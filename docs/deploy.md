@@ -100,8 +100,8 @@ repository rule (`applications/your-move*`, push = Maintainer) refuses deploy to
 role. It can push or overwrite any image in this project's container registry and nothing else: it
 can't call the API, push code or publish packages (findings.md F-9). To rotate it before the
 expiry date shown in the project's access-token settings, create a new token with the same name,
-role and scopes, update both variables, then revoke the old one. The release deploy token needs
-only `write_package_registry`; drop any registry scopes it holds when it is next rotated.
+role and scopes, update both variables, then revoke the old one. The release deploy token holds
+only `read_package_registry` and `write_package_registry`; rotate it the same way.
 
 The nightly OSV scan is a schedule with `SCHEDULE_TASK=nightly`. Every merge request pipeline runs
 one job per environment that declares that environment, prints whether each of these variables is
