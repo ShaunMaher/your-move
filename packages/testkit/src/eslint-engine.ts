@@ -83,9 +83,47 @@ const BUILT_IN_OBJECTS = ENGINE_GLOBALS.filter((name) => /^[A-Z]/u.test(name)).j
 /** Built-in values that are primitives, not objects: using them as values exposes nothing. */
 const PRIMITIVE_GLOBALS: ReadonlySet<string> = new Set(["Infinity", "NaN", "undefined"]);
 
-/** Whether `identifier` is used only to reach a member, or to call or construct the built-in. */
-function namedUse(identifier: Rule.Node): boolean {
-  const parent = identifier.parent as Partial<{ type: string; object: unknown; callee: unknown }>;
+/** The built-in error classes, which an engine may extend (`class InvalidMove extends Error`). */
+const ERROR_CLASSES: ReadonlySet<string> = new Set(
+  ENGINE_GLOBALS.filter((name) => name.endsWith("Error")),
+);
+
+/** Pure conversion functions an engine may pass as an array method's callback. */
+const CONVERSIONS: ReadonlySet<string> = new Set(["Boolean", "Number", "String"]);
+
+/** The array methods whose first argument is a callback applied to each element. */
+const CALLBACK_METHODS: ReadonlySet<string> = new Set([
+  "every",
+  "filter",
+  "find",
+  "findIndex",
+  "findLast",
+  "findLastIndex",
+  "flatMap",
+  "map",
+  "some",
+]);
+
+type ParentNode = Partial<{
+  type: string;
+  object: unknown;
+  callee: Partial<{ type: string; computed: boolean; property: Partial<{ name: string }> }>;
+  arguments: unknown[];
+  operator: string;
+  right: unknown;
+  superClass: unknown;
+}>;
+
+/**
+ * Whether `identifier` is used by name: to reach a member, to call or construct the built-in, as
+ * the right-hand side of `instanceof` (which only reads it), or an error class as a class heritage
+ * (which makes a subclass: writes through it land on the subclass). None binds the built-in to a
+ * name. The one value use allowed is a conversion function as an array method's callback
+ * (`arr.map(Number)`): an array method only calls it. A static rule can't tell a user-defined
+ * method of the same name from it (F-5), and writes by name to these three stay rejected.
+ */
+function namedUse(identifier: Rule.Node, name: string): boolean {
+  const parent = identifier.parent as ParentNode;
   switch (parent.type) {
     // TypeScript's `typeof Math` and `typeof Math.random` in a type position are erased at compile
     // time (`Math as T` is not: it is still the value).
@@ -95,17 +133,32 @@ function namedUse(identifier: Rule.Node): boolean {
     case "MemberExpression":
       return parent.object === identifier;
     case "CallExpression":
+      return (
+        parent.callee === identifier ||
+        (CONVERSIONS.has(name) &&
+          parent.arguments?.[0] === identifier &&
+          parent.callee?.type === "MemberExpression" &&
+          parent.callee.computed === false &&
+          CALLBACK_METHODS.has(parent.callee.property?.name ?? ""))
+      );
     case "NewExpression":
       return parent.callee === identifier;
+    case "BinaryExpression":
+      return parent.operator === "instanceof" && parent.right === identifier;
+    case "ClassDeclaration":
+    case "ClassExpression":
+      return ERROR_CLASSES.has(name) && parent.superClass === identifier;
     default:
       return false;
   }
 }
 
 /**
- * Built-in objects and functions are used by name only: as `Math.max(…)`, `Number(…)` or
- * `new Map()`, never as values (`const M = Math`, `f(Math)`, `{ ...Math }`, `const { random } =
- * Math`). The member and call rules below can only see uses by name.
+ * Built-in objects and functions are used by name only: as `Math.max(…)`, `Number(…)`,
+ * `new Map()`, `x instanceof Map` or `class E extends Error`, never as values (`const M = Math`,
+ * `f(Math)`, `{ ...Math }`, `const { random } = Math`), except `Number`, `String` and `Boolean` as
+ * an array method's callback (`arr.map(Number)`, `arr.filter(Boolean)`). The member and call rules
+ * below can only see uses by name.
  */
 const noBuiltInValues: Rule.RuleModule = {
   meta: {
@@ -123,7 +176,7 @@ const noBuiltInValues: Rule.RuleModule = {
         // TypeScript sources: a type position (`Map<K, V>`, `typeof Math`) names no runtime value.
         if ((reference as { isValueReference?: boolean }).isValueReference === false) continue;
         const identifier = reference.identifier as Rule.Node;
-        if (!namedUse(identifier)) {
+        if (!namedUse(identifier, variable.name)) {
           context.report({ node: identifier, messageId: "value", data: { name: variable.name } });
         }
       }

@@ -94,8 +94,13 @@ describe("engineEslintConfig", () => {
     ["[Math][0].max(1)", /Use Math by name/u],
     ["Object.values(Math)", /Use Math by name/u],
     ["({ ...Reflect })", /Use Reflect by name/u],
-    ["[1].filter(Boolean)", /Use Boolean by name/u],
     ["typeof Date", /Use Date by name/u],
+    // The allowed value uses don't open writes by name.
+    ["Number.prototype.x = 1", /must not write to prototypes/u],
+    ["Number.parseFloat = (s) => s", /must not write to built-in objects/u],
+    ["Object.assign(Number, { x: 1 })", /must not write to built-in objects/u],
+    ["Error.prototype.x = 1", /must not write to prototypes/u],
+    ["Error.captureStackTrace = () => 1", /must not write to built-in objects/u],
   ])("rejects %s", (code, expected) => {
     const found = messages(`export const x = () => ${code};`);
     expect(
@@ -108,8 +113,52 @@ describe("engineEslintConfig", () => {
     "const M = Math; export const r = () => M.max(1);",
     "const { max } = Math; export const m = max(1, 2);",
     "export const f = (n = Number) => n;",
+    // Conversion functions: only as an array method's callback, never aliased or handed on.
+    "const N = Number; export const p = N.prototype;",
+    "const f = (n) => n; export const p = f(Number);",
+    "export const s = [1].map(Math);",
+    "export const s = [1].map(Object);",
+    "export const s = [1].map(JSON);",
+    "export const s = [1].map(Reflect);",
+    "export const s = [1].map(Map);",
+    "export const s = [1].map(...Number);",
+    "export const s = [1].map((x) => x, Number);",
+    "export const s = [1][`map`](Number);",
+    "export const s = [1].reduce(Number);",
+    // Heritage: error classes only.
+    "export class M extends Map {}",
+    "export class O extends Object {}",
+    "export const E = class extends (Error, Math) {};",
   ])("rejects a built-in used as a value: %s", (code) => {
     expect(messages(code).join("\n")).toMatch(/by name \(a member, call or new\), not as a value/u);
+  });
+
+  it("refuses an aliased global the allow-list leaves off, whatever the form", () => {
+    expect(messages("export const s = [1].map(Function);").join("\n")).toMatch(
+      /'Function' is not defined|Function is not on/u,
+    );
+    expect(messages("export const s = [1].map(globalThis);").join("\n")).toMatch(
+      /globalThis is not on the engine globals allow-list/u,
+    );
+    expect(messages("export const s = [1].map(eval);").join("\n")).toMatch(
+      /eval is not on the engine globals allow-list/u,
+    );
+  });
+
+  it("allows instanceof, error subclasses and conversion functions as array callbacks", () => {
+    expect(
+      messages(`
+        export class InvalidMove extends Error {}
+        export const Rejected = class extends RangeError {};
+        export const isMap = (x) => x instanceof Map;
+        export const isDate = (x) => x instanceof Date;
+        export const numbers = ["1", "2"].map(Number);
+        export const strings = [1, 2].map(String);
+        export const present = [0, 1, null].filter(Boolean);
+        export const any = [0, 1].some(Boolean);
+        export const maybe = (xs) => xs?.map(Number);
+      `),
+    ).toEqual([]);
   });
 
   it("allows the primitive built-ins and a local binding that shadows a built-in's name", () => {
