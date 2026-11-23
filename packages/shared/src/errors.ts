@@ -6,9 +6,11 @@ import { z } from "@hono/zod-openapi";
  */
 export const ERROR_CODES = [
   "BAD_REQUEST",
+  "UNAUTHENTICATED",
   "NOT_FOUND",
   "TOO_LARGE",
   "UNSUPPORTED_MEDIA_TYPE",
+  "RATE_LIMITED",
   "INTERNAL",
 ] as const;
 

@@ -55,12 +55,18 @@ function errorBody(code: ErrorCode, message: string) {
   return { error: { code, message } };
 }
 
-/** Error codes for the statuses a rejected request can get (05 §Errors). */
+/**
+ * The client-error statuses 05 §Errors maps to a single framework code. An `HTTPException` with one
+ * of these is a rejected request (body limit, malformed JSON, validation): it keeps its status and
+ * code. Statuses with several codes (403, 409) are answered by the handler that knows which one.
+ */
 const REJECTION_CODES: Partial<Record<number, ErrorCode>> = {
   400: "BAD_REQUEST",
+  401: "UNAUTHENTICATED",
   404: "NOT_FOUND",
   413: "TOO_LARGE",
   415: "UNSUPPORTED_MEDIA_TYPE",
+  429: "RATE_LIMITED",
 };
 
 /** The stack without its first line, which repeats the (possibly input-derived) message. */
@@ -148,23 +154,20 @@ export function createApp(options: AppOptions): App {
 
   app.onError((error, c) => {
     const context = { requestId: c.get("requestId"), route: respondedRoute(c as Context) };
-    if (error instanceof HTTPException || error instanceof SyntaxError) {
-      // A request the client got wrong (body limits, malformed JSON, validation): its own status,
-      // not an error-level log, and never the message, which can quote the input (09 §5).
-      const status = error instanceof HTTPException ? error.status : 400;
+    const code = error instanceof HTTPException ? REJECTION_CODES[error.status] : undefined;
+    if (error instanceof HTTPException && code !== undefined) {
+      // A request the client got wrong: its own status and code, not an error-level log, and never
+      // the message, which can quote the input (09 §5).
       log.info("request rejected", {
         ...context,
-        status,
+        status: error.status,
         errorClass: error.name,
         stack: stackFrames(error),
       });
-      return c.json(
-        status >= 500
-          ? errorBody("INTERNAL", "Something went wrong.")
-          : errorBody(REJECTION_CODES[status] ?? "BAD_REQUEST", "The request was rejected."),
-        status,
-      );
+      return c.json(errorBody(code, "The request was rejected."), error.status);
     }
+    // Anything else is a server fault, including an HTTPException with a 5xx or unmapped status
+    // and a SyntaxError from parsing something other than the request (stored JSON, an engine).
     log.error("unhandled error", {
       ...context,
       errorClass: error.name,

@@ -1,3 +1,4 @@
+import { createRoute, z } from "@hono/zod-openapi";
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { describe, expect, it } from "vitest";
@@ -187,12 +188,14 @@ describe("errors and logging", () => {
   }
 
   it.each([
+    [400, "BAD_REQUEST"],
+    [401, "UNAUTHENTICATED"],
+    [404, "NOT_FOUND"],
     [413, "TOO_LARGE"],
     [415, "UNSUPPORTED_MEDIA_TYPE"],
-    [400, "BAD_REQUEST"],
-    [409, "BAD_REQUEST"],
+    [429, "RATE_LIMITED"],
   ])(
-    "passes an HTTPException with status %i through, logged below error level",
+    "passes an HTTPException with status %i through as %s, logged below error level",
     async (status, code) => {
       const { app, platform } = throwing(
         new HTTPException(status as ContentfulStatusCode, { message: "input: secret-value" }),
@@ -205,17 +208,50 @@ describe("errors and logging", () => {
       expect(platform.lines.some((line) => line["level"] === "error")).toBe(false);
       const rejected = platform.lines.find((line) => line["msg"] === "request rejected");
       expect(rejected).toMatchObject({ level: "info", status, errorClass: "Error" });
+      expect(String(rejected?.["stack"])).toMatch(/^\s+at /u);
       expect(JSON.stringify(platform.lines)).not.toContain("secret-value");
     },
   );
 
-  it("treats a SyntaxError as a malformed request: 400, logged without its message", async () => {
-    const { app, platform } = throwing(new SyntaxError('Unexpected token "secret-value" in JSON'));
+  it.each([
+    ["an HTTPException with a 5xx status", new HTTPException(503, { message: "upstream" })],
+    ["an HTTPException with an unmapped status", new HTTPException(409, { message: "conflict" })],
+    ["a SyntaxError (stored JSON, an engine bug)", new SyntaxError("Unexpected token in JSON")],
+  ])("treats %s as a server fault: 500 INTERNAL, logged at error level", async (_, error) => {
+    const { app, platform } = throwing(error);
     const res = await app.request("/api/v1/config");
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({
+      error: { code: "INTERNAL", message: "Something went wrong." },
+    });
+    expect(platform.lines.find((line) => line["level"] === "error")).toMatchObject({
+      msg: "unhandled error",
+      errorClass: error.name,
+    });
+    expect(platform.lines.some((line) => line["msg"] === "request rejected")).toBe(false);
+  });
+
+  it("rejects a malformed JSON body as 400 BAD_REQUEST: Hono's validator raises an HTTPException", async () => {
+    const { app, platform } = setup();
+    app.openapi(
+      createRoute({
+        method: "post",
+        path: "/echo", // outside the server paths, whose catch-all answers 404 first
+        request: {
+          body: { content: { "application/json": { schema: z.object({ a: z.string() }) } } },
+        },
+        responses: { 200: { description: "ok" } },
+      }),
+      (c) => c.body(null, 200),
+    );
+    const res = await app.request("/echo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: '{"a": "secret-value"',
+    });
     expect(res.status).toBe(400);
-    const rejected = platform.lines.find((line) => line["msg"] === "request rejected");
-    expect(rejected).toMatchObject({ errorClass: "SyntaxError", status: 400 });
-    expect(String(rejected?.["stack"])).toMatch(/^\s+at /u);
+    expect(await res.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
+    expect(platform.lines.some((line) => line["level"] === "error")).toBe(false);
     expect(JSON.stringify(platform.lines)).not.toContain("secret-value");
   });
 
