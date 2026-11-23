@@ -3,7 +3,7 @@
  * workerd through Wrangler's test harness, including Workers Static Assets with the generated
  * `_headers` file — the Cloudflare half of the header test (03 §9, 10 M0).
  */
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -15,6 +15,20 @@ import { contractSuite, expectSecurityHeaders } from "./suite.js";
 const WORKER_DIR = new URL("../../../apps/worker/", import.meta.url);
 
 let harness: TestHarness;
+
+/**
+ * Why workerd can't start here, if the reason is known: on x86-64 it needs SSE4.2 (x86-64-v2), and
+ * without it fails at isolate bootstrap with an empty `jsg.Error` (M0 review CI-1). A VM on the
+ * generic `qemu64` CPU model lacks it.
+ */
+function knownStartupProblem(): string | null {
+  if (process.platform !== "linux" || process.arch !== "x64") return null;
+  const cpuinfo = readFileSync("/proc/cpuinfo", "utf8");
+  const flags = /^flags\s*:(.*)$/mu.exec(cpuinfo)?.[1]?.split(" ") ?? [];
+  if (flags.includes("sse4_2")) return null;
+  const model = /^model name\s*:\s*(.*)$/mu.exec(cpuinfo)?.[1] ?? "unknown";
+  return `workerd needs SSE4.2 (x86-64-v2) and this CPU (${model}) doesn't offer it; run the Worker tests on a host or VM CPU type that does`;
+}
 
 beforeAll(async () => {
   harness = createTestHarness({
@@ -38,7 +52,8 @@ beforeAll(async () => {
     } catch (debugError) {
       console.error("harness.debug() failed", debugError);
     }
-    throw error;
+    const known = knownStartupProblem();
+    throw known === null ? error : new Error(known, { cause: error });
   }
 }, 60_000);
 
