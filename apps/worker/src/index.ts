@@ -17,6 +17,11 @@ import { installedGames as games } from "../../../generated/server-registry.js";
 
 type App = ReturnType<typeof createApp>;
 
+/** A startup problem whose message carries no configuration value (safe to log in full). */
+class StartupError extends Error {
+  override readonly name = "StartupError";
+}
+
 /** Builds the app once per isolate from the Worker's vars and secrets. */
 function build(env: Readonly<Record<string, unknown>>): App {
   const strings = Object.fromEntries(
@@ -25,7 +30,9 @@ function build(env: Readonly<Record<string, unknown>>): App {
   const installed = installedSchema.parse(installedJson);
   const mismatches = registryMismatches(games, installed);
   if (mismatches.length > 0) {
-    throw new Error(`The game registry does not match installed.json: ${mismatches.join("; ")}`);
+    throw new StartupError(
+      `The game registry does not match installed.json: ${mismatches.join("; ")}`,
+    );
   }
   const config = parseConfig(strings, {
     runtime: "cloudflare",
@@ -52,8 +59,11 @@ export default {
     try {
       app ??= build(env);
     } catch (error) {
-      // Workers can't refuse to start: log what is wrong (never a value) and answer 500.
-      console.error(error instanceof ConfigError ? error.message : "startup failed", {
+      // Workers can't refuse to start: log what is wrong and answer 500. ConfigError messages are
+      // already redacted and StartupError messages carry no values; anything else is logged by
+      // class only, since its message might quote configuration.
+      const safe = error instanceof ConfigError || error instanceof StartupError;
+      console.error(safe ? error.message : "startup failed", {
         errorClass: error instanceof Error ? error.name : typeof error,
       });
       return Response.json(
