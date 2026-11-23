@@ -642,9 +642,10 @@ games still use is caught at **deploy and run time**:
     change fails the build.
 - **Publishing.** All `@your-move/*` packages meant for outside use (`sdk`, `testkit`,
   `api-client`, `mcp`, the first-party games) are published to this project's GitLab package
-  registry through its project-level npm endpoint, only from `main`/tags (11 §9). Until the
-  `@your-move` scope is also claimed on the public npm registry (Q25), **every install instruction
-  names the registry explicitly** — a game author's `.npmrc`:
+  registry through its project-level npm endpoint, only from `main`/tags (11 §9). The
+  `@your-move` scope is claimed on the public npm registry so nobody else can publish under it
+  (Q25), but nothing is released there, so **every install instruction names the registry
+  explicitly** — a game author's `.npmrc`:
 
   ```
   @your-move:registry=https://<gitlab-host>/api/v4/projects/<project-id>/packages/npm/
