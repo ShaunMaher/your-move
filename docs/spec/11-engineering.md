@@ -53,9 +53,12 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
     `@your-move/api-client` (`openapi-typescript` + `openapi-fetch`, generated from the route
     schemas, 05 §Versioning), the SDK's API Extractor report (`@microsoft/api-extractor`, 02 §7.4)
     and Drizzle migrations (reviewed, then committed);
-  - **not committed** (git-ignored `generated/`): the game registry and client import map
-    (`pnpm games:generate`, 02 §7.3), which depend on the instance's installed games. Only
-    `apps/*` import them (§5).
+  - **not committed** (git-ignored `generated/`): the game registry, the client import map and
+    `installed.json` (`pnpm games:generate`, 02 §7.3), which depend on the instance's installed
+    games. Only `apps/*` import them (§5). Because tools that read `apps/*` (`tsc -b`, type-aware
+    ESLint, knip, dependency-cruiser, Vitest) need them, `games:generate` runs from the root
+    `prepare` script (so `pnpm install` on a fresh clone produces them) and again at the start of
+    `pnpm typecheck`, `pnpm lint` and `pnpm test`; CI's validate stage runs it first (§9).
 
 ## 4. Tests
 
@@ -63,7 +66,7 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
 |---|---|---|---|
 | Unit and integration | Vitest | every package; repositories against both drivers (03 §4) | runs on every MR |
 | Property-based | fast-check (inside Vitest) | engines, rule invariants, tile conservation, parsers | seeded; a failure prints the seed |
-| Game contract | `@your-move/testkit` (02 §6) | every installed game package | **full** kit on every MR (test stage); **fast** kit in `pnpm games:verify` during build and deploy |
+| Game contract | `@your-move/testkit` (02 §6) | every installed game package | **full** kit on every MR (test stage); **fast** kit in `pnpm games:verify` during `pnpm build` and the Docker build (never in the deploy job, 08 §6) |
 | API contract | Vitest + `@your-move/api-client` | the same suite against the Node build and the Worker build (Miniflare / `@cloudflare/vitest-pool-workers`) | runs on every MR |
 | Component | Vitest + Testing Library | web app and game clients | runs on every MR |
 | End-to-end | Playwright | WebKit (iPhone viewport) and Chromium; real server + SQLite | runs on every MR (sharded) |
@@ -81,23 +84,26 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
 
 `dependency-cruiser` enforces the boundaries in CLAUDE.md and 02 §7.5 (`pnpm lint:arch`):
 
-- `games/*/engine` → only `@your-move/sdk` (incl. `@your-move/sdk/schema`) and its own files. No
-  `node:*`, no runtime packages, no framework packages, no DOM, no React.
-- `games/*/client` → only `@your-move/sdk`, React and its own engine.
+- `games/*/engine` and `games/*/manifest` → only `@your-move/sdk` and `@your-move/sdk/schema`
+  (never `@your-move/sdk/client`) and their own files. No `node:*`, no runtime packages, no
+  framework packages, no DOM, no React.
+- `games/*/client` → only `@your-move/sdk` (including `@your-move/sdk/client`), React, its own
+  engine and the packages it declares in `dependencies` (02 §7.1.1).
 - `packages/server` → no `apps/*`, no game packages and **not** `generated/` (the game registry is
   injected by `apps/worker` and `apps/node` through `createApp({ platform, games })`, 02 §7.3), no
   Cloudflare- or Node-specific modules (03 principle 1).
 - `generated/` → imported only by `apps/worker`, `apps/node` (server registry) and `apps/web`
   (client import map).
-- `packages/sdk` → no dependencies; `zod` and `react` are peer dependencies only (02 §7.4).
+- `packages/sdk` → no dependencies; `zod` and `react` are peer dependencies only (02 §7.4); only the
+  `@your-move/sdk/client` entry point may import React.
 - `apps/web` → the API only through `@your-move/api-client`; no `packages/server` imports.
 - No circular dependencies anywhere; no orphaned modules.
 
 The game-facing part of these rules ships in `@your-move/testkit` so third-party game repos and
 `pnpm games:verify` use exactly the same rules (02 §7.5): the dependency-cruiser ruleset
 (`@your-move/testkit/depcruise`) for imports, and an ESLint config
-(`@your-move/testkit/eslint-engine`) run on **built engine output** for the globals allow-list and
-the no-writes-to-built-ins rule — dependency-cruiser can't see globals.
+(`@your-move/testkit/eslint-engine`) run on **built engine and manifest output** for the globals
+allow-list and the no-writes-to-built-ins rule — dependency-cruiser can't see globals.
 
 ## 6. Dependency and repository hygiene
 
@@ -133,14 +139,18 @@ the no-writes-to-built-ins rule — dependency-cruiser can't see globals.
   pass; release commits are `chore(release): version packages`.
 - **lefthook** pre-commit hooks (installed by `pnpm install`): Prettier and ESLint on staged files,
   gitleaks on the staged diff. Pre-push: `pnpm typecheck`. Hooks are a convenience; CI is the gate.
-- **Changesets** version and release the published `@your-move/*` packages (02 §7.4), **without a
-  bot**: every MR that changes a published package includes a changeset (CI checks this with
-  `changeset status --since=origin/main`; Renovate MRs are exempt). To release, a maintainer runs
+- **Changesets** version and release the `@your-move/*` packages (02 §7.4), **without a bot**.
+  `.changeset/config.json` sets `privatePackages: { version: false, tag: false }`: only published
+  packages are versioned by Changesets; the instance (the unpublished app) is versioned by `v*` git
+  tags on `main`. The rule, stated plainly: **every MR that changes the source of a published
+  package includes a changeset**; other MRs need none. CI checks it in MR
+  pipelines with `git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"` followed by
+  `changeset status --since="$CI_MERGE_REQUEST_DIFF_BASE_SHA"` (a plain `origin/main` isn't
+  fetched in MR pipelines). Renovate MRs are exempt. To release, a maintainer runs
   `pnpm changeset version` on a `release/<date>` branch and opens a normal MR; when it merges, the
-  publish job on `main` runs `changeset publish` (08 §6: protected `release` environment, deploy
-  token, never `CI_JOB_TOKEN`) and `CHANGELOG.md` is written per package. `.changeset/config.json`
-  sets `privatePackages: { version: true, tag: false }`, so the unpublished app is versioned from
-  the same flow (`@your-move/server` version = instance version). The SDK stays `0.x` until M4.
+  publish job on `main` runs `changeset publish` (08 §6: `release` environment, deploy token, never
+  `CI_JOB_TOKEN`) and `CHANGELOG.md` is written per package. Packages stay `"private": true` until
+  their milestone (10 M0), so nothing unfinished is published. The SDK stays `0.x` until M4.
 
 ## 8. Dependency updates (Renovate)
 
@@ -171,21 +181,34 @@ Pipelines run for merge requests and for `main`/tags (no duplicate branch pipeli
 store is cached by lockfile hash. Jobs run unprivileged (no Docker-in-Docker); untagged jobs run
 on the amd64 shared runner. Stages, in order:
 
-1. **validate** — `prettier --check`, ESLint, `tsc -b`, `pnpm lint:arch`, knip, commitlint (MR),
+1. **validate** — `pnpm games:generate` first (§3), then `prettier --check`, ESLint, `tsc -b`,
+   `pnpm lint:arch`, knip, commitlint (MR),
    changeset check (§7), committed generated-code drift (§3), OpenAPI breaking-change check against
    the target branch (`oasdiff breaking`, 05 §Versioning), API Extractor report check.
 2. **test** — Vitest with coverage (unit, integration, property, component, the **full** game
    kit, API contract on both runtimes); JUnit and Cobertura reports to the MR.
-3. **build** — `pnpm games:verify --fast`, web app, Worker bundle, Docker image per architecture
-   built natively with rootless BuildKit (`linux/amd64` job tagged `arch-amd64`, `linux/arm64` job
-   tagged `arch-arm64`), CycloneDX SBOM. MR pipelines build but never push.
-4. **e2e** — Playwright (WebKit + Chromium) against the **build artifact** from stage 3, traces and
-   screenshots kept as artifacts on failure.
+3. **build** — `pnpm games:verify --fast`, web app, Node server build (`apps/node/dist`), Worker
+   bundle, `generated/installed.json` kept as an artifact for the deploy job, Docker image per
+   architecture built natively with rootless BuildKit (`linux/amd64` job tagged `arch-amd64`,
+   `linux/arm64` job tagged `arch-arm64`), CycloneDX SBOM. MR pipelines build but never push, so
+   nothing on an MR runs the image.
+4. **e2e** — Playwright (WebKit + Chromium) against the **Node build output** from stage 3
+   (`node apps/node/dist` with SQLite), not the Docker image; traces and screenshots kept as
+   artifacts on failure.
 5. **security** — gitleaks, OSV-Scanner, licence check (§6).
-6. **publish** (`main`/tags only, protected `release` environment, deploy token, 08 §6) —
+6. **publish** (`main`/tags only, `release` environment, deploy token, 08 §6) —
    `changeset publish` to the GitLab package registry; per-arch images pushed and joined into a
-   multi-arch manifest with `crane`; digests recorded in the release notes.
-7. **deploy** (manual, `production` environment, 09 §6) — reuses the stage-3 artifact.
+   multi-arch manifest with `crane`; digests recorded in the release notes; then a **smoke job**
+   pulls the new image by digest as a `services:` container and checks `/api/health` (09 §6).
+7. **deploy** (manual, `production` environment, 09 §6) — reuses the stage-3 artifact; runs
+   `pnpm games:check-db` from `installed.json` only, and never runs `games:verify` or imports game
+   package code while holding deploy credentials (08 §6).
+
+**Environments on GitLab CE.** Our GitLab is Community Edition, which has no protected
+environments. Every secret is a variable that is both **protected** (only `main`, which only
+Maintainers can push or merge to, and protected `v*` tags receive it) and **scoped to one
+environment** (`release`, `renovate` or `production`), so only the jobs on protected refs that
+declare that environment get it (08 §6).
 
 Stages 1–5 run on every MR; that's what "green on an MR" means. Each gate is shown to fail by
 **fixture tests in CI** (e.g. a fixture file with a lint error, an import breaking an architecture

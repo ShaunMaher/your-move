@@ -10,8 +10,10 @@ app, the MCP server (02 §9.4) and anyone else's tools are clients of the same A
   `/api/v1`. Paths in this document are written in full.
 - **One schema per endpoint.** Each route's request, response and error shapes are Zod schemas in
   `@your-move/shared` (the client-facing types a game client also needs — `GameEnvelope`,
-  `SubmitResult` and friends — are defined in `@your-move/sdk` and re-used, 02 §7.4), registered
-  through `@hono/zod-openapi`. They drive request validation (unknown fields rejected with
+  `SubmitResult` and friends — are Zod schemas defined in `@your-move/sdk`, which the server
+  registers as they are, 02 §7.4), registered through `@hono/zod-openapi`. Because the server
+  registers the SDK's own schemas, the types generated for `@your-move/api-client` are structurally
+  identical to the SDK's; a type-level test asserts the two are mutually assignable. They drive request validation (unknown fields rejected with
   `.strict()`), response typing, the generated **OpenAPI 3.1** document served at
   `GET /api/v1/openapi.json` (**public**), and the generated typed client `@your-move/api-client`
   (`openapi-typescript` + `openapi-fetch`, 11 §3). Each operation carries an `x-scope` extension
@@ -215,8 +217,8 @@ from `game_actions`. `via` lets every client mark AI moves (02 §9.1). Never ret
    learns it is stale;
 4. viewer's seat is in `toAct` (`409 NOT_YOUR_TURN`);
 5. for a bearer-token request on a **human** seat: the game's `aiAssistance` is `allowed`
-   (`403 AI_NOT_ALLOWED`, 02 §9.3; also applied to resign and decline). The logged action gets
-   `via = "token"`;
+   (`403 AI_NOT_ALLOWED`, 02 §9.3; also applied to resign, never to decline). The logged action
+   gets `via = "token"`;
 6. action schema (`400 INVALID_ACTION`);
 7. for games using a `serverOnly` dictionary: the lookup budget (08 §4, 03 §10) is reserved for
    the action's worst case before the module runs (`429 RATE_LIMITED` without calling the module);
@@ -341,19 +343,24 @@ address.
 
 ## Token scopes
 
-Every route is listed here, with what may call it. The server enforces this table from the
-`x-scope` value on each operation (§Versioning), and a route-enumeration test fails if any
-registered route lacks an entry: **deny by default**. "Session" means a cookie session only; a
+Every route is listed here, with what may call it, including routes that aren't OpenAPI
+operations (the WebSocket, the unsubscribe page, the manifest, the health routes and the dev-only
+routes). The server enforces this table from the `x-scope` value on each OpenAPI operation
+(§Versioning) and from the same table for the other routes. A route-enumeration test walks the
+**final Hono router** (`app.routes`) of **both runtime builds** (Node and Worker, with every
+runtime-specific route mounted) and fails if any registered route lacks an entry; at runtime a
+route with no entry answers `403`: **deny by default**. "Session" means a cookie session only; a
 token gets `403 INSUFFICIENT_SCOPE`. "Agent" says whether an AI account's token may call it
 (otherwise `403 AGENT_NOT_ALLOWED`).
 
 | Routes | Credential | Agent |
 |---|---|---|
-| `/api/health`, `/api/v1/health`, `/api/v1/config`, `/api/v1/openapi.json`, `/api/v1/games/types/:type/{rules,schemas}`, `/api/v1/auth/otp/*`, `/api/v1/email/unsubscribe`, `/manifest.webmanifest` | public | — |
+| `/api/health`, `/api/v1/health`, `/api/v1/config`, `/api/v1/openapi.json`, `/api/v1/games/types/:type/{rules,schemas}`, `/api/v1/auth/otp/*`, `/api/v1/email/unsubscribe` (GET page and POST), `/manifest.webmanifest` | public | — |
+| `/__dev/*` (e.g. `/__dev/emails`) | public, **dev only**: registered only when `isLocalDev(config)` (06 §4), never in a production-config build (the enumeration test runs on production config and asserts they're absent) | — |
 | `GET /api/v1/me`, `GET /api/v1/games`, `GET /api/v1/games/:id`, `GET /api/v1/games/:id/history`, `GET /api/v1/catalog`, `POST /api/v1/games/:id/preview` | session or `read` | yes |
-| `POST /api/v1/games/:id/actions`, `…/resign`, `…/decline`, `…/seen` | session or `play` (for seats the token's user already holds) | yes |
+| `POST /api/v1/games/:id/actions`, `…/resign`, `…/seen`, and `…/decline` by a `playing` seat before its first action | session or `play` (for seats the token's user already holds) | yes |
 | `POST /api/v1/games`, `…/start`, `…/cancel`, `…/remove-seat`, `…/join-link` (POST/DELETE), `…/add-player`, `GET /api/v1/players/recent` | session or `games:create` (tokens: no email invitees) | no |
-| `POST /api/v1/join/lookup`, `POST /api/v1/join`, `…/accept`, `…/leave` | session or `join` | no |
+| `POST /api/v1/join/lookup`, `POST /api/v1/join`, `…/accept`, `…/leave`, and `…/decline` of a lobby invitation or lobby seat | session or `join` | no |
 | `PATCH /api/v1/me`, `POST /api/v1/me/under-age`, `/api/v1/me/delete/otp`, `DELETE /api/v1/me`, `/api/v1/me/sessions*`, `/api/v1/me/tokens*`, `/api/v1/me/step-up/otp`, `/api/v1/me/agents*`, `/api/v1/auth/logout*`, `/api/v1/blocks*`, `/api/v1/push/*`, `/api/v1/dictionaries*` | session | no |
 | `GET /api/v1/ws` | session (cookie) only; bearer tokens are rejected | no |
 | `/api/v1/admin/*` | an `admin` token only (§Admin API) | no |
@@ -375,7 +382,9 @@ administrative task is an endpoint; the `pnpm admin:*` commands are thin clients
   no cookie-based admin access in v1 (the web app has no admin screens). `@your-move/api-client`
   and `@your-move/mcp` refuse admin tokens unless explicitly told otherwise.
 - **Non-admins** — any request without a valid admin token, including signed-in users and other
-  tokens — get `404 NOT_FOUND` on every admin route, as if it didn't exist. These refusals are
+  tokens — get `404 NOT_FOUND` on every admin route, as if it didn't exist. The `/api/v1/admin/`
+  prefix answers this `404` **before** any token validation, so a missing, expired, unknown or
+  non-admin token all look the same (the global `401` for bad tokens never applies there). These refusals are
   logged and rate-limited per user and per IP bucket (08 §4), not written to `admin_audit`.
 - Requests from admin principals — allowed or refused (e.g. validation errors) — are written to
   `admin_audit` (04) with a stable actor key, action, target and request id. Separate rate limits

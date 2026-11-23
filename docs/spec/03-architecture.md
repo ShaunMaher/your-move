@@ -70,7 +70,7 @@
 │  ├─ words/               @your-move/game-words (engine includes rulesets/<id>/v<N>.json)
 │  └─ paths/               @your-move/game-paths
 ├─ instance.config.ts      Installed game packages for this instance (02 §7.3)
-├─ generated/              Server registry + client import map from `pnpm games:generate` (ignored by
+├─ generated/              Server registry, client import map and installed.json from `pnpm games:generate` (ignored by
 │                          git, never committed); imported only by apps/worker, apps/node, apps/web
 ├─ mise.toml               Pinned Node and pnpm (11 §1)
 ├─ docs/spec/              This specification

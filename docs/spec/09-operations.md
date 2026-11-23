@@ -185,12 +185,13 @@ that work on both runtimes, plus SMTP for Node only.
 - Multi-stage `apps/node/Dockerfile`: build with pnpm, runtime on a slim Node LTS image pinned by
   digest; runs as non-root UID; read-only root filesystem except `/data`; `EXPOSE 8080`;
   `HEALTHCHECK` on `/api/health` (which needs no `CF-Connecting-IP`, 08 §4.1). The server starts
-  with `node --disallow-code-generation-from-strings`, reads config and secrets (`*_FILE`), scrubs
-  them from `process.env`, checks for orphaned games (02 §7.3) and only then loads the generated
-  game registry with a dynamic `import()` (02 §7.5).
+  with `node --disallow-code-generation-from-strings` and then, in order (02 §7.3): applies
+  migrations (with a lock); checks for orphaned games using only `generated/installed.json`;
+  reads config and secrets (`*_FILE`) and scrubs them from `process.env`; loads the generated game
+  registry with a dynamic `import()` (02 §7.5) and refuses to start if it doesn't match
+  `installed.json`; then serves.
 - Deployments pull the image **by digest** (`image: registry…/your-move@sha256:…`), taken from the
   release notes; tags are for humans only (images aren't signed yet, 08 §6).
-- Migrations run automatically on start (with a lock).
 - Two compose examples in `apps/node/` (the only names used anywhere), both with named volumes for
   `/data` and (separately) `/data/blobs`, and app secrets supplied as Docker secrets (`*_FILE`, §1):
   - `docker-compose.tunnel.yml` (**the proof-of-concept deployment**, Q6; an M4 deliverable):
@@ -241,14 +242,18 @@ that work on both runtimes, plus SMTP for Node only.
 The pipeline, its stages and the quality gates are defined in 11 §9. Deployment specifics:
 
 - **Cloudflare deploy** is a manual job in the `production` environment, default branch and tags
-  only: `pnpm games:check-db` against D1 (02 §7.3; `--allow-orphans` is the only override), then
-  `wrangler d1 migrations apply`, then `wrangler deploy`, from the already-built artifact without
-  re-installing (credentials per 08 §6).
+  only: `pnpm games:check-db` against D1 (02 §7.3; `--allow-orphans` is the only override), reading
+  only `generated/installed.json` from the stage-3 artifact, then `wrangler d1 migrations apply`,
+  then `wrangler deploy`, from the already-built artifact without re-installing and without running
+  `games:verify` or importing any game package (credentials per 08 §6).
 - **Docker images** for `linux/amd64` and `linux/arm64` are built natively on the matching shared
   runner (tags `arch-amd64`, `arch-arm64`) with rootless BuildKit, assembled into a multi-arch
-  manifest, and — on `main` and tags only, in the protected `release` environment with the release
-  deploy token (08 §6) — pushed to this project's GitLab container registry with their SBOM, tagged
-  with the version and the commit, and their digests recorded in the release notes. MR pipelines
-  build but never push. Images aren't signed yet (08 §6).
+  manifest, and — on `main` and tags only, in the `release` environment with the release deploy
+  token (protected, environment-scoped variables; our GitLab CE has no protected environments,
+  08 §6) — pushed to this project's GitLab container registry with their SBOM, tagged with the
+  version and the commit, and their digests recorded in the release notes. MR pipelines build but
+  never push, so they can't run the image (end-to-end tests run against the Node build output
+  instead, 11 §9). On `main`, a **smoke job** after the push pulls the new image by digest as a CI
+  `services:` container and checks that `/api/health` answers. Images aren't signed yet (08 §6).
 - The owner's proof-of-concept deployment (Docker behind a Cloudflare Tunnel, Q6) pulls the image
   from the registry; a deploy job for it can follow once it exists.

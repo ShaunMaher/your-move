@@ -62,7 +62,8 @@ Toolchain: `mise install` (Node and pnpm pinned in `mise.toml`, 11 §1), then:
 - `pnpm install` · `pnpm dev:node` · `pnpm dev:worker` · `pnpm build`
 - Quality: `pnpm format` · `pnpm lint` · `pnpm lint:arch` · `pnpm lint:unused` · `pnpm typecheck` ·
   `pnpm test` · `pnpm test:e2e`
-- Games: `pnpm games:generate` · `pnpm games:verify` (`--fast` in builds) · `pnpm games:check-db` (deploy)
+- Games: `pnpm games:generate` (also runs on `prepare`) · `pnpm games:verify` (`--fast` in builds; never in deploy jobs) ·
+  `pnpm games:check-db` (deploy; reads only `generated/installed.json`)
 - API: `pnpm api:generate` (OpenAPI document + `@your-move/api-client`)
 - Releases: `pnpm changeset`
 - Ops: `pnpm cf:migrate` · `pnpm cf:deploy` · `pnpm gen:vapid` · `pnpm gmail:authorize` ·

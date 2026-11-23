@@ -59,7 +59,7 @@ type ModuleConfig = unknown;                               // parsed from this m
 type ResourceRequest = { kind: "dictionary"; id: string; version?: number };  // framework resource kinds (§2.1 rule 7)
 type ListSummary = { headline: Text; scores?: number[] };  // one line in the game list
 type FrameworkError = { code: string; message: string; detail?: unknown };   // 05 §Errors
-type GameEnvelope = /* 05 §Common types; defined in the SDK, re-used by @your-move/api-client */;
+type GameEnvelope = /* 05 §Common types; a Zod schema defined in the SDK and registered by the server, so the generated api-client type is structurally identical (§7.4) */;
 type SubmitResult = { ok: true; game: GameEnvelope; view: unknown } | { ok: false; error: GameError | FrameworkError };
 type ResourceMeta = {                                      // metadata only, never contents (08 T22)
   kind: "dictionary"; id: string; version: number; name: string;
@@ -470,8 +470,8 @@ set and seat count, with seeded randomness:
    `preview` result must be identical. This catches module-level state (e.g. a wrongly keyed cache)
    leaking one game's hidden state into another.
 
-The kit has two modes: **fast** (a few hundred games per package; run by `pnpm build`, the Docker
-build and the deploy path through `pnpm games:verify --fast`) and **full** (thousands of games per
+The kit has two modes: **fast** (a few hundred games per package; run by `pnpm build` and the
+Docker build through `pnpm games:verify --fast`; the deploy job never runs it, §7.3) and **full** (thousands of games per
 option set and seat count; run in CI's test stage and in each game package's own CI).
 
 The kit itself is tested against deliberately **broken fixture modules** (one leaks hidden state
@@ -514,9 +514,11 @@ package except through these three entry points.
 - **Dependencies**: `@your-move/sdk`, `zod` and (for the client) `react` are **peerDependencies**
   only (the instance supplies them); the SDK range is the package's statement of compatibility
   (§7.4). An engine may **bundle** pure third-party code into its built output (e.g. a small
-  algorithm library) — bundled code is held to the same rules as the engine's own code — but its
-  published `dependencies` must be empty: an engine never imports another package at runtime. A
-  client may have ordinary `dependencies` (subject to the licence allow-list).
+  algorithm library); bundled code is held to the same rules as the engine's own code. The built
+  engine and manifest output import nothing but `@your-move/sdk` and `@your-move/sdk/schema`,
+  enforced on built output (§7.5), so an engine never imports a package at runtime even if one is
+  installed. A **client** may import the packages it declares in its `dependencies` (subject to the
+  licence allow-list, 11 §6); those are the package's only `dependencies`.
 - **Built-output rules** (§7.5) are checked on the files the `exports` map points at, so what is
   verified is exactly what runs.
 
@@ -564,10 +566,13 @@ Cloudflare Workers can't load code at runtime, so an instance's set of games is 
 
   Game packages are ordinary entries in the root `package.json` **`dependencies`** (never
   `devDependencies`), pinned by the lockfile; Renovate identifies them from this list (11 §8).
-- `pnpm games:generate` (run by `pnpm build` and `pnpm dev:*`) reads the config and generates two
-  files into the git-ignored `generated/` directory, never edited by hand and never committed: the
-  **server registry** (`type → { manifest, engines }`) and the **client import map**
-  (`type → () => import("<pkg>/client")`) used for lazy loading. `packages/server` never imports
+- `pnpm games:generate` reads the config and generates three files into the git-ignored
+  `generated/` directory, never edited by hand and never committed: the **server registry**
+  (`type → { manifest, engines }`), the **client import map** (`type → () => import("<pkg>/client")`)
+  used for lazy loading, and **`installed.json`**, plain data listing each installed `type` with
+  its package name and version and the rules versions its engine exports. It runs from the root
+  `prepare` script (so a fresh clone has `generated/` after `pnpm install`), before `pnpm typecheck`,
+  `pnpm lint` and `pnpm test`, and from `pnpm build` and `pnpm dev:*` (11 §3). `packages/server` never imports
   them: `apps/worker` and `apps/node` import the server registry and pass it in
   (`createApp({ platform, games })`, 03 §4), and `apps/web` imports the client import map.
 - `pnpm games:verify` fails the build when:
@@ -579,8 +584,9 @@ Cloudflare Workers can't load code at runtime, so an instance's set of games is 
     instance's SDK;
   - the manifest disagrees with the engine (§7.2), or the manifest icon fails sanitisation.
 
-  `pnpm build`, the Docker build and the deploy path run it in **fast** mode; CI's test stage runs
-  the **full** kit (§6).
+  `pnpm build` and the Docker build run it in **fast** mode; CI's test stage runs the **full** kit
+  (§6). **The deploy job never runs it**, nor anything else that imports game package code: deploy
+  jobs hold deploy credentials (08 §6).
 - At runtime `ENABLED_GAMES` (09) still filters which installed types are offered for **new**
   games; an installed but disabled type keeps serving its existing games.
 
@@ -588,9 +594,13 @@ The build can't see an instance's database, so removing a game type or rules ver
 games still use is caught at **deploy and run time**:
 
 - `pnpm games:check-db` lists every `lobby`/`active` game whose `game_type` isn't installed or whose
-  `game_version` isn't exported by the installed package. The Cloudflare deploy job (09 §6) runs it
-  against D1 before `wrangler deploy` and stops on any hit; the Node server runs the same check at
-  startup and refuses to start. The operator may override with `--allow-orphans` on the deploy
+  `game_version` isn't exported by the installed package. It reads **only** `generated/installed.json`
+  (the build stage's artifact) and runs one fixed query; it never imports game package code. The
+  Cloudflare deploy job (09 §6) runs it against D1 before `wrangler deploy` and stops on any hit.
+  The Node server runs the same check at startup, in this order: migrations → orphan check against
+  `installed.json` → read and scrub secrets (§7.5) → dynamic `import()` of the server registry →
+  assert the registry's types and versions equal `installed.json` (else refuse to start) → serve. On
+  an orphan hit it refuses to start. The operator may override with `--allow-orphans` on the deploy
   step (or `ALLOW_ORPHAN_GAMES=true` for one Node start), which accepts that those games become
   orphaned.
 - At runtime an **orphaned** game (no engine for its type or version) answers every write with
@@ -611,9 +621,13 @@ games still use is caught at **deploy and run time**:
   versioning, as defined by the module.
 - **The SDK** (`@your-move/sdk`, with `@your-move/testkit`) is the contract between the framework
   and every game. Its only peer dependencies are `zod` (one pinned major, re-exported as
-  `@your-move/sdk/schema`) and, for its client helpers, `react`; it has no other dependencies. It
-  exports every type a module or client needs, including the client-facing API types
-  (`GameEnvelope`, `SubmitResult`, …) that `@your-move/api-client` also re-uses.
+  `@your-move/sdk/schema`) and, for its client helpers, `react`; it has no other dependencies.
+  Entry points: `@your-move/sdk` (types and pure helpers, no React), `@your-move/sdk/schema` and
+  `@your-move/sdk/client` (the React helpers; never importable from an engine or manifest, §7.5).
+  It exports every type a module or client needs, including the client-facing API types
+  (`GameEnvelope`, `SubmitResult`, …) as Zod schemas. The server registers these same schemas on its
+  routes, so the types `openapi-typescript` generates for `@your-move/api-client` are structurally
+  identical; a type-level test asserts the two are mutually assignable.
   - **Until the MVP (M4) the SDK is `0.x`**: any minor may break, with a migration note. This keeps
     the contract changeable while the framework (M3) and the first games exercise it.
   - **From 1.0** it follows semver strictly: **patch** — fixes with no type or behaviour change
@@ -650,10 +664,12 @@ unlikely, and reduce what a dishonest one can reach:
 
 - **Built-output rules shipped in the testkit**, run by `pnpm games:verify` on the files each
   package's `exports` map points at (§7.1.1):
-  - a dependency-cruiser ruleset (`@your-move/testkit/depcruise`): an engine imports only
-    `@your-move/sdk` (and `@your-move/sdk/schema`); a client only the SDK, React and its own engine;
-    no `node:*`, no DOM in engines, no framework packages;
-  - an ESLint config (`@your-move/testkit/eslint-engine`) on built engine output: a **globals
+  - a dependency-cruiser ruleset (`@your-move/testkit/depcruise`): an engine or manifest imports
+    only `@your-move/sdk` and `@your-move/sdk/schema` (never `@your-move/sdk/client`); a client
+    only the SDK (including `/client`), React, its own engine and the packages in its own
+    `dependencies`; no `node:*`, no DOM in engines or manifests, no framework packages;
+  - an ESLint config (`@your-move/testkit/eslint-engine`) on built **engine and manifest** output
+    (manifests are executable JavaScript too): a **globals
     allow-list** (no `fetch`, `crypto`, `globalThis`/`self` access, timers, `Date.now()` or
     `new Date()` without arguments, `Math.random`, `eval`/`Function`, `WebAssembly`, `process`), and
     **no writes to built-in objects or prototypes** — consistent with CLAUDE.md's purity rule.
@@ -748,7 +764,8 @@ assistant should never be given.
 `aiAssistance` (§4) decides whether a **human** seat may be played by that human's agent:
 
 - `off` (the default whenever the game has an open seat or two or more humans, §4): a token
-  submitting an action, resign or decline **for a human seat** gets `403 AI_NOT_ALLOWED`. Reading
+  submitting an action or resign **for a human seat** gets `403 AI_NOT_ALLOWED` (a decline is
+  never refused on these grounds: declining gives nobody an advantage, 05). Reading
   your own view and history and asking for previews with a `read`-scoped token is always allowed
   (preview never runs the AI check, 05): an assistant may suggest, the human decides and plays in
   the app.

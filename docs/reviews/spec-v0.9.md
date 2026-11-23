@@ -57,3 +57,19 @@ One line per finding: ID → outcome (where).
 - S5-19 fixed (02 §6 kit check 7 + broken fixture)
 - S5-20a fixed (06 §8; 08 §6) · S5-20b fixed (05 conventions, WebSocket) · S5-20c fixed (05 no renderer) · S5-20d fixed (10 M8) · S5-20e fixed (08 T15; 09 §5)
 - 08 additions: §7 accepted risks (findings F-5..F-9); §4 limits; §6 signing and protection (F-9); T15 `Authorization` redaction — all fixed
+
+## Focused verification of v0.9.1 (applied in v0.9.2)
+
+- R6-1 fixed (11 §9 stages 3–4: e2e on the Node build output; 09 §6 post-push image smoke job on `main`; 10 M0 accept)
+- R6-2 fixed (02 §7.1.1: clients import their declared `dependencies`; built engine and manifest output import only the SDK; "dependencies empty" dropped; 02 §7.5; 11 §5)
+- R6-3 fixed (02 §7.4 `@your-move/sdk/client` entry point; 02 §7.5 and 11 §5 exclude it from engines and manifests)
+- R6-4 fixed (10 M0 lists the `games:verify` subset; kit, manifest, icon, built-output ESLint and fast/full move to M1)
+- R6-5 fixed (02 §7.3 and 11 §3: `games:generate` on `prepare` and before typecheck/lint/test; 11 §9 stage 1 runs it first)
+- R6-6 fixed (02 §7.3 `generated/installed.json`; Node startup order; 09 §4)
+- R6-7 fixed (11 §7: changeset rule covers every workspace package, empty changesets for non-package MRs, `--since=$CI_MERGE_REQUEST_DIFF_BASE_SHA` after fetching the target branch)
+- R6-8 fixed (10 M0 and 11 §7: placeholders `"private": true` until their milestone)
+- R6-9 fixed (05 §Token scopes: lobby decline needs `join`; check 5 never applies to declines, 05 and 02 §9.3; admin prefix answers `404` before token validation; `/__dev/*` row, dev only)
+- R6-10 fixed (05 §Versioning and 02 §7.4: server registers the SDK's schemas; type-level mutual-assignability test)
+- S6-1 fixed (02 §6 and §7.3, 08 §6, 09 §6, 11 §4/§9: deploy jobs never run `games:verify` or import game code; `games:check-db` reads only `installed.json` plus one fixed query; built-output rules extended to manifests)
+- S6-2 fixed (05 §Token scopes: the enumeration test walks `app.routes` of both runtime builds; non-OpenAPI routes in the same table; unlisted route → test failure and `403`)
+- S6 GitLab-tier note fixed (08 §6, 11 §9, 10 M0/M1, 09 §6: CE has no protected environments — protected + environment-scoped variables, protected `main` and `v*` tags; M1 verifies protected packages/tags on CE with a recorded fallback; findings F-8, F-9 updated)

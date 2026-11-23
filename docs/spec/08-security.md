@@ -192,13 +192,23 @@ whatever notification the operator uses.
   No job that runs dependency code (lint, test, build) can read it.
 - Secret scanning: gitleaks in CI and as a pre-commit hook, with a rule for the `ym_pat_` token
   prefix (06 §8). Forge push protection doesn't know the prefix (06 §8), so gitleaks is the control.
+- **Our GitLab is Community Edition, which has no protected environments.** Secrets are therefore
+  confined by two settings that CE does have, used together: the variable is **protected** (only
+  pipelines on protected refs receive it: `main`, which only Maintainers can push or merge to, and
+  tags matching `v*`, protected so only Maintainers can create them) **and environment-scoped**
+  (only jobs that declare that environment receive it). An MR pipeline gets neither.
 - **Publishing** packages (`@your-move/*`, 02 §7.4) and images happens only in jobs on `main`/tags
-  that deploy to a protected **`release` environment**, authenticated with a **deploy token**
+  that declare the **`release` environment**, authenticated with a **deploy token**
   (`write_package_registry`, `write_registry`) held in a masked, protected variable scoped to that
   environment — **never `CI_JOB_TOKEN`**, which every pipeline (including MR and Renovate
   pipelines running new dependency code) receives with the triggering user's rights. GitLab
   **protected packages** for `@your-move/*` and **protected container tags** require the Maintainer
   role to push, so a Developer-level token or a compromised MR job can't publish over a release.
+  M1 verifies that both protection features exist on our CE version and that the deploy token can
+  publish through them; if not, the fallback (recorded in findings.md F-9) is a Maintainer-role
+  project access token in the same protected, environment-scoped variable, with protected variables
+  and protected refs as the only confinement. M0/M1 acceptance proves the release credential
+  publishes from `main` and that an MR pipeline can't read it.
   No developer publishes from a workstation. Image signing is a later decision (cosign keyless
   needs an OIDC issuer Sigstore trusts; a self-hosted GitLab isn't one); until then deployments
   **pull images by digest**, recorded in the release notes, and every package/image records the
@@ -208,14 +218,16 @@ whatever notification the operator uses.
 - **Runners**: the instance's shared runners (amd64 and arm64) aren't protected, so MR jobs and
   `main` jobs share hosts. Jobs therefore run unprivileged: no Docker-in-Docker, images built with
   rootless BuildKit (or kaniko) natively per architecture; secrets exist only in the `release`,
-  `renovate` and `production` environments. Accepted risk (findings.md): code from an MR job could
+  `renovate` and `production` environments (protected + environment-scoped variables, above). Accepted risk (findings.md): code from an MR job could
   try to persist on a shared runner host; protected runners for release jobs are an owner-side
   improvement if the instance gains more runners.
 - Cloudflare deploy credentials: `CLOUDFLARE_API_TOKEN` is a **protected + masked** GitLab variable
-  scoped to a `production` environment that only the default branch/tags can deploy to. The token
-  is scoped to one account with only Workers Scripts:Edit and D1:Edit. The deploy job uses the
-  already-built artifact and does not run `pnpm install` (no dependency scripts execute with the
-  token in the environment).
+  scoped to a `production` environment, so only jobs on protected refs that declare it receive it.
+  The token is scoped to one account with only Workers Scripts:Edit and D1:Edit. **No dependency
+  or game-package code runs while it is in the environment**: the deploy job uses the stage-3
+  artifact, doesn't run `pnpm install`, doesn't run `pnpm games:verify`, and its orphan check
+  (`pnpm games:check-db`, 02 §7.3) reads only the plain-data `generated/installed.json` plus one
+  fixed D1 query — it never imports a game package's engine or manifest.
 
 ## 7. Security process
 

@@ -10,7 +10,10 @@ The project's foundation, built to 11 (engineering standards) from the first com
   `packageManager`, `engines` (11 §1).
 - pnpm monorepo per 03 §3 with every package directory created (empty packages export a
   placeholder and a test; placeholders are knip-ignored with the milestone that fills them, 11 §6),
-  `@your-move/*` scope, TypeScript project references and the strict settings (11 §2).
+  `@your-move/*` scope, TypeScript project references and the strict settings (11 §2). Every
+  placeholder package, including those that will be published (`sdk`, `testkit`, `api-client`,
+  `mcp`, the games), is **`"private": true`** until the milestone that fills it removes the flag,
+  so the first `main` pipeline can't publish `0.0.0` placeholders.
 - Quality tooling (11 §3–§6): Prettier, ESLint flat config (typescript-eslint strict type-checked,
   React, hooks, jsx-a11y, import rules, eslint-comments), dependency-cruiser architecture rules
   (11 §5, including the game-package ruleset in `packages/testkit`), knip, licence check, gitleaks,
@@ -24,17 +27,24 @@ The project's foundation, built to 11 (engineering standards) from the first com
   scheduled job in the `renovate` environment, the only job that receives `RENOVATE_TOKEN`.
 - `.gitlab-ci.yml` with every stage in 11 §9 in the order validate → test → build → e2e → security
   → publish → deploy; unprivileged jobs, native per-arch image builds with rootless BuildKit on the
-  `arch-amd64` / `arch-arm64` runners; publish jobs in the protected `release` environment using the
-  release deploy token (failing clearly when it isn't configured; nothing to publish yet).
+  `arch-amd64` / `arch-arm64` runners; publish jobs in the `release` environment (protected,
+  environment-scoped variables; GitLab CE has no protected environments, 08 §6) using the release
+  deploy token (failing clearly when it isn't configured; nothing to publish yet).
 - `apps/worker` and `apps/node` both serve `packages/server`'s Hono app and the Vite SPA shell.
   The API skeleton is versioned from the start: `GET /api/health` and `GET /api/v1/health`,
   the OpenAPI document at `/api/v1/openapi.json` (no rendered docs page, 05 §Versioning),
   `@your-move/api-client` generated from it (`openapi-typescript` + `openapi-fetch`) and used by
   the SPA's health check, and the `oasdiff` breaking-change check.
-- Instance composition plumbing (02 §7.3): `instance.config.ts` (empty game list), `pnpm
-  games:generate` writing the git-ignored `generated/` that `apps/*` inject into
-  `createApp({ platform, games })`, and `pnpm games:verify` (fast and full modes) with its failure
-  checks unit-tested against fixture packages.
+- Instance composition plumbing (02 §7.3): `instance.config.ts` (empty game list); `pnpm
+  games:generate` writing the git-ignored `generated/` (server registry, client import map and
+  `installed.json`) that `apps/*` inject into `createApp({ platform, games })`, run from the root
+  `prepare` script and before typecheck, lint and test (11 §3); `pnpm games:check-db` reading only
+  `installed.json`; and the **M0 subset** of `pnpm games:verify`: duplicate or invalid type ids, the
+  SDK peer-range check, the licence allow-list with `acceptLicence`, the empty-`dependencies` check
+  (02 §7.1.1), and the import ruleset, each
+  unit-tested against fixture packages, plus a `--fast` flag that is accepted and documented. The
+  test-kit run, the manifest-vs-engine check, icon sanitisation, the built-output ESLint rules and
+  the real fast/full split need the SDK types and kit, so they land in **M1**.
 - Config schema with secret redaction + `.env.example`; shared security-header definition applied
   on Node and emitted as `_headers` for Cloudflare.
 - Docs: README quick start, CONTRIBUTING (dev setup, commands, conventions, review process), the
@@ -44,10 +54,14 @@ The project's foundation, built to 11 (engineering standards) from the first com
   on an MR; each gate is shown to fail by **fixture tests run in CI** against the real configs (a
   lint error, an architecture-rule breach such as an engine importing `node:fs` or using
   `Math.random`, a coverage drop, a fake `ym_pat_` string, a disallowed licence, a breaking OpenAPI
-  change, a commit message not in Conventional Commits form); the Docker image builds natively for
-  amd64 and arm64 without privileged jobs and runs; header test passes on both targets; Renovate's
-  first run (manual trigger of the scheduled job) opens its Dependency Dashboard and no other job
-  can read `RENOVATE_TOKEN`.
+  change, a commit message not in Conventional Commits form); end-to-end tests run against the
+  **Node build output** (`node apps/node/dist`), not the image; the Docker image builds natively for
+  amd64 and arm64 without privileged jobs (MR pipelines build but never push); **the image runs**:
+  checked on `main` by the post-push smoke job (09 §6), and locally once with `docker build` +
+  `docker run` and a `/api/health` request, recorded in the MR; header test passes on both targets;
+  Renovate's first run (manual trigger of the scheduled job) opens its Dependency Dashboard; and
+  no MR-pipeline job can read `RENOVATE_TOKEN` or the release and production variables (a CI check
+  that prints only whether each variable is set, run on an MR).
 
 ## M1 — Game SDK + words engine + dictionary
 - `@your-move/sdk`: `GameDefinition` / `GameClientModule` / `GameManifest` types, recording
@@ -55,8 +69,14 @@ The project's foundation, built to 11 (engineering standards) from the first com
   perturbation secrecy, termination, turn sanity, CPU budget, cross-game isolation; fast and full
   modes) and the game-package built-output rules (02 §7.5: dependency-cruiser ruleset and the
   engine ESLint config). The SDK is **0.x** until M4 (02 §7.4), exports the client-facing API types
-  and re-exports zod as `@your-move/sdk/schema`; the API Extractor report is committed. Publishing
-  to the GitLab package registry happens from `main` after merge (11 §7).
+  and re-exports zod as `@your-move/sdk/schema`, with React helpers only at `@your-move/sdk/client`;
+  the API Extractor report is committed. `pnpm games:verify` gains the rest of its checks (the kit,
+  manifest-vs-engine, icon sanitisation, built-output ESLint rules on engine and manifest output,
+  fast/full modes). Publishing to the GitLab package registry happens from `main` after merge
+  (11 §7). **Accept (release path):** GitLab protected packages for `@your-move/*` and protected
+  container tags are configured and shown to exist on our CE version (else the F-9 fallback is
+  applied and recorded); the release deploy token publishes from `main`, and an MR pipeline can
+  neither read it nor publish.
 - **The reference game package** `@your-move/game-example` (02 §7.6): exercises everything the
   word game doesn't — 2–4 players, a hidden hand, elimination, and one simultaneous secret phase
   (multi-seat `toAct`). It proves the contract and kit before the word game uses them, drives the
