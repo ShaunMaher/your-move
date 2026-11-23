@@ -53,9 +53,25 @@ export function checkIdentity(games: readonly LoadedGame[]): string[] {
   return problems;
 }
 
+/**
+ * Resolves pnpm's `workspace:` protocol the way publishing does, so a first-party game in this
+ * repository is checked exactly like its published package: `workspace:^` and `workspace:~`
+ * become `^`/`~` of the workspace version, `workspace:*` the version itself, and
+ * `workspace:<range>` the range.
+ */
+export function resolveWorkspaceRange(range: string, workspaceVersion: string): string {
+  if (!range.startsWith("workspace:")) return range;
+  const spec = range.slice("workspace:".length);
+  if (spec === "^" || spec === "~") return `${spec}${workspaceVersion}`;
+  if (spec === "*") return workspaceVersion;
+  return spec;
+}
+
 /** The package's `@your-move/sdk` peer range must include this instance's SDK (02 §7.4). */
 function checkSdk(game: LoadedGame, sdkVersion: string): string[] {
-  const range = game.pkg.peerDependencies["@your-move/sdk"];
+  const declared = game.pkg.peerDependencies["@your-move/sdk"];
+  // In this repository the workspace SDK is the instance's SDK.
+  const range = declared === undefined ? undefined : resolveWorkspaceRange(declared, sdkVersion);
   if (range === undefined) {
     return [`${game.packageName}: must declare @your-move/sdk as a peer dependency (02 §7.1.1)`];
   }

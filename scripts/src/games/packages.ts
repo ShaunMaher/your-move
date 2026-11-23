@@ -1,9 +1,15 @@
 /**
  * Reading an installed game package: its `package.json` and its three entry points
- * (docs/spec/02-game-framework.md §7.1).
+ * (docs/spec/02-game-framework.md §7.1, §7.1.1).
+ *
+ * The package contract is checked strictly and fails closed, because what `games:verify` checks
+ * must be exactly what bundlers and Node load: every `exports` entry is `{ types, import }` and
+ * nothing else (no other conditions a bundler might prefer, no nesting, no string shorthand), no
+ * `imports` or `browser` remapping, ESM only, and every target resolves (symlinks included) to a
+ * file inside the package.
  */
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 import { z } from "zod";
 
@@ -19,7 +25,7 @@ export interface GamePackage {
   readonly peerDependencies: Readonly<Record<string, string>>;
   /** The package directory (symlinks resolved). */
   readonly dir: string;
-  /** Absolute path of each entry point's module. */
+  /** Absolute path of each entry point's module (symlinks resolved). */
   readonly entries: Readonly<Record<EntryPoint, string>>;
 }
 
@@ -34,36 +40,34 @@ export function nodeModulesResolver(rootDir: string): PackageResolver {
   };
 }
 
-type ExportTarget = string | { readonly [condition: string]: ExportTarget } | null;
-const exportTargetSchema: z.ZodType<ExportTarget> = z.lazy(() =>
-  z.union([z.string(), z.null(), z.record(z.string(), exportTargetSchema)]),
-);
+/** The only shape an `exports` entry may have (02 §7.1.1). */
+const exportEntrySchema = z.object({ types: z.string(), import: z.string() }).strict();
 
 const packageJsonSchema = z.looseObject({
   name: z.string(),
   version: z.string(),
+  type: z.string().optional(),
   license: z.string().optional(),
   dependencies: z.record(z.string(), z.string()).optional(),
   peerDependencies: z.record(z.string(), z.string()).optional(),
-  exports: z.record(z.string(), exportTargetSchema).optional(),
+  exports: z.unknown().optional(),
+  imports: z.unknown().optional(),
+  browser: z.unknown().optional(),
 });
-
-/** Picks the ESM target of one `exports` entry: `import`, then `default`, depth first. */
-function exportTarget(target: ExportTarget | undefined): string | null {
-  if (target === undefined || target === null) return null;
-  if (typeof target === "string") return target;
-  for (const condition of ["import", "default"]) {
-    const found = exportTarget(target[condition]);
-    if (found !== null) return found;
-  }
-  return null;
-}
 
 export type ReadResult =
   | { readonly ok: true; readonly pkg: GamePackage }
   | { readonly ok: false; readonly problems: readonly string[] };
 
-/** Reads a game package and checks it has the three entry points. */
+/** The real path of `target` if it exists inside `dir` (itself a real path), else null. */
+function containedFile(dir: string, target: string): string | null {
+  const file = resolve(dir, target);
+  if (!existsSync(file)) return null;
+  const real = realpathSync(file);
+  return real.startsWith(`${dir}${sep}`) ? real : null;
+}
+
+/** Reads a game package and checks its `package.json` contract and three entry points. */
 export function readGamePackage(name: string, resolvePackage: PackageResolver): ReadResult {
   const dir = resolvePackage(name);
   if (dir === null) {
@@ -75,28 +79,60 @@ export function readGamePackage(name: string, resolvePackage: PackageResolver): 
   if (!parsed.success) {
     return { ok: false, problems: [`${name}: package.json has no valid name and version`] };
   }
+  const json = parsed.data;
   const problems: string[] = [];
-  const entries: Partial<Record<EntryPoint, string>> = {};
-  for (const entry of ENTRY_POINTS) {
-    const target = exportTarget(parsed.data.exports?.[`./${entry}`]);
-    const file = target === null ? null : resolve(dir, target);
-    if (file === null || !file.startsWith(`${dir}/`) || !existsSync(file)) {
-      problems.push(`${name}: missing the "./${entry}" entry point (02 §7.1)`);
-    } else {
-      entries[entry] = file;
+  if (json.type !== "module") {
+    problems.push(`${name}: must be ESM ("type": "module") (02 §7.1.1)`);
+  }
+  for (const field of ["imports", "browser"] as const) {
+    if (json[field] !== undefined) {
+      problems.push(`${name}: must not have a package.json "${field}" field (02 §7.1.1)`);
     }
   }
+
+  const exportsMap = z.record(z.string(), z.unknown()).safeParse(json.exports);
+  const entries: Partial<Record<EntryPoint, string>> = {};
+  if (!exportsMap.success || Object.keys(exportsMap.data).some((key) => !key.startsWith("."))) {
+    problems.push(`${name}: "exports" must map subpaths to { types, import } (02 §7.1.1)`);
+  } else {
+    for (const [subpath, value] of Object.entries(exportsMap.data)) {
+      const entry = exportEntrySchema.safeParse(value);
+      if (!entry.success) {
+        problems.push(
+          `${name}: exports["${subpath}"] must be exactly { types, import }, with no other conditions (02 §7.1.1)`,
+        );
+        continue;
+      }
+      for (const target of [entry.data.types, entry.data.import]) {
+        if (containedFile(dir, target) === null) {
+          problems.push(
+            `${name}: exports["${subpath}"] points at "${target}", which is not a file inside the package`,
+          );
+        }
+      }
+    }
+    for (const point of ENTRY_POINTS) {
+      const entry = exportEntrySchema.safeParse(exportsMap.data[`./${point}`]);
+      const file = entry.success ? containedFile(dir, entry.data.import) : null;
+      if (file === null) {
+        problems.push(`${name}: missing the "./${point}" entry point (02 §7.1)`);
+      } else {
+        entries[point] = file;
+      }
+    }
+  }
+
   if (problems.length > 0 || !entries.engine || !entries.client || !entries.manifest) {
-    return { ok: false, problems };
+    return { ok: false, problems: [...new Set(problems)] };
   }
   return {
     ok: true,
     pkg: {
-      name: parsed.data.name,
-      version: parsed.data.version,
-      license: parsed.data.license,
-      dependencies: parsed.data.dependencies ?? {},
-      peerDependencies: parsed.data.peerDependencies ?? {},
+      name: json.name,
+      version: json.version,
+      license: json.license,
+      dependencies: json.dependencies ?? {},
+      peerDependencies: json.peerDependencies ?? {},
       dir,
       entries: { engine: entries.engine, client: entries.client, manifest: entries.manifest },
     },

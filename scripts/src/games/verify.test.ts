@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { loadGames, type LoadedGame } from "./load.js";
 import { nodeModulesResolver } from "./packages.js";
-import { verifyGames } from "./verify.js";
+import { resolveWorkspaceRange, verifyGames } from "./verify.js";
 
 /** Fixture packages as a registry would install them (scripts/test-fixtures/games/node_modules). */
 const FIXTURES = fileURLToPath(new URL("../../test-fixtures/games", import.meta.url));
@@ -39,6 +39,15 @@ describe("games:verify", () => {
 
   it("lets a client import the packages in its own dependencies", async () => {
     expect(await verify("@fixture/game-clientdep")).toEqual([]);
+  });
+
+  it("checks a workspace: peer range like the published range", async () => {
+    expect(await verify("@fixture/game-workspace")).toEqual([]);
+  });
+
+  it("fails an engine importing zod directly instead of @your-move/sdk/schema", async () => {
+    const problems = await verify("@fixture/game-zod");
+    expect(problems.join("\n")).toMatch(/game-no-direct-zod/u);
   });
 
   it("passes an empty instance", async () => {
@@ -130,6 +139,28 @@ describe("loading installed packages", () => {
       "@fixture/game-noengines",
       /must export an "engines" map/u,
     ],
+    [
+      "whose exports add a condition a bundler might prefer",
+      "@fixture/game-condswap",
+      /exports\["\.\/engine"\] must be exactly \{ types, import \}/u,
+    ],
+    [
+      "whose exports use the string shorthand",
+      "@fixture/game-shorthand",
+      /exports\["\.\/engine"\] must be exactly \{ types, import \}/u,
+    ],
+    ["with an imports map", "@fixture/game-importsmap", /must not have a package\.json "imports"/u],
+    [
+      "with a browser field",
+      "@fixture/game-browserfield",
+      /must not have a package\.json "browser"/u,
+    ],
+    ["that isn't ESM", "@fixture/game-commonjs", /must be ESM/u],
+    [
+      "whose entry point is a symlink out of the package",
+      "@fixture/game-symlink",
+      /points at "\.\/dist\/engine\/index\.js", which is not a file inside the package/u,
+    ],
   ])("reports a package %s", async (_label, name, expected) => {
     const result = await loadGames({ games: [{ package: name }] }, resolvePackage);
     expect(result.ok).toBe(false);
@@ -145,5 +176,17 @@ describe("loading installed packages", () => {
       ok: true,
       games: [{ rulesVersions: [1], enabledByDefault: false, manifest: { type: "good" } }],
     });
+  });
+});
+
+describe("resolveWorkspaceRange", () => {
+  it.each([
+    ["workspace:^", "^1.2.0"],
+    ["workspace:~", "~1.2.0"],
+    ["workspace:*", "1.2.0"],
+    ["workspace:^1.0.0", "^1.0.0"],
+    ["^1.0.0", "^1.0.0"],
+  ])("%s → %s", (range, expected) => {
+    expect(resolveWorkspaceRange(range, "1.2.0")).toBe(expected);
   });
 });
