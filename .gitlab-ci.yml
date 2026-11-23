@@ -215,14 +215,20 @@ test:
   script:
     # Unit, integration, property, component and API contract tests; the full game kit joins in
     # M1. The Worker half of the contract suite runs in test:worker instead (see there): to fold it
-    # back, drop the --exclude and the test:worker job.
-    - pnpm test --exclude src/worker.test.ts
+    # back, drop the --exclude and the test:worker job. Vitest matches --exclude against each
+    # project's own directory, so only an absolute path names this one file and no other.
+    - pnpm test --exclude "$CI_PROJECT_DIR/tests/contract/src/worker.test.ts"
   after_script:
+    # The Worker build writes Wrangler's log, but a job that fails earlier writes none: an empty
+    # directory keeps the artifact upload from warning.
+    - mkdir -p "$WRANGLER_LOG_PATH"
     - *runner-report
   coverage: '/Lines\s*:\s*(\d+(?:\.\d+)?)%/'
   artifacts:
     when: always
     expire_in: 1 week
+    # Wrangler's logs can carry the test configuration; only project members read them.
+    access: developer
     paths:
       - reports/wrangler-logs/
     reports:
@@ -259,10 +265,12 @@ test:worker:
     # The contract project's global setup builds the web app, Node server and Worker first.
     - pnpm exec vitest run --project tests/contract src/worker.test.ts
   after_script:
+    - mkdir -p "$WRANGLER_LOG_PATH"
     - *runner-report
   artifacts:
     when: always
     expire_in: 1 week
+    access: developer
     paths:
       - reports/wrangler-logs/
     reports:

@@ -52,7 +52,13 @@ beforeAll(async () => {
     } catch (debugError) {
       console.error("harness.debug() failed", debugError);
     }
-    const known = knownStartupProblem();
+    // Naming a known cause is a courtesy: a problem reading the CPU's flags mustn't hide the error.
+    let known: string | null = null;
+    try {
+      known = knownStartupProblem();
+    } catch (probeError) {
+      console.error("knownStartupProblem() failed", probeError);
+    }
     throw known === null ? error : new Error(known, { cause: error });
   }
 }, 60_000);
