@@ -425,6 +425,12 @@ Framework codes (reserved; modules can't use them, 02 §2.2):
 | 413 / 415 | `TOO_LARGE` / `UNSUPPORTED_MEDIA_TYPE` |
 | 429 | `RATE_LIMITED` |
 | 500 | `INTERNAL` — never carries detail; the log records a request id only, never inputs or state (09 §5) |
+
+Logs never contain request bodies or input-derived messages (09 §5). A request rejected while it
+is being read (body limit, malformed JSON, validation) keeps its own status (`400`, `413`, `415`)
+and is logged below error level with the error's class and stack frames but not its message,
+which can quote the input; only unexpected errors are logged at error level, with class, message
+and stack.
 | 503 | `UPLOADS_FULL` |
 
 **Module errors** from `validate` and `preview` are returned as `400 { error: { code, message,

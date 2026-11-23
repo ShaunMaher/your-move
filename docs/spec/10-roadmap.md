@@ -26,12 +26,13 @@ The project's foundation, built to 11 (engineering standards) from the first com
 - Renovate configuration (11 §8: no automerge, `:semanticCommits`, `ignoreScripts`) and its
   scheduled job in the `renovate` environment, the only job that receives `RENOVATE_TOKEN`.
 - `.gitlab-ci.yml` with every stage in 11 §9 in the order validate → test → build → e2e → security
-  → publish → deploy; unprivileged jobs, native per-arch image builds with rootless BuildKit on the
+  → publish → deploy; unprivileged jobs, native per-arch image builds with kaniko (or rootless BuildKit) on the
   `arch-amd64` / `arch-arm64` runners; publish jobs in the `release` environment (protected,
   environment-scoped variables; GitLab CE has no protected environments, 08 §6) using the release
   deploy token (failing clearly when it isn't configured; nothing to publish yet).
 - `apps/worker` and `apps/node` both serve `packages/server`'s Hono app and the Vite SPA shell.
   The API skeleton is versioned from the start: `GET /api/health` and `GET /api/v1/health`,
+  `GET /api/v1/config` (so the shell takes its title from config, 03 §9),
   the OpenAPI document at `/api/v1/openapi.json` (no rendered docs page, 05 §Versioning),
   `@your-move/api-client` generated from it (`openapi-typescript` + `openapi-fetch`) and used by
   the SPA's health check, and the `oasdiff` breaking-change check.
@@ -40,7 +41,8 @@ The project's foundation, built to 11 (engineering standards) from the first com
   `installed.json`) that `apps/*` inject into `createApp({ platform, games })`, run from the root
   `prepare` script and before typecheck, lint and test (11 §3); `pnpm games:check-db` reading only
   `installed.json`; and the **M0 subset** of `pnpm games:verify`: duplicate or invalid type ids, the
-  SDK peer-range check, the licence allow-list with `acceptLicence`, the empty-`dependencies` check
+  SDK peer-range check, the licence allow-list with `acceptLicence`, the dependency rules of 02 §7.1.1 (the SDK, `zod` and `react` as peers only, nothing
+  else as a peer, other `dependencies` reachable only from the client)
   (02 §7.1.1), and the import ruleset, each
   unit-tested against fixture packages, plus a `--fast` flag that is accepted and documented. The
   test-kit run, the manifest-vs-engine check, icon sanitisation, the built-output ESLint rules and
@@ -91,7 +93,12 @@ The project's foundation, built to 11 (engineering standards) from the first com
 - `words` engine as a `GameDefinition` (games/words.md §10): setup/deal, placement validation, word
   finding, scoring, swap/pass, resign/timeout, end conditions, final scoring, view, preview —
   packaged as `@your-move/game-words` with its manifest (02 §7).
-- **Accept:** the kit fails every broken fixture and passes the reference module at 2, 3 and 4
+- Releases: `v*` tag pipelines create a GitLab Release that records the image digests and the
+  package versions published.
+- **Accept:** a Maintainer-triggered MR pipeline's `CI_JOB_TOKEN` cannot push a protected
+  container tag or an `@your-move/*` package version (if it can, protection is raised to Owner and
+  the release deploy token is confirmed to still publish; F-9);
+  the kit fails every broken fixture and passes the reference module at 2, 3 and 4
   players; `pnpm games:verify` passes with `example` and `words` installed and fails when either
   violates an architecture rule; a game package built in a separate scratch repository from
   `pnpm pack` tarballs of the SDK and testkit, following the guide, passes the kit and the
@@ -317,3 +324,12 @@ phase is a good test of multi-seat `toAct`.
   tile sets), and possibly per-game custom house-rule word lists.
 - In-game chat (with block/report), 3–4 player word games, play vs. bot, word definitions (needs a
   permissively licensed dictionary source), stats, rematch button, spectators.
+
+## First Workers deployment (unscheduled)
+
+The proof of concept deploys to Docker (Q6), so no milestone above deploys to Cloudflare Workers;
+the Worker build is still built and tested in CI. The milestone that first deploys to Workers adds
+the CI deploy job (11 §9 stage 7, 09 §6): deploy `dist/worker` from the stage-3 artifact with
+`--no-bundle`; wrangler from a lockfile-pinned, `--ignore-scripts` install carried as an artifact;
+configuration generated from CI variables; no `pnpm install` in the job; `pnpm games:check-db`
+against D1 first; `pnpm cf:migrate` and `pnpm cf:deploy` with it.

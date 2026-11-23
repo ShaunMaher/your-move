@@ -178,8 +178,8 @@ whatever notification the operator uses.
 ## 6. Supply chain and CI
 
 - Lockfile committed; `pnpm install --frozen-lockfile` everywhere.
-- Install scripts: pnpm's `onlyBuiltDependencies` allow-list set explicitly (e.g. `better-sqlite3`,
-  `esbuild`, `workerd`); all others blocked. Runtime Docker image built with `pnpm deploy --prod`.
+- Install scripts: pnpm's `allowBuilds` allow-list (pnpm 12's name for `onlyBuiltDependencies`)
+  set explicitly (e.g. `better-sqlite3`, `esbuild`, `workerd`); all others blocked. Runtime Docker image built with `pnpm deploy --prod`.
 - Minimal runtime deps, each justified and permissively licensed (allow-list checked in CI, 11 §6);
   OSV-Scanner on the lockfile in CI and nightly, with every ignore in `osv-scanner.toml` pointing at
   an accepted-risk entry (with an expiry) in `docs/security/findings.md`; dependency updates via

@@ -10,14 +10,20 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
   **pnpm 12**, exact versions (e.g. `node = "26.13.1"`, `pnpm = "12.21.0"`). Renovate keeps them
   current (§8). If a dependency we need doesn't support the pinned Node major yet, fall back to the
   previous LTS and record why in an ADR.
-- `package.json` repeats the pins for people without mise: `"packageManager": "pnpm@<version>"`
-  (corepack) and `"engines": { "node": ">=26 <27" }`; `engine-strict=true` in `.npmrc`.
-- CI uses the same pins (§9): job images are built from the pinned Node version, and pnpm comes
-  from `packageManager`.
+- `package.json` repeats the pins for people without mise:
+  `"packageManager": "pnpm@<version>+sha512.<hash>"` (corepack verifies the hash) and
+  `"engines": { "node": ">=26 <27" }`; `engine-strict=true` in `.npmrc`.
+- CI uses the same pins (§9): job images are built from the pinned Node version. Node 26 ships
+  without corepack, so CI and the Dockerfile install pnpm with mise at the version and SHA-256 in
+  `mise.lock` (the same version as `packageManager`). The mise release itself is downloaded and
+  checked against a SHA-256 committed in `scripts/ci/install-mise.sh`; nothing is piped into a
+  shell. **Deliberate exception:** the e2e job runs in the Playwright image, whose Node is Node 26
+  but not necessarily the exact pinned patch; Renovate keeps the image current.
 - `mise.toml` also pins the **non-npm tools** the gates need, so a fresh clone gets them from
-  `mise install` (mise `aqua`/`ubi` backends): **gitleaks**, **osv-scanner** and **oasdiff**. CI
-  installs the same pins.
-- No global installs are assumed beyond mise (or Node + corepack plus those three binaries) and
+  `mise install` (mise `aqua`/`ubi`/`github` backends): **gitleaks**, **osv-scanner**, **oasdiff**
+  and **syft** (SBOMs). `mise.lock` records each tool's URL and checksum for the CI platforms, and
+  CI installs with `mise install --locked`.
+- No global installs are assumed beyond mise (or Node + corepack plus those binaries) and
   Docker (for the Docker image and some e2e setups). `pnpm install` provides every npm tool.
 
 ## 2. TypeScript
@@ -36,7 +42,11 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
 ## 3. Code style, lint and generated code
 
 - **Prettier** formats everything it understands (TS, JSON, YAML, Markdown, CSS). `pnpm format`
-  writes; CI runs `prettier --check`. No style debates in review.
+  writes; CI runs `prettier --check`. No style debates in review. Excluded (`.prettierignore`):
+  generated output (the lockfile, `generated/`, build output, API Extractor reports, changelogs),
+  CI caches kept in the project directory, fixture packages, and hand-maintained records with wide
+  tables — `docs/spec/`, `docs/reviews/`, `docs/security/findings.md` and `.claude/` — whose
+  re-padding would bury real changes in diffs.
 - **ESLint** (flat config, `eslint.config.js`):
   - `typescript-eslint` `strictTypeChecked` + `stylisticTypeChecked` with type information;
   - `eslint-plugin-react`, `react-hooks`, `jsx-a11y` (strict) for the web app and game clients;
@@ -122,8 +132,9 @@ allow-list and the no-writes-to-built-ins rule — dependency-cruiser can't see 
   vulnerability in a production dependency fails the pipeline unless it is ignored in
   `osv-scanner.toml` with `ignoreUntil` and a `reason` that names an accepted-risk entry
   (`F-<n>`) in `docs/security/findings.md` with the same expiry.
-- **pnpm**: `--frozen-lockfile` everywhere; `onlyBuiltDependencies` lists the few packages allowed
-  to run install scripts (08 §6); `minimumReleaseAge` for new versions; `strict-peer-dependencies`.
+- **pnpm**: `--frozen-lockfile` everywhere; `allowBuilds` (pnpm 12's name for the former
+  `onlyBuiltDependencies`) lists the few packages allowed to run install scripts (08 §6);
+  `minimumReleaseAge` for new versions; `strict-peer-dependencies`.
 - Repository files: `.editorconfig`, `.gitattributes` (LF line endings, lockfile marked generated),
   `CODEOWNERS` (owner reviews `docs/spec/`, `.gitlab-ci.yml`, `08`-relevant code), `SECURITY.md`,
   `CONTRIBUTING.md` (dev setup, commit convention, changesets, the review process).
@@ -189,9 +200,11 @@ on the amd64 shared runner. Stages, in order:
    kit, API contract on both runtimes); JUnit and Cobertura reports to the MR.
 3. **build** — `pnpm games:verify --fast`, web app, Node server build (`apps/node/dist`), Worker
    bundle, `generated/installed.json` kept as an artifact for the deploy job, Docker image per
-   architecture built natively with rootless BuildKit (`linux/amd64` job tagged `arch-amd64`,
-   `linux/arm64` job tagged `arch-arm64`), CycloneDX SBOM. MR pipelines build but never push, so
-   nothing on an MR runs the image.
+   architecture built natively with kaniko (or rootless BuildKit, where the runner grants user
+   namespaces; `linux/amd64` job tagged `arch-amd64`, `linux/arm64` job tagged `arch-arm64`).
+   On `main`/tags, CycloneDX SBOMs of each image and of the Worker bundle's production
+   dependencies, and image labels naming the commit and pipeline. MR pipelines build but never
+   push or keep the image, so nothing on an MR runs it.
 4. **e2e** — Playwright (WebKit + Chromium) against the **Node build output** from stage 3
    (`node apps/node/dist` with SQLite), not the Docker image; traces and screenshots kept as
    artifacts on failure.
@@ -200,9 +213,14 @@ on the amd64 shared runner. Stages, in order:
    `changeset publish` to the GitLab package registry; per-arch images pushed and joined into a
    multi-arch manifest with `crane`; digests recorded in the release notes; then a **smoke job**
    pulls the new image by digest as a `services:` container and checks `/api/health` (09 §6).
-7. **deploy** (manual, `production` environment, 09 §6) — reuses the stage-3 artifact; runs
-   `pnpm games:check-db` from `installed.json` only, and never runs `games:verify` or imports game
-   package code while holding deploy credentials (08 §6).
+7. **deploy** (manual, `production` environment, 09 §6). The stage exists from M0; the Cloudflare
+   deploy job arrives with the first Workers deployment (10), built to these constraints: it
+   reuses the stage-3 artifact and deploys `dist/worker` with `--no-bundle`; wrangler comes from a
+   lockfile-pinned, `--ignore-scripts` install carried as an artifact (e.g. `pnpm deploy --prod`
+   of a small deployer package), never fetched in the job; its configuration is generated from CI
+   variables; it runs no `pnpm install`; it runs `pnpm games:check-db` from `installed.json` only,
+   and never runs `games:verify` or imports game package code while holding deploy credentials
+   (08 §6).
 
 **Environments on GitLab CE.** Our GitLab is Community Edition, which has no protected
 environments. Every secret is a variable that is both **protected** (only `main`, which only

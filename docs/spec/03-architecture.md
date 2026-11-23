@@ -72,7 +72,12 @@
 ├─ instance.config.ts      Installed game packages for this instance (02 §7.3)
 ├─ generated/              Server registry, client import map and installed.json from `pnpm games:generate` (ignored by
 │                          git, never committed); imported only by apps/worker, apps/node, apps/web
-├─ mise.toml               Pinned Node and pnpm (11 §1)
+├─ mise.toml, mise.lock    Pinned Node, pnpm and gate tools, with checksums (11 §1)
+├─ scripts/                @your-move/scripts (private) — repository tooling: games:generate/verify/
+│                          check-db, api:generate, licence and vulnerability gates, gates:prove,
+│                          scripts/ci/ (verified tool installs for CI and the Dockerfile)
+├─ tests/                  contract/ (the API contract suite on both builds) and e2e/ (Playwright)
+├─ config/                 local-dev.env: the public local-development configuration (06 §4)
 ├─ docs/spec/              This specification
 ├─ docs/adr/               Architecture decision records (11 §10)
 ├─ docs/guides/            Developer guides, e.g. writing-a-game.md (11 §11)
