@@ -1,25 +1,52 @@
-# The owner reviews the specification, the pipeline and security-relevant code (11 §6, 08).
-# Owners are the maintainers of the project's GitLab group.
+# The owner reviews the specification, the pipeline, every gate's configuration and
+# security-relevant code (11 §6, 08). Owners are the maintainers of the project's GitLab group.
+#
+# On our GitLab Community Edition this file is advisory: CE doesn't enforce Code Owner approval.
+# Ownership is enforced by the review process (CONTRIBUTING.md): a change to any path here needs
+# the owner's explicit review before it merges.
 
-[Specification]
+[Specification and process]
 /docs/spec/ @applications
 /docs/adr/ @applications
 /docs/security/ @applications
+/docs/licences.md @applications
 /CLAUDE.md @applications
+/CODEOWNERS @applications
 /.claude/agents/ @applications
 
-[Pipeline and supply chain]
+[Pipeline, toolchain and supply chain]
 /.gitlab-ci.yml @applications
-/renovate.json @applications
+/scripts/ @applications
+/mise.toml @applications
+/mise.lock @applications
+/package.json @applications
 /pnpm-workspace.yaml @applications
+/.npmrc @applications
+/renovate.json @applications
 /osv-scanner.toml @applications
 /.gitleaks.toml @applications
+/.dockerignore @applications
 /apps/node/Dockerfile @applications
 /apps/worker/wrangler.example.toml @applications
 /instance.config.ts @applications
 
+[Gate configuration]
+/vitest.config.ts @applications
+/eslint.config.js @applications
+/.dependency-cruiser.mjs @applications
+/knip.config.ts @applications
+/lefthook.yml @applications
+/commitlint.config.js @applications
+/.prettierignore @applications
+/tsconfig.base.json @applications
+/tests/e2e/playwright.config.ts @applications
+
 [Security-relevant code (08)]
+/packages/server/src/app.ts @applications
+/packages/server/src/log.ts @applications
 /packages/server/src/config/ @applications
 /packages/server/src/http/ @applications
-/apps/node/src/env.ts @applications
+/packages/server/src/games/ @applications
+/apps/node/src/ @applications
+/apps/worker/src/ @applications
 /packages/testkit/src/ @applications

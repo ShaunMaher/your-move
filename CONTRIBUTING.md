@@ -34,6 +34,14 @@ End-to-end tests need Playwright's browsers once: `pnpm --filter @your-move/e2e 
 install --with-deps chromium webkit` (WebKit needs system libraries; CI runs it in the Playwright
 image).
 
+## Owned paths
+
+[`CODEOWNERS`](CODEOWNERS) lists the paths whose changes can weaken a gate or the security model:
+the specification, the pipeline, the toolchain pins, every gate's configuration and the
+security-relevant code. Our GitLab is Community Edition, which doesn't enforce Code Owner
+approval, so **ownership is enforced by the review process, not by GitLab**: a merge request that
+touches any of those paths needs the owner's explicit review, and says so in its description.
+
 ## Before you push
 
 CI is the gate, but the same checks run locally:

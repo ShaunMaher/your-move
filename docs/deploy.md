@@ -7,13 +7,21 @@ This page grows with the milestones; today it covers what M0 delivers. The speci
 
 Every variable is listed, with its rules, in [`.env.example`](../.env.example) and
 [09 §1](spec/09-operations.md). The server refuses to start on invalid configuration, naming each
-variable and rule but never a secret's value. On Docker, give secrets as files:
-`NAME_FILE=/run/secrets/name` (Docker secrets) wins over `NAME`, so secrets don't show up in
-`docker inspect`.
+variable and rule but never a secret's value.
+
+**On Docker, give secrets as files:** `NAME_FILE=/run/secrets/name` (Docker secrets) wins over
+`NAME`, so secrets don't show up in `docker inspect`. The server also removes secrets from
+`process.env` after reading them, before any game code loads. That guards against accidental
+leaks (a library logging its environment, say), **not** against code that goes looking for
+secrets: the process's original environment stays readable from `/proc/self/environ`. Secrets
+given as files never enter the environment at all, which is why `*_FILE` is the recommended way.
 
 Generate `APP_SECRET` with `openssl rand -base64 32`. **Rotating `APP_SECRET` is unsupported**
 until the re-keying job described in 09 §1.1 exists: changing it silently empties the email
 suppression list.
+
+If you remove an installed game, also remove its `GAMES_<TYPE>_*` variables: a variable for a
+game type that isn't installed refuses to start the server (09 §1.3).
 
 ## Docker
 
@@ -21,16 +29,19 @@ Images are built by CI for `linux/amd64` and `linux/arm64` and pushed to this pr
 registry from `main` and `v*` tags only. **Deploy by digest**, never by tag:
 
 ```yaml
-image: registry.example.org/group/your-move/server@sha256:<digest from the release notes>
+image: registry.example.org/group/your-move/server@sha256:<digest from the pipeline>
 ```
 
-Tags (`<commit>`, `v*`) are for humans; images aren't signed yet (08 §6), so the digest recorded
-in the release notes is what ties a deployment to the pipeline that built it.
+Tags (`<commit>`, `v*`) are for humans; images aren't signed yet (08 §6), so the digest is what
+ties a deployment to the pipeline that built it. Each image's labels name the commit
+(`org.opencontainers.image.revision`) and the pipeline (`com.gitlab.ci.pipeline.id`,
+`com.gitlab.ci.pipeline.url`), and a CycloneDX SBOM of each image is kept with the pipeline's
+artifacts. Release notes recording digests arrive in M1.
 
 The container runs as an unprivileged user, serves on port 8080, keeps its data in `/data`, and
 works with a read-only root filesystem (`read_only: true` in compose, or `docker run --read-only`).
-It starts with `node --disallow-code-generation-from-strings`. Its health check calls
-`/api/health`.
+It starts with `node --disallow-code-generation-from-strings` and refuses to start if code
+generation from strings turns out to be allowed. Its health check calls `/api/health`.
 
 To build and try it locally:
 
@@ -54,21 +65,27 @@ Copy [`apps/worker/wrangler.example.toml`](../apps/worker/wrangler.example.toml)
 generated from the same security-header definition the Node server uses; set `PUBLIC_URL` (and
 `TURNSTILE_ENABLED=true` if you use Turnstile) when building so the static headers match.
 
-The CI deploy job (manual, `production` environment) runs `pnpm games:check-db` against D1 from
-the build artifact, then applies migrations and deploys, without installing dependencies or
-running game code. It is completed when D1 arrives (M2–M3).
+There is no CI deploy job for Workers yet. It arrives with the first Workers deployment
+(09 §6, 10), built to deploy the build artifact (`dist/worker`, `--no-bundle`) with a
+lockfile-pinned wrangler and configuration generated from CI variables, without installing
+anything or running game code while the deploy token is present.
 
-## CI secrets
+## CI settings and secrets
 
 Our GitLab is Community Edition (no protected environments), so each secret is a variable that is
-both **protected** (only `main` and protected `v*` tags receive it) and **scoped to one
+**masked, protected** (only `main` and protected `v*` tags receive it) **and scoped to one
 environment**:
 
-| Variable                                      | Environment  | Used by                                                                                            |
-| --------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------- |
-| `RENOVATE_TOKEN`                              | `renovate`   | the scheduled Renovate job (schedule variable `SCHEDULE_TASK=renovate`)                            |
-| `RELEASE_DEPLOY_USER`, `RELEASE_DEPLOY_TOKEN` | `release`    | publishing packages and images (a deploy token with `write_package_registry` and `write_registry`) |
-| `CLOUDFLARE_API_TOKEN`, `D1_DATABASE`         | `production` | the manual Cloudflare deploy                                                                       |
+| Variable                                      | Environment  | Used by                                                                                                    |
+| --------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------- |
+| `RENOVATE_TOKEN`                              | `renovate`   | the scheduled Renovate job (schedule variable `SCHEDULE_TASK=renovate`)                                    |
+| `GITHUB_COM_TOKEN`                            | `renovate`   | Renovate's lookups of GitHub releases (mise tools, mise itself): a read-only token for public repositories |
+| `RELEASE_DEPLOY_USER`, `RELEASE_DEPLOY_TOKEN` | `release`    | publishing packages and images (a deploy token with `write_package_registry` and `write_registry`)         |
+| `CLOUDFLARE_API_TOKEN`, `D1_DATABASE`         | `production` | the Workers deploy job, once it exists                                                                     |
 
 The nightly OSV scan is a schedule with `SCHEDULE_TASK=nightly`. Every merge request pipeline runs
-a job that prints whether each of these is set and fails if any is.
+one job per environment that declares that environment, prints whether each of these variables is
+set, and fails if any is.
+
+The project setting **"Use separate caches for protected branches" must stay on**: it keeps caches
+written by merge-request pipelines out of the pipelines that hold the release credentials.
