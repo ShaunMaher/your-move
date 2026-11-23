@@ -3,11 +3,14 @@
 ## 1. Configuration
 
 All configuration comes from environment variables (Node) or vars/secrets (Cloudflare), parsed and
-validated by one Zod schema at startup. Invalid config → refuse to start with a clear message.
-`.env.example` documents every variable. On Node every secret may instead be given as a file:
-`<NAME>_FILE=/run/secrets/<name>` (Docker secrets) is read at startup and wins over `<NAME>`, so
-secrets don't show up in `docker inspect` or the process environment; setting both is allowed only
-if they're equal.
+validated by one Zod schema at startup. Invalid config → refuse to start with a clear message that
+names the variable and the rule but **never includes a secret's value** (secret fields are redacted
+in every startup and config error, including Zod's received-value text and the `_FILE` equality
+check). `.env.example` documents every variable. On Node every secret may instead be given as a
+file: `<NAME>_FILE=/run/secrets/<name>` (Docker secrets) is read at startup and wins over `<NAME>`,
+so secrets don't show up in `docker inspect` or the process environment; exactly one trailing
+newline (`\n` or `\r\n`) is trimmed from the file's contents; setting both is allowed only if they're
+equal.
 
 | Variable | Required | Example / default | Notes |
 |---|---|---|---|
@@ -28,7 +31,7 @@ if they're equal.
 | `MIN_AGE` | no | `13` | Integer ≥ 13 (refuse to start otherwise). Minimum age confirmed at onboarding (06 §5); set 16 where GDPR Art. 8 requires it. Raising it makes users who confirmed a lower value confirm again |
 | `TRUST_PROXY` | no | `false` | Node only; where the client IP comes from: `false` (socket address), `xff` (`X-Forwarded-For`, right-to-left by `TRUST_PROXY_HOPS`) or `cloudflare` (`CF-Connecting-IP`, for a Cloudflare Tunnel) (08 §4.1) |
 | `TRUST_PROXY_HOPS` | no | `1` | Node only, with `TRUST_PROXY=xff`; number of trusted proxies in front of the app |
-| `TRUST_PROXY_PEERS` | no | private ranges + loopback | Node only, with `xff`/`cloudflare`: CIDR list the socket peer must be in, else `400` (08 §4.1) |
+| `TRUST_PROXY_PEERS` | no | private ranges + loopback (fallback; the compose files set the pinned `front` subnet + loopback, §4) | Node only, with `xff`/`cloudflare`: CIDR list the socket peer must be in, else `400` (08 §4.1) |
 | `PORT` | no | `8080` | Node only |
 | `DATABASE_PATH` | Node | `/data/app.sqlite` | |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | no | | Enables Turnstile on OTP request (manually or via the circuit breaker). On Cloudflare the web build also needs `TURNSTILE_ENABLED=true` for the static CSP (03 §9). |
@@ -88,13 +91,27 @@ that work on both runtimes, plus SMTP for Node only.
   - Move to a dedicated transactional provider before the instance grows beyond friends and family.
 - **Operator setup for `gmail`** (done once by the owner, in their Google accounts; documented in
   `docs/deploy.md`):
-  1. Create a dedicated Workspace user for sending (e.g. `no-reply@…`), used for nothing else;
-     disable IMAP and POP for it; set up a regular purge of its *Sent* folder (or a retention rule
-     if the edition supports one).
+  1. Create a dedicated Workspace user for sending (e.g. `no-reply@…`), used for nothing else and
+     never used interactively after setup; turn on 2-Step Verification for it; disable IMAP and POP
+     for it; set up a regular purge of its *Sent* folder (or a retention rule if the edition
+     supports one). Purged messages stay in Trash for 30 days, and any Vault hold keeps them longer;
+     the privacy page's retention statement must allow for both (08 §5).
   2. In a Google Cloud project, enable the Gmail API and create an OAuth client with user type
      **Internal** and the single scope `gmail.send`.
-  3. Sign in as the sender user once (a small `pnpm gmail:authorize` helper runs the OAuth flow
-     locally) to obtain the refresh token.
+  3. Sign in as the sender user once with the `pnpm gmail:authorize` helper to obtain the refresh
+     token. The helper:
+     - runs the OAuth authorization-code flow with **PKCE** and a random `state`, on a loopback
+       redirect bound to `127.0.0.1` (a random port), with `login_hint=GMAIL_SENDER`;
+     - requests exactly `openid email https://www.googleapis.com/auth/gmail.send`, never
+       `include_granted_scopes`;
+     - refuses the result unless the `id_token`'s verified `email` equals `GMAIL_SENDER` and the
+       granted scope set is exactly the requested one (so authorising while signed in as the
+       wrong account, e.g. an admin, fails instead of sending from their mailbox);
+     - reads the client id and secret from the environment or a file, never from argv;
+     - writes the refresh token to a new file with mode `0600` (or prints it once to stdout).
+
+     At startup the server re-checks the token's granted scope and refuses to start if it is
+     anything other than `gmail.send` (plus `openid`/`email`).
   4. Store `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` and `GMAIL_SENDER` as
      Worker secrets or Docker secrets (`*_FILE`). To revoke, remove the app's access from the sender
      user's Google account and repeat step 3.
@@ -157,9 +174,15 @@ that work on both runtimes, plus SMTP for Node only.
 - **Networks**: the app's port is **never** published to the host. Two networks:
   - `front` (`internal: true`), shared only by the app and Caddy or `cloudflared`, so nothing else
     can reach the app's port (otherwise `X-Forwarded-For`/`CF-Connecting-IP` could be spoofed by
-    connecting directly; `TRUST_PROXY_PEERS` is the second line of defence, 08 §4.1);
-  - `egress`, a normal bridge network with no published ports, which the app needs for outbound
-    calls (Gmail API, Web Push) and `cloudflared` for its tunnel connection.
+    connecting directly; `TRUST_PROXY_PEERS` is the second line of defence, 08 §4.1). Its subnet is
+    **pinned with IPAM** in both compose files (e.g. `172.30.99.0/28`), and the compose files set
+    `TRUST_PROXY_PEERS` to exactly that subnet plus loopback (loopback keeps the container's own
+    health check working). The private-ranges default of `TRUST_PROXY_PEERS` is only a fallback for
+    deployments that don't set it, and startup logs a warning when the default is in use;
+  - `egress`, a normal bridge network the app needs for outbound calls (Gmail API, Web Push) and
+    `cloudflared` for its tunnel connection. The app publishes nothing on it. In the Caddy compose,
+    Caddy publishes 80/443 on `egress` and reaches the app over `front`; nothing publishes the
+    app's port.
 - Single instance only (see 03 §5.3).
 
 ## 5. Observability

@@ -66,8 +66,8 @@ Framework
   lock screen only says "You have a new game invitation", never who sent it (if I've turned email
   nudges on, the invitation email does name them). A past opponent adding me shows their name.
 - F5. Adding someone by email never tells me whether they already have an account: the app shows
-  the address back so I can check it, and the seat shows that address until they accept —
-  even if I remove it or they decline.
+  the address back so I can check it, and the seat shows that address while it's waiting. If I
+  remove it or it's declined, it shows just "Removed" or "Declined", the same for every seat.
 
 Words (games/words.md)
 - G1. As a player I start a new game by entering an opponent's email address and choosing a

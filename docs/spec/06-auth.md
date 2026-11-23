@@ -15,7 +15,8 @@ hard requirement, not a preference.
 [Enter email] --POST /otp/request--> server issues challenge, emails code
 [Enter code]  --POST /otp/verify-->  server verifies, creates user if new, creates session
    ├─ onboarding incomplete → [Display name + age confirmation] → PATCH /me (claims invites) → [Game list]
-   │                          └─ "I'm under MIN_AGE" → POST /me/under-age (account deleted)
+   │                          └─ "I'm under MIN_AGE" → POST /me/under-age (new account: deleted;
+   │                                                   re-prompted account: this session signed out)
    └─ otherwise             → [Game list]
 ```
 
@@ -49,8 +50,9 @@ hard requirement, not a preference.
 Attempt counting, consumption and rate limiting must be race-free under parallel requests:
 
 - Before comparing a code: `UPDATE otp_challenges SET attempts = attempts + 1 WHERE id = ? AND
-  attempts < 5 AND consumed_at IS NULL AND expires_at > ? RETURNING code_hash`. Zero rows ⇒ treat as
-  invalid.
+  attempts < 5 AND consumed_at IS NULL AND expires_at > ? RETURNING code_hash, emailed`. Zero rows ⇒
+  treat as invalid. A challenge with `emailed = 0` (§3.2) still consumes the attempt and runs the
+  comparison, then always fails, so it does the same work as a real one and can never be satisfied.
 - On match: `UPDATE otp_challenges SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL`. Only
   the request that changes 1 row proceeds to create a session (invites are claimed later, at
   onboarding, §6.4).
@@ -65,8 +67,8 @@ Attempt counting, consumption and rate limiting must be race-free under parallel
 - `/otp/request` performs the same DB operations on every path (known/unknown email, limited/not)
   and always sends email via `waitUntil` after responding — never awaited in the request. In
   particular, when an unknown email is silently refused because its IP bucket is over the
-  new-accounts limit (08 §4), a challenge is still inserted (marked never-emailed, so it can never
-  be satisfied), so a following wrong `/otp/verify` does the same attempt-counting work for known and
+  new-accounts limit (08 §4), a challenge is still inserted (`emailed = 0`, so it can never be
+  satisfied, §3.1), so a following wrong `/otp/verify` does the same attempt-counting work for known and
   unknown addresses.
 - `/otp/verify` computes an HMAC against a dummy key/value when no live challenge exists.
 - M2 includes a loose statistical timing test for both endpoints.
@@ -131,13 +133,22 @@ Verify on a real device during M2.
   never deletes them and their games carry on for the other players. Nothing else is collected
   about age. Children play through a parent's account (Q20); the privacy page
   says so (08 §5), and user-facing copy never markets the service to children.
-- **"I'm under `MIN_AGE`"** is an explicit choice on the same screen. It shows "Ask a parent or carer
-  to sign in and play with you on their account." and immediately deletes the account and its
-  sessions, with no step-up code (`POST /api/me/under-age`, 04 §Account deletion; logged as
-  `under_age_exit` without the email): a new account's short deletion, or, for a re-prompted user,
-  the full one. It also suppresses invite emails to that address and makes pending email seats for
-  it `inert`, so a child stops receiving invitations. An account that never completes onboarding
-  (`onboarded_at` NULL) is deleted by the sweep 7 days after creation.
+- **"I'm under `MIN_AGE`"** is an explicit choice on the same screen (`POST /api/me/under-age`,
+  logged as `under_age_exit` without the email). It shows "Ask a parent or carer to sign in and
+  play with you on their account." What happens next depends on the account:
+  - **New account** (`onboarded_at` NULL): the account and its sessions are deleted at once, with
+    no step-up code (04 §Account deletion, the short deletion). Invite emails to that address are
+    suppressed and pending email seats for it become `inert`, so a child stops receiving
+    invitations.
+  - **Re-prompted account** (onboarded, re-prompted after a `MIN_AGE` rise): only **this session**
+    is signed out; nothing is deleted. Children may be holding a parent's phone (Q20), so a child
+    answering truthfully must never be able to delete the parent's account, and a stolen session
+    must not skip the step-up for deletion (T5). The account holder can still delete the account
+    through the normal step-up path (§7). The re-prompt copy addresses the account holder:
+    "Please confirm you, the account holder, are `MIN_AGE` or older."
+
+  An account that never completes onboarding (`onboarded_at` NULL) is deleted by the sweep 7 days
+  after creation.
 - **Display name**: prompted on the same screen. The screen warns: "Other players will see this.
   Don't use your full name." After onboarding it can be changed at most **3 times per 30 days**;
   each change is logged (`display_name_changed`), so a name can't be used as a rolling message
@@ -178,14 +189,19 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
      same normalised address twice, or the same `userId` twice) are `INVALID_INVITEES`, so the
      response never confirms whose address it is.
 
-   `userId` invitees are checked for blocks explicitly (in either direction, against the creator
-   and every other invitee and member): a block fails the request as `INVALID_INVITEES`, exactly
-   like a non-past-opponent, rather than relying on the past-opponent pair having been deleted.
+   `userId` invitees are checked for blocks explicitly rather than relying on the past-opponent
+   pair having been deleted. Only a block in either direction **between the creator and a `userId`
+   invitee** fails the request, as `INVALID_INVITEES`, indistinguishable from "not a past
+   opponent". A block between invitees (however each was added) or between an invitee and an
+   existing member never changes the response: the later invitee in the request gets an `inert`
+   seat, exactly as on the email path, so the response reveals neither whether a typed address has
+   an account nor whether two other people have blocked each other.
 
    To limit typo invites, the players step shows each typed address back for confirmation before
    Create ("Check the address: …"). A row that has never been `joined` never shows a name or user
-   id to anyone, in any state: the creator sees the address they typed; other members see only the
-   state (05 §Common types). Response time doesn't depend on the case (same reads and writes, emails
+   id to anyone, in any state: while it's `invited` the creator sees the address they typed (or the
+   name of a past opponent they picked); after a decline or removal the creator, like everyone
+   else, sees only the state (05 §Common types). Response time doesn't depend on the case (same reads and writes, emails
    sent via `waitUntil`, as in §3.2). Per-pair limits (§6.7) count an email invitee by its
    `emailId`, never by the user it resolves to.
 2. **Who can add me to games** (`users.settings.whoCanAddMe`, set in Settings):
@@ -213,13 +229,16 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    timeout + a link to `PUBLIC_URL` + short "how to add to your home screen" + one-click
    unsubscribe ("Don't send me invites again", 05 §Email links). It isn't sent if the address is
    suppressed or over an invite cap (§6.6); the seat is created either way.
-4. When a user **completes onboarding** (not merely verifies a code), every `invited` email seat with
-   matching `invite_email` in a `lobby` game is claimed: `user_id` set, `invite_email` kept for the
+4. When a user **completes onboarding** (not merely verifies a code), every `invited`, non-`inert`
+   email seat with matching `invite_email` in a `lobby` game where they hold no other row is
+   claimed (guard, version check and retries in 02 §4): `user_id` set, `invite_email` kept for the
    creator's view until accepted. The seat becomes an invitation for the new user ("Sam invited you
    to play — Accept / Decline"), with the same checks as a new invitation:
    - the full §6.1 block rule against the creator **and every other row** in the game (a block in
      either direction → `inert`);
-   - the inbound cap (§6.7; over it → `hidden`).
+   - the inbound cap (§6.7; over it → `hidden`), counted atomically with the claim.
+
+   An `inert` seat is never claimed and never becomes deliverable.
 
    A claim is a row-level update, not a game transition (02 §4): it doesn't bump the game version,
    sends no realtime event to other members and changes nothing the creator sees. The sweep (03 §8)
@@ -281,8 +300,9 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    on the finished screen the creator is asked "Add <name> to your players?" and only a yes records
    creator ↔ that player, never the other players. So a forwarded link can't turn a stranger into
    anyone's past opponent without the creator's say-so. A pair with a block in either direction is
-   never recorded — not at the finish, not through that question (`canAddPlayers` leaves blocked
-   players out; `add-player` answers `404`) — and blocking someone deletes the relationship both
+   never recorded — not at the finish, not through that question (`canAddPlayers` still lists a
+   blocked link joiner, so the prompt reveals nothing, but `add-player` is then a silent `204`
+   no-op that writes no pair) — and blocking someone deletes the relationship both
    ways. A test asserts that no `past_opponents` row ever exists for a blocked pair (04 invariant 6).
 10. **Blocks** apply between every pair of users in a game: they're checked when seats are added
     (§6.1), on accept, on join, and again at start (02 §4). Blocking someone you share a lobby with

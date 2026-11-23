@@ -118,16 +118,20 @@ pass in CI.
   indistinguishable timing — and stays identical after the creator **removes** the seat, after the
   per-pair caps are hit with the same address, and when an invitation is claimed (no version
   bump or realtime event for other members); rows never joined show no name or id in any state;
-  blocked pairs: never written as past opponents (04 invariant 6), `add-player` `404`,
-  `userId` invitees with a block → `INVALID_INVITEES`, claims apply the full block rule and the
-  inbound cap; the sweep claims seats for invitees who onboarded during creation;
+  blocked pairs: never written as past opponents (04 invariant 6),
+  only a creator↔`userId` block → `INVALID_INVITEES`, while a block between invitees (picked or
+  typed) or with a member gives an `inert` seat and an identical response (Q3 parity), after a
+  remove or decline every row shows only its state to the creator; claims apply the full block rule
+  and the inbound cap atomically, never claim an `inert` row or a second row for the same user, and
+  retry on a version change; the sweep claims seats for invitees who onboarded during creation;
+  `add-player` with a block is a silent `204` no-op;
   lobby endings and lobby events other than auto-join and invitation send no push or email, the
   invitation push names nobody (T18); unsubscribe GET/POST e2e on both targets with the service worker active; onboarding:
   `403 ONBOARDING_REQUIRED` on game list, create, accept, join lookup and join until done, invites
   claimed only at onboarding completion, "I'm under `MIN_AGE`" deletes the account, the sweep
   deletes un-onboarded accounts after 7 days (never re-prompted ones), raising `MIN_AGE`
-  re-prompts and gates the same endpoints, "I'm under" for a re-prompted user runs the full
-  deletion and suppresses invite emails; display-name rename limit; blocking a lobby co-member
+  re-prompts and gates the same endpoints, "I'm under" for a re-prompted user only signs out that
+  session and deletes nothing (deletion still needs the step-up code); display-name rename limit; blocking a lobby co-member
   removes/leaves the seat; tunnel deployment: `TRUST_PROXY=cloudflare` with `TRUST_PROXY_PEERS`
   (foreign peer → `400`), the container health check passing without `CF-Connecting-IP`, no
   published ports; MIME builder tests with hostile display names (T14); `*_FILE` secrets.

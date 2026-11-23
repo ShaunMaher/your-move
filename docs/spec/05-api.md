@@ -30,7 +30,7 @@ rejected (`.strict()`).
 | POST | `/api/auth/logout-all` | `{}` | `204`, deletes all of the user's sessions |
 | GET | `/api/me` | | `200 { id, email, displayName, settings, ageAttested, needsOnboarding }` or `401`. `needsOnboarding` is true until onboarding is complete, and again for a re-prompted user after a `MIN_AGE` rise (06 §5) |
 | PATCH | `/api/me` | `{ displayName?, settings?, ageAttested?: true }` | `200` user. `settings` accepts only known keys (`emailNudges`, `whoCanAddMe`, theme). The request that completes onboarding sets `onboarded_at` and claims email-invite seats (06 §6.4). Display-name changes after onboarding: at most 3 per 30 days (`429 RATE_LIMITED`), each logged (06 §5) |
-| POST | `/api/me/under-age` | `{}` | Only while `needsOnboarding` is true — a new account, or one re-prompted after a `MIN_AGE` rise: deletes the account and its sessions at once, with no step-up code (06 §5, 04 §Account deletion), and suppresses invite emails to the address. `204`, clears cookie; `409 WRONG_STATUS` when `needsOnboarding` is false |
+| POST | `/api/me/under-age` | `{}` | Only while `needsOnboarding` is true. A new account (`onboarded_at` NULL): deletes the account and its sessions at once, with no step-up code (06 §5, 04 §Account deletion), suppresses invite emails to the address and makes its email seats `inert`. A re-prompted account (onboarded, after a `MIN_AGE` rise): signs out this session only and deletes nothing (deletion needs the step-up flow below). `204`, clears cookie; `409 WRONG_STATUS` when `needsOnboarding` is false |
 | POST | `/api/me/delete/otp` | `{}` | `202` — emails a `delete_account`-purpose code (06 §7) |
 | DELETE | `/api/me` | `{ code }` | `204` if the code is a valid `delete_account` code; else `400 INVALID_CODE` |
 | GET | `/api/me/sessions` | | list of `{ id, createdAt, lastSeenAt, userAgent, current }` |
@@ -55,14 +55,14 @@ GameEnvelope = {
                 downloadUrl?: string /* public distribution only: versioned, hashed (words §9.4) */ }],  // never blob keys or hashes
   players: [{ playerId?: string /* game_players.id; creator only, lobby only (for remove-seat) */,
               seat: number | null /* null in lobby */, userId: string | null, displayName: string | null,
-              invitedAs?: string /* creator only, while joinedAt is null: the address they typed, or the picked past opponent's name */,
+              invitedAs?: string /* creator only, while state is "invited": the address they typed, or the picked past opponent's name */,
               state: "invited" | "joined" | "declined" | "left" | "removed" | "playing" | "out",
               outReason?: "eliminated" | "resigned" | "timed_out" | "declined", rank?: number, score?: number,
               deadline?: number /* when this seat times out, if in toAct */, isYou: boolean, isCreator: boolean }],
   yourSeat: number | null, toAct: number[], yourTurn: boolean,
   yourInvitation: "normal" | "hidden" | null, // you hold an `invited` seat (accept/decline); hidden ones never badge
   joinLink?: { active: boolean, expiresAt: number | null },  // creator only, lobby only; the URL is shown only on create/rotate
-  canAddPlayers?: { userId, displayName }[], // creator only, finished games: link joiners who acted, aren't yet past opponents, and have no block with the creator either way (02 §4)
+  canAddPlayers?: { userId, displayName }[], // creator only, finished games: link joiners who acted and aren't yet past opponents — blocked ones are still listed so the prompt reveals nothing; add-player is a no-op for them (02 §4)
   createdAt, lastActionAt
 }
 GameSummary = { id, gameType, status, endReason, yourTurn, yourInvitation /* as in the envelope */, players (as in the envelope),
@@ -75,9 +75,11 @@ GameSummary = { id, gameType, status, endReason, yourTurn, yourInvitation /* as 
 **Who sees what in `players[]`.** In the lobby: rows in `invited`, `joined`, `declined`, `left` and
 `removed`. **Any row that has never been `joined` (`joined_at` NULL) has `displayName: null` and
 `userId: null` for everyone, in every state** — invited, declined or removed alike — so neither a
-removal nor a decline reveals whether a typed address has an account (Q3). The creator sees
-`invitedAs` (the address they typed, or the picked past opponent's name) and the state; other
-members see only the state ("Invited", "Declined", "Removed"). `normal`, `hidden` and `inert`
+removal nor a decline reveals whether a typed address has an account (Q3). While the row is
+`invited`, the creator also sees `invitedAs`: the address they typed, or the name of a past
+opponent they picked by `userId` (which they already know). Once the row is `declined` or
+`removed`, `invitedAs` is absent for every kind of row and the creator sees only the state, like
+other members ("Invited", "Declined", "Removed"); the typed address has been cleared (06 §6.5). `normal`, `hidden` and `inert`
 invitations look identical (Q3, 04). Link joiners (and the join lookup) see only `joined` rows.
 After start: only seated players. A player's envelope never contains an email other than the
 creator's own typed `invitedAs` values.
@@ -121,7 +123,7 @@ invitee by its `emailId` (the HMAC of the typed address), never by the user it r
 | `seats` outside `players(options)` | `400 INVALID_SEAT_COUNT` |
 | `turnTimeoutDays` not an integer 1–30 | `400 INVALID_TIMEOUT` |
 | `validateStart(options, seats)` fails | `409 INVALID_SEATS { detail: { code, detail? } }` — nothing created |
-| More invitees than `seats - 1`, **literal** duplicates (the same normalised address twice, or the same `userId` twice), an invalid address, or a `userId` that isn't a past opponent or has a block in either direction with the creator or another invitee | `400 INVALID_INVITEES` |
+| More invitees than `seats - 1`, **literal** duplicates (the same normalised address twice, or the same `userId` twice), an invalid address, or a `userId` that isn't a past opponent or has a block in either direction with the creator (a block between invitees, or with a member, silently gives the later invitee an `inert` seat, 06 §6.1) | `400 INVALID_INVITEES` |
 | The creator's own email or id | `400 CANNOT_PLAY_SELF` |
 | Creator has too many `lobby`/`active` games they created (per pair > 5, total > 50) — counts only games the **creator** created; a pair is (creator, `userId`) for picked invitees and (creator, `emailId`) for every typed address, whatever it resolves to | `409 TOO_MANY_GAMES` |
 | More email invitees than allowed (per user, 08 §4; counted for every email, whatever it turns out to be) | `429 RATE_LIMITED` — nothing created |
@@ -190,7 +192,7 @@ These don't take `expectedVersion`.
 | POST | `/api/games/:id/join-link` | Creator, in `lobby`: create or rotate the join link → `{ url, expiresAt }` (the only time the URL is returned). Changes `join_links` only, not the game row. Errors: `403 NOT_ALLOWED`, `409 WRONG_STATUS`, `429` |
 | DELETE | `/api/games/:id/join-link` | Creator: revoke (body-less). Never ends the lobby (02 §4). `204`; `403 NOT_ALLOWED` |
 | POST | `/api/games/:id/seen` | `{ version }` — marks activity as read (not a transition). `204` |
-| POST | `/api/games/:id/add-player` | Creator of a `finished` game: `{ userId }` → records creator ↔ that link joiner as past opponents, if both acted and neither has blocked the other (02 §4, 06 §6.9). `204`; `404` if not one of `canAddPlayers` or a block exists in either direction |
+| POST | `/api/games/:id/add-player` | Creator of a `finished` game: `{ userId }` → records creator ↔ that link joiner as past opponents, if both acted and neither has blocked the other (02 §4, 06 §6.9). `204`; when a block exists in either direction it is a silent `204` no-op (no pair is written), so the creator can't learn about the block; `404` if not one of `canAddPlayers` |
 
 ### Join links
 The token travels in the URL **fragment** (`PUBLIC_URL/join#<token>`), so it never reaches server

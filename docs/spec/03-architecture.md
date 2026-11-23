@@ -127,7 +127,8 @@ per-game DO (with D1 as an index) is a contained change behind the `GameReposito
 Every `games` row has an integer `version` and a `write_token`. **Every** state change to a game —
 action, join, accept, remove, start, resign, decline, leave, cancel, expiry, timeout (02 §4) — is a
 *transition* applied like this. (Invite claims update only the claimed `game_players` row, guarded by
-its state, and deliberately don't bump `version`, 02 §4.)
+its state, `delivery <> 'inert'`, the claimant holding no other row in the game, and the game
+`version` being unchanged since it was loaded — checked but deliberately not bumped, 02 §4.)
 
 1. Load game state + version.
 2. Compute the new state with the game module (pure), with recorded randomness and pre-loaded
@@ -229,8 +230,9 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
 - Expire OTPs, sessions, invites, join links and rate-limit buckets.
 - Delete accounts that haven't completed onboarding 7 days after creation — only rows with
   `onboarded_at IS NULL`, never users re-prompted after a `MIN_AGE` rise (06 §5).
-- Claim any `invited` email seat in a `lobby` game whose `invite_email` matches an onboarded user
-  (catches games created during onboarding and failed claims; 06 §6.4).
+- Claim any `invited`, non-`inert` email seat in a `lobby` game whose `invite_email` matches an
+  onboarded user who holds no other row in that game, with the same guard as an onboarding claim
+  (catches games created during onboarding and failed claims; 02 §4, 06 §6.4).
 - Apply per-seat turn timeouts via module `onTimeout`: overdue seats one transition at a time, in
   seat order, reloading and re-checking `toAct` and the deadline before each (02 §4).
 - Send timeout reminders (50 % and 24 h before, 02 §4; tracked in `timeout_reminders_sent`, which

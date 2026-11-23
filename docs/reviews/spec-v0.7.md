@@ -71,3 +71,21 @@ v0.8. One line per finding: fixed (where) or rebutted (why).
 - Controls not carried through (T15, T14, 08 §5 retention, T4 residuals, T20 invariant) fixed: see S3-4, S3-11, S3-5, S3-7 and S3-2.
 
 No findings were rebutted.
+
+## Focused verification of v0.8 (applied in v0.8.1)
+
+- R4-1 fixed (merged with S4-3): claim guard and sweep add `delivery <> 'inert'` and "no other row in this game for this user"; an inert row's delivery is never recomputed (02 §4 invite claims, 03 §5.2, 03 §8 sweep, 06 §6.4; M4 tests in 10).
+- R4-2 fixed: after a remove or decline every row shows only its state ("Removed"/"Declined") to the creator; `invitedAs` only while `invited`; `invite_email` cleared as before (01 F5, 02 §4, 05 §Common types, 06 §6.1, 07 `/g/:id`).
+- R4-3 fixed: the creator alone sees the name of a past opponent they picked by `userId` while invited; 02 §4 wording now "to anyone but the creator" (02 §4, 05 `invitedAs`, 07).
+- R4-4 fixed (merged with S4-2): only a creator↔`userId` block fails as `INVALID_INVITEES` (indistinguishable from "not a past opponent"); blocks between invitees or with members give the later invitee a silent `inert` seat (06 §6.1, 05 create table, 08 T20; Q3 parity test in 10 M4).
+- R4-5 fixed: `otp_challenges.emailed` column; an `emailed = 0` challenge consumes the attempt, runs the comparison and always fails (04 `otp_challenges`, 06 §3.1, §3.2).
+- R4-6 fixed: `ResourceMeta.downloadUrl?`, set by the framework for public distribution only (02 §2 types).
+- R4-7 fixed: Caddy publishes 80/443 on `egress` and reaches the app over `front`; the app publishes nothing (09 §4 networks).
+- S4-1 fixed: for a re-prompted (onboarded) account, "I'm under `MIN_AGE`" signs out only that session and deletes nothing; deletion goes through the step-up path; no-step-up deletion only when `onboarded_at` IS NULL; re-prompt copy addresses the account holder (06 §5, 05 `/api/me/under-age`, 04 §Account deletion, 07 `/welcome`, 10 M4).
+- S4-2 fixed: see R4-4.
+- S4-3 fixed: see R4-1.
+- S4-4 fixed: claims are conditional on `games.version` equal to the loaded version (checked, not bumped), retried up to 3 times; the inbound-cap count is atomic with the claim (02 §4, 03 §5.2, 06 §6.4; 10 M4).
+- S4-5 fixed: compose files pin the `front` subnet via IPAM and set `TRUST_PROXY_PEERS` to it plus loopback; the private-ranges default is a logged fallback (09 §1 table, 09 §4 networks, 08 §4.1).
+- S4-6 fixed: `pnpm gmail:authorize` uses PKCE + `state`, a 127.0.0.1 loopback redirect, `login_hint=GMAIL_SENDER`, exact scopes `openid email gmail.send` without `include_granted_scopes`, verifies the id_token email and granted scopes, reads the secret from env/file, writes a 0600 file; startup re-checks the scope; T15 qualified for a leaked Internal-client secret; sender user has 2-Step Verification, is never used interactively, and the privacy retention allows for Trash (30 days) and Vault holds (09 §2, 08 T15, 08 §5).
+- S4-7 fixed: secret fields redacted in every startup/config error; one trailing newline trimmed from `*_FILE` contents (09 §1).
+- S4-8 fixed: `canAddPlayers` keeps listing blocked link joiners; `add-player` is a silent `204` no-op when a block exists (05 envelope and add-player, 06 §6.9, 08 T20, 10 M4).

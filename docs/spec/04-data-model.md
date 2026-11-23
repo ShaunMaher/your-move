@@ -40,6 +40,7 @@ Conventions:
 | attempts | INTEGER NOT NULL DEFAULT 0 | |
 | created_at, expires_at | INTEGER | expiry = created + 10 min |
 | consumed_at | INTEGER NULL | |
+| emailed | INTEGER NOT NULL DEFAULT 1 | 0 for a challenge inserted only for timing parity on the silent new-account path (06 §3.2); such a challenge always fails verify |
 
 At most 3 *live* challenges per (email, purpose); issuing a 4th burns the oldest (06 §3).
 
@@ -264,10 +265,10 @@ deleted first, so the account is unusable from the moment deletion starts.
 Accounts that never finished onboarding (`onboarded_at` NULL) hold no game rows (invitations are
 claimed only at onboarding, 06 §6.4), so their deletion — immediately when the user says they're
 under `MIN_AGE`, or by the sweep 7 days after creation (06 §5) — is steps 1, 3, 4 and 5, with no
-step-up code. A user **re-prompted** after a `MIN_AGE` rise who says they're under it gets the full
-deletion (steps 1–5), also without a step-up code. Either way the under-age exit adds the address
-to `email_suppressions` (reason `unsubscribed`) and makes every `invited` email seat for it `inert`,
-so no more invite emails arrive.
+step-up code. The under-age exit also adds the address to `email_suppressions` (reason
+`unsubscribed`) and makes every `invited` email seat for it `inert`, so no more invite emails
+arrive. A user **re-prompted** after a `MIN_AGE` rise who says they're under it is only signed out
+of that session; their account is deleted only through the normal step-up path (06 §5, §7).
 
 If a step fails, the deletion is retried from the start by the next sweep (a `deletion_requested_at`
 marker on the user row); every step is safe to repeat.

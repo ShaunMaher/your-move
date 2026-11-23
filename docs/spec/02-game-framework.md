@@ -51,6 +51,7 @@ type ResourceMeta = {                                      // metadata only, nev
   kind: "dictionary"; id: string; version: number; name: string;
   language: string; alphabet: string[];                    // what compatibility checks need (words §9.3)
   distribution: "public" | "serverOnly"; source: "builtin" | "operator" | "upload";
+  downloadUrl?: string;                                    // set by the framework for public distribution only (words §9.4)
 };
 type ResourceCatalog = ResourceMeta[];
 type Resources = {                                         // loaded for one game, synchronous (§2.1 rule 6)
@@ -262,9 +263,11 @@ is stored. The turn timeout and seat order are shown on every invitation and in 
   through the link is treated as accepting it.
 
 A row that has never been `joined` (`joined_at` NULL) never shows a display name or user id to
-anyone, in any state (`invited`, `declined`, `removed`, `dropped`, 05 §Common types): the creator
-sees the address they typed (or "Invited"/"Declined"/"Removed" for a picked past opponent), other
-members see only the state (06 §6.1).
+anyone but the creator, and to the creator only for a past opponent they picked by `userId`, whose
+name they already know (05 §Common types). While such a row is `invited`, the creator sees the
+address they typed or the picked past opponent's name; once it is `declined`, `removed` or `dropped`
+the creator sees only the state ("Declined", "Removed"), for every kind of row alike, because the
+typed address has been cleared (06 §6.5). Other members only ever see the state (06 §6.1).
 
 *Past opponents* are pairs of users who both took at least one action (`acted_once`) in a game that
 reached `finished`. A player who joined through a link is never recorded automatically: at the end
@@ -357,11 +360,15 @@ expiry) goes through the `write_token` optimistic-concurrency write (03 §5.2) a
 on a version conflict.
 
 **Invite claims are not game transitions.** Claiming an email-invite seat (06 §6.4) is a
-row-level update of that one `game_players` row, guarded by `state = 'invited' AND user_id IS NULL`
-and the game being in `lobby`. It doesn't bump the game `version`, sends no realtime event to
-other members, and changes nothing the creator or other members can see (the row still shows the
-typed address or "Invited"); only the claimant's own game list updates. A concurrent start, remove
-or cancel simply makes the guard fail.
+row-level update of that one `game_players` row, guarded by `state = 'invited' AND user_id IS NULL
+AND delivery <> 'inert'`, by **no other row in this game holding the claimant's user id**, by the
+game being in `lobby`, and by `games.version` still equalling the version loaded for the block and
+cap checks (checked, **not** bumped; on a mismatch the claim reloads and retries, up to 3 times). An
+`inert` row is never claimed and its `delivery` is never recomputed. The inbound-cap count (06 §6.7)
+is taken atomically in the same write. A claim doesn't bump the game `version`, sends no realtime
+event to other members, and changes nothing the creator or other members can see (the row still
+shows the typed address or "Invited"); only the claimant's own game list updates. A concurrent
+start, remove, join, accept or cancel simply makes the guard fail.
 
 ## 5. State, history and replay
 
