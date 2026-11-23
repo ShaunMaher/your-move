@@ -1,4 +1,5 @@
 import { Linter } from "eslint";
+import { parser } from "typescript-eslint";
 import { describe, expect, it } from "vitest";
 
 import { ENGINE_GLOBALS, engineEslintConfig } from "./index.js";
@@ -61,12 +62,71 @@ describe("engineEslintConfig", () => {
     ["Object.defineProperties(Math, {})", /must not write to built-in objects/u],
     ["Object.setPrototypeOf(Array.prototype, null)", /must not write to built-in objects/u],
     ["delete Math.max", /must not write to built-in objects/u],
+    ['Reflect.get(Math, "random")', /Reflect\.get reaches/u],
+    ['Reflect.getOwnPropertyDescriptor(Math, "random")', /Reflect\.getOwnPropertyDescriptor/u],
+    [
+      'Object.getOwnPropertyDescriptor(Math, "random")',
+      /Object\.getOwnPropertyDescriptor reaches/u,
+    ],
+    ["Object.getOwnPropertyDescriptors({})", /Object\.getOwnPropertyDescriptors reaches/u],
+    ["new Date(...[])", /with a spread/u],
+    ['import("./other.js")', /import only statically/u],
+    ["import(name)", /import only statically/u],
+    ["import.meta.url", /import\.meta is host-provided/u],
+    ["(() => 1).constructor", /constructors or prototypes/u],
+    ['({})["__proto__"]', /constructors or prototypes/u],
+    ["Math", /Use Math by name/u],
+    ["[Math][0].max(1)", /Use Math by name/u],
+    ["Object.values(Math)", /Use Math by name/u],
+    ["({ ...Reflect })", /Use Reflect by name/u],
+    ["[1].filter(Boolean)", /Use Boolean by name/u],
+    ["typeof Date", /Use Date by name/u],
   ])("rejects %s", (code, expected) => {
     const found = messages(`export const x = () => ${code};`);
     expect(
       found.some((message) => expected.test(message)),
       found.join("\n"),
     ).toBe(true);
+  });
+
+  it.each([
+    "const M = Math; export const r = () => M.max(1);",
+    "const { max } = Math; export const m = max(1, 2);",
+    "export const f = (n = Number) => n;",
+  ])("rejects a built-in used as a value: %s", (code) => {
+    expect(messages(code).join("\n")).toMatch(/by name \(a member, call or new\), not as a value/u);
+  });
+
+  it("allows the primitive built-ins and a local binding that shadows a built-in's name", () => {
+    expect(
+      messages(`
+        export const values = [undefined, NaN, Infinity];
+        export const local = (Math) => Math;
+      `),
+    ).toEqual([]);
+  });
+
+  it("lets TypeScript name built-ins in type positions, but not use them as values", () => {
+    const typescript = [
+      { languageOptions: { parser, sourceType: "module" } } as const,
+      ...engineEslintConfig(["**/*.ts"]),
+    ];
+    const found = linter.verify(
+      `
+        export const cells = new Map<string, number>();
+        export type Random = typeof Math.random;
+        export type Builtin = typeof Math;
+        export const lookup: ReadonlyMap<string, Date> = cells as never;
+        export const bad = Math;
+        export const cast = (Math as { random(): number }).random;
+      `,
+      typescript,
+      "engine.ts",
+    );
+    expect(found.map((message) => `${String(message.line)}: ${message.message}`)).toEqual([
+      "6: Use Math by name (a member, call or new), not as a value.",
+      "7: Use Math by name (a member, call or new), not as a value.",
+    ]);
   });
 
   it("allows ordinary uses of the same names", () => {
