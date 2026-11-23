@@ -57,22 +57,28 @@ Framework
 - F1. As a player I pick which game to start, set its options and turn timeout, and choose players
   by email, from past opponents, or by sharing a join link.
 - F2. Games wait in a lobby until every seat is filled; the creator can start early once the
-  minimum have joined, and can remove someone from the lobby.
+  minimum have joined, and can remove someone from the lobby. A game with a join link waits for the
+  creator to press Start.
 - F3. My game list shows all my games of every type: *Your turn*, *Invitations*, *Waiting*,
   *Finished*.
-- F4. I choose who can add me to games straight away (anyone / people I've finished a game with /
-  nobody). Everyone else sends me an invitation that I accept or decline, without lock-screen
-  notifications.
+- F4. I choose whether people I've finished a game with can add me to games straight away, or
+  nobody can. Everyone else sends me an invitation that I accept or decline; for an invitation my
+  lock screen only says "You have a new game invitation", never who sent it (if I've turned email
+  nudges on, the invitation email does name them). A past opponent adding me shows their name.
+- F5. Adding someone by email never tells me whether they already have an account: the app shows
+  the address back so I can check it, and the seat shows that address while it's waiting. If I
+  remove it or it's declined, it shows just "Removed" or "Declined", the same for every seat.
 
 Words (games/words.md)
 - G1. As a player I start a new game by entering an opponent's email address and choosing a
   ruleset (MVP: "Classic" or "Casual", see words §8.3) and a dictionary (MVP: ENABLE). My last
   choices are remembered.
-- G2. If that email belongs to an existing player who lets me add them (F4), the game starts and
-  they're notified; otherwise they get an invitation and the game starts when they accept.
-- G3. If not, I'm asked "They're not playing yet — send them an invite?" On confirm, the game waits
-  in the lobby and they get an email. When they sign in with that address the invitation is waiting
-  for them.
+- G2. If that email belongs to an existing player, they get an invitation and the game starts when
+  they accept. If I pick a past opponent from my list instead and they allow it (F4), the game
+  starts at once and they're notified.
+- G3. If nobody plays with that address yet, they get an invite email; the game waits in the lobby,
+  and when they sign up with that address the invitation is waiting for them. Either way I see the
+  same "Game created — we'll let them know" (F5).
 - G4. I can re-challenge a past opponent from a list (no email retyping).
 - G5. I see my word games in the shared game list (F3).
 - G6. In a game I can drag tiles from my rack to the board, rearrange/shuffle my rack, recall tiles,
@@ -81,7 +87,8 @@ Words (games/words.md)
 - G8. I can see the move history with words and scores, and how many tiles remain in the bag.
 - G9. When my opponent moves while I have the app open, the board updates without a reload.
 - G10. I get a notification when it's my turn (web push on supported devices; see 07/09).
-- G11. An invitee or opponent can decline a new game before making a move; nobody wins or loses.
+- G11. An invitee or opponent can decline a new game before making a move, and isn't penalised:
+  in a 2-player game nobody wins or loses; in a bigger game they simply leave without a rank.
 - G12. I can block a player so they can't start games with me.
 - G13. If I have access to another word list (e.g. a tournament list I'm licensed for), I can upload
   it and use it for games I create. The app tells me where official lists can be obtained but never

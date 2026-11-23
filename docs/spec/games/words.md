@@ -113,7 +113,9 @@ The game ends when any of the following happens:
    are not turns and do not count. A play scoring 0 (e.g. only blanks) counts as scoreless.
 3. **Resignation**.
 4. **Timeout**: the player to move has not acted within the game's turn timeout (a framework
-   setting, default 14 days for this module; 02 §4). Treated as resignation by that player.
+   setting, default 14 days for this module; 02 §4). Treated as resignation by that player, except
+   that a player who never acted takes no loss: the framework ends the game `declined` with no
+   result (02 §4).
    Enforced **only by the periodic sweep** (03 §8, ≤ 15 min granularity); reads never write.
    This module's `onTimeout` is §10.6.
 
@@ -196,7 +198,7 @@ bundle all rulesets (they are small), so the client can render any game and prev
 
 ### 8.3 MVP rulesets
 
-Display names are placeholders (Q16) and live only in the ruleset files.
+Display names "Classic" and "Casual" (Q16) live only in the ruleset files.
 
 | Field | `classic` — "Classic" | `casual` — "Casual" |
 |---|---|---|
@@ -207,9 +209,9 @@ Display names are placeholders (Q16) and live only in the ruleset files.
 | Tiles | 100 incl. 2 blanks (table A) | 104 incl. 2 blanks (table B) |
 | Rack | 7 | 7 |
 | Bingo bonus | 50 | 35 |
-| `swapOrder` | `drawThenReturn` | `returnThenDraw` (verify; Q17) |
-| `swapMinBag` | 7 | 7 (verify against reference game; Q17) |
-| `scorelessTurnLimit` | 6 | 6 (verify against reference game; Q17) |
+| `swapOrder` | `drawThenReturn` | `returnThenDraw` (Q17) |
+| `swapMinBag` | 7 | 7 (Q17) |
+| `scorelessTurnLimit` | 6 | 6 (Q17) |
 
 **Table A — `classic` tiles (100)**
 
@@ -270,7 +272,9 @@ rulesets.
   lists (the North American NWL/TWL family and the Commonwealth Collins list) are **not** freely
   licensed and MUST NOT be added to the repo or bundled in builds. Players who have access to
   them can bring their own (§9.5).
-- `removals.txt` ships with a list of slurs so they can't be played (Q7).
+- `removals.txt` ships with a list of slurs so they can't be played (Q7). The same words are also
+  kept in a shared `packages/dictionary/removals-global.txt`, which is applied to every operator
+  and uploaded dictionary (§9.5).
 
 ### 9.2 MVP dictionary
 
@@ -287,7 +291,8 @@ dictionaries as a list from day one, so adding one is a data change plus a build
   letter used by the dictionary's words has a tile in the ruleset. The build computes each
   dictionary's alphabet and stores it in its manifest. The UI offers only compatible pairs, and the
   server rejects incompatible ones (`400 INCOMPATIBLE_DICTIONARY`).
-- Operators can restrict the dictionaries offered for new games (`GAMES_WORDS_ENABLED_DICTIONARIES`).
+- Operators can restrict the built-in dictionaries offered for new games (`DICTIONARIES_ENABLED`,
+  framework resource config, 09 §1).
   A dictionary used by any non-finished game MUST NOT be removed from a deployment; disabling only
   hides it from new games.
 
@@ -298,8 +303,9 @@ dictionaries as a list from day one, so adding one is a data change plus a build
   deployed, and it applies to every game using that dictionary, including games in progress. The recorded version is informational only. Changes to
   additions/removals bump the version.
 - The server is authoritative. The client downloads the game's dictionary by versioned, hashed URL
-  (from `GET /api/catalog`), caches it in the service worker, and uses it only for instant
-  validity/score previews.
+  (from the game envelope's `resources[].downloadUrl`, 05, so it works even after the dictionary is
+  disabled for new games; the new-game screen uses `GET /api/catalog`), caches it in the service
+  worker, and uses it only for instant validity/score previews.
 - Server lookup is a binary search directly over the sorted text. No index is built, so loading
   costs only I/O and no request pays a parse cost (Workers Free: 10 ms CPU/request). Dictionaries are
   loaded lazily per id and cached per isolate/process. On Cloudflare they're bundled as text
@@ -314,8 +320,8 @@ one can use it. There are two routes, and both go through the same **server-only
 | | Operator dictionaries | Uploaded dictionaries |
 |---|---|---|
 | Who adds it | The person running the instance, e.g. under their own NASPA licence | Any signed-in player whose account is at least 7 days old or has finished a game (Q18) |
-| How | `pnpm admin:dict:add` (09 §1) and listed in `GAMES_WORDS_DICTIONARIES_EXTRA` | Uploaded from Settings → Word lists |
-| Who can choose it for new games | Everyone on the instance | Only the uploader — enforced by the framework's resource authorisation at create time (02 §2.1 rule 7); anyone else gets `400 UNKNOWN_DICTIONARY`, exactly as for an id that doesn't exist |
+| How | `pnpm admin:dict:add` (09 §1) and listed in `DICTIONARIES_EXTRA` | Uploaded from Settings → Word lists (off with `DICTIONARY_UPLOADS=false`) |
+| Who can choose it for new games | Everyone on the instance | Only the uploader — enforced by the framework's resource authorisation at create time (02 §2.1 rule 7); anyone else gets `400 INVALID_OPTIONS` with `detail.code = UNKNOWN_DICTIONARY`, exactly as for an id that doesn't exist |
 | Who plays with it | Everyone in games that use it | Everyone in games the uploader creates with it |
 
 **Distribution classes.** Each dictionary has `distribution: "public" | "serverOnly"`:
@@ -331,7 +337,9 @@ one can use it. There are two routes, and both go through the same **server-only
 - **Oracle limits.** `validate` and `preview` run every structural and rack check (§10.3) before any
   dictionary lookup, so a play using tiles not in the rack never reaches the word list. Lookups
   against `serverOnly` lists are rate-limited per word looked up (08 §4), separately from the
-  general preview limit.
+  general preview limit; the framework reserves `placements + 1` lookups before calling the module
+  and aborts with `429` if the module would exceed them (03 §10), so crossing the limit never yields
+  an `INVALID_WORDS` answer.
 
 **Upload format and processing.**
 
@@ -351,8 +359,9 @@ one can use it. There are two routes, and both go through the same **server-only
   than 1 hour (failed or aborted uploads). Keys are never derived from user input, and identical
   lists uploaded by different users are stored separately (no cross-user dedup, which would reveal
   that a list already exists).
-- The dictionary's `removals.txt` policy (Q7) applies to uploads too: the server drops listed words
-  while validating, so they can't be played or appear in history or notifications.
+- The removals policy (Q7) applies to uploads and operator lists too: the server drops every word
+  in `packages/dictionary/removals-global.txt` (§9.1) while validating, so they can't be played or
+  appear in history or notifications.
 - Before uploading, the user gives a name (same rules as display names, 06 §5, since opponents see
   it), picks a language (default `en`), and ticks: *"I have the right to use this word list."*
 - Uploaded dictionaries are immutable. "Replace" means upload a new one and delete the old one.
@@ -392,9 +401,9 @@ Options = { rulesetId: string; rulesetVersion: number; dictionaryId: string; dic
 ```
 
 - **Module config** (`configSchema`, 09 §1): `GAMES_WORDS_ENABLED_RULESETS`,
-  `GAMES_WORDS_DEFAULT_RULESET`, `GAMES_WORDS_ENABLED_DICTIONARIES`,
-  `GAMES_WORDS_DEFAULT_DICTIONARY`, `GAMES_WORDS_DICTIONARY_UPLOADS`,
-  `GAMES_WORDS_DICTIONARIES_EXTRA`.
+  `GAMES_WORDS_DEFAULT_RULESET`, `GAMES_WORDS_DEFAULT_DICTIONARY`. Which dictionaries exist, are
+  enabled or may be uploaded is framework resource config (`DICTIONARIES_*`, 02 §2.1 rule 7); the
+  module sees only the resulting `ctx.resources`.
 - `resolveOptions(input, ctx)`: fills missing fields from the instance defaults (the framework has
   already merged the creator's last choices, 05); unknown or disabled ruleset → `UNKNOWN_RULESET`;
   a dictionary not in `ctx.resources` (unknown, disabled, deleted, or someone else's upload) →
@@ -406,7 +415,7 @@ Options = { rulesetId: string; rulesetVersion: number; dictionaryId: string; dic
 - `players(options)` = `{ min: ruleset.minPlayers, max: ruleset.maxPlayers }` (2/2 in the MVP).
 - `validateStart(options, seats)`: total tiles ≥ `rackSize × seats`, else `NOT_ENOUGH_TILES`.
 - `defaultTurnTimeoutDays` = 14.
-- `resources(options)` = `[{ kind: "dictionary", id: options.dictionaryId }]`.
+- `resources(options)` = `[{ kind: "dictionary", id: options.dictionaryId, version: options.dictionaryVersion }]`.
 
 ### 10.2 State (secret, server-only)
 
@@ -443,7 +452,6 @@ View = {
   board: (null | { tile: string, letter: string, blank: boolean })[][],
   scores: number[], rackCounts: number[], bagCount: number,
   yourRack: string[] | null,                  // the viewer's only; null in the public view
-  history: WordsRecord[],                     // full public history (< ~60 entries)
   final?: { reason: "out" | "scoreless" | "resign" | "timeout", adjustments: number[], racks: string[][] }  // only once finished
 }
 WordsRecord = {
@@ -464,6 +472,10 @@ debounced (§9.5).
 
 - `onResign` / `onTimeout` (2-player): the game ends; the other player wins regardless of score
   (§6). Record type `resign` / `timeout`. `seatStatus` reports the resigning/timed-out seat `out`.
+  (A decline or timeout before a player's first action never reaches the module in a 2-player game:
+  the framework ends it `declined`, 02 §4. If `reason` is `"decline"` — only possible once 3–4
+  player games exist — the record type is `decline` and `describe` says the player declined, never
+  that they resigned, 02 §2.1 rule 9.)
 - `result()`: ranking by final score (ties share rank) for `out` / `scoreless` endings; the
   non-resigning player ranks 1 for `resign` / `timeout`.
 - `summary()`: `{ headline: [{seat:0}, " 212 – 187 ", {seat:1}], scores }`, rendered as

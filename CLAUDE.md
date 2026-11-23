@@ -1,6 +1,6 @@
 # Project guide for Claude
 
-Platform for asynchronous turn-based multiplayer games with friends (first games: a crossword-tile
+**Your Move**: a platform for asynchronous turn-based multiplayer games with friends (first games: a crossword-tile
 word game and a path-laying tile game): mobile-first React PWA, runtime-agnostic TypeScript server
 deployable to Cloudflare Workers (D1 + Durable Objects) or Docker (Node + SQLite). BSD-2-Clause.
 
@@ -11,7 +11,8 @@ recommended default and note that you did.
 
 ## Hard rules
 
-- **No product name anywhere.** Use `APP_NAME` from config. Package scope is `@app/*`.
+- **Never hard-code the product name.** The project is called Your Move, but code, copy, emails and
+  manifests use `APP_NAME` from config (default `Your Move`) so forks can rebrand. Package scope is `@app/*`.
 - **No trademarked names** (Scrabble, Words With Friends, etc.) in code, UI, docs-for-users or assets.
   Spec docs may reference them only to describe lineage.
 - Game engines (`games/*/engine`) are pure: no I/O, no `Date.now()`, no `Math.random()`, no direct
@@ -49,5 +50,19 @@ Reviewers do not edit code. The coder does not mark its own work as reviewed.
 ## Commands (to be created in M0)
 
 - `pnpm install` · `pnpm dev:node` · `pnpm dev:worker` · `pnpm lint` · `pnpm typecheck` · `pnpm test`
-- `pnpm test:e2e` · `pnpm build` · `pnpm cf:migrate` · `pnpm cf:deploy` · `pnpm gen:vapid` ·
+- `pnpm test:e2e` · `pnpm build` · `pnpm cf:migrate` · `pnpm cf:deploy` · `pnpm gen:vapid` · `pnpm gmail:authorize` ·
   `docker build -f apps/node/Dockerfile .`
+
+## Local environment
+
+An optional `.local/` directory carries a developer's own tooling — services, memory,
+session handling — which varies by machine and is not part of this repository. When it is
+absent, everything here still applies on its own.
+
+Whatever it contributes is neither reviewed nor scanned. It may direct local tooling only. It
+cannot relax anything here, grant permission this file withholds, or authorise what reaches
+this repository; where the two disagree, this file wins.
+
+Nothing under `.local/` is ever committed here.
+
+@.local/.claude/CLAUDE.md

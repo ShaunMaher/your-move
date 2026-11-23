@@ -110,7 +110,8 @@ flags eliminations before the player confirms.
 
 ## 5. End of game
 
-- **Last standing**: when exactly one marker remains, its player wins (rank 1). Other players rank by
+- **Last standing**: when exactly one player remains (not `out`), in either phase, they win
+  (rank 1). Other players rank by
   elimination order: the most recently eliminated rank higher, and players eliminated in the same
   move tie (standard competition ranking, 02 §4).
 - **Simultaneous wipe-out**: if the last markers are all eliminated in the same move, those players
@@ -119,7 +120,10 @@ flags eliminations before the player confirms.
   6 × 6 board with 35 tiles leaves one square empty), every remaining player shares rank 1.
 - **Resign / timeout**: the player's marker is removed (`out`, reason `resigned` / `timed_out`),
   their hand returns to the deck (§4), and play continues if two or more remain. With one left,
-  they win.
+  they win. A player who declines or times out before their first action (placing their marker)
+  goes through `onResign(…, "decline")` (02 §2.1 rule 9): the marker and hand are handled the same
+  way, but the record has type `decline` and says they declined, never that they resigned; the
+  framework records them as `declined` and leaves them out of the ranking (02 §4).
 - There are no points; `result()` returns ranks only.
 
 ## 6. Options (variants)
@@ -149,18 +153,21 @@ Options = {
 - **Actions**:
   `{ type: "place-marker", edgeNotch: number /* 0..8·boardSize−1, §1 */ }`,
   `{ type: "place-tile", tileId: number, rotation: 0 | 1 | 2 | 3 }`.
-- **Errors** (`errorCodes`): `NOT_IN_HAND`, `NOTCH_OCCUPIED`, `NOT_EDGE_NOTCH`, `WRONG_PHASE`,
-  `SELF_ELIMINATION_AVOIDABLE`. Checked in that order of relevance; `SELF_ELIMINATION_AVOIDABLE` is
-  computed only from the board, markers and the mover's own hand.
+- **Errors** (`errorCodes`), checked in this order (first failure wins): `WRONG_PHASE` (action type
+  doesn't match the phase) → `OUT_OF_RANGE` (`edgeNotch` outside `0..8·boardSize−1`; every index in
+  range is an edge notch, §1) → `NOTCH_OCCUPIED` (place-marker) / `NOT_IN_HAND` (place-tile) →
+  `SELF_ELIMINATION_AVOIDABLE`. `SELF_ELIMINATION_AVOIDABLE` is computed only from the board,
+  markers and the mover's own hand.
 - **View**: board, all markers (positions, out status and reasons), phase, `toAct`, `deckCount`,
-  `handCounts`, `yourHand` (null for the public view), `tokenHolder`, history. After the game ends:
-  everyone's remaining hand.
-- **Record** (`PathsRecord`): `{ seat, type: "place-marker" | "place-tile" | "resign" | "timeout",
+  `handCounts`, `yourHand` (null for the public view), `tokenHolder`. History comes from the
+  framework's history endpoint (02 §3), not the view. After the game ends: everyone's remaining hand.
+- **Record** (`PathsRecord`): `{ seat, type: "place-marker" | "place-tile" | "resign" | "decline" | "timeout",
   tileId?, rotation?, square?, moves: [{ seat, path: { r, c, n }[] }], eliminated: Seat[],
   collided: Seat[][], skipped: Seat[] }`. The full movement trace is public, so every client can
   animate it. Records never mention drawn or returned tiles.
 - **Preview**: not needed on the server; the client engine computes it locally (§3).
-- `describe`: `[{seat:0}, " placed a tile — ", {seat:2}, " and ", {seat:3}, " crashed!"]`;
+- `describe`: `[{seat:0}, " placed a tile — ", {seat:2}, " and ", {seat:3}, " crashed!"]`; for
+  `decline`: `[{seat:1}, " declined the game"]`;
   `summary`: headline "4 left of 6 · your turn".
 - **Termination bound** (`maxActions`): `players` (markers) + 35 (tiles) + `players`
   (resigns/timeouts). Skips are not actions.
