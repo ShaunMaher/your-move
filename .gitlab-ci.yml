@@ -266,7 +266,7 @@ build:app:
         --destination "$IMAGE_REPOSITORY:$CI_COMMIT_SHA-$ARCH" \
         $tar_args
       if [ -f "images/image-$ARCH.tar" ]; then
-        scripts/ci/install-syft.sh /tmp/syft
+        sh scripts/ci/install-syft.sh /tmp/syft
         /tmp/syft/syft scan "docker-archive:images/image-$ARCH.tar" \
           -o "cyclonedx-json=images/sbom-$ARCH.cdx.json"
       fi

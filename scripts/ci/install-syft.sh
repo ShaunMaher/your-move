@@ -1,6 +1,7 @@
 #!/bin/sh
 # Installs syft into DIR from the URL and SHA-256 recorded in mise.lock, for images without mise
-# or Node (the kaniko build job, which has busybox only).
+# or Node (the kaniko build job after `--cleanup`, which has busybox only). Scripts are run with
+# `sh`, because `--cleanup` also removes /bin, so a `#!/bin/sh` line finds no interpreter.
 #
 # Usage: install-syft.sh DIR
 set -eu
@@ -26,6 +27,6 @@ if [ -z "$url" ] || [ -z "$sha" ]; then
 fi
 
 mkdir -p "$1"
-"$here/fetch-verified.sh" "$url" "$sha" "$1/syft.tar.gz"
+sh "$here/fetch-verified.sh" "$url" "$sha" "$1/syft.tar.gz"
 tar -xzf "$1/syft.tar.gz" -C "$1" syft
 rm -f "$1/syft.tar.gz"
