@@ -1,0 +1,15 @@
+{
+  "name": "@your-move/dictionary",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Dictionaries: sources, build script and lookup (a framework resource provider)",
+  "license": "BSD-2-Clause",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}

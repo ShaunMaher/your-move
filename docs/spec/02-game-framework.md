@@ -511,10 +511,17 @@ package except through these three entry points.
   (TypeScript sources are not consumed): `exports` maps `"./engine"`, `"./client"` and
   `"./manifest"` to objects with `types` and `import` conditions (and nothing else; no `require`,
   no `browser`/`node` forks). Every entry point uses the named export above; no default exports.
+- **Nothing else changes how the files are read**: `import` targets end in `.js` or `.mjs` and
+  `types` targets in `.d.ts` or `.d.mts`; no `imports` or `browser` field; and nowhere in the
+  package another `package.json` (Node and bundlers honour its `imports`, `browser` and `type`),
+  a `node_modules` directory (`bundleDependencies`), CommonJS (`.cjs`, `.cts`) or a symlink
+  leading out of the package. A package installed from a registry has no `workspace:` ranges
+  (publishing replaces them); `games:verify` resolves them only for this repository's workspace
+  packages, whose own top-level `node_modules` (pnpm's links) it skips.
 - **Dependencies**: `@your-move/sdk`, `zod` and (for the client) `react` are **peerDependencies**
   only (the instance supplies them); the SDK range is the package's statement of compatibility
-  (§7.4). An engine may **bundle** pure third-party code into its built output (e.g. a small
-  algorithm library); bundled code is held to the same rules as the engine's own code. The built
+  (§7.4). An engine may **bundle** pure third-party code into its built output (inlined, e.g. a
+  small algorithm library; not as a bundled dependency); bundled code is held to the same rules as the engine's own code. The built
   engine and manifest output import nothing but `@your-move/sdk` and `@your-move/sdk/schema`,
   enforced on built output (§7.5), so an engine never imports a package at runtime even if one is
   installed. A **client** may import the packages it declares in its `dependencies` (subject to the
@@ -642,9 +649,10 @@ games still use is caught at **deploy and run time**:
     change fails the build.
 - **Publishing.** All `@your-move/*` packages meant for outside use (`sdk`, `testkit`,
   `api-client`, `mcp`, the first-party games) are published to this project's GitLab package
-  registry through its project-level npm endpoint, only from `main`/tags (11 §9). Until the
-  `@your-move` scope is also claimed on the public npm registry (Q25), **every install instruction
-  names the registry explicitly** — a game author's `.npmrc`:
+  registry through its project-level npm endpoint, only from `main`/tags (11 §9). The
+  `@your-move` scope is claimed on the public npm registry so nobody else can publish under it
+  (Q25), but nothing is released there, so **every install instruction names the registry
+  explicitly** — a game author's `.npmrc`:
 
   ```
   @your-move:registry=https://<gitlab-host>/api/v4/projects/<project-id>/packages/npm/

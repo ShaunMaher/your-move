@@ -1,0 +1,31 @@
+{
+  "name": "@your-move/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A local Model Context Protocol server over the public API",
+  "license": "BSD-2-Clause",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}

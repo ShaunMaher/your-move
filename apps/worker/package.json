@@ -1,0 +1,23 @@
+{
+  "name": "@your-move/worker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Cloudflare runtime: Worker, static assets and (later) Durable Objects",
+  "license": "BSD-2-Clause",
+  "type": "module",
+  "scripts": {
+    "assets": "tsx scripts/prepare-assets.ts",
+    "dev": "pnpm --filter @your-move/web build && PUBLIC_URL=http://localhost:8787 tsx scripts/prepare-assets.ts && wrangler dev --config wrangler.example.toml --env-file ../../config/local-dev.env --var PUBLIC_URL:http://localhost:8787 --port 8787",
+    "build": "tsx scripts/prepare-assets.ts && wrangler deploy --dry-run --config wrangler.example.toml --outdir dist/worker"
+  },
+  "dependencies": {
+    "@your-move/server": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "@types/node": "catalog:",
+    "@your-move/web": "workspace:*",
+    "tsx": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

@@ -1,0 +1,29 @@
+:root {
+  color-scheme: light dark;
+  --color-bg: #f7f7f5;
+  --color-fg: #1b1b1b;
+  --space: 1rem;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #151515;
+    --color-fg: #ececec;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+}
+
+.shell {
+  max-width: 32rem;
+  margin: 0 auto;
+  padding: calc(var(--space) + env(safe-area-inset-top))
+    calc(var(--space) + env(safe-area-inset-right)) calc(var(--space) + env(safe-area-inset-bottom))
+    calc(var(--space) + env(safe-area-inset-left));
+}

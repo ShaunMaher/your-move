@@ -1,0 +1,12 @@
+# LF line endings everywhere (11 §6).
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.woff2 binary
+
+# Generated: collapsed in diffs and excluded from language statistics.
+pnpm-lock.yaml linguist-generated=true -diff
+packages/api-client/openapi/v1.json linguist-generated=true
+packages/api-client/src/schema.ts linguist-generated=true
+packages/*/api-report/*.api.md linguist-generated=true

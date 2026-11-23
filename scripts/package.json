@@ -1,0 +1,29 @@
+{
+  "name": "@your-move/scripts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Repository tooling: instance composition, API generation, licence check",
+  "license": "BSD-2-Clause",
+  "type": "module",
+  "exports": {
+    "./instance": "./src/instance/define.ts"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/semver": "catalog:",
+    "@your-move/sdk": "workspace:*",
+    "@your-move/server": "workspace:*",
+    "@your-move/testkit": "workspace:*",
+    "dependency-cruiser": "catalog:",
+    "eslint": "catalog:",
+    "fast-check": "catalog:",
+    "openapi-typescript": "catalog:",
+    "prettier": "catalog:",
+    "semver": "catalog:",
+    "smol-toml": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "yaml": "catalog:",
+    "zod": "catalog:"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+    // The program includes the git-ignored generated/ client import map (11 §5).
+    "rootDir": "../..",
+    "outDir": "dist-types",
+    "tsBuildInfoFile": "dist-types/.tsbuildinfo",
+    "emitDeclarationOnly": true
+  },
+  "include": ["src", "vite.config.ts", "vitest.config.ts", "../../generated/client-games.ts"],
+  "references": [{ "path": "../../packages/api-client" }]
+}

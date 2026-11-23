@@ -1,0 +1,24 @@
+{
+  // Solution file: `pnpm typecheck` runs `tsc --build` over every project (11 §2).
+  "files": [],
+  "references": [
+    { "path": "packages/sdk" },
+    { "path": "packages/testkit" },
+    { "path": "packages/shared" },
+    { "path": "packages/server" },
+    { "path": "packages/api-client" },
+    { "path": "packages/mcp" },
+    { "path": "packages/dictionary" },
+    { "path": "games/example" },
+    { "path": "games/words" },
+    { "path": "games/paths" },
+    { "path": "apps/node" },
+    { "path": "apps/worker" },
+    { "path": "apps/worker/scripts" },
+    { "path": "apps/web" },
+    { "path": "scripts" },
+    { "path": "tests/contract" },
+    { "path": "tests/e2e" },
+    { "path": "tsconfig.config.json" }
+  ]
+}

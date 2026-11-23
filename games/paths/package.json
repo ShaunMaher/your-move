@@ -1,0 +1,38 @@
+{
+  "name": "@your-move/game-paths",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Path-laying tile game for 2 to 8 players",
+  "license": "BSD-2-Clause",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./engine": {
+      "types": "./dist/engine/index.d.ts",
+      "import": "./dist/engine/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "import": "./dist/manifest.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "peerDependencies": {
+    "@your-move/sdk": "workspace:^"
+  },
+  "devDependencies": {
+    "@your-move/sdk": "workspace:*",
+    "vitest": "catalog:"
+  }
+}

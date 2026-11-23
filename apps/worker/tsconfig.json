@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["@cloudflare/workers-types"],
+    // The program includes the git-ignored generated/ registry, which only apps import (11 §5).
+    "rootDir": "../..",
+    "outDir": "dist/types",
+    "tsBuildInfoFile": "dist/types/.tsbuildinfo",
+    "emitDeclarationOnly": true
+  },
+  "include": ["src", "../../generated/server-registry.ts", "../../generated/installed.json"],
+  "references": [{ "path": "../../packages/server" }]
+}

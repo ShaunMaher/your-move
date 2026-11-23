@@ -1,0 +1,59 @@
+{
+  "name": "@your-move/testkit",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The generic test kit and built-output rules every game package must pass",
+  "license": "BSD-2-Clause",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./depcruise": "./src/depcruise.ts",
+    "./eslint-engine": "./src/eslint-engine.ts"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./depcruise": {
+        "types": "./dist/depcruise.d.ts",
+        "default": "./dist/depcruise.js"
+      },
+      "./eslint-engine": {
+        "types": "./dist/eslint-engine.d.ts",
+        "default": "./dist/eslint-engine.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "dependencies": {
+    "globals": "catalog:"
+  },
+  "peerDependencies": {
+    "dependency-cruiser": "^18.0.0",
+    "eslint": "^9.0.0"
+  },
+  "peerDependenciesMeta": {
+    "dependency-cruiser": {
+      "optional": true
+    },
+    "eslint": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "dependency-cruiser": "catalog:",
+    "eslint": "catalog:",
+    "typescript-eslint": "catalog:",
+    "vitest": "catalog:"
+  }
+}

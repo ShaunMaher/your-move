@@ -1,0 +1,25 @@
+# Generated or vendored: never formatted by hand (11 §3).
+# CI caches and outputs kept inside the project directory (GitLab caches only paths there).
+.pnpm-store/
+.mise/
+images/
+sbom/
+pnpm-lock.yaml
+generated/
+**/dist/
+**/dist-types/
+coverage/
+reports/
+**/test-results/
+**/playwright-report/
+**/.wrangler/
+**/CHANGELOG.md
+packages/*/api-report/
+# Fixture packages shaped like third-party build output.
+scripts/test-fixtures/
+# Hand-maintained records with wide tables; reformatting them buries real changes in diffs.
+docs/spec/
+docs/reviews/
+docs/security/findings.md
+# Agent definitions are maintained by the owner.
+.claude/

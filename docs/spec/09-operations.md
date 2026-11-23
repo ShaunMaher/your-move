@@ -16,11 +16,11 @@ equal.
 |---|---|---|---|
 | `APP_NAME` | no | `Your Move` | Display name everywhere (UI, emails, manifest). The name is never hard-coded, so instances can rebrand. |
 | `APP_SHORT_NAME` | no | = `APP_NAME` | Home-screen label (≤ 12 chars recommended) |
-| `PUBLIC_URL` | yes | `https://play.example.org` | Canonical origin; used for links, Origin checks, cookie mode |
-| `APP_SECRET` | yes (secret) | base64 of ≥ 32 random bytes (validated after decoding) | Root secret for HKDF subkeys — see §1.1 before ever rotating it |
-| `EMAIL_PROVIDER` | yes | `gmail` · `smtp` · `resend` · `postmark` · `ses` · `cloudflare` · `console` | `console` only in local-dev mode (`isLocalDev`, 06 §4); refuse to start otherwise. See §2 |
+| `PUBLIC_URL` | yes | `https://play.example.org` | Canonical origin; used for links, Origin checks, cookie mode. Must be `https`, except the local-dev origins (`http://localhost`, `127.0.0.1`, `[::1]`, 06 §4); no credentials, path, query or fragment |
+| `APP_SECRET` | yes (secret) | base64 of ≥ 32 random bytes (validated after decoding) | Root secret for HKDF subkeys — see §1.1 before ever rotating it. The public value in `config/local-dev.env` is refused outside local-dev mode |
+| `EMAIL_PROVIDER` | yes | `gmail` · `smtp` · `resend` · `postmark` · `ses` · `cloudflare` · `console` | `console` only in local-dev mode (`isLocalDev`, 06 §4); `smtp` only on Node and `cloudflare` only on Workers; refuse to start otherwise. See §2 |
 | `EMAIL_FROM` | yes | `"Your Move" <no-reply@example.org>` | |
-| `EMAIL_API_KEY` | per provider (secret) | | |
+| `EMAIL_API_KEY` | per provider (secret) | | Required for `resend`, `postmark` and `ses` (how SES credentials are given is settled with the SES provider) |
 | `SMTP_URL` | if `smtp` (secret) | `smtp://user:pass@mail.example.org:587` (STARTTLS) or `smtps://user:pass@host:465` | Node only; for operators with their own SMTP relay |
 | `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` | if `gmail` (secret) | | The Internal OAuth client (§2); both runtimes |
 | `GMAIL_REFRESH_TOKEN` | if `gmail` (secret) | | Granted once by the dedicated sender user, scope `https://www.googleapis.com/auth/gmail.send` only (§2) |
@@ -35,7 +35,7 @@ equal.
 | `PORT` | no | `8080` | Node only |
 | `DATABASE_PATH` | Node | `/data/app.sqlite` | |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | no | | Enables Turnstile on OTP request (manually or via the circuit breaker). On Cloudflare the web build also needs `TURNSTILE_ENABLED=true` for the static CSP (03 §9). |
-| `LIMIT_*` | no | see 08 §4 | Overrides for rate limits / instance-wide caps |
+| `LIMIT_*` | no | see 08 §4 | Overrides for rate limits / instance-wide caps, as positive whole numbers. Each `LIMIT_<NAME>` is listed in this table; an unknown name refuses to start. Today only `LIMIT_DICT_TOTAL_BYTES`; the rate limiter (M2) adds the names of the 08 §4 limits here |
 | `ENABLED_GAMES` | no | every installed package not marked `enabled: false` in `instance.config.ts` | Comma-separated game types offered for **new** games (02 §7.3). Must name installed types only (refuse to start otherwise). Type ids match `^[a-z][a-z0-9]{1,31}$` |
 | `ADMIN_EMAILS` | no | (none) | Comma-separated addresses of admins (05 §Admin API). Matched against the normalised email of the human an admin token belongs to, on every admin request (admin access is by admin token only); an empty list disables the Admin API |
 | `ALLOW_ORPHAN_GAMES` | no | `false` | Node only: set for **one** start to accept orphaning `lobby`/`active` games of removed game types or rules versions (02 §7.3); otherwise the server refuses to start while any exist |
@@ -45,7 +45,7 @@ equal.
 | `LOG_LEVEL` | no | `info` | |
 | `LIMIT_DICT_TOTAL_BYTES` | no | `2147483648` | Instance-wide cap on stored uploaded dictionaries (08 §4) |
 | `BLOB_DIR` | Node | `/data/blobs` | `BlobStore` root for Docker; preferably its own volume or size-limited, so uploads can't fill the database disk |
-| `GAMES_<TYPE>_*` | no | | Module config: each module receives only its own keys, prefix stripped, parsed by its strict `configSchema` (02 §2.1 rule 8). The framework itself has no game-specific variables |
+| `GAMES_<TYPE>_*` | no | | Module config: each module receives only its own keys, prefix stripped, parsed by its strict `configSchema` (02 §2.1 rule 8). The framework itself has no game-specific variables. A variable for a type that isn't installed refuses to start |
 
 **`words` module config** (games/words.md §10.1):
 
@@ -93,7 +93,8 @@ in fast mode; CI runs the full kit), and deploy. To **remove** a game type or up
 major that drops a rules version, first let its live games finish or cancel them (Admin API): the
 deploy job's `pnpm games:check-db` (Cloudflare) and the Node server's startup check refuse to go
 ahead while `lobby`/`active` games would be orphaned, unless you pass `--allow-orphans` to the
-deploy step or start Node once with `ALLOW_ORPHAN_GAMES=true` (02 §7.3).
+deploy step or start Node once with `ALLOW_ORPHAN_GAMES=true` (02 §7.3). **Also remove the
+removed game's `GAMES_<TYPE>_*` variables**: left behind, they block startup (§1).
 
 Before installing, read 02 §7.5: **a game package is fully trusted** — it runs inside your server
 and in your players' browsers with their sessions, and a malicious one can take over the instance
@@ -191,7 +192,8 @@ that work on both runtimes, plus SMTP for Node only.
   registry with a dynamic `import()` (02 §7.5) and refuses to start if it doesn't match
   `installed.json`; then serves.
 - Deployments pull the image **by digest** (`image: registry…/your-move@sha256:…`), taken from the
-  release notes; tags are for humans only (images aren't signed yet, 08 §6).
+  release notes (from M1; until then from the `publish:image` job's output); tags are for humans
+  only (images aren't signed yet, 08 §6).
 - Two compose examples in `apps/node/` (the only names used anywhere), both with named volumes for
   `/data` and (separately) `/data/blobs`, and app secrets supplied as Docker secrets (`*_FILE`, §1):
   - `docker-compose.tunnel.yml` (**the proof-of-concept deployment**, Q6; an M4 deliverable):
@@ -241,17 +243,24 @@ that work on both runtimes, plus SMTP for Node only.
 
 The pipeline, its stages and the quality gates are defined in 11 §9. Deployment specifics:
 
-- **Cloudflare deploy** is a manual job in the `production` environment, default branch and tags
-  only: `pnpm games:check-db` against D1 (02 §7.3; `--allow-orphans` is the only override), reading
-  only `generated/installed.json` from the stage-3 artifact, then `wrangler d1 migrations apply`,
-  then `wrangler deploy`, from the already-built artifact without re-installing and without running
-  `games:verify` or importing any game package (credentials per 08 §6).
+- **Cloudflare deploy** arrives with the first Workers deployment (10 §First Workers
+  deployment); until then the deploy stage has no job. It will be a manual job in the `production`
+  environment, default branch and tags only: `pnpm games:check-db` against D1 (02 §7.3;
+  `--allow-orphans` is the only override), reading only `generated/installed.json` from the
+  stage-3 artifact (`games:check-db` runs as a self-contained bundle built in stage 3 and carried
+  in the same artifact, since the job installs nothing), then `wrangler d1 migrations apply`, then
+  `wrangler deploy --no-bundle` of `dist/worker` from the already-built artifact. wrangler comes
+  from a lockfile-pinned,
+  `--ignore-scripts` install carried as an artifact, its configuration is generated from CI
+  variables, and the job never runs `pnpm install` or `games:verify` or imports any game package
+  (credentials per 08 §6).
 - **Docker images** for `linux/amd64` and `linux/arm64` are built natively on the matching shared
-  runner (tags `arch-amd64`, `arch-arm64`) with rootless BuildKit, assembled into a multi-arch
+  runner (tags `arch-amd64`, `arch-arm64`) with kaniko (or rootless BuildKit), assembled into a multi-arch
   manifest, and — on `main` and tags only, in the `release` environment with the release deploy
   token (protected, environment-scoped variables; our GitLab CE has no protected environments,
-  08 §6) — pushed to this project's GitLab container registry with their SBOM, tagged with the
-  version and the commit, and their digests recorded in the release notes. MR pipelines build but
+  08 §6) — pushed to this project's GitLab container registry, tagged with the version and the
+  commit, with their SBOMs kept as pipeline artifacts and (from M1) their digests recorded in the
+  release notes. MR pipelines build but
   never push, so they can't run the image (end-to-end tests run against the Node build output
   instead, 11 §9). On `main`, a **smoke job** after the push pulls the new image by digest as a CI
   `services:` container and checks that `/api/health` answers. Images aren't signed yet (08 §6).

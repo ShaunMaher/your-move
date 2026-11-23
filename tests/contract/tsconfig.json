@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "lib": ["ES2023", "DOM"],
+    "rootDir": ".",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "emitDeclarationOnly": true
+  },
+  "include": ["src", "vitest.config.ts"],
+  "references": [
+    { "path": "../../packages/api-client" },
+    { "path": "../../packages/server" },
+    { "path": "../../packages/shared" }
+  ]
+}

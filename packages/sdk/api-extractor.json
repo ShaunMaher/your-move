@@ -1,0 +1,21 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/api-extractor/v7/api-extractor.schema.json",
+  // The SDK's public surface report (02 §7.4, 11 §3): committed under api-report/, and CI fails
+  // when the surface changes without the report being regenerated (`pnpm api:surface`).
+  "mainEntryPointFilePath": "<projectFolder>/dist/index.d.ts",
+  "newlineKind": "lf",
+  "apiReport": {
+    "enabled": true,
+    "reportFileName": "sdk",
+    "reportFolder": "<projectFolder>/api-report/",
+    "reportTempFolder": "<projectFolder>/dist/api-report-temp/"
+  },
+  "docModel": { "enabled": false },
+  "dtsRollup": { "enabled": false },
+  "tsdocMetadata": { "enabled": false },
+  "messages": {
+    "extractorMessageReporting": {
+      "ae-missing-release-tag": { "logLevel": "error" }
+    }
+  }
+}

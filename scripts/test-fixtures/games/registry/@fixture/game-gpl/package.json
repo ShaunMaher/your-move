@@ -1,0 +1,24 @@
+{
+  "name": "@fixture/game-gpl",
+  "version": "1.0.0",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "exports": {
+    "./engine": {
+      "types": "./dist/engine/index.d.ts",
+      "import": "./dist/engine/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "import": "./dist/manifest.js"
+    }
+  },
+  "peerDependencies": {
+    "@your-move/sdk": "^1.0.0",
+    "react": "^19.0.0"
+  }
+}

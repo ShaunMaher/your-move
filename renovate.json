@@ -1,0 +1,69 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Dependency updates (docs/spec/11-engineering.md §8, 08 §6). Nothing is ever automerged.",
+  "extends": ["config:best-practices", ":semanticCommits"],
+  "ignoreScripts": true,
+  "automerge": false,
+  "platformAutomerge": false,
+  "dependencyDashboard": { "enabled": true },
+  "ignorePaths": ["**/node_modules/**", "scripts/test-fixtures/**"],
+  "schedule": ["* * * * 0,6"],
+  "osvVulnerabilityAlerts": true,
+  "lockFileMaintenance": { "enabled": true, "schedule": ["* * 1 * *"] },
+  "enabledManagers": ["npm", "mise", "dockerfile", "gitlabci", "custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Images pinned in .gitlab-ci.yml variables, each annotated `# renovate: datasource=docker depName=…` on the line above.",
+      "managerFilePatterns": ["/(^|/)\\.gitlab-ci\\.yml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\n\\s*[A-Z_]+:\\s*[^:@\\s]+:(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "Versions pinned in CI scripts (the mise release). A mise bump also needs the new SHA-256 values from the release's signed SHASUMS256 committed next to it, or install-mise.sh fails the pipeline; Renovate can't do that, so mise has its own group.",
+      "managerFilePatterns": ["/^scripts/ci/.+\\.sh$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\n\\s*[A-Z_]+=\"(?<currentValue>[^\"]+)\""
+      ]
+    }
+  ],
+  "packageRules": [
+    { "matchDatasources": ["npm"], "minimumReleaseAge": "3 days" },
+    { "matchPackageNames": ["@types/**"], "groupName": "@types" },
+    {
+      "matchPackageNames": ["typescript-eslint", "@typescript-eslint/**"],
+      "groupName": "typescript-eslint"
+    },
+    { "matchPackageNames": ["vitest", "@vitest/**"], "groupName": "Vitest" },
+    {
+      "matchPackageNames": ["@playwright/test", "playwright", "mcr.microsoft.com/playwright"],
+      "groupName": "Playwright"
+    },
+    { "matchPackageNames": ["hono", "@hono/**"], "groupName": "Hono" },
+    { "matchPackageNames": ["drizzle-orm", "drizzle-kit"], "groupName": "Drizzle" },
+    {
+      "matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"],
+      "groupName": "React"
+    },
+    { "matchFileNames": [".gitlab-ci.yml", "scripts/ci/**"], "groupName": "CI images and tools" },
+    {
+      "description": "One update for every pin of the same tool, across mise.toml, the Dockerfile, the CI images and packageManager; pnpm lint:pins fails when they differ. Renovate refreshes mise.lock with the mise.toml change (its mise manager runs mise lock).",
+      "matchPackageNames": ["node"],
+      "groupName": "Node"
+    },
+    { "matchPackageNames": ["pnpm"], "groupName": "pnpm" },
+    {
+      "description": "The mise release needs its checksums updated by hand (scripts/ci/install-mise.sh), so it never holds up other updates.",
+      "matchPackageNames": ["jdx/mise"],
+      "groupName": "mise (update checksums by hand)",
+      "addLabels": ["needs-checksums"]
+    },
+    {
+      "description": "Kaniko comes from a community fork (F-10): read its release notes before merging.",
+      "matchPackageNames": ["ghcr.io/osscontainertools/kaniko"],
+      "addLabels": ["review-release-notes"]
+    }
+  ]
+}

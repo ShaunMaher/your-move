@@ -1,0 +1,39 @@
+# Secret scanning (docs/spec/11-engineering.md §6): gitleaks in the pre-commit hook and in CI.
+# The default rules, plus one for this project's API tokens (06 §8), which forge push protection
+# doesn't recognise.
+title = "Your Move gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "your-move-api-token"
+description = "API token (ym_pat_<id>_<secret>, docs/spec/06-auth.md §8)"
+regex = '''ym_pat_[0-9A-Za-z]{1,64}_[0-9A-Za-z]{20,}'''
+keywords = ["ym_pat_"]
+
+[allowlist]
+description = "Values that are public by design, and untracked caches and build output"
+# Anchored to the exact untracked locations (CI caches, installed dependencies, build output), so
+# tracked files with dist/ directories, such as the scripts/test-fixtures game packages, are still
+# scanned; `pnpm gates:prove` checks that. gitleaks' default config, extended above, also skips
+# every path under any node_modules directory, which is why the fixture game packages live in
+# scripts/test-fixtures/games/registry (only a few stub dependencies are under node_modules there).
+paths = [
+  # Machine-written integrity hashes, which look like secrets.
+  '''^pnpm-lock\.yaml$''',
+  # CI caches kept inside the project directory: third-party packages and tool binaries.
+  '''^\.pnpm-store/''',
+  '''^\.mise/''',
+  # Installed dependencies: the root's and each workspace package's.
+  '''^node_modules/''',
+  '''^(apps|packages|games|tests)/[^/]+/node_modules/''',
+  '''^scripts/node_modules/''',
+  # Build output (never committed; its sources are scanned instead).
+  '''^(apps|packages|games|tests)/[^/]+/dist/''',
+]
+# The published local-dev APP_SECRET (config/local-dev.env, LOCAL_DEV_APP_SECRET): the server
+# accepts it only when PUBLIC_URL is http://localhost. Only this exact value is allowed.
+regexes = [
+  '''bG9jYWwtZGV2LW9ubHktbm90LWEtc2VjcmV0LWRvLW5vdC11c2U=''',
+]

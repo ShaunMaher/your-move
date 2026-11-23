@@ -1,0 +1,18 @@
+/**
+ * The game packages this instance installs (docs/spec/02-game-framework.md §7.3). An operator's
+ * fork or deployment repository edits this list, adds each package to the root package.json, and
+ * runs `pnpm build` (which runs `pnpm games:generate` and `pnpm games:verify`).
+ *
+ * Empty until the first game packages exist: `example` and `words` are installed in M3, `paths`
+ * in M5.
+ */
+import { defineInstance } from "@your-move/scripts/instance";
+
+export default defineInstance({
+  games: [
+    // { package: "@your-move/game-words" },
+    // { package: "@your-move/game-paths" },
+    // { package: "@your-move/game-example", enabled: false },
+    // { package: "@someone/game-hex", acceptLicence: "MPL-2.0" },  // a third-party game
+  ],
+});

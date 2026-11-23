@@ -427,6 +427,16 @@ Framework codes (reserved; modules can't use them, 02 §2.2):
 | 500 | `INTERNAL` — never carries detail; the log records a request id only, never inputs or state (09 §5) |
 | 503 | `UPLOADS_FULL` |
 
+Logs never contain request bodies or input-derived messages (09 §5). A request rejected with one
+of the statuses that has a single code above (`400 BAD_REQUEST`, `401`, `404`, `413`, `415`,
+`429`), such as a body over the limit, malformed JSON or a failed validation, keeps that status and
+code and is logged below error level with the error's class and stack frames but not its message,
+which can quote the input. Anything else is a server fault, answered `500 INTERNAL` and logged at
+error level with class, message and stack: an error raised with a `5xx` status or with a status
+whose code only the handler can choose (`403`, `409`), and a parse error in anything but the
+request (stored JSON, an engine). A parse error (`SyntaxError`) is logged without its message,
+which quotes the text being parsed.
+
 **Module errors** from `validate` and `preview` are returned as `400 { error: { code, message,
 detail } }` with the module's code and detail as-is. From `resolveOptions` and `validateStart` they
 are wrapped: `400 INVALID_OPTIONS` / `409 INVALID_SEATS` with `detail: { code, detail }`.

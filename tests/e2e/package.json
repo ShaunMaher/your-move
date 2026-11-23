@@ -1,0 +1,17 @@
+{
+  "name": "@your-move/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end tests (Playwright) against the Node build output",
+  "license": "BSD-2-Clause",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "catalog:",
+    "@playwright/test": "catalog:",
+    "@types/node": "catalog:",
+    "@your-move/server": "workspace:*"
+  }
+}
