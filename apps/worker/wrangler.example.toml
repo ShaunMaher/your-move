@@ -1,0 +1,25 @@
+# Cloudflare Worker configuration (docs/spec/09-operations.md §3). No account-specific ids here:
+# copy to wrangler.toml (git-ignored) or pass --config, and set secrets with `wrangler secret put`.
+# `pnpm dev:worker` uses this file as is, with config/local-dev.env.
+name = "your-move"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+# Serve the app only on the configured custom domain. Enable workers_dev only while testing
+# without a custom domain.
+workers_dev = false
+preview_urls = false
+
+[placement]
+mode = "smart"
+
+[assets]
+# Built by scripts/prepare-assets.ts: the SPA plus the generated _headers file.
+directory = "./dist/assets"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+# Server-handled paths (packages/server SERVER_PATHS, 03 §9).
+run_worker_first = ["/api/*", "/manifest.webmanifest", "/__dev/*"]
+
+# Added by later milestones: D1 binding DB (M2), Durable Object USER_CHANNEL (M3), the cron
+# trigger "*/15 * * * *" (M3) and the R2 bucket BLOBS (M6).
