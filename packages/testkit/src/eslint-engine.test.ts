@@ -47,12 +47,42 @@ describe("engineEslintConfig", () => {
     ["Array.prototype.shuffle = function () {}", /must not write to prototypes|extend/u],
     ["Object.prototype.x = 1", /must not write to prototypes|extend/u],
     ["typeof fetch", /'fetch' is not defined/u],
+    ["Date()", /Date\(\) reads the clock/u],
+    ["String(Date(0))", /Date\(\) reads the clock/u],
+    ['Math["ran" + "dom"]()', /by computed access/u],
+    ['JSON["parse"]', /by computed access/u],
+    ["Reflect.apply(Math.max, undefined, [1])", /Reflect\.apply/u],
+    ["Reflect.construct(Map, [])", /Reflect\.construct/u],
+    ["Reflect.set(JSON, 'parse', String)", /Reflect\.set/u],
+    ["Reflect.defineProperty(JSON, 'parse', {})", /Reflect\.defineProperty/u],
+    ["Reflect.setPrototypeOf(Object.prototype, null)", /Reflect\.setPrototypeOf/u],
+    ["Object.assign(Math, { random: () => 1 })", /must not write to built-in objects/u],
+    ["Object.defineProperty(JSON, 'parse', {})", /must not write to built-in objects/u],
+    ["Object.defineProperties(Math, {})", /must not write to built-in objects/u],
+    ["Object.setPrototypeOf(Array.prototype, null)", /must not write to built-in objects/u],
+    ["delete Math.max", /must not write to built-in objects/u],
   ])("rejects %s", (code, expected) => {
     const found = messages(`export const x = () => ${code};`);
     expect(
       found.some((message) => expected.test(message)),
       found.join("\n"),
     ).toBe(true);
+  });
+
+  it("allows ordinary uses of the same names", () => {
+    expect(
+      messages(`
+        const board = { cells: [1, 2] };
+        export const merged = Object.assign({}, board, { size: 2 });
+        export const cell = board.cells[0];
+        export const max = Math.max(...board.cells);
+        export const keys = Reflect.ownKeys(board);
+      `),
+    ).toEqual([]);
+  });
+
+  it("parses engine code as a module (strict mode)", () => {
+    expect(messages("with (Math) { max(1, 2); }").join("\n")).toMatch(/strict mode|Parsing error/u);
   });
 
   it("allows Date with an argument but not the clock", () => {

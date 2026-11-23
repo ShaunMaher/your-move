@@ -9,7 +9,7 @@
  *
  * @packageDocumentation
  */
-import type { IReachabilityForbiddenRuleType } from "dependency-cruiser";
+import type { IForbiddenRuleType, IReachabilityForbiddenRuleType } from "dependency-cruiser";
 
 /**
  * Where a game package's code lives, as dependency-cruiser path regular expressions (matched
@@ -48,15 +48,18 @@ const installed = (name: string): string =>
  * - An engine or manifest may reach only the SDK (never `@your-move/sdk/client`), Zod through
  *   `@your-move/sdk/schema`, and the package's own files: no `node:*` or other built-in modules, no
  *   runtime or framework packages, no React or DOM libraries.
- * - A client may reach only the SDK (including `/client`), Zod, React, the package's own files
- *   (its engine included) and the packages in its own `dependencies`.
+ * - A client may reach only the SDK (including `/client`), Zod through the SDK, React, the
+ *   package's own files (its engine included) and the packages in its own `dependencies`.
+ * - No file of the package imports Zod directly: only through `@your-move/sdk/schema`.
  *
- * Rules are reachability rules, so a forbidden import is caught however deep it is.
+ * The import rules are reachability rules, so a forbidden import is caught however deep it is.
  *
  * @public
  */
-export function gamePackageRules(layout: GamePackageLayout): IReachabilityForbiddenRuleType[] {
+export function gamePackageRules(layout: GamePackageLayout): IForbiddenRuleType[] {
   const sdk = layout.sdk ?? installed("@your-move/sdk");
+  // Group references ($1) only work in `to`; as a `from` they stand for any one path segment.
+  const anyOwnFile = layout.ownFiles.replaceAll("$1", "[^/]+");
   const zod = installed("zod");
   const pure = [layout.ownFiles, sdk, zod];
   const sdkClient = `${sdk}(src|dist)/client[.]`;
@@ -92,6 +95,13 @@ export function gamePackageRules(layout: GamePackageLayout): IReachabilityForbid
         reachable: true,
         pathNot: [...pure, installed("react"), ...(layout.clientDependencies ?? []).map(installed)],
       },
+    },
+    {
+      name: "game-no-direct-zod",
+      comment: "Game code imports Zod only through @your-move/sdk/schema (02 §7.1.1, §7.5).",
+      severity: "error",
+      from: { path: anyOwnFile },
+      to: { path: zod },
     },
   ];
 }

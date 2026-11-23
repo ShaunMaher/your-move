@@ -91,6 +91,8 @@ export function engineEslintConfig(files: readonly string[]): Linter.Config[] {
       name: "@your-move/testkit/eslint-engine",
       files: [...files],
       languageOptions: {
+        // Built engine output is ESM, hence strict mode: no sloppy-mode `this` as the global.
+        sourceType: "module",
         globals: Object.fromEntries(ENGINE_GLOBALS.map((name) => [name, "readonly"])),
       },
       rules: {
@@ -108,6 +110,18 @@ export function engineEslintConfig(files: readonly string[]): Linter.Config[] {
           "error",
           { object: "Math", property: "random", message: "Randomness comes from RandomSource." },
           { object: "Date", property: "now", message: "Engines get time only as an argument." },
+          ...[
+            "construct",
+            "set",
+            "defineProperty",
+            "deleteProperty",
+            "setPrototypeOf",
+            "apply",
+          ].map((property) => ({
+            object: "Reflect",
+            property,
+            message: `Reflect.${property} can call or rewrite built-ins indirectly; engines don't need it.`,
+          })),
         ],
         "no-restricted-syntax": [
           "error",
@@ -116,9 +130,25 @@ export function engineEslintConfig(files: readonly string[]): Linter.Config[] {
             message: "new Date() reads the clock; engines get time only as an argument.",
           },
           {
+            selector: "CallExpression[callee.name='Date']",
+            message: "Date() reads the clock; engines get time only as an argument.",
+          },
+          {
+            selector: `MemberExpression[computed=true][object.name=/^(${BUILT_IN_OBJECTS})$/]`,
+            message: "Use built-ins' members by name, not by computed access.",
+          },
+          {
             selector: `AssignmentExpression > MemberExpression.left[object.name=/^(${BUILT_IN_OBJECTS})$/]`,
             message: "Engines must not write to built-in objects.",
           },
+          {
+            selector: `UnaryExpression[operator='delete'] > MemberExpression[object.name=/^(${BUILT_IN_OBJECTS})$/]`,
+            message: "Engines must not write to built-in objects.",
+          },
+          ...["[arguments.0.name", "[arguments.0.object.name"].map((target) => ({
+            selector: `CallExpression[callee.object.name='Object'][callee.property.name=/^(assign|defineProperty|defineProperties|setPrototypeOf)$/]${target}=/^(${BUILT_IN_OBJECTS})$/]`,
+            message: "Engines must not write to built-in objects.",
+          })),
           {
             selector: `AssignmentExpression > MemberExpression.left > MemberExpression.object[property.name='prototype']`,
             message: "Engines must not write to prototypes.",

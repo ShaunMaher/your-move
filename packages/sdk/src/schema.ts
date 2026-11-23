@@ -1,7 +1,8 @@
 /**
- * `@your-move/sdk/schema`: the Zod instance game packages build their option, action, view and
- * config schemas with, so an engine needs no Zod dependency of its own (game packages have no
- * `dependencies`; Zod is a peer of the SDK).
+ * `@your-move/sdk/schema`: the Zod that game packages build their option, action, view and config
+ * schemas with. Engines and manifests reach Zod only through this entry point, never by importing
+ * `zod` directly (02 §7.1.1, §7.5); `zod` is a peer dependency of both the SDK and the game
+ * package, so the instance supplies the one copy everything uses.
  *
  * @packageDocumentation
  */
