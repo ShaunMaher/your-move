@@ -151,7 +151,8 @@ validate:
     - section unused "knip"; pnpm lint:unused; end unused
     - section pins "Toolchain pins"
     - pnpm lint:pins
-    - mise lock --check || { echo "mise.lock is out of date: run 'mise lock' and commit mise.lock"; exit 1; }
+    - |
+      mise lock --check || { echo "mise.lock is out of date: run 'mise lock' and commit mise.lock"; exit 1; }
     - end pins
     - section generated "Committed generated code"
     - pnpm api:generate
