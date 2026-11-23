@@ -11,15 +11,22 @@
    so one schema and one migration set serve both.
 4. **Server-authoritative, hidden-information safe.** The client never receives secret state.
 5. **Boring, small dependency set.** Each dependency must justify itself (supply-chain risk).
+6. **API first.** Every capability is an endpoint of the public, versioned HTTP API (`/api/v1`,
+   05) before it is a screen. The web app is one client of that API, through the same generated
+   typed client (`@your-move/api-client`) that the MCP server (02 §9.4) and other developers use.
+   There are no private endpoints for the web app; operator-only endpoints live in the separate
+   Admin API (05 §Admin API).
+7. **Games are packages.** The framework knows games only through installed game packages (02 §7),
+   composed at build time; first-party games get no special path.
 
 ## 2. Technology choices
 
 | Concern | Choice | Why |
 |---|---|---|
-| Language | TypeScript (strict), ES2022 modules | Shared types across engine/server/client |
+| Language | TypeScript (strict), ES2023 target, ESM (11 §2) | Shared types across engine/server/client |
 | Package manager | pnpm workspaces | Fast, strict, good monorepo support |
 | HTTP framework | [Hono](https://hono.dev) | Runs natively on Workers and Node; tiny; typed routes |
-| Validation | Zod (or Valibot if bundle size matters) | Shared request/response schemas, used client-side too |
+| Validation and API description | Zod, with Hono's OpenAPI integration (`@hono/zod-openapi`) | One schema per endpoint drives validation, the generated OpenAPI 3.1 document and the generated typed client (05 §Conventions) |
 | DB access | Drizzle ORM + drizzle-kit migrations | First-class D1 *and* better-sqlite3 drivers, same schema |
 | Node SQLite driver | better-sqlite3, WAL mode | Mature, synchronous, fast |
 | Node WebSockets | `ws` (via `@hono/node-ws` or direct) | Standard |
@@ -27,47 +34,62 @@
 | PWA | `vite-plugin-pwa` (Workbox) | Manifest + service worker generation |
 | Client state | TanStack Query for server state; small local store (Zustand or `useReducer`) for board drag state | Keep it simple |
 | Styling | CSS modules or plain CSS with custom properties | No heavy UI kit; we need full control of the board |
-| Tests | Vitest (unit + integration), Playwright (e2e, mobile viewports) | Same test runner across packages |
-| Lint/format | ESLint + Prettier (or Biome) | Pick one in M0 |
+| Tests | Vitest (unit + integration), fast-check (property tests), Playwright (e2e, mobile viewports) | Same test runner across packages; details in 11 §4 |
+| Lint/format and repo tooling | ESLint (typescript-eslint strict, type-checked) + Prettier, dependency-cruiser, knip, Changesets, Renovate | 11 (engineering standards) |
+| Toolchain | mise pins Node (26 LTS) and pnpm (12) | One pinned toolchain for developers and CI (11 §1) |
 
 ## 3. Repository layout
 
 ```
 /
 ├─ apps/
-│  ├─ web/                 React PWA (Vite)
+│  ├─ web/                 React PWA (Vite); a client of the public API via @your-move/api-client
 │  ├─ worker/              Cloudflare entry: Worker fetch handler, Durable Object classes,
 │  │                       cron handler, wrangler.toml (template), D1 binding
 │  └─ node/                Node entry: HTTP server, ws hub, SQLite, interval scheduler,
 │                          Dockerfile, docker-compose.tunnel.yml, docker-compose.caddy.yml (09 §4)
 ├─ packages/
-│  ├─ sdk/                 GameDefinition + GameClientModule types, RandomSource, Resources,
-│  │                       and the generic test kit (02 §2, §3, §6). No runtime deps.
-│  ├─ games-registry/      Server-side registry of game engines + versions (02 §7)
-│  ├─ dictionary/          dictionaries/<id>/ (source, meta, additions/removals), build script,
-│  │                       lookup API (a resource provider used by `words`)
-│  ├─ shared/              Zod schemas and TS types for the API + WebSocket protocol
-│  └─ server/              Runtime-agnostic Hono app: framework (lifecycle, transitions, lobby,
-│                          timeouts), accounts, routes, repositories, rate limiting, email
-│                          templates. Depends on a `Platform`. Knows games only via the registry.
-├─ games/
-│  ├─ words/
-│  │  ├─ engine/           Pure GameDefinition + rulesets/<id>/v<N>.json   (@app/game-words)
-│  │  └─ client/           React GameClientModule                          (@app/game-words-client)
-│  └─ paths/
-│     ├─ engine/           (@app/game-paths)
-│     └─ client/           (@app/game-paths-client)
+│  ├─ sdk/                 @your-move/sdk — GameDefinition, GameClientModule, GameManifest types,
+│  │                       RandomSource, Resources, client helpers (02 §2, §3, §7). Published.
+│  ├─ testkit/             @your-move/testkit — generic test kit + architecture rules for game
+│  │                       packages (02 §6, §7.5). Published.
+│  ├─ api-client/          @your-move/api-client — typed client generated from the OpenAPI
+│  │                       document (05). Published.
+│  ├─ mcp/                 @your-move/mcp — local MCP server over the API (02 §9.4). Published.
+│  ├─ dictionary/          @your-move/dictionary — dictionaries/<id>/ (source, meta,
+│  │                       additions/removals), build script, lookup (a framework resource provider)
+│  ├─ shared/              @your-move/shared — Zod schemas for the API + WebSocket protocol; the
+│  │                       source of the OpenAPI document
+│  └─ server/              @your-move/server — runtime-agnostic Hono app: framework (lifecycle,
+│                          transitions, lobby, timeouts), accounts, tokens, admin, routes,
+│                          repositories, rate limiting, email templates. Depends on a `Platform`.
+│                          Knows games only through the registry injected into createApp (§4);
+│                          never imports generated/ or any game package.
+├─ games/                  First-party game packages, each with /engine, /client, /manifest (02 §7)
+│  ├─ example/             @your-move/game-example — reference module and template for authors
+│  ├─ words/               @your-move/game-words (engine includes rulesets/<id>/v<N>.json)
+│  └─ paths/               @your-move/game-paths
+├─ instance.config.ts      Installed game packages for this instance (02 §7.3)
+├─ generated/              Server registry, client import map and installed.json from `pnpm games:generate` (ignored by
+│                          git, never committed); imported only by apps/worker, apps/node, apps/web
+├─ mise.toml               Pinned Node and pnpm (11 §1)
 ├─ docs/spec/              This specification
+├─ docs/adr/               Architecture decision records (11 §10)
+├─ docs/guides/            Developer guides, e.g. writing-a-game.md (11 §11)
 ├─ .claude/agents/         Agent definitions (coder, picky reviewer, security reviewer)
 └─ LICENSE (BSD-2-Clause)
 ```
 
-Package scope: `@app/*`. It stays generic even though the project is named, so a rebranded fork
-needn't rename packages.
+Package scope: `@your-move/*`. Package names are the project's identity, not branding: a fork that
+rebrands changes `APP_NAME` (09), not package names. Packages meant for outside use are published
+(02 §7.4); the rest are private workspace packages (`"private": true`).
 
 ## 4. The `Platform` port
 
-`packages/server` exports `createApp(platform: Platform): Hono`. Each runtime builds a `Platform`:
+`packages/server` exports `createApp({ platform, games }: { platform: Platform; games: GameRegistry }): Hono`.
+`games` is the generated server registry (`type → { manifest, engines }`, 02 §7.3), which
+`apps/worker` and `apps/node` import from `generated/` and pass in, so the server package itself
+never depends on any game package. Each runtime builds a `Platform`:
 
 ```ts
 interface Platform {
@@ -121,6 +143,12 @@ behaves identically on both targets.
 
 Revisit if contention or latency becomes a problem: moving authoritative game state into a
 per-game DO (with D1 as an index) is a contained change behind the `GameRepository` interface.
+
+**Durable Objects hold no state of record.** `UserChannel` only relays "something changed"
+invalidations to a user's open sockets (§6); it stores nothing a client couldn't lose, and every
+read and every action still goes through the HTTP API (principle 6). That is also why the Docker
+target, which has no Durable Objects, behaves identically: the API is the contract on both, and
+the same contract test suite runs against both builds (11 §4).
 
 ### 5.2 Game state transitions (actions and everything else)
 
@@ -180,7 +208,7 @@ unsupported and the app SHOULD refuse to start if it detects another live instan
 
 ## 6. Realtime
 
-- Client opens one WebSocket per signed-in app instance: `GET /api/ws` (cookie-authenticated,
+- Client opens one WebSocket per signed-in app instance: `GET /api/v1/ws` (cookie-authenticated,
   Origin-checked, per-IP upgrade rate limit — see 08). The target channel is always the
   **session-derived** `userId`; nothing client-supplied selects the channel.
 - Server publishes small *invalidation* events, not full state:
@@ -242,17 +270,21 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
 - Purge blobs of deleted dictionaries no `lobby`/`active` game references (`game_resources`), and
   delete row-less upload blobs older than 1 h (words §9.5).
 - Resume unfinished account deletions (04 §Account deletion).
+- Cancel **orphaned** `lobby`/`active` games — a game type or rules version no longer installed
+  (only possible after a deploy with `--allow-orphans` / `ALLOW_ORPHAN_GAMES`, 02 §7.3) — with
+  operator-cancel semantics, no ranking and `final_views` NULL.
+- Expire API tokens past `expires_at` (they're already refused; this only tidies rows).
 
 ## 9. Static assets and routing
 
 - Server-handled paths: `/api/*` (including the server-rendered unsubscribe page,
-  `/api/email/unsubscribe`, 05 §Email links), `/manifest.webmanifest` (generated at runtime from
+  `/api/v1/email/unsubscribe`, 05 §Email links), `/manifest.webmanifest` (generated at runtime from
   config so a prebuilt image/bundle carries no name — 07 §4), and `/__dev/*` (returns 404 unless
   local-dev mode, 06 §4). Everything else → built SPA from `apps/web/dist` with SPA fallback to
   `index.html`. An M4 e2e test GETs and POSTs the unsubscribe URL on both targets with the service
   worker active.
 - `index.html` contains no product name; the SPA sets `document.title` and the
-  `apple-mobile-web-app-title` meta at startup from `/api/config` (verify the iOS home-screen label
+  `apple-mobile-web-app-title` meta at startup from `/api/v1/config` (verify the iOS home-screen label
   on a real device in M2; if iOS ignores the runtime values, serve `index.html` through the server
   with the name injected).
 - **Cloudflare:** Workers Static Assets with `not_found_handling = "single-page-application"` and

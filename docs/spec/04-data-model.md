@@ -21,13 +21,16 @@ Conventions:
 | Column | Type | Notes |
 |---|---|---|
 | id | TEXT PK | |
-| email | TEXT UNIQUE NOT NULL | normalised |
+| kind | TEXT NOT NULL DEFAULT 'human' | `human` · `agent` (an AI account, 02 §9.2) |
+| owner_user_id | TEXT NULL FK → users ON DELETE CASCADE | set exactly when `kind = 'agent'`: the human who owns it (≤ 3 per owner) |
+| email | TEXT UNIQUE NULL | normalised; NOT NULL exactly when `kind = 'human'` (agents have no email and can't sign in) |
 | display_name | TEXT NULL | NULL until onboarding completed (06 §5). Wherever a name is shown (UI, push, email) and it is NULL, the fallback label "New player" is used |
 | settings | TEXT NOT NULL DEFAULT '{}' | JSON: `{ emailNudges: boolean, whoCanAddMe: "pastOpponents" \| "nobody" (default "pastOpponents", 06 §6.2), lastGameType?: string, lastOptions?: { [gameType]: unknown }, ... }` |
 | age_attested_at | INTEGER NULL | when the user confirmed they meet `MIN_AGE` (06 §5); NULL until onboarding completed |
 | age_attested_min_age | INTEGER NULL | the `MIN_AGE` value in force when they confirmed. If the operator raises `MIN_AGE` above it, the user is **re-prompted** (06 §5): `onboarded_at` is never cleared, the sweep never deletes them, but they get `403 ONBOARDING_REQUIRED` on the gated endpoints until they confirm again |
 | onboarded_at | INTEGER NULL | set when display name and age confirmation are both done (06 §5). Until then the account is treated as unknown for invitations and is deleted by the sweep after 7 days |
 | deletion_requested_at | INTEGER NULL | set when account deletion starts; the sweep resumes unfinished deletions (§Account deletion) |
+| suspended_at | INTEGER NULL | set by an admin (05 §Admin API). A suspended user can't sign in or use tokens; their sessions and tokens are revoked at suspension. Their games are not touched: seats to act simply time out (02 §4). An agent is suspended with its owner |
 | created_at, updated_at | INTEGER | |
 
 ### `otp_challenges`
@@ -35,7 +38,7 @@ Conventions:
 |---|---|---|
 | id | TEXT PK | |
 | email | TEXT NOT NULL | normalised; indexed |
-| purpose | TEXT NOT NULL | `signin` · `delete_account` — a code only verifies for its purpose |
+| purpose | TEXT NOT NULL | `signin` · `delete_account` · `token_create` · `token_admin` (06 §7) — a code only verifies for its purpose, and each purpose has its own email template |
 | code_hash | TEXT NOT NULL | HMAC-SHA256(K_otp, challengeId ‖ code), see 06 §3 |
 | attempts | INTEGER NOT NULL DEFAULT 0 | |
 | created_at, expires_at | INTEGER | expiry = created + 10 min |
@@ -64,14 +67,15 @@ At most 3 *live* challenges per (email, purpose); issuing a 4th burns the oldest
 | seats | INTEGER NOT NULL | chosen seat count; reduced to joined count at start |
 | turn_timeout_days | INTEGER NOT NULL | 1–30, framework-validated (02 §4) |
 | seat_order | TEXT NOT NULL | `join` · `random` (02 §4) |
+| ai_assistance | TEXT NOT NULL | `off` · `allowed` (02 §9.3) — public |
 | state 🔒 | TEXT NULL | module `State` JSON; NULL in `lobby` (setup runs at start) |
 | setup_rng 🔒 | TEXT NULL | random draws consumed at start: seat-order draw, then `setup` (replay, 02 §5) |
-| final_views | TEXT NULL | JSON `{ seats: { view, summary }[], public: { view, summary } }`, written on any terminal status after start (`finished`, or `declined` before a first action, 02 §5). A player only ever receives `seats[theirSeat]` |
+| final_views | TEXT NULL | JSON `{ seats: { view, summary }[], public: { view, summary } }`, written on any terminal status after start (`finished`; `declined` before a first action; `cancelled` by an operator), except for an orphaned game whose engine is gone (02 §5, §7.3). A player only ever receives `seats[theirSeat]` |
 | version | INTEGER NOT NULL DEFAULT 0 | optimistic concurrency, 03 §5.2 |
 | write_token | TEXT NULL | per-transition guard token, 03 §5.2 |
 | action_count | INTEGER NOT NULL DEFAULT 0 | |
 | last_action_at | INTEGER NOT NULL | initialised to `created_at`; ordering |
-| end_reason | TEXT NULL | module `result().endReason`, or framework reasons `declined` / `cancelled` / `expired` |
+| end_reason | TEXT NULL | module `result().endReason`, or framework reasons `declined` / `cancelled` / `operator_cancelled` / `expired` |
 | created_at, updated_at, started_at, ended_at | INTEGER | |
 
 ### `game_players`
@@ -83,7 +87,7 @@ At most 3 *live* challenges per (email, purpose); issuing a 4th burns the oldest
 | user_id | TEXT NULL FK → users ON DELETE SET NULL | NULL for an email-invite seat or after account deletion |
 | invite_email | TEXT NULL | normalised; the address the creator typed, on any seat added by email (email-invite seat or user invitation) while `invited`. Shown only to the creator. Cleared on accept and on any terminal outcome (06 §6.5) |
 | state | TEXT | `invited` · `joined` · `declined` · `left` · `removed` (lobby) · `playing` · `out` (seated, active/finished) · `dropped` (unfilled invitation at start); `declined`/`left`/`removed`/`dropped` rows stay after start with `seat` NULL (02 §4) |
-| out_reason | TEXT NULL | `eliminated` · `resigned` · `timed_out` · `declined` (out before a first action; never ranked, 02 §4) |
+| out_reason | TEXT NULL | `eliminated` · `resigned` · `timed_out` · `declined` (out before a first action; never ranked, 02 §4) · `cancelled` (operator cancel of an active game, 02 §4) |
 | joined_via | TEXT NULL | `creator` · `added` (auto-joined past opponent) · `invitation` (accepted — including an invited user who joins through the link, 02 §4) · `email_invite` · `join_link` |
 | delivery | TEXT NOT NULL DEFAULT 'normal' | for `invited` rows: `normal` · `hidden` (over the target's inbound cap, 06 §6.7: shown only in their collapsed *Hidden invitations*, no notification) · `inert` (blocked pair, or a typed address that resolves to a user already added in the same request: never delivered, never claimable, never accepted, `user_id` NULL for the latter, 06 §6.1). The creator sees all three the same way (Q3) |
 | removed_at | INTEGER NULL | when the creator removed this seat; compared with `join_links.created_at` (06 §6.8) |
@@ -118,6 +122,7 @@ in state `joined`, `playing` or `out`, or an `invited` row with their `user_id` 
 | record | TEXT NOT NULL | module `PublicRecord` JSON — public |
 | describe | TEXT NOT NULL | JSON `Text` from module `describe(record)` (02 §5) — public |
 | rng 🔒 | TEXT NULL | random draws consumed (replay) |
+| via | TEXT NOT NULL DEFAULT 'app' | `app` (cookie session) · `token` (an API token: an AI move, 02 §9.1) · `system` (timeouts). Public; history shows token moves as AI or AI-assisted |
 | created_at | INTEGER | |
 
 ### `game_resources`
@@ -141,10 +146,10 @@ resource kinds (02 §2.1 rule 7).
 Written (both directions) in the transition that finishes a game (status `finished` only), for
 every pair of seated users who **both** have `acted_once = 1`, except players who joined through a
 link: they're never paired automatically. The creator may confirm one afterwards ("Add <name> to
-your players?", `POST /api/games/:id/add-player`, 05), which writes only creator ↔ that player, and
+your players?", `POST /api/v1/games/:id/add-player`, 05), which writes only creator ↔ that player, and
 only if both acted (06 §6.9). **Never written for a pair with a block in either direction** (checked
 in the same transition), and deleted in both directions when either user blocks the other. Read by
-`whoCanAddMe` checks and `/api/players/recent`.
+`whoCanAddMe` checks and `/api/v1/players/recent`.
 
 ### `join_links`
 | Column | Type | Notes |
@@ -217,8 +222,42 @@ Index on `owner_id`.
 | window_start | INTEGER | |
 | count | INTEGER | PK(key, window_start); swept hourly |
 
+### `api_tokens` (06 §8)
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | public token id, shown in the token list |
+| user_id | TEXT FK → users ON DELETE CASCADE | the account the token acts as: the creator, or one of their agents |
+| created_by | TEXT FK → users ON DELETE CASCADE | always a human (the agent's owner for agent tokens) |
+| name | TEXT NOT NULL | user-chosen label; display-name rules (06 §5.1); HTML-escaped in emails, never in a subject |
+| token_hash | TEXT UNIQUE NOT NULL | HMAC-SHA256(K_token, secret part); the raw token is shown once |
+| scopes | TEXT NOT NULL | JSON array: `read` plus any of `play` · `games:create` · `join`; or exactly `["admin"]` (exclusive, admins only, never for an agent). Agent tokens: `read`, `play` only (06 §8) |
+| created_at, expires_at | INTEGER | expiry ≤ created + 365 days; ≤ created + 30 days for `admin` |
+| last_used_at | INTEGER NULL | updated at most once a minute |
+| revoked_at | INTEGER NULL | |
+
+At most 10 live tokens per account. Index on `user_id`.
+
+### `admin_audit` (append-only, retained 2 years)
+| Column | Type | Notes |
+|---|---|---|
+| id | TEXT PK | |
+| actor_key | TEXT NOT NULL | stable pseudonymous key of the admin: their `emailId` (HMAC of the address, 09 §1.1); **not** a foreign key, so it survives the admin's own account deletion |
+| actor_user_id | TEXT NULL FK → users ON DELETE SET NULL | the admin's user id while the account exists |
+| token_id | TEXT NOT NULL | the admin token used (admin access is by token only, 05 §Admin API) |
+| action | TEXT NOT NULL | e.g. `user.suspend`, `game.cancel`, `dictionary.add` (05 §Admin API) |
+| target_type, target_id | TEXT NULL | e.g. `user` + user id, `game` + game id; never an email |
+| detail | TEXT NULL | JSON, no secrets, no emails, no hidden game state |
+| request_id | TEXT NOT NULL | correlates with logs |
+| created_at | INTEGER | |
+
+Only requests from admin principals are written here (refused requests from non-admins are logged
+and rate-limited instead, 05 §Admin API). No route updates or deletes rows; the repository exposes
+insert and read only. Account deletion sets `actor_user_id` / `target_id` of a deleted user to
+NULL but keeps `actor_key`, so an admin deleting their own account can't erase their audit trail;
+an admin's self-deletion is itself audited (`user.delete_self`).
+
 ### `auth_events` (security audit, retained 90 days)
-| id | user_id NULL | type (`otp_requested`, `otp_failed`, `signed_in`, `signed_out_all`, `display_name_changed`, `under_age_exit`, `account_deleted`) | ip_hash | created_at |
+| id | user_id NULL | type (`otp_requested`, `otp_failed`, `signed_in`, `signed_out_all`, `display_name_changed`, `under_age_exit`, `account_deleted`, `token_created`, `token_revoked`, `token_rejected`, `agent_created`, `agent_deleted`) | ip_hash | created_at |
 
 ## Invariants (enforced by tests)
 
@@ -240,6 +279,13 @@ Framework-level (module-specific invariants live in each game doc):
    `out`; every other row has `seat` NULL and is `declined`, `left`, `removed` or `dropped`.
 6. **Blocks and past opponents**: no `past_opponents` row ever exists for a pair with a block in
    either direction (06 §6.10).
+7. **Agents**: a `kind = 'agent'` user has `owner_user_id` set and `email` NULL, has no sessions,
+   OTP challenges, push subscriptions, blocks or `past_opponents` rows, never appears as an
+   invitee, and holds `game_players` rows only in games its owner created, in state `joined`,
+   `playing` or `out` — or `removed` (the creator removed the seat in the lobby) or `left` (the
+   agent's deletion left a lobby, §Account deletion). Its onboarding state is its owner's: an
+   agent's `age_attested_min_age` stays NULL and `needsOnboarding` / re-prompt are computed from
+   the owner (06 §8).
 
 ## Account deletion
 
@@ -247,7 +293,8 @@ D1 has no interactive transactions, so deletion is a resumable sequence of idemp
 game handled by its own `write_token` transition (with the usual retries, 02 §4). Sessions are
 deleted first, so the account is unusable from the moment deletion starts.
 
-1. Delete sessions (cascades push subscriptions; live sockets closed, 06 §4).
+1. Delete sessions and API tokens (cascades push subscriptions; live sockets closed, 06 §4).
+   The user's AI accounts are deleted first by this same sequence (02 §9.2).
 2. For each of the user's games:
    - `active` where they're `playing`: a real resign transition (module `onResign`; others notified),
      or the decline rule if they haven't acted yet (02 §4);
@@ -258,7 +305,8 @@ deleted first, so the account is unusable from the moment deletion starts.
 3. Delete OTP challenges for the email, blocks and `past_opponents` rows in both directions. Mark the
    user's uploaded dictionaries deleted (`deleted_at`); the sweep purges their blobs once
    unreferenced.
-4. `auth_events`: set `user_id` NULL (keeps pseudonymous security history for its 90-day retention).
+4. `auth_events`: set `user_id` NULL (keeps pseudonymous security history for its 90-day retention);
+   `admin_audit`: set the user's `actor_user_id`/`target_id` NULL (`actor_key` stays).
 5. Delete the `users` row last: `game_players.user_id` and `games.created_by` become NULL via FK
    actions; finished games show "Deleted player". Opponents' history stays intact.
 

@@ -40,3 +40,6 @@ __pycache__/
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+
+# Agent worktrees (Claude Code isolation)
+.claude/worktrees/

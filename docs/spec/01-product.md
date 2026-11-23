@@ -23,13 +23,19 @@ the first game; a path-laying tile game for 2–8 players (good for kids and gro
 7. Open source under BSD-2-Clause.
 8. Modular rules: the game creator picks a ruleset and a dictionary per game. Ship rulesets
    modelled on the two best-known games first, then add our own variants and more dictionaries.
+9. **Games anyone can build**: a game is a package written against a published SDK, in its own
+   repository; an operator installs the games they want into their own instance (02 §7).
+10. **API first**: everything the app does is available through a documented, versioned public API
+    (05), so people can build their own tools — including connecting their own AI agent as an
+    assistant or an opponent (02 §9).
+11. Built to a high engineering standard from the first commit (11).
 
 ## 3. Non-goals (v1)
 
 - Native apps, app-store distribution.
 - Public matchmaking / playing strangers, leaderboards, ELO.
 - Chat (planned later, see roadmap).
-- Solo play vs. a computer opponent (planned later).
+- A built-in computer opponent. (People can bring their own AI agent instead, 02 §9.)
 - Payments of any kind.
 - Social-login providers (Google/Apple). Email OTP only.
 - Horizontal scaling of the Docker deployment (single instance is fine; see 03).
@@ -40,7 +46,10 @@ the first game; a path-laying tile game for 2–8 players (good for kids and gro
 - **Player**: someone aged `MIN_AGE`+ (default 13) with a phone who wants to play games with
   friends and family. Younger children play through a parent's or carer's account (Q20).
 - **Operator**: the person who deploys an instance (Cloudflare account or a Docker host). In
-  practice the owner of this repo, plus anyone else who forks it.
+  practice the owner of this repo, plus anyone else who forks it. Operators administer their
+  instance through the Admin API (05).
+- **Game author**: a developer who writes a game package in their own repository (02 §7,
+  `docs/guides/writing-a-game.md`).
 
 ## 5. User stories (v1)
 
@@ -99,6 +108,23 @@ Paths (games/paths.md)
 - P2. On my turn I rotate a tile from my hand and see exactly where every affected marker would go
   before placing it.
 - P3. I see the movement animated when anyone plays, and who's been eliminated.
+
+AI and the API (02 §9, 05, 06 §8)
+- A1. As a player I can create API tokens for my own tools, choosing what each may do, and revoke
+  them at any time.
+- A2. As a player I can create an AI account, connect my own agent to it, and seat it in a game I
+  create; everyone sees it is my AI ("Sam's AI Robo") before accepting.
+- A3. As a player I can let my agent read my games and suggest moves; it plays for me only in games
+  whose creator allowed AI assistance, and those moves are marked in history.
+
+Developers and operators
+- D1. As a game author I can build and test a game in my own repository with the published SDK
+  and test kit, following the guide.
+- D2. As an operator I can install third-party games into my instance by listing them in one
+  config file; the build refuses anything that breaks the rules.
+- D3. As an operator I can see instance status and suspend, delete or look up a user, cancel a game
+  and manage dictionaries through the Admin API (or its command-line client), with every action
+  audited.
 
 ## 6. Quality bar
 
