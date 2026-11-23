@@ -117,6 +117,12 @@ const NO_CONTROL_CHARS = /^[^\p{Cc}]+$/u;
 const STRICT_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const POSITIVE_INTEGER = /^[1-9][0-9]{0,15}$/u;
 const LIMIT_NAME = /^LIMIT_([A-Z][A-Z0-9_]*)$/u;
+/**
+ * The limits an operator may override (`LIMIT_<NAME>`, 09 §1). An unknown name refuses to start,
+ * like an unknown `GAMES_<TYPE>_*`, so a typo never silently leaves a limit at its default. The
+ * rate limits of 08 §4 add their names here with the rate limiter (M2).
+ */
+const KNOWN_LIMITS: ReadonlySet<string> = new Set(["DICT_TOTAL_BYTES"]);
 const GAMES_NAME = /^GAMES_([A-Z][A-Z0-9]*)_([A-Z0-9_]+)$/u;
 
 function required(message = "is required") {
@@ -302,8 +308,15 @@ function crossFieldIssues(raw: RawEnv, options: ParseConfigOptions): string[] {
   }
 
   for (const [name, value] of Object.entries(raw)) {
-    if (LIMIT_NAME.test(name) && !POSITIVE_INTEGER.test(String(value))) {
-      issues.push(`${name}: must be a positive whole number`);
+    if (name.startsWith("LIMIT_")) {
+      const limit = LIMIT_NAME.exec(name)?.[1];
+      if (limit === undefined || !KNOWN_LIMITS.has(limit)) {
+        issues.push(
+          `${name}: not a known limit (the LIMIT_* names are listed in docs/spec/09-operations.md §1)`,
+        );
+      } else if (!POSITIVE_INTEGER.test(String(value))) {
+        issues.push(`${name}: must be a positive whole number`);
+      }
     }
     if (name.startsWith("GAMES_")) {
       const match = GAMES_NAME.exec(name);

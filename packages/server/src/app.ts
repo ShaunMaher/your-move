@@ -2,6 +2,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import type { GameManifest } from "@your-move/sdk";
 import { configRoute, healthRoute, type ErrorCode } from "@your-move/shared";
 import type { Context } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { matchedRoutes } from "hono/route";
 
 import type { AppConfig } from "./config/parse.js";
@@ -52,6 +53,22 @@ export const SERVER_PATHS = ["/api/*", "/manifest.webmanifest", "/__dev/*"] as c
 
 function errorBody(code: ErrorCode, message: string) {
   return { error: { code, message } };
+}
+
+/** Error codes for the statuses a rejected request can get (05 §Errors). */
+const REJECTION_CODES: Partial<Record<number, ErrorCode>> = {
+  400: "BAD_REQUEST",
+  404: "NOT_FOUND",
+  413: "TOO_LARGE",
+  415: "UNSUPPORTED_MEDIA_TYPE",
+};
+
+/** The stack without its first line, which repeats the (possibly input-derived) message. */
+function stackFrames(error: Error): string {
+  return (error.stack ?? "")
+    .split("\n")
+    .filter((line) => line.trimStart().startsWith("at "))
+    .join("\n");
 }
 
 /** The route pattern that answered, never the raw path (09 §5). */
@@ -130,9 +147,26 @@ export function createApp(options: AppOptions): App {
   }
 
   app.onError((error, c) => {
+    const context = { requestId: c.get("requestId"), route: respondedRoute(c as Context) };
+    if (error instanceof HTTPException || error instanceof SyntaxError) {
+      // A request the client got wrong (body limits, malformed JSON, validation): its own status,
+      // not an error-level log, and never the message, which can quote the input (09 §5).
+      const status = error instanceof HTTPException ? error.status : 400;
+      log.info("request rejected", {
+        ...context,
+        status,
+        errorClass: error.name,
+        stack: stackFrames(error),
+      });
+      return c.json(
+        status >= 500
+          ? errorBody("INTERNAL", "Something went wrong.")
+          : errorBody(REJECTION_CODES[status] ?? "BAD_REQUEST", "The request was rejected."),
+        status,
+      );
+    }
     log.error("unhandled error", {
-      requestId: c.get("requestId"),
-      route: respondedRoute(c as Context),
+      ...context,
       errorClass: error.name,
       errorMessage: error.message,
       stack: error.stack,

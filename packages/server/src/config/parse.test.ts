@@ -107,7 +107,6 @@ describe("parseConfig: valid configurations", () => {
         DICTIONARY_UPLOADS: "false",
         DICTIONARIES_EXTRA: "nwl-2023,club-list",
         LOG_LEVEL: "debug",
-        LIMIT_MOVES_PER_MINUTE: "60",
         LIMIT_DICT_TOTAL_BYTES: "1000",
         GAMES_WORDS_DEFAULT_RULESET: "casual",
         GAMES_WORDS_ENABLED_RULESETS: "classic,casual",
@@ -130,7 +129,7 @@ describe("parseConfig: valid configurations", () => {
       dictionaryUploads: false,
       dictionariesExtra: ["nwl-2023", "club-list"],
       logLevel: "debug",
-      limits: { DICT_TOTAL_BYTES: 1000, MOVES_PER_MINUTE: 60 },
+      limits: { DICT_TOTAL_BYTES: 1000 },
       gameConfig: { words: { DEFAULT_RULESET: "casual", ENABLED_RULESETS: "classic,casual" } },
       enabledGames: ["words"],
     });
@@ -326,14 +325,20 @@ describe("parseConfig: invalid configurations", () => {
     ["LOG_LEVEL unknown", { ...PROD_ENV, LOG_LEVEL: "trace" }, "LOG_LEVEL: must be one of"],
     [
       "LIMIT_ not a number",
-      { ...PROD_ENV, LIMIT_MOVES: "lots" },
-      "LIMIT_MOVES: must be a positive whole number",
+      { ...PROD_ENV, LIMIT_DICT_TOTAL_BYTES: "lots" },
+      "LIMIT_DICT_TOTAL_BYTES: must be a positive whole number",
     ],
     [
       "LIMIT_ zero",
-      { ...PROD_ENV, LIMIT_MOVES: "0" },
-      "LIMIT_MOVES: must be a positive whole number",
+      { ...PROD_ENV, LIMIT_DICT_TOTAL_BYTES: "0" },
+      "LIMIT_DICT_TOTAL_BYTES: must be a positive whole number",
     ],
+    [
+      "LIMIT_ with an unknown name",
+      { ...PROD_ENV, LIMIT_MOVES_PER_MINUTE: "60" },
+      "LIMIT_MOVES_PER_MINUTE: not a known limit",
+    ],
+    ["LIMIT_ with a malformed name", { ...PROD_ENV, LIMIT_: "60" }, "LIMIT_: not a known limit"],
     [
       "GAMES_ for an unknown type",
       { ...PROD_ENV, GAMES_CHESS_X: "1" },

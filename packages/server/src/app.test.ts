@@ -1,3 +1,5 @@
+import { HTTPException } from "hono/http-exception";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
@@ -171,6 +173,50 @@ describe("errors and logging", () => {
       route: "/api/v1/config",
     });
     expect(errorLine?.["requestId"]).toEqual(expect.any(String));
+  });
+
+  /** An app whose /api/v1/config handler throws `error` (reading config is its first step). */
+  function throwing(error: Error) {
+    const platform = testPlatform();
+    const config = Object.defineProperty({ ...platform.config }, "operatorContact", {
+      get(): never {
+        throw error;
+      },
+    });
+    return { platform, app: createApp({ platform: { ...platform, config }, games: [] }) };
+  }
+
+  it.each([
+    [413, "TOO_LARGE"],
+    [415, "UNSUPPORTED_MEDIA_TYPE"],
+    [400, "BAD_REQUEST"],
+    [409, "BAD_REQUEST"],
+  ])(
+    "passes an HTTPException with status %i through, logged below error level",
+    async (status, code) => {
+      const { app, platform } = throwing(
+        new HTTPException(status as ContentfulStatusCode, { message: "input: secret-value" }),
+      );
+      const res = await app.request("/api/v1/config");
+      expect(res.status).toBe(status);
+      expect(await res.json()).toEqual({
+        error: { code, message: "The request was rejected." },
+      });
+      expect(platform.lines.some((line) => line["level"] === "error")).toBe(false);
+      const rejected = platform.lines.find((line) => line["msg"] === "request rejected");
+      expect(rejected).toMatchObject({ level: "info", status, errorClass: "Error" });
+      expect(JSON.stringify(platform.lines)).not.toContain("secret-value");
+    },
+  );
+
+  it("treats a SyntaxError as a malformed request: 400, logged without its message", async () => {
+    const { app, platform } = throwing(new SyntaxError('Unexpected token "secret-value" in JSON'));
+    const res = await app.request("/api/v1/config");
+    expect(res.status).toBe(400);
+    const rejected = platform.lines.find((line) => line["msg"] === "request rejected");
+    expect(rejected).toMatchObject({ errorClass: "SyntaxError", status: 400 });
+    expect(String(rejected?.["stack"])).toMatch(/^\s+at /u);
+    expect(JSON.stringify(platform.lines)).not.toContain("secret-value");
   });
 
   it("measures request duration with the platform clock", async () => {

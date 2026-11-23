@@ -4,7 +4,13 @@ import { z } from "@hono/zod-openapi";
  * Framework error codes (docs/spec/05-api.md §Errors). Clients branch on `code`; `message` is for
  * display. Codes are added here as the endpoints that return them are built.
  */
-export const ERROR_CODES = ["BAD_REQUEST", "NOT_FOUND", "INTERNAL"] as const;
+export const ERROR_CODES = [
+  "BAD_REQUEST",
+  "NOT_FOUND",
+  "TOO_LARGE",
+  "UNSUPPORTED_MEDIA_TYPE",
+  "INTERNAL",
+] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
 

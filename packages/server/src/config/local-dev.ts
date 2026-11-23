@@ -24,4 +24,4 @@ export function isLocalDev(config: { readonly publicUrl: string }): boolean {
  * The `APP_SECRET` committed in `config/local-dev.env` so a fresh clone runs with no setup. It is
  * public, so the config parser refuses it unless local-dev mode is on.
  */
-export const LOCAL_DEV_APP_SECRET = "bG9jYWwtZGV2LW9ubHktbm90LWEtc2VjcmV0LWRvLW5vdC11c2U="; // gitleaks:allow (public by design)
+export const LOCAL_DEV_APP_SECRET = "bG9jYWwtZGV2LW9ubHktbm90LWEtc2VjcmV0LWRvLW5vdC11c2U=";
