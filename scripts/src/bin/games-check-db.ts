@@ -3,8 +3,8 @@
  * [--installed <file>]`: refuses a deploy that would orphan live games (02 §7.3). Reads only
  * `generated/installed.json` and runs one fixed query; never imports game package code (08 §6).
  *
- * The build stage bundles this file (scripts/dist/games-check-db.mjs) so the deploy job can run it
- * without installing dependencies.
+ * The CI job that deploys to Workers (with the first Workers deployment, 09 §6) runs it against D1
+ * before `wrangler deploy`; the Node server makes the same check at startup.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -42,7 +42,7 @@ function querySqlite(file: string): LiveGame[] | null {
 
 function queryD1(database: string, local: boolean): LiveGame[] | null {
   try {
-    // The deploy job provides wrangler on PATH (or WRANGLER_BIN); nothing is installed here.
+    // wrangler comes from PATH, or WRANGLER_BIN; nothing is installed here.
     const stdout = execFileSync(
       process.env["WRANGLER_BIN"] ?? "wrangler",
       [

@@ -11,6 +11,12 @@ reports/
 !scripts/test-fixtures/games/node_modules/
 !scripts/test-fixtures/games/node_modules/**/dist/
 
+# CI caches and outputs kept inside the project directory (GitLab caches only paths there).
+/.pnpm-store/
+/.mise/
+/images/
+/sbom/
+
 # Game registry, client import map and installed.json: generated per instance by
 # `pnpm games:generate`, never committed (02 §7.3, 11 §3).
 /generated/

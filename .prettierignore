@@ -1,4 +1,9 @@
 # Generated or vendored: never formatted by hand (11 §3).
+# CI caches and outputs kept inside the project directory (GitLab caches only paths there).
+.pnpm-store/
+.mise/
+images/
+sbom/
 pnpm-lock.yaml
 generated/
 **/dist/

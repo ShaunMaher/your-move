@@ -1,4 +1,7 @@
 **/node_modules
+.pnpm-store
+.mise
+sbom
 !scripts/test-fixtures/**/node_modules
 **/dist
 **/dist-types

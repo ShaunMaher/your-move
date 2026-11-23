@@ -7,6 +7,9 @@ import type { KnipConfig } from "knip";
  */
 const config: KnipConfig = {
   ignore: [
+    // CI caches kept inside the project directory.
+    ".pnpm-store/**",
+    ".mise/**",
     // M1: the SDK's client entry point gets its helpers.
     "packages/sdk/src/client.ts",
     // M1: the dictionary package gets its registry, build and lookup.

@@ -115,6 +115,8 @@ export default {
     doNotFollow: { path: "node_modules" },
     exclude: {
       path: [
+        "^[.]pnpm-store/",
+        "^[.]mise/",
         "(^|/)dist/",
         "(^|/)dist-types/",
         "(^|/)coverage/",

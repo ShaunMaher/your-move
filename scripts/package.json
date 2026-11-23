@@ -8,9 +8,6 @@
   "exports": {
     "./instance": "./src/instance/define.ts"
   },
-  "scripts": {
-    "build": "esbuild src/bin/games-check-db.ts --bundle --platform=node --format=esm --target=node26 --outfile=dist/games-check-db.mjs"
-  },
   "devDependencies": {
     "@types/node": "catalog:",
     "@types/semver": "catalog:",
@@ -18,7 +15,6 @@
     "@your-move/server": "workspace:*",
     "@your-move/testkit": "workspace:*",
     "dependency-cruiser": "catalog:",
-    "esbuild": "catalog:",
     "eslint": "catalog:",
     "fast-check": "catalog:",
     "openapi-typescript": "catalog:",

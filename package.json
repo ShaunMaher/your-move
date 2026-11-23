@@ -5,7 +5,7 @@
   "description": "Asynchronous turn-based games with friends: monorepo root",
   "license": "BSD-2-Clause",
   "type": "module",
-  "packageManager": "pnpm@12.21.0",
+  "packageManager": "pnpm@12.21.0+sha512.66fd8278ee28935ce951792d34367ff3af5c432a2756445823029533835b8da529bbe0be5130afd56ed0713fb8789e47bad82d93bd5ae2fe54b15562d6276ef0",
   "engines": {
     "node": ">=26 <27"
   },
@@ -32,8 +32,7 @@
     "renovate:sync": "tsx scripts/src/bin/renovate-sync.ts",
     "gates:prove": "tsx scripts/src/bin/gates-prove.ts",
     "api:surface": "pnpm --filter @your-move/sdk run api:surface",
-    "changeset": "changeset",
-    "cf:deploy": "pnpm --filter @your-move/worker run deploy"
+    "changeset": "changeset"
   },
   "dependencies": {
     "@your-move/sdk": "workspace:*"

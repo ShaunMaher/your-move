@@ -630,9 +630,6 @@ importers:
       dependency-cruiser:
         specifier: 'catalog:'
         version: 18.8.0
-      esbuild:
-        specifier: 'catalog:'
-        version: 0.28.2
       eslint:
         specifier: 'catalog:'
         version: 9.39.5(jiti@2.7.0)(supports-color@10.2.2)
@@ -666,9 +663,6 @@ importers:
       '@your-move/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
-      '@your-move/node':
-        specifier: workspace:*
-        version: link:../../apps/node
       '@your-move/server':
         specifier: workspace:*
         version: link:../../packages/server

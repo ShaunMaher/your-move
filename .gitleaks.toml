@@ -13,9 +13,18 @@ regex = '''ym_pat_[0-9A-Za-z]{1,64}_[0-9A-Za-z]{20,}'''
 keywords = ["ym_pat_"]
 
 [allowlist]
-description = "Values that are public by design"
+description = "Values that are public by design, and caches that hold no project secrets"
 paths = [
-  # The published local-dev configuration: accepted by the server only with http://localhost.
-  '''^config/local-dev\.env$''',
   '''(^|/)pnpm-lock\.yaml$''',
+  # CI caches kept inside the project directory: third-party packages and tool binaries.
+  '''^\.pnpm-store/''',
+  '''^\.mise/''',
+  '''(^|/)node_modules/''',
+  # Build output (never committed; its sources are scanned instead).
+  '''(^|/)dist/''',
+]
+# The published local-dev APP_SECRET (config/local-dev.env, LOCAL_DEV_APP_SECRET): the server
+# accepts it only when PUBLIC_URL is http://localhost. Only this exact value is allowed.
+regexes = [
+  '''bG9jYWwtZGV2LW9ubHktbm90LWEtc2VjcmV0LWRvLW5vdC11c2U=''',
 ]
