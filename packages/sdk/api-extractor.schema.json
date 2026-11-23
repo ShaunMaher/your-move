@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/api-extractor/v7/api-extractor.schema.json",
+  // The @your-move/sdk/schema entry point (API Extractor reads one entry point per config).
+  "extends": "./api-extractor.json",
+  "mainEntryPointFilePath": "<projectFolder>/dist/schema.d.ts",
+  "apiReport": {
+    "enabled": true,
+    "reportFileName": "sdk-schema",
+    "reportFolder": "<projectFolder>/api-report/",
+    "reportTempFolder": "<projectFolder>/dist/api-report-temp/"
+  }
+}
