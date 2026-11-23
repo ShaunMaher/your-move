@@ -309,7 +309,10 @@ it("passes the generic test kit", () => {
 ```
 
 Use `mode: "fast"` while developing and `mode: "full"` in CI (thousands of games per option set
-and seat count). A failure names the property and the seed, so you can replay it. The kit also
+and seat count). By default the kit plays only your default options (`resolveOptions({})`); pass
+`optionInputs` to play more option sets, as the example does with the corners of its ranges
+(`src/kit.test.ts`). Every seat count `players(options)` allows and `validateStart` accepts is
+played. A failure names the property and the seed, so you can replay it. The kit also
 checks that the manifest agrees with the engine: the type, `hiddenInformation`, player bounds,
 rules text for every exported version, and the resource kinds.
 
@@ -330,6 +333,11 @@ export default {
     // The packages in your package.json "dependencies", which only the client may import.
     clientDependencies: [],
   }),
+  options: {
+    // Resolve through package.json "exports" the way Node and bundlers do; without this the SDK's
+    // entry points don't resolve and every import of them is reported.
+    enhancedResolveOptions: { exportsFields: ["exports"], conditionNames: ["import", "default"] },
+  },
 };
 ```
 
