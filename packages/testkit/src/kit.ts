@@ -146,7 +146,6 @@ class Kit {
     try {
       return fn();
     } catch (error) {
-      if (error instanceof GameAborted) throw error;
       this.fail(property, `${what} threw ${errorName(error)}`, where);
       throw new GameAborted();
     }
@@ -298,8 +297,20 @@ class Kit {
   /** Plays one seeded game with every per-step check. */
   play(combo: Combo, seed: number): void {
     const steps = this.game(combo, seed);
-    while (steps.next().done !== true) {
-      // Each step is one transition; nothing to do between them.
+    try {
+      while (steps.next().done !== true) {
+        // Each step is one transition; nothing to do between them.
+      }
+    } catch (error) {
+      // A failure was reported where it happened. Anything else is module output the kit
+      // couldn't even inspect (e.g. seatStatus returning no array).
+      if (!(error instanceof GameAborted)) {
+        this.fail("schema", `module output the kit can't read: ${errorName(error)}`, {
+          version: combo.def.version,
+          seats: combo.seats,
+          seed,
+        });
+      }
     }
   }
 
@@ -353,7 +364,6 @@ class Kit {
       this.record(def, result.record, where, observe);
       state = this.roundTrip(result.state, entry.kind, where);
       log.push({ ...entry.log, draws: [...entry.draws()] });
-      yield;
       if (entry.log.kind === "action") acted.add(entry.log.seat);
       if (entry.log.kind !== "action") {
         const status = this.call("turns", "seatStatus", where, () => def.seatStatus(state));
@@ -364,6 +374,7 @@ class Kit {
           where,
         );
       }
+      yield;
     }
     this.replay(def, options, seats, setupDraws, log, state, where);
   }
@@ -882,8 +893,11 @@ class Kit {
         this.fail("cpu", `worstCase input ${String(index)} threw ${errorName(error)}`, where);
         continue;
       }
-      times.sort((a, b) => a - b);
-      const p99 = times[Math.min(times.length - 1, Math.ceil(times.length * 0.99) - 1)] ?? 0;
+      // The 99th percentile: the slowest of the fastest 99 % of runs.
+      const p99 = [...times]
+        .sort((a, b) => a - b)
+        .slice(0, Math.ceil(times.length * 0.99))
+        .reduce((slowest, time) => Math.max(slowest, time), 0);
       if (p99 > budget) {
         this.fail(
           "cpu",
@@ -908,8 +922,8 @@ class Kit {
           for (const game of games) {
             try {
               if (game.next().done !== true) live += 1;
-            } catch (error) {
-              if (!(error instanceof GameAborted)) throw error;
+            } catch {
+              // The game stopped on a failure, which playing it on its own reported.
             }
           }
         }
@@ -934,8 +948,6 @@ class Kit {
     const savedSamples = [this.samples, this.perturbed];
     try {
       fn();
-    } catch (error) {
-      if (!(error instanceof GameAborted)) throw error;
     } finally {
       this.failures.splice(0, this.failures.length, ...saved);
       this.counts.clear();
@@ -986,11 +998,7 @@ export function runKit(engines: GameEngines, options: KitOptions): KitReport {
       for (let game = 0; game < perCombo; game += 1) {
         seed += 1;
         kit.games += 1;
-        try {
-          kit.play(combo, seed);
-        } catch (error) {
-          if (!(error instanceof GameAborted)) throw error;
-        }
+        kit.play(combo, seed);
       }
       kit.cpu(combo, seed);
       const pairs = options.mode === "full" ? 20 : 3;

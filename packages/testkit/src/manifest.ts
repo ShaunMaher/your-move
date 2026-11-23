@@ -32,11 +32,9 @@ export function checkManifest(
     problems.push(`manifest type "${manifest.type}" must match ^[a-z][a-z0-9]{1,31}$`);
   }
   problems.push(...checkIcon(manifest.icon).map((problem) => `manifest icon: ${problem}`));
-  const versions = Object.keys(engines);
+  const versions = Object.entries(engines);
   if (versions.length === 0) problems.push("the engine exports no rules version");
-  for (const key of versions) {
-    const def = engines[Number(key)];
-    if (def === undefined) continue;
+  for (const [key, def] of versions) {
     const at = `rules version ${key}`;
     if (def.version !== Number(key)) {
       problems.push(`${at}: the definition says version ${String(def.version)}`);

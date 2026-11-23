@@ -40,6 +40,12 @@ describe("checkManifest", () => {
     ]);
   });
 
+  it("accepts resource requests of a kind the manifest lists", () => {
+    const toy = toyGame();
+    const engines = { 1: { ...toy, resources: () => [{ kind: "dictionary" as const, id: "d" }] } };
+    expect(checkManifest({ ...toyManifest, resources: ["dictionary"] }, engines)).toEqual([]);
+  });
+
   it("reports an engine with no rules version", () => {
     expect(checkManifest(toyManifest, {})).toEqual(["the engine exports no rules version"]);
   });

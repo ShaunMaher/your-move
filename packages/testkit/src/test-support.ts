@@ -251,7 +251,7 @@ export const toyManifest: GameManifest = {
 };
 
 /** Wraps a definition as a package's `engines` export. */
-export const asEngines =(def: Toy): GameEngines => ({ [def.version]: def });
+export const asEngines = (def: Toy): GameEngines => ({ [def.version]: def });
 
 /** Marks the slow fixture's worst-case states. */
 const SLOW = 99;

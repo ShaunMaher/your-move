@@ -135,6 +135,76 @@ describe("runKit's static checks", () => {
     expect(report.failures.filter((f) => f.property === "secrecy")).toHaveLength(5);
   });
 
+  it("reports resolveOptions throwing for one option input, and checkConfig's undeclared codes", () => {
+    const toy = toyGame();
+    const report = runKit(
+      asEngines({
+        ...toy,
+        resolveOptions: (input, ctx) => {
+          if (typeof input === "object" && input !== null && "boom" in input) {
+            throw new Error("boom");
+          }
+          return toy.resolveOptions(input, ctx);
+        },
+        checkConfig: () => ({ code: "CONFIG" }),
+      }),
+      { mode: "fast", games: 1, optionInputs: [{ boom: 1 }, {}] },
+    );
+    expect(report.failures.map((f) => f.message)).toEqual([
+      "checkConfig returned code CONFIG, which isn't in errorCodes",
+      "resolveOptions threw Error: boom",
+    ]);
+  });
+
+  it("reports module output it can't read, and exceptions that aren't Errors", () => {
+    const toy = toyGame();
+    const unreadable = runKit(
+      asEngines({ ...toy, seatStatus: () => null as unknown as ("playing" | "out")[] }),
+      { mode: "fast", games: 1 },
+    );
+    expect(unreadable.failures.map((f) => f.message).join("\n")).toMatch(
+      /module output the kit can't read: TypeError/u,
+    );
+    const thrown = runKit(
+      asEngines({
+        ...toy,
+        summary: () => {
+          // eslint-disable-next-line @typescript-eslint/only-throw-error -- the kit must report any thrown value
+          throw "not an error";
+        },
+      }),
+      { mode: "fast", games: 1 },
+    );
+    expect(thrown.failures.map((f) => f.message).join("\n")).toMatch(/threw not an error/u);
+  });
+
+  it("times worst cases whose action is illegal, and reports ones that throw", () => {
+    const toy = toyGame();
+    const worstCase = (illegal: number) => () => {
+      const state = toy.setup({ options: {}, seats: 2, rng: { nextInt: () => 0 } });
+      return [{ state: { ...state, marker: illegal }, seat: 0, action: { card: 99 } }];
+    };
+    const legal = runKit(asEngines({ ...toy, test: { ...toy.test, worstCase: worstCase(0) } }), {
+      mode: "fast",
+      games: 1,
+    });
+    expect(legal.failures).toEqual([]);
+    const throwing = runKit(
+      asEngines({
+        ...toy,
+        validate: (s, seat, a, res) => {
+          if (s.marker === 1) throw new Error("slow path");
+          return toy.validate(s, seat, a, res);
+        },
+        test: { ...toy.test, worstCase: worstCase(1) },
+      }),
+      { mode: "fast", games: 1 },
+    );
+    expect(throwing.failures.map((f) => f.message)).toContain(
+      "worstCase input 0 threw Error: slow path",
+    );
+  });
+
   it("reports a worstCase that throws", () => {
     const toy = toyGame();
     const report = runKit(

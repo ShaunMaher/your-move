@@ -5,7 +5,7 @@
 
 const sortKeys = (_key: string, value: unknown): unknown => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
-  return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : 1)));
 };
 
 /** JSON with object keys in a stable order; `undefined` stays distinguishable from absent. */

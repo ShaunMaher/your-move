@@ -48,6 +48,7 @@ describe("checkIcon", () => {
     ["a non-svg root", '<g xmlns="http://www.w3.org/2000/svg"></g>', /root element must be <svg>/u],
     ["two roots", `${svg("")}${svg("")}`, /exactly one root/u],
     ["text outside title", svg("hello"), /text is allowed only inside/u],
+    ["text after the root", `${svg("")}trailing`, /text is allowed only inside/u],
     ["markup inside title", svg("<title><rect/></title>"), /may contain only text/u],
     ["an entity in a title", svg("<title>a &amp; b</title>"), /character references/u],
     ["an unclosed element", '<svg xmlns="http://www.w3.org/2000/svg"><g>', /not closed/u],
