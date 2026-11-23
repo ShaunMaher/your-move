@@ -23,8 +23,8 @@ are no app-only endpoints.
 | `/new` | New game flow (§1.1) |
 | `/g/:id` | Lobby (status `lobby`: seats and their states, turn timeout, seat order, word list and other resources; rows never joined show the creator the typed address (or the picked past opponent's name) only while invited, and otherwise only their state ("Invited", "Declined", "Removed"), which is all everyone else ever sees; for the creator: join-link share sheet, Remove per seat, Start/Cancel; for an invitation: Accept/Decline/Block; for others: Leave) or the game frame + module `Board`. The history drawer pages through `GET /api/v1/games/:id/history`. The finished screen shows ranks (or "Declined — no result") and, for the creator, "Add <name> to your players?" for link joiners (02 §4) |
 | `/join#<token>` | Join-link landing page: game type, options, turn timeout, creator and joined players; an explicit "Join" button. On load it reads the fragment and replaces the URL with plain `/join` (`history.replaceState`). Signed-out visitors sign in first; the path and fragment are kept in `sessionStorage` (same-origin `/join` only), restored afterwards, and cleared after a join or a `404` (06 §6.8). Never joins automatically |
-| `/settings` | Display name, **who can add me to games** (06 §6.2), notifications toggle, email nudges, devices/sessions, sign out, sign out everywhere, blocked players, delete account, about/licence/source link |
-| `/settings/api` | **API tokens** (06 §8): list (name, scopes, acts as, created, expires, last used), create (name, scopes, expiry, acting as me or one of my AI accounts; asks for a step-up code; shows the token **once** with a copy button and a warning), revoke. **AI accounts** (02 §9.2): create (display name), rename, delete, see their games. A link to the API docs page (`/api/v1/docs`) and the MCP guide |
+| `/settings` | Display name, **who can add me to games** (06 §6.2), notifications toggle, email nudges, devices/sessions, sign out, sign out everywhere (with "also revoke all API tokens", checked by default), blocked players, delete account, about/licence/source link |
+| `/settings/api` | **API tokens** (06 §8): list (name, scopes, acts as, created, expires, last used), create (name, scopes — `read` + `play` pre-selected, `games:create` and `join` behind an "advanced" toggle that explains an assistant never needs them; expiry; acting as me or one of my AI accounts; asks for a `token_create` step-up code; shows the token **once** with a copy button and a warning), revoke. Admin tokens aren't created here: admins use the same screen's separate "Admin token" form (exclusive scope, ≤ 30 days, its own step-up code). **AI accounts** (02 §9.2): create (display name), rename, delete, see their games. Links to the OpenAPI document (`/api/v1/openapi.json`) and the MCP guide |
 | `/privacy` | Privacy page (08 §5), operator contact from config; says the service is for people aged `MIN_AGE`+ and that children play through a parent's account, and that the email provider keeps copies of sent emails (sign-in codes, invitations) and for how long (operator-configured text) |
 | `/settings/word-lists` | My uploaded word lists: upload (file picker → name, language, rights checkbox → progress), list with "in use by N games", delete |
 | `/help/word-lists` | "Where can I get a word list?" (words §9.5): official sources only, licence reminder, accepted file format |
@@ -33,9 +33,10 @@ are no app-only endpoints.
 The app name comes from `/api/v1/config` at runtime; nothing name-specific is baked into the build.
 
 **AI labels** (02 §9.2, 08 T31): wherever a player's name appears — game list, lobby, header,
-history, finished screen, invitations — an AI account shows "<name> (AI)" with an AI badge
-(icon + accessible label "AI player"). Moves made through a token show an "AI" marker in the
-history drawer. Games with AI assistance allowed show it in the header and lobby.
+history, finished screen, invitations, the join page — an AI account shows "<owner>'s AI <name>"
+with an AI badge (icon + accessible label "AI player"), from the envelope's `kind` and
+`aiOwnerName` (05). Moves made through a token show an "AI" marker in the history drawer (from
+`via`). Games with AI assistance allowed show it in the header, lobby, invitation and join page.
 
 There is no admin UI in v1; operators use the Admin API and its command-line client (09 §1.2).
 
@@ -57,13 +58,15 @@ There is no admin UI in v1; operators use the Admin API and its command-line cli
    open seats" toggle (with the warning that anyone with the link can see the game and join, and
    that the game then waits for you to press Start), and a "Turn order: join order / random"
    choice.
-   If the creator has AI accounts, they can add them to seats here ("Add my AI").
+   If the creator has AI accounts, they can add them to seats here ("Add my AI"); for a game type
+   with hidden information this is offered only when every other seat is one of their AIs (02 §4).
 4. **Pace and AI**: turn timeout in days (1–30), defaulting to the game's `defaultTurnTimeoutDays`;
-   **AI assistance** off / allowed (02 §9.3), defaulting to off when two or more people will play,
-   with a one-line explanation ("Allowed: players may let their own AI agent make moves; those moves
-   are marked").
+   **AI assistance** off / allowed (02 §9.3), defaulting to off whenever a seat is open or two or
+   more people will play (02 §4), fixed once created, with a one-line explanation ("Allowed: players
+   may let their own AI agent make moves; those moves are marked").
 5. **Create**. The game starts immediately if every seat is filled by auto-joined past opponents
-   and there's no join link; otherwise it opens the lobby. If a join link was created, its URL is shown once with a share
+   and/or the creator's own AIs, there's no join link and no AI rule prevents it (02 §4); otherwise
+   it opens the lobby. If a join link was created, its URL is shown once with a share
    button.
 
 In the game frame, the menu shows the game's name and options (e.g. ruleset and word list), plus

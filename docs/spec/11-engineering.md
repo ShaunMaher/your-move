@@ -14,8 +14,11 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
   (corepack) and `"engines": { "node": ">=26 <27" }`; `engine-strict=true` in `.npmrc`.
 - CI uses the same pins (§9): job images are built from the pinned Node version, and pnpm comes
   from `packageManager`.
-- No global installs are assumed beyond mise (or Node + corepack) and Docker (for the Docker image
-  and some e2e setups). `pnpm install` then provides every other tool.
+- `mise.toml` also pins the **non-npm tools** the gates need, so a fresh clone gets them from
+  `mise install` (mise `aqua`/`ubi` backends): **gitleaks**, **osv-scanner** and **oasdiff**. CI
+  installs the same pins.
+- No global installs are assumed beyond mise (or Node + corepack plus those three binaries) and
+  Docker (for the Docker image and some e2e setups). `pnpm install` provides every npm tool.
 
 ## 2. TypeScript
 
@@ -37,7 +40,7 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
 - **ESLint** (flat config, `eslint.config.js`):
   - `typescript-eslint` `strictTypeChecked` + `stylisticTypeChecked` with type information;
   - `eslint-plugin-react`, `react-hooks`, `jsx-a11y` (strict) for the web app and game clients;
-  - `eslint-plugin-import-x` (or `simple-import-sort`) for ordering, no cycles, no extraneous deps;
+  - `eslint-plugin-import-x` for import ordering, `no-cycle` and `no-extraneous-dependencies`;
   - `@eslint-community/eslint-comments` with `require-description`: every disable comment states
     why, and `no-unused-disable` removes stale ones;
   - `no-console` outside `apps/*` entry points and scripts (use the logger, 09 §5);
@@ -45,10 +48,14 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
     or timers in `games/*/engine` and the SDK's pure parts; no `dangerouslySetInnerHTML`;
     no hard-coded `"Your Move"` string outside config defaults.
 - Warnings fail CI (`--max-warnings 0`).
-- **Generated code** is never edited by hand and lives in clearly marked places: the OpenAPI
-  document and `@your-move/api-client` (generated from `@your-move/shared`'s schemas, 05 §Versioning),
-  the game registry and client import map (`pnpm games:generate`, 02 §7.3), Drizzle migrations
-  (reviewed, then committed). CI regenerates and fails if the committed output differs.
+- **Generated code** is never edited by hand and lives in clearly marked places:
+  - **committed**, and CI regenerates and fails on any difference: the OpenAPI document and
+    `@your-move/api-client` (`openapi-typescript` + `openapi-fetch`, generated from the route
+    schemas, 05 §Versioning), the SDK's API Extractor report (`@microsoft/api-extractor`, 02 §7.4)
+    and Drizzle migrations (reviewed, then committed);
+  - **not committed** (git-ignored `generated/`): the game registry and client import map
+    (`pnpm games:generate`, 02 §7.3), which depend on the instance's installed games. Only
+    `apps/*` import them (§5).
 
 ## 4. Tests
 
@@ -56,7 +63,7 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
 |---|---|---|---|
 | Unit and integration | Vitest | every package; repositories against both drivers (03 §4) | runs on every MR |
 | Property-based | fast-check (inside Vitest) | engines, rule invariants, tile conservation, parsers | seeded; a failure prints the seed |
-| Game contract | `@your-move/testkit` (02 §6) | every installed game package | runs on every MR and in `pnpm games:verify` |
+| Game contract | `@your-move/testkit` (02 §6) | every installed game package | **full** kit on every MR (test stage); **fast** kit in `pnpm games:verify` during build and deploy |
 | API contract | Vitest + `@your-move/api-client` | the same suite against the Node build and the Worker build (Miniflare / `@cloudflare/vitest-pool-workers`) | runs on every MR |
 | Component | Vitest + Testing Library | web app and game clients | runs on every MR |
 | End-to-end | Playwright | WebKit (iPhone viewport) and Chromium; real server + SQLite | runs on every MR (sharded) |
@@ -74,29 +81,41 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
 
 `dependency-cruiser` enforces the boundaries in CLAUDE.md and 02 §7.5 (`pnpm lint:arch`):
 
-- `games/*/engine` → only `@your-move/sdk` and its own files. No `node:*`, no runtime packages, no
-  framework packages, no DOM, no React.
+- `games/*/engine` → only `@your-move/sdk` (incl. `@your-move/sdk/schema`) and its own files. No
+  `node:*`, no runtime packages, no framework packages, no DOM, no React.
 - `games/*/client` → only `@your-move/sdk`, React and its own engine.
-- `packages/server` → no `apps/*`, no game packages (only the generated registry), no
+- `packages/server` → no `apps/*`, no game packages and **not** `generated/` (the game registry is
+  injected by `apps/worker` and `apps/node` through `createApp({ platform, games })`, 02 §7.3), no
   Cloudflare- or Node-specific modules (03 principle 1).
-- `packages/sdk` → no runtime dependencies at all.
+- `generated/` → imported only by `apps/worker`, `apps/node` (server registry) and `apps/web`
+  (client import map).
+- `packages/sdk` → no dependencies; `zod` and `react` are peer dependencies only (02 §7.4).
 - `apps/web` → the API only through `@your-move/api-client`; no `packages/server` imports.
 - No circular dependencies anywhere; no orphaned modules.
 
 The game-facing part of these rules ships in `@your-move/testkit` so third-party game repos and
-`pnpm games:verify` use exactly the same ruleset (02 §7.5).
+`pnpm games:verify` use exactly the same rules (02 §7.5): the dependency-cruiser ruleset
+(`@your-move/testkit/depcruise`) for imports, and an ESLint config
+(`@your-move/testkit/eslint-engine`) run on **built engine output** for the globals allow-list and
+the no-writes-to-built-ins rule — dependency-cruiser can't see globals.
 
 ## 6. Dependency and repository hygiene
 
 - **knip**: no unused files, exports, dependencies or devDependencies (`pnpm lint:unused`).
+  Placeholder packages and exports that exist only for a later milestone are listed in knip's
+  `ignore` with a comment naming the milestone, and removed from it when that milestone lands.
 - **Licences**: every production dependency's licence must be on the allow-list — MIT, ISC,
-  BSD-2-Clause, BSD-3-Clause, Apache-2.0, 0BSD, BlueOak-1.0.0, CC0-1.0, Unlicense. Anything else needs an owner decision recorded in `docs/licences.md`. The same
-  allow-list applies to installed game packages (02 §7.3).
+  BSD-2-Clause, BSD-3-Clause, Apache-2.0, 0BSD, BlueOak-1.0.0 (permissive licences), and the
+  public-domain dedications CC0-1.0 and Unlicense. Anything else needs an owner decision recorded
+  in `docs/licences.md`. The check (`pnpm lint:licences`) is a small script over
+  `pnpm licenses list --json --prod` — no extra dependency. The same allow-list applies to
+  installed game packages (02 §7.3).
 - **Secrets**: gitleaks in pre-commit and CI, with a custom rule for `ym_pat_` tokens (06 §8);
   `.env*` files ignored (an `.env.example` is committed).
 - **Vulnerabilities**: OSV-Scanner on the lockfile in CI and on a nightly schedule; a known
-  vulnerability in a production dependency fails the pipeline unless an accepted-risk entry with an
-  expiry date exists in `docs/security/findings.md`.
+  vulnerability in a production dependency fails the pipeline unless it is ignored in
+  `osv-scanner.toml` with `ignoreUntil` and a `reason` that names an accepted-risk entry
+  (`F-<n>`) in `docs/security/findings.md` with the same expiry.
 - **pnpm**: `--frozen-lockfile` everywhere; `onlyBuiltDependencies` lists the few packages allowed
   to run install scripts (08 §6); `minimumReleaseAge` for new versions; `strict-peer-dependencies`.
 - Repository files: `.editorconfig`, `.gitattributes` (LF line endings, lockfile marked generated),
@@ -106,33 +125,42 @@ The game-facing part of these rules ships in `@your-move/testkit` so third-party
 ## 7. Git workflow and releases
 
 - `main` is protected: changes land only through merge requests with a green pipeline and the
-  review process in CLAUDE.md. Branches are named `m<N>-<slug>`, `spec-<version>`, `fix/<slug>` or
-  `renovate/*`.
+  review process in CLAUDE.md. Branches are named `m<N>-<slug>`, `spec-<version>`, `fix/<slug>`,
+  `release/<yyyy-mm-dd>` or `renovate/*`.
 - **Conventional Commits** (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`, `build:`,
   `ci:`; `!` for breaking), enforced by commitlint on every commit in an MR and on the MR title
-  (squash commits use the title).
+  (squash commits use the title). Renovate is configured with `:semanticCommits` so its commits
+  pass; release commits are `chore(release): version packages`.
 - **lefthook** pre-commit hooks (installed by `pnpm install`): Prettier and ESLint on staged files,
   gitleaks on the staged diff. Pre-push: `pnpm typecheck`. Hooks are a convenience; CI is the gate.
-- **Changesets** version and release the published `@your-move/*` packages (02 §7.4): every MR
-  that changes a published package includes a changeset; `main` opens a "Version packages" MR, and
-  merging it publishes from CI (08 §6) and writes `CHANGELOG.md` per package. The app itself is
-  versioned from the same flow (`@your-move/server` version = instance version).
+- **Changesets** version and release the published `@your-move/*` packages (02 §7.4), **without a
+  bot**: every MR that changes a published package includes a changeset (CI checks this with
+  `changeset status --since=origin/main`; Renovate MRs are exempt). To release, a maintainer runs
+  `pnpm changeset version` on a `release/<date>` branch and opens a normal MR; when it merges, the
+  publish job on `main` runs `changeset publish` (08 §6: protected `release` environment, deploy
+  token, never `CI_JOB_TOKEN`) and `CHANGELOG.md` is written per package. `.changeset/config.json`
+  sets `privatePackages: { version: true, tag: false }`, so the unpublished app is versioned from
+  the same flow (`@your-move/server` version = instance version). The SDK stays `0.x` until M4.
 
 ## 8. Dependency updates (Renovate)
 
 Renovate runs as a scheduled pipeline on this GitLab project with the `RENOVATE_TOKEN` project
-access token (masked, protected CI variable; rotation noted in the operator's private notes).
+access token (Developer role, no merge rights on `main`): a masked, protected CI variable **scoped
+to the `renovate` environment**, which only the scheduled Renovate job uses — no lint, test or
+build job can read it (08 §6). Rotation is noted in the operator's private notes.
 `renovate.json`:
 
 - extends `config:best-practices` (pins Docker images and CI images by digest, `:pinDevDependencies`,
-  config migration);
+  config migration) and `:semanticCommits`; `ignoreScripts: true`;
 - schedule: weekly (weekend), plus security updates at any time;
 - `minimumReleaseAge` 3 days for npm packages;
 - groups: monorepo packages together (typescript-eslint, Vitest, Playwright, Hono, Drizzle,
   React), all `@types/*` together, CI images together;
-- **automerge** only for patch/minor **devDependencies** and lockfile maintenance, after a green
-  pipeline; runtime dependencies, game packages (`@*/game-*`), the SDK's dependencies and major
-  updates are never automerged;
+- **no automerge at all**: every update — dev dependencies (test and build tools shape the
+  production bundle), lockfile maintenance, runtime dependencies, game packages, majors — opens an
+  MR that goes through the normal review (08 §6). Game packages are recognised from the list in
+  `instance.config.ts` (a `packageRules` entry generated from it), not from a name pattern, and get
+  their own label so their diffs are read with the trust model in mind (02 §7.5);
 - lockfile maintenance monthly;
 - covers `mise.toml` (Node, pnpm), Dockerfiles, `.gitlab-ci.yml` images and `package.json`;
 - the Dependency Dashboard issue is enabled and is the single place to see pending updates.
@@ -140,20 +168,29 @@ access token (masked, protected CI variable; rotation noted in the operator's pr
 ## 9. CI pipeline (`.gitlab-ci.yml`)
 
 Pipelines run for merge requests and for `main`/tags (no duplicate branch pipelines). The pnpm
-store is cached by lockfile hash. Stages:
+store is cached by lockfile hash. Jobs run unprivileged (no Docker-in-Docker); untagged jobs run
+on the amd64 shared runner. Stages, in order:
 
 1. **validate** — `prettier --check`, ESLint, `tsc -b`, `pnpm lint:arch`, knip, commitlint (MR),
-   generated-code drift (§3), OpenAPI breaking-change check against the target branch (oasdiff,
-   05 §Versioning), `pnpm games:verify` (02 §7.3).
-2. **test** — Vitest with coverage (unit, integration, property, component, game contract, API
-   contract on both runtimes); JUnit and Cobertura reports to the MR.
-3. **e2e** — Playwright (WebKit + Chromium), traces and screenshots kept as artifacts on failure.
-4. **security** — gitleaks, OSV-Scanner, licence check (§6).
-5. **build** — web app, Worker bundle, multi-arch Docker image (`linux/amd64` on the x86 runner,
-   `linux/arm64` on the arm64 runner, then a manifest), CycloneDX SBOM.
-6. **publish** (`main`/tags only) — Changesets publish to the GitLab package registry; Docker image
-   to the GitLab container registry (09 §6).
-7. **deploy** (manual, `production` environment, 09 §6).
+   changeset check (§7), committed generated-code drift (§3), OpenAPI breaking-change check against
+   the target branch (`oasdiff breaking`, 05 §Versioning), API Extractor report check.
+2. **test** — Vitest with coverage (unit, integration, property, component, the **full** game
+   kit, API contract on both runtimes); JUnit and Cobertura reports to the MR.
+3. **build** — `pnpm games:verify --fast`, web app, Worker bundle, Docker image per architecture
+   built natively with rootless BuildKit (`linux/amd64` job tagged `arch-amd64`, `linux/arm64` job
+   tagged `arch-arm64`), CycloneDX SBOM. MR pipelines build but never push.
+4. **e2e** — Playwright (WebKit + Chromium) against the **build artifact** from stage 3, traces and
+   screenshots kept as artifacts on failure.
+5. **security** — gitleaks, OSV-Scanner, licence check (§6).
+6. **publish** (`main`/tags only, protected `release` environment, deploy token, 08 §6) —
+   `changeset publish` to the GitLab package registry; per-arch images pushed and joined into a
+   multi-arch manifest with `crane`; digests recorded in the release notes.
+7. **deploy** (manual, `production` environment, 09 §6) — reuses the stage-3 artifact.
+
+Stages 1–5 run on every MR; that's what "green on an MR" means. Each gate is shown to fail by
+**fixture tests in CI** (e.g. a fixture file with a lint error, an import breaking an architecture
+rule, a fake `ym_pat_` secret, a disallowed licence in a fixture manifest, an engine fixture using
+`Math.random`), run against the real configs, not by one-off throwaway MRs.
 
 A scheduled pipeline runs Renovate (§8) and the nightly OSV scan. Every job has a timeout;
 pipeline wall time on an MR should stay under 15 minutes (track it; split or shard when it grows).
@@ -183,7 +220,8 @@ chose it over the alternatives*. M0 writes the first three:
   6. Versioning rules and state (rules versions, package semver, SDK compatibility)
   7. Publishing and installing into an instance (`instance.config.ts`, `pnpm games:verify`)
   8. Checklist before you publish
-- Public API reference: the generated OpenAPI document and its docs page (05).
+- Public API reference: the generated OpenAPI document (`/api/v1/openapi.json`, 05). There is no
+  rendered docs page in v1 (CSP, 05 §Versioning); the README says how to open it in a local viewer.
 
 ## 12. Definition of done
 

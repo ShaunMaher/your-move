@@ -9,14 +9,19 @@ app, the MCP server (02 §9.4) and anyone else's tools are clients of the same A
   balancers and Docker health checks); everything else, including the WebSocket, is under
   `/api/v1`. Paths in this document are written in full.
 - **One schema per endpoint.** Each route's request, response and error shapes are Zod schemas in
-  `@your-move/shared`, registered through `@hono/zod-openapi`. They drive request validation
-  (unknown fields rejected with `.strict()`), response typing, the generated **OpenAPI 3.1**
-  document served at `GET /api/v1/openapi.json` (**public**) with a rendered reference page at
-  `/api/v1/docs` (static assets bundled with the app, no third-party CDN, 08 §3), and the generated
-  typed client `@your-move/api-client` (11 §3). Game-specific payloads appear in the document as
-  `unknown` with a pointer to the installed game's own schemas, which are published per game type
-  at `GET /api/v1/games/types/:type/schemas` (**public**; JSON Schema generated from the module's
-  Zod schemas).
+  `@your-move/shared` (the client-facing types a game client also needs — `GameEnvelope`,
+  `SubmitResult` and friends — are defined in `@your-move/sdk` and re-used, 02 §7.4), registered
+  through `@hono/zod-openapi`. They drive request validation (unknown fields rejected with
+  `.strict()`), response typing, the generated **OpenAPI 3.1** document served at
+  `GET /api/v1/openapi.json` (**public**), and the generated typed client `@your-move/api-client`
+  (`openapi-typescript` + `openapi-fetch`, 11 §3). Each operation carries an `x-scope` extension
+  (§Token scopes). There is **no rendered docs page in v1**: common renderers need inline styles
+  that the CSP forbids (08 §3); developers load `openapi.json` into a viewer of their choice.
+  Game-specific payloads appear in the document as `unknown` with a pointer to the installed game's
+  own schemas, published per game type at `GET /api/v1/games/types/:type/schemas` (**public**;
+  JSON Schema generated from the module's Zod schemas), and its rules at
+  `GET /api/v1/games/types/:type/rules?version=` (**public**; the manifest's Markdown, 02 §7.2;
+  latest rules version by default).
 - The Admin API (§Admin API) has its own document, `GET /api/v1/admin/openapi.json`, served only to
   admins; it is never part of the public document.
 - **Compatibility within v1 is additive only**: new endpoints, new optional request fields, new
@@ -26,17 +31,21 @@ app, the MCP server (02 §9.4) and anyone else's tools are clients of the same A
   `/api/v2`, which runs alongside v1 for at least 6 months. Endpoints scheduled for removal send
   `Deprecation` (RFC 9745) and `Sunset` (RFC 8594) headers and are listed in the changelog.
 - A CI check compares the generated OpenAPI document with the one on the target branch and fails
-  on a breaking change within v1 (oasdiff or equivalent, 11 §9).
+  on a breaking change within v1 (`oasdiff breaking`, 11 §9).
 - **Contract tests**: one API test suite, written against `@your-move/api-client`, runs against
   both the Node build and the Worker build (Miniflare) in CI (11 §4).
 
 ## Conventions
 
 - Auth: session cookie (06 §4) **or** an API token sent as `Authorization: Bearer ym_pat_…`
-  (06 §8). Endpoints are authenticated unless marked **public**. Each endpoint states the token
-  scope it needs; endpoints marked **session only** can't be used with a token at all (token
-  management, account settings, deletion, onboarding, push subscriptions, blocks).
-- A request carrying both a cookie and a bearer token is rejected (`400 BAD_REQUEST`).
+  (06 §8). Endpoints are authenticated unless marked **public**. Which credential each route
+  accepts — public, session only, or a token with a given scope — is defined once, in
+  §Token scopes, and anything not listed there is **denied** (deny by default).
+- A request carrying both a cookie and a bearer token is rejected (`400 BAD_REQUEST`). Tokens are
+  accepted **only** in the `Authorization` header: never in a query string, cookie or WebSocket.
+  The `Authorization` header is never logged, by the app or at the edge (09 §5).
+- **No CORS in v1**: the API sends no `Access-Control-Allow-*` headers, so browsers on other origins
+  can't call it; scripts, CLIs and the MCP server (which aren't browsers) use tokens.
 - State-changing requests (`POST`/`PATCH`/`DELETE`) **authenticated by cookie** MUST carry an
   `Origin` header equal to `PUBLIC_URL`'s origin, else `403 BAD_ORIGIN` (CSRF defence, 08).
   Bearer-token requests are exempt from the Origin rule: browsers never attach them automatically,
@@ -59,7 +68,7 @@ app, the MCP server (02 §9.4) and anyone else's tools are clients of the same A
 | POST | `/api/v1/auth/otp/request` **public** | `{ email }` | `202 {}` — always identical regardless of whether the email is known, rate-limited, or suppressed. Rate limiting is reported only when the *IP* is limited (`429 RATE_LIMITED`), never per email. |
 | POST | `/api/v1/auth/otp/verify` **public** | `{ email, code }` | `200 { user, needsOnboarding }` + `Set-Cookie`. `needsOnboarding` is true until a display name is set and the age confirmation given for the current `MIN_AGE` (06 §5). Errors: `400 INVALID_CODE` (wrong, expired, consumed or unknown — indistinguishable), `429 RATE_LIMITED`. |
 | POST | `/api/v1/auth/logout` | `{}` | `204`, clears cookie, deletes session |
-| POST | `/api/v1/auth/logout-all` | `{}` | `204`, deletes all of the user's sessions |
+| POST | `/api/v1/auth/logout-all` | `{ revokeTokens?: boolean }` | `204`, deletes all of the user's sessions; with `revokeTokens: true` (the app offers it, checked by default) also revokes every API token of the user and their AI accounts |
 | GET | `/api/v1/me` | | `200 { id, kind, email, displayName, settings, ageAttested, needsOnboarding, isAdmin }` or `401` (`kind` is `agent` and `email` null for an AI account's token; `isAdmin` lets the client show admin links, it grants nothing). `needsOnboarding` is true until onboarding is complete, and again for a re-prompted user after a `MIN_AGE` rise (06 §5) |
 | PATCH | `/api/v1/me` | `{ displayName?, settings?, ageAttested?: true }` | `200` user. `settings` accepts only known keys (`emailNudges`, `whoCanAddMe`, theme). The request that completes onboarding sets `onboarded_at` and claims email-invite seats (06 §6.4). Display-name changes after onboarding: at most 3 per 30 days (`429 RATE_LIMITED`), each logged (06 §5) |
 | POST | `/api/v1/me/under-age` | `{}` | Only while `needsOnboarding` is true. A new account (`onboarded_at` NULL): deletes the account and its sessions at once, with no step-up code (06 §5, 04 §Account deletion), suppresses invite emails to the address and makes its email seats `inert`. A re-prompted account (onboarded, after a `MIN_AGE` rise): signs out this session only and deletes nothing (deletion needs the step-up flow below). `204`, clears cookie; `409 WRONG_STATUS` when `needsOnboarding` is false |
@@ -83,13 +92,16 @@ GameEnvelope = {
   version,                                   // optimistic-concurrency version
   endReason: string | null,                  // module result().endReason, or "declined" / "cancelled" / "expired"
   turnTimeoutDays, seatOrder: "join" | "random",
+  aiAssistance: "off" | "allowed",           // 02 §9.3; fixed at creation
+  available: boolean,                        // false for an orphaned game whose engine is gone (02 §7.3)
   resources: [{ kind, id, name, distribution?, uploadedBy?: string,
                 downloadUrl?: string /* public distribution only: versioned, hashed (words §9.4) */ }],  // never blob keys or hashes
   players: [{ playerId?: string /* game_players.id; creator only, lobby only (for remove-seat) */,
               seat: number | null /* null in lobby */, userId: string | null, displayName: string | null,
+              kind: "human" | "agent", aiOwnerName?: string /* agents: the owner's display name, shown as "<owner>'s AI" (02 §9.2) */,
               invitedAs?: string /* creator only, while state is "invited": the address they typed, or the picked past opponent's name */,
               state: "invited" | "joined" | "declined" | "left" | "removed" | "playing" | "out",
-              outReason?: "eliminated" | "resigned" | "timed_out" | "declined", rank?: number, score?: number,
+              outReason?: "eliminated" | "resigned" | "timed_out" | "declined" | "cancelled", rank?: number, score?: number,
               deadline?: number /* when this seat times out, if in toAct */, isYou: boolean, isCreator: boolean }],
   yourSeat: number | null, toAct: number[], yourTurn: boolean,
   yourInvitation: "normal" | "hidden" | null, // you hold an `invited` seat (accept/decline); hidden ones never badge
@@ -97,7 +109,7 @@ GameEnvelope = {
   canAddPlayers?: { userId, displayName }[], // creator only, finished games: link joiners who acted and aren't yet past opponents — blocked ones are still listed so the prompt reveals nothing; add-player is a no-op for them (02 §4)
   createdAt, lastActionAt
 }
-GameSummary = { id, gameType, status, endReason, yourTurn, yourInvitation /* as in the envelope */, players (as in the envelope),
+GameSummary = { id, gameType, status, endReason, aiAssistance, yourTurn, yourInvitation /* as in the envelope */, players (as in the envelope),
   summary: { headline: Text, scores? },     // module summary(state, yourSeat) while active; the stored final summary after start;
                                             // in the lobby a framework Text, e.g. "Waiting for 2 players"
   lastAction: { describe: Text, byYou: boolean } | null,
@@ -114,7 +126,9 @@ opponent they picked by `userId` (which they already know). Once the row is `dec
 other members ("Invited", "Declined", "Removed"); the typed address has been cleared (06 §6.5). `normal`, `hidden` and `inert`
 invitations look identical (Q3, 04). Link joiners (and the join lookup) see only `joined` rows.
 After start: only seated players. A player's envelope never contains an email other than the
-creator's own typed `invitedAs` values.
+creator's own typed `invitedAs` values. `kind` and `aiOwnerName` are shown for every row that is
+shown at all (AI accounts are always seated by their owner at creation, so they are never
+anonymous rows).
 
 ### `GET /api/v1/games`
 The viewer's games (membership as in 04), newest activity first: all `lobby`/`active`; `finished`
@@ -132,9 +146,11 @@ collapsed *Hidden invitations*, 06 §6.7).
   seats?: number,                  // default: max if min = max, else min; must be within players(options)
   turnTimeoutDays?: number,        // integer 1–30; default module defaultTurnTimeoutDays(options)
   seatOrder?: "join" | "random",   // default "join"
-  aiAssistance?: "off" | "allowed", // default "off" when the game will have ≥ 2 human seats (02 §9.3)
+  aiAssistance?: "off" | "allowed", // default "off" if any seat is open or ≥ 2 humans, else "allowed" (02 §4); immutable
   agents?: string[],               // ids of the creator's own AI accounts to seat (02 §9.2); auto-joined
   invitees: ({ email: string } | { userId: string })[],   // humans; agents + invitees ≤ seats-1; userId must be a past opponent
+                                   // a token (scope games:create) may name only past opponents by userId and own agents —
+                                   // never an email invitee (403 NOT_ALLOWED)
   joinLink?: boolean               // create a join link for remaining open seats
 }
 ```
@@ -151,7 +167,7 @@ invitee by its `emailId` (the HMAC of the typed address), never by the user it r
 
 | Case | Response |
 |---|---|
-| Created | `201 { game: GameEnvelope, joinLinkUrl?: string }` — `active` immediately if every seat is filled by auto-joined past opponents (and no join link was requested), else `lobby` |
+| Created | `201 { game: GameEnvelope, joinLinkUrl?: string }` — `active` immediately if every seat is filled by auto-joined past opponents and/or the creator's own AI accounts (no join link requested, and no AI rule in 02 §4 preventing auto-start), else `lobby` |
 | Unknown/disabled `gameType` | `400 UNKNOWN_GAME` |
 | `resolveOptions` fails (incl. a resource the creator may not use, 02 §2.1 rule 7) | `400 INVALID_OPTIONS { detail: { code, detail? } }` with the module code, e.g. `UNKNOWN_DICTIONARY`, `INCOMPATIBLE_DICTIONARY` |
 | `seats` outside `players(options)` | `400 INVALID_SEAT_COUNT` |
@@ -160,7 +176,9 @@ invitee by its `emailId` (the HMAC of the typed address), never by the user it r
 | More invitees than `seats - 1`, **literal** duplicates (the same normalised address twice, or the same `userId` twice), an invalid address, or a `userId` that isn't a past opponent or has a block in either direction with the creator (a block between invitees, or with a member, silently gives the later invitee an `inert` seat, 06 §6.1) | `400 INVALID_INVITEES` |
 | The creator's own email or id | `400 CANNOT_PLAY_SELF` |
 | An `agents` id that isn't one of the creator's own AI accounts, or an AI account's id or address given as an invitee | `400 INVALID_INVITEES` |
-| The caller is an AI account (agents can't create games, 02 §9.2) | `403 NOT_ALLOWED` |
+| AI seats in a game type with hidden information while another human seat is possible (02 §4) | `400 AI_SEATS_NOT_ALLOWED` |
+| The caller is an AI account's token (agents can't create games, 02 §9.2) | `403 AGENT_NOT_ALLOWED` |
+| A token request with an email invitee | `403 NOT_ALLOWED` |
 | Creator has too many `lobby`/`active` games they created (per pair > 5, total > 50) — counts only games the **creator** created; a pair is (creator, `userId`) for picked invitees and (creator, `emailId`) for every typed address, whatever it resolves to | `409 TOO_MANY_GAMES` |
 | More email invitees than allowed (per user, 08 §4; counted for every email, whatever it turns out to be) | `429 RATE_LIMITED` — nothing created |
 | Onboarding incomplete | `403 ONBOARDING_REQUIRED` |
@@ -176,19 +194,23 @@ disabled ruleset in the remembered choices never breaks game creation.
 ### `GET /api/v1/games/:id`
 `200 { game: GameEnvelope, view: <module View> | null }`. `view` is `view(state, yourSeat)` while
 active, null in the lobby (and for invitations), and `final_views.seats[yourSeat].view` for any
-terminal status after start (`finished`, or `declined` before a first action) — never the whole
-`final_views`. `404 NOT_FOUND` if the viewer isn't a member (04 §Membership; never `403`).
+terminal status after start (`finished`; `declined` before a first action; `cancelled` by an
+operator) — never the whole `final_views`. For an orphaned game (`available: false`, 02 §7.3)
+`view` is null and the client shows "This game is no longer available". `404 NOT_FOUND` if the
+viewer isn't a member (04 §Membership; never `403`).
 
 ### `GET /api/v1/games/:id/history`
 Members only (`404` otherwise). Cursor-paginated, oldest first (`?cursor=`, 100 per page):
-`{ items: [{ seq, seat, kind, record, describe: Text, createdAt }], nextCursor }` from
-`game_actions`. Never returns `action` or `rng`. Empty for games that never started.
+`{ items: [{ seq, seat, kind, record, describe: Text, via: "app" | "token", createdAt }], nextCursor }`
+from `game_actions`. `via` lets every client mark AI moves (02 §9.1). Never returns `action` or
+`rng`. Empty for games that never started.
 
 ### `POST /api/v1/games/:id/actions`
 `{ expectedVersion: number, action: <module Action> }`. Checks in order (first failure wins):
 
 1. viewer is a member with a seat (`404 NOT_FOUND`);
-2. status is `active` (`409 GAME_NOT_ACTIVE`);
+2. status is `active` (`409 GAME_NOT_ACTIVE`) and the game isn't orphaned (`409 GAME_UNAVAILABLE`,
+   02 §7.3);
 3. `expectedVersion` matches (`409 STALE_GAME`) — before the turn check, so a stale client always
    learns it is stale;
 4. viewer's seat is in `toAct` (`409 NOT_YOUR_TURN`);
@@ -204,8 +226,11 @@ Members only (`404` otherwise). Cursor-paginated, oldest first (`?cursor=`, 100 
 
 ### `POST /api/v1/games/:id/preview`
 `{ action }` → `200 { preview }` or `400` module error, without committing. Only for modules that
-implement `preview`, and only for a full module `Action` (never free-form words). Checks 1, 2, 4,
-5, 6, then module `preview`. Rate-limited (it can be a dictionary oracle — 08 T22, §4).
+implement `preview`, and only for a full module `Action` (never free-form words). Runs checks 1, 2,
+4, 6 and 7 of `/actions` — including the `serverOnly` lookup-budget reservation — then module
+`preview`. It **never** runs check 5: previews are allowed to a `read` token whatever the game's
+`aiAssistance` (02 §9.3). Rate-limited (it can be a dictionary oracle — 08 T22, §4); a test
+asserts that preview draws on the lookup budget.
 
 ### Lifecycle transitions
 All take `{ expectedVersion }` and are framework transitions (03 §5.2).
@@ -239,7 +264,7 @@ or proxy logs. The web page reads it and calls:
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/v1/join/lookup` | `{ token }` → `200 { game: { id, gameType, options, resources, turnTimeoutDays, creatorName, players (joined only, names only), openSeats } }` or `404` (invalid, revoked, expired, full, blocked with any member, the viewer declined/left this game, or was removed while this link was live — indistinguishable) |
+| POST | `/api/v1/join/lookup` | `{ token }` → `200 { game: { id, gameType, options, resources, turnTimeoutDays, aiAssistance, creatorName, players (joined only: names, `kind`, `aiOwnerName`), openSeats } }` or `404` (invalid, revoked, expired, full, blocked with any member, the viewer declined/left this game, or was removed while this link was live — indistinguishable) |
 | POST | `/api/v1/join` | `{ token }` → takes an open seat → `200 { game }`; same `404` cases; `409 ALREADY_JOINED`. Blocks are checked against **every** row in the game (`404` if any). If the viewer already holds a `normal` or `hidden` invitation in this game, joining accepts it instead of taking another seat (`joined_via = invitation`); an `inert` row is never accepted (its block makes the join `404` anyway). Server-side retries on version conflict (02 §4), so callers never see `STALE_GAME` |
 
 Both return `403 ONBOARDING_REQUIRED` until onboarding is complete, and both are rate-limited per
@@ -250,6 +275,8 @@ creator's game caps. Joining always requires an explicit tap on Join (07 §1).
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/v1/players/recent` | Past opponents (04 `past_opponents`): `[{ userId, displayName, lastPlayedAt }]` up to 50, across all game types |
+| GET | `/api/v1/games/types/:type/rules?version=` **public** | `200 { type, version, markdown }` from the installed manifest (02 §7.2); `404` for an unknown type or version |
+| GET | `/api/v1/games/types/:type/schemas` **public** | JSON Schemas of the module's options, action, view, record and preview (§Versioning) |
 
 ## Catalog, config, health
 
@@ -304,20 +331,37 @@ address.
 | Method | Path | Body | Result |
 |---|---|---|---|
 | GET | `/api/v1/me/tokens` | | `{ id, name, scopes, actsAs: { userId, displayName, kind }, createdAt, expiresAt, lastUsedAt }[]` for the viewer and their AI accounts; never the token or its hash |
-| POST | `/api/v1/me/tokens` | `{ name, scopes, expiresInDays, agentId?, code }` | Needs a fresh `step_up` code (06 §7, purpose `step_up`, requested with `POST /api/v1/me/step-up/otp`). `201 { id, token }` — the token is shown **once**. `scopes` ⊆ `read`, `play` (+ `admin` for admins acting as themselves, never for an agent); `expiresInDays` 1–365; `agentId` must be one of the viewer's AI accounts. Errors: `400 INVALID_CODE`, `400 BAD_REQUEST`, `409 TOO_MANY_TOKENS` (10 live per account) |
+| POST | `/api/v1/me/step-up/otp` | `{ purpose: "token_create" \| "token_admin" }` | `202` — emails a code for that purpose; the email names the action ("Code to create an API token", "Code to create an **admin** token") and uses a template distinct from sign-in (06 §7). Rate-limited separately from sign-in (08 §4) |
+| POST | `/api/v1/me/tokens` | `{ name, scopes, expiresInDays, agentId?, code }` | `201 { id, token }` — the token is shown **once**. `code` must be a fresh code of purpose `token_create`, or `token_admin` when `scopes` is `["admin"]`. `scopes` is either a non-empty subset of `read`, `play`, `games:create`, `join` (with `read` always included), or exactly `["admin"]` (admins only, acting as themselves, never with other scopes, never for an agent). `expiresInDays`: 1–365, or 1–30 for `admin`. `agentId` must be one of the viewer's AI accounts; agent tokens may have only `read` and `play`. `name` follows the display-name rules (06 §5.1). Creating an `admin` token emails **every** admin and writes `admin_audit`. Errors: `400 INVALID_CODE`, `400 BAD_REQUEST`, `403 ONBOARDING_REQUIRED`, `409 TOO_MANY_TOKENS` (10 live per account) |
 | DELETE | `/api/v1/me/tokens/:id` | (none) | `204`; revokes at once; `404` if not the viewer's or their agent's |
-| POST | `/api/v1/me/step-up/otp` | `{}` | `202` — emails a `step_up`-purpose code (06 §7) |
 | GET | `/api/v1/me/agents` | | `{ id, displayName, createdAt, tokenCount }[]` |
-| POST | `/api/v1/me/agents` | `{ displayName }` | `201 { id, displayName }`; display-name rules apply (06 §5.1), shown with the "(AI)" suffix everywhere; `409 TOO_MANY_AGENTS` (3) |
+| POST | `/api/v1/me/agents` | `{ displayName }` | `201 { id, displayName }`; display-name rules apply (06 §5.1); shown as "<owner>'s AI <name>" everywhere; counts toward the owner's rename budget (06 §5) and a daily creation limit (08 §4). `409 TOO_MANY_AGENTS` (3 live), `403 ONBOARDING_REQUIRED`, `429 RATE_LIMITED` |
 | PATCH | `/api/v1/me/agents/:id` | `{ displayName }` | `200`; rename limit as for people (06 §5) |
 | DELETE | `/api/v1/me/agents/:id` | (none) | `204`; runs account deletion for the agent (04 §Account deletion): its tokens are revoked and its active seats resign |
 
-**Token scopes.** `read`: every `GET` a member can make about their own account's games, the game
-list, history, catalog, `GET /api/v1/me`. `play`: additionally actions, preview, accept, decline,
-resign, leave, join links (join), and creating games (people only). `admin`: the Admin API, and
-only for an admin's own account. Everything else is **session only** and answers
-`403 INSUFFICIENT_SCOPE` to a token. A token for an AI account acts as that agent, so its view is
-the agent's seat's view.
+## Token scopes
+
+Every route is listed here, with what may call it. The server enforces this table from the
+`x-scope` value on each operation (§Versioning), and a route-enumeration test fails if any
+registered route lacks an entry: **deny by default**. "Session" means a cookie session only; a
+token gets `403 INSUFFICIENT_SCOPE`. "Agent" says whether an AI account's token may call it
+(otherwise `403 AGENT_NOT_ALLOWED`).
+
+| Routes | Credential | Agent |
+|---|---|---|
+| `/api/health`, `/api/v1/health`, `/api/v1/config`, `/api/v1/openapi.json`, `/api/v1/games/types/:type/{rules,schemas}`, `/api/v1/auth/otp/*`, `/api/v1/email/unsubscribe`, `/manifest.webmanifest` | public | — |
+| `GET /api/v1/me`, `GET /api/v1/games`, `GET /api/v1/games/:id`, `GET /api/v1/games/:id/history`, `GET /api/v1/catalog`, `POST /api/v1/games/:id/preview` | session or `read` | yes |
+| `POST /api/v1/games/:id/actions`, `…/resign`, `…/decline`, `…/seen` | session or `play` (for seats the token's user already holds) | yes |
+| `POST /api/v1/games`, `…/start`, `…/cancel`, `…/remove-seat`, `…/join-link` (POST/DELETE), `…/add-player`, `GET /api/v1/players/recent` | session or `games:create` (tokens: no email invitees) | no |
+| `POST /api/v1/join/lookup`, `POST /api/v1/join`, `…/accept`, `…/leave` | session or `join` | no |
+| `PATCH /api/v1/me`, `POST /api/v1/me/under-age`, `/api/v1/me/delete/otp`, `DELETE /api/v1/me`, `/api/v1/me/sessions*`, `/api/v1/me/tokens*`, `/api/v1/me/step-up/otp`, `/api/v1/me/agents*`, `/api/v1/auth/logout*`, `/api/v1/blocks*`, `/api/v1/push/*`, `/api/v1/dictionaries*` | session | no |
+| `GET /api/v1/ws` | session (cookie) only; bearer tokens are rejected | no |
+| `/api/v1/admin/*` | an `admin` token only (§Admin API) | no |
+
+`read` is always part of a non-admin token. A token for an AI account acts as that agent, so its
+view is the agent's seat's view; it stops working while the agent's owner isn't onboarded
+(06 §8). The default scopes offered in the app are `read` + `play`; `games:create` and `join` are
+opt-in and the app explains that an assistant should never need them.
 
 ## Admin API
 
@@ -326,29 +370,34 @@ administrative task is an endpoint; the `pnpm admin:*` commands are thin clients
 
 - **Who:** users whose email is listed in `ADMIN_EMAILS` (09). Not stored in the database; checked
   on every request.
-- **How:** a cookie session with a `step_up` code verified within the last 10 minutes
-  (`POST /api/v1/admin/step-up { code }` marks the session; else `403 STEP_UP_REQUIRED`), or a
-  bearer token with the `admin` scope belonging to an admin.
-- Separate, lower rate limits (08 §4); every admin request — allowed or refused — is written to
-  `admin_audit` (04) with actor, action, target and request id. Refusals are also logged.
+- **How:** only a bearer token with the exclusive `admin` scope (06 §8: max 30 days, created with
+  its own `token_admin` step-up code, every admin notified) belonging to a current admin. There is
+  no cookie-based admin access in v1 (the web app has no admin screens). `@your-move/api-client`
+  and `@your-move/mcp` refuse admin tokens unless explicitly told otherwise.
+- **Non-admins** — any request without a valid admin token, including signed-in users and other
+  tokens — get `404 NOT_FOUND` on every admin route, as if it didn't exist. These refusals are
+  logged and rate-limited per user and per IP bucket (08 §4), not written to `admin_audit`.
+- Requests from admin principals — allowed or refused (e.g. validation errors) — are written to
+  `admin_audit` (04) with a stable actor key, action, target and request id. Separate rate limits
+  (08 §4).
 - **Admins never see hidden game state** (no racks, bags, decks or other seats' views of an
   `active` game; the same secrecy rules as everyone, 04 invariant 4) and never browse email
   addresses: users are looked up only by an exact address (matched by its HMAC) or by id.
+- The admin's `reason` text is stored in `admin_audit` only and **never shown to players**.
 - Not part of the public OpenAPI document (§Versioning).
 
 | Method | Path | Body | Result |
 |---|---|---|---|
-| POST | `/api/v1/admin/step-up` | `{ code }` | `204`; marks this session as stepped up for 10 minutes |
-| GET | `/api/v1/admin/status` | | Instance status: version, enabled game types and installed packages, migration level, counts (users, active games, games by type and status, sessions), sweep last-run times, email-provider health, rate-limit breaker state. No personal data |
+| GET | `/api/v1/admin/status` | | Instance status: version, enabled game types and installed packages, migration level, counts (users, active games, games by type and status, sessions), orphaned games (02 §7.3), sweep last-run times, email-provider health, rate-limit breaker state. No personal data |
 | POST | `/api/v1/admin/users/lookup` | `{ email }` or `{ id }` | `200 { id, kind, displayName, createdAt, onboardedAt, suspendedAt, gameCounts, agentCount }` or `404`. The email is never echoed back |
-| POST | `/api/v1/admin/users/:id/suspend` | `{ reason }` | `204`; sets `suspended_at`, revokes sessions and tokens (incl. its agents'); sign-in refused with the generic sign-in response (06 §3) — never revealing the suspension to someone who only knows the address; a signed-in client gets `403 SUSPENDED` |
+| POST | `/api/v1/admin/users/:id/suspend` | `{ reason }` | `204`; sets `suspended_at`, revokes sessions and tokens (incl. its agents'), cancels the `lobby` games the user created and declines their pending invitations (realtime only); active games continue and time out normally. Sign-in is refused with the generic sign-in response (06 §3) — never revealing the suspension to someone who only knows the address; a signed-in client gets `403 SUSPENDED` |
 | POST | `/api/v1/admin/users/:id/unsuspend` | `{}` | `204` |
-| POST | `/api/v1/admin/users/:id/revoke-sessions` | `{}` | `204` |
+| POST | `/api/v1/admin/users/:id/revoke-sessions` | `{ revokeTokens?: boolean }` | `204` |
 | DELETE | `/api/v1/admin/users/:id` | `{ reason }` | `202`; runs account deletion (04) |
-| POST | `/api/v1/admin/games/:id/cancel` | `{ reason }` | `204`; ends a `lobby` game as `cancelled` or an `active` game as `cancelled` with no ranking (players get a "cancelled by the operator" notice); `409 WRONG_STATUS` otherwise |
-| GET | `/api/v1/admin/dictionaries` | | operator and built-in dictionaries with metadata (never contents) |
-| POST | `/api/v1/admin/dictionaries` | streamed upload, as the user upload route (words §9.5), plus `{ id, name, distribution }` | `201`; operator dictionary added (same validation pipeline) |
-| DELETE | `/api/v1/admin/dictionaries/:id` | (none) | `204`; marked deleted, purged once unreferenced |
+| POST | `/api/v1/admin/games/:id/cancel` | `{ reason }` | `204`; operator cancel (02 §4): a `lobby` game ends `cancelled`; an `active` (or orphaned) game ends `cancelled` with no ranking and players get a "cancelled by the operator" notice; `409 WRONG_STATUS` otherwise |
+| GET | `/api/v1/admin/dictionaries` | `?source=builtin\|operator\|upload&cursor=` | Dictionaries with metadata (id, source, name, language, word count, created, owner id for uploads, games using it) — never contents, blob keys or hashes |
+| POST | `/api/v1/admin/dictionaries` | streamed upload exactly as the user upload route: gzip body, metadata in headers `X-Dict-Id`, `X-Dict-Name`, `X-Dict-Language` | `201`; adds an **operator** dictionary, always `serverOnly` (09 §1), enabled at once; same validation pipeline (words §9.5). An id listed in `DICTIONARIES_EXTRA` but not yet added is reported by `status` |
+| DELETE | `/api/v1/admin/dictionaries/:id` | `{ reason }` | `204`; for **any** operator dictionary or user upload (the takedown path, 08 T23): marked deleted, unusable for new games, purged once unreferenced (words §9.5) |
 | GET | `/api/v1/admin/email-suppressions` | `?cursor=` | `{ emailId, reason, createdAt }[]` — HMACs only, never addresses |
 | DELETE | `/api/v1/admin/email-suppressions` | `{ email }` | `204`; removes the suppression for that exact address (e.g. a user asked to receive invites again) |
 | GET | `/api/v1/admin/audit` | `?cursor=` | `admin_audit` rows, newest first |
@@ -359,11 +408,11 @@ Framework codes (reserved; modules can't use them, 02 §2.2):
 
 | Status | Codes |
 |---|---|
-| 400 | `INVALID_CODE`, `INVALID_ACTION`, `INVALID_OPTIONS`, `INVALID_SEAT_COUNT` (seat count outside `players(options)`), `INVALID_TIMEOUT`, `INVALID_INVITEES`, `CANNOT_PLAY_SELF`, `UNKNOWN_GAME`, `INVALID_DICTIONARY`, `BAD_REQUEST` |
+| 400 | `INVALID_CODE`, `INVALID_ACTION`, `INVALID_OPTIONS`, `INVALID_SEAT_COUNT` (seat count outside `players(options)`), `INVALID_TIMEOUT`, `INVALID_INVITEES`, `AI_SEATS_NOT_ALLOWED`, `CANNOT_PLAY_SELF`, `UNKNOWN_GAME`, `INVALID_DICTIONARY`, `BAD_REQUEST` |
 | 401 | `UNAUTHENTICATED` |
-| 403 | `BAD_ORIGIN`, `NOT_ALLOWED`, `ONBOARDING_REQUIRED`, `AI_NOT_ALLOWED`, `INSUFFICIENT_SCOPE` (token lacks the endpoint's scope, or the endpoint is session only), `STEP_UP_REQUIRED` (admin action without a recent step-up, §Admin API), `SUSPENDED` |
+| 403 | `BAD_ORIGIN`, `NOT_ALLOWED`, `ONBOARDING_REQUIRED`, `AI_NOT_ALLOWED`, `INSUFFICIENT_SCOPE` (token lacks the route's scope, or the route is session only, §Token scopes), `AGENT_NOT_ALLOWED` (an AI account's token on a route agents can't use), `SUSPENDED` |
 | 404 | `NOT_FOUND` |
-| 409 | `STALE_GAME`, `GAME_NOT_ACTIVE`, `NOT_YOUR_TURN`, `WRONG_STATUS`, `NOT_ENOUGH_PLAYERS`, `INVALID_SEATS` (module `validateStart` failed, at create or start), `ALREADY_ACTED`, `ALREADY_JOINED`, `TOO_MANY_GAMES`, `TOO_MANY_DICTIONARIES`, `TOO_MANY_TOKENS`, `TOO_MANY_AGENTS` |
+| 409 | `STALE_GAME`, `GAME_NOT_ACTIVE`, `GAME_UNAVAILABLE` (orphaned game, 02 §7.3), `NOT_YOUR_TURN`, `WRONG_STATUS`, `NOT_ENOUGH_PLAYERS`, `INVALID_SEATS` (module `validateStart` failed, at create or start), `ALREADY_ACTED`, `ALREADY_JOINED`, `TOO_MANY_GAMES`, `TOO_MANY_DICTIONARIES`, `TOO_MANY_TOKENS`, `TOO_MANY_AGENTS` |
 | 413 / 415 | `TOO_LARGE` / `UNSUPPORTED_MEDIA_TYPE` |
 | 429 | `RATE_LIMITED` |
 | 500 | `INTERNAL` — never carries detail; the log records a request id only, never inputs or state (09 §5) |
@@ -376,7 +425,8 @@ are wrapped: `400 INVALID_OPTIONS` / `409 INVALID_SEATS` with `detail: { code, d
 `401 UNAUTHENTICATED` also covers an unknown, expired or revoked token (indistinguishable).
 
 ## WebSocket `GET /api/v1/ws`
-- Cookie-authenticated; `Origin` MUST match `PUBLIC_URL` (else reject the upgrade with `403`).
+- Cookie-authenticated only (bearer tokens are rejected); `Origin` MUST match `PUBLIC_URL` (else
+  reject the upgrade with `403`).
   Per-IP upgrade rate limit (08 §4).
 - Server → client messages (JSON): `game.created { gameId }`, `game.updated { gameId, version }`,
   `games.changed`. Sent only to members (04 §Membership). Keep-alive: client sends the literal text

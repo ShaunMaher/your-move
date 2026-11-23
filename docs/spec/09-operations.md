@@ -37,7 +37,8 @@ equal.
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | no | | Enables Turnstile on OTP request (manually or via the circuit breaker). On Cloudflare the web build also needs `TURNSTILE_ENABLED=true` for the static CSP (03 §9). |
 | `LIMIT_*` | no | see 08 §4 | Overrides for rate limits / instance-wide caps |
 | `ENABLED_GAMES` | no | every installed package not marked `enabled: false` in `instance.config.ts` | Comma-separated game types offered for **new** games (02 §7.3). Must name installed types only (refuse to start otherwise). Type ids match `^[a-z][a-z0-9]{1,31}$` |
-| `ADMIN_EMAILS` | no | (none) | Comma-separated addresses of admins (05 §Admin API). Matched against the signed-in user's normalised email on every admin request; an empty list disables the Admin API |
+| `ADMIN_EMAILS` | no | (none) | Comma-separated addresses of admins (05 §Admin API). Matched against the normalised email of the human an admin token belongs to, on every admin request (admin access is by admin token only); an empty list disables the Admin API |
+| `ALLOW_ORPHAN_GAMES` | no | `false` | Node only: set for **one** start to accept orphaning `lobby`/`active` games of removed game types or rules versions (02 §7.3); otherwise the server refuses to start while any exist |
 | `DICTIONARIES_ENABLED` | no | all bundled | Comma-separated built-in dictionary ids offered for new games (words §9.3); framework resource config (02 §2.1 rule 7) |
 | `DICTIONARY_UPLOADS` | no | `true` | `false` disables user uploads (Q18) |
 | `DICTIONARIES_EXTRA` | no | (none) | Operator dictionaries: comma-separated ids, each added through the Admin API (`POST /api/v1/admin/dictionaries`, or `pnpm admin:dict:add <id> <file> --name … --language …`, §1.2), which validates (id format per words §9.5), stores the file in `BlobStore` under a generated key and inserts the `dictionaries` row (always `serverOnly`) |
@@ -76,19 +77,29 @@ exists, **rotating `APP_SECRET` is unsupported** and the docs say so.
 
 Every administrative task is an Admin API endpoint (05 §Admin API) — Workers has no shell. The
 `pnpm admin:*` scripts are thin clients of that API: they read `ADMIN_URL` (the instance's
-`PUBLIC_URL`) and an `admin`-scope token from `ADMIN_TOKEN` (or `ADMIN_TOKEN_FILE`) in the
-operator's shell, never from the repository. Commands: `admin:status`, `admin:user:lookup`,
+`PUBLIC_URL`) and an `admin` token (exclusive scope, ≤ 30 days, 06 §8) from `ADMIN_TOKEN_FILE`
+(preferred: a 0600 file) or `ADMIN_TOKEN` in the operator's shell, never from the repository. The
+Admin API and these commands arrive with API tokens in M3 (10); before that, M2 has no admin
+surface beyond config. Commands: `admin:status`, `admin:user:lookup`,
 `admin:user:suspend`, `admin:user:unsuspend`, `admin:user:delete`, `admin:game:cancel`,
 `admin:dict:add`, `admin:dict:delete`, `admin:suppression:remove`, `admin:audit`.
 
 ### 1.3 Installing games
 
 The installed games are listed in `instance.config.ts` (02 §7.3). To add a third-party game:
-add the package to `package.json` (from a registry you trust), add it to `instance.config.ts`,
-run `pnpm build` (which runs `pnpm games:verify`), and deploy. Before installing, read 02 §7.5:
-a game package runs inside your server and your players' browsers, so treat it like any other
-dependency — trust the author, pin the version, read the diff on every upgrade, and keep
-Renovate's merge requests for game packages on manual merge (the default, 11 §8).
+add the package to the root `package.json` **`dependencies`** from a registry you name explicitly
+in `.npmrc`, add it to `instance.config.ts`, run `pnpm build` (which runs `pnpm games:verify`
+in fast mode; CI runs the full kit), and deploy. To **remove** a game type or upgrade to a package
+major that drops a rules version, first let its live games finish or cancel them (Admin API): the
+deploy job's `pnpm games:check-db` (Cloudflare) and the Node server's startup check refuse to go
+ahead while `lobby`/`active` games would be orphaned, unless you pass `--allow-orphans` to the
+deploy step or start Node once with `ALLOW_ORPHAN_GAMES=true` (02 §7.3).
+
+Before installing, read 02 §7.5: **a game package is fully trusted** — it runs inside your server
+and in your players' browsers with their sessions, and a malicious one can take over the instance
+and players' accounts. Install games only from authors you trust, pin the version, read the diff
+on every upgrade (Renovate never merges anything by itself, 11 §8), and **don't play games on an
+admin account**.
 
 ## 2. Email delivery
 
@@ -173,7 +184,12 @@ that work on both runtimes, plus SMTP for Node only.
 
 - Multi-stage `apps/node/Dockerfile`: build with pnpm, runtime on a slim Node LTS image pinned by
   digest; runs as non-root UID; read-only root filesystem except `/data`; `EXPOSE 8080`;
-  `HEALTHCHECK` on `/api/health`.
+  `HEALTHCHECK` on `/api/health` (which needs no `CF-Connecting-IP`, 08 §4.1). The server starts
+  with `node --disallow-code-generation-from-strings`, reads config and secrets (`*_FILE`), scrubs
+  them from `process.env`, checks for orphaned games (02 §7.3) and only then loads the generated
+  game registry with a dynamic `import()` (02 §7.5).
+- Deployments pull the image **by digest** (`image: registry…/your-move@sha256:…`), taken from the
+  release notes; tags are for humans only (images aren't signed yet, 08 §6).
 - Migrations run automatically on start (with a lock).
 - Two compose examples in `apps/node/` (the only names used anywhere), both with named volumes for
   `/data` and (separately) `/data/blobs`, and app secrets supplied as Docker secrets (`*_FILE`, §1):
@@ -209,8 +225,10 @@ that work on both runtimes, plus SMTP for Node only.
 
 - Structured JSON logs (`level`, `msg`, `requestId`, `route`, `status`, `durationMs`, `userId`
   where relevant). `route` is the route **pattern** (`/api/v1/games/:id`), never the raw path. Never
-  log OTPs, tokens, cookies, request bodies, emails in any form other than the HMAC `emailId`, or
-  game secrets.
+  log OTPs, tokens, cookies, the `Authorization` header, request bodies, emails in any form other
+  than the HMAC `emailId`, or game secrets. Edge logs must exclude `Authorization` too: the Caddy
+  compose's log config drops it, and on Workers the operator checks that Workers Logs/Logpush don't
+  record request headers (to be verified in M3, when tokens arrive).
 - Validation and module errors are logged by code and path only, never with input values
   (e.g. strip Zod's `received`). Unhandled exceptions log the error class, message and stack, and
   the client gets `500 INTERNAL` with no detail (05 §Errors).
@@ -223,10 +241,14 @@ that work on both runtimes, plus SMTP for Node only.
 The pipeline, its stages and the quality gates are defined in 11 §9. Deployment specifics:
 
 - **Cloudflare deploy** is a manual job in the `production` environment, default branch and tags
-  only: `wrangler d1 migrations apply`, then `wrangler deploy`, from the already-built artifact
-  without re-installing (credentials per 08 §6).
-- **Docker images** for `linux/amd64` and `linux/arm64` are built on `main` and tags, pushed to
-  this project's GitLab container registry, signed with their SBOM attached (08 §6), and tagged
-  with the version and the commit.
+  only: `pnpm games:check-db` against D1 (02 §7.3; `--allow-orphans` is the only override), then
+  `wrangler d1 migrations apply`, then `wrangler deploy`, from the already-built artifact without
+  re-installing (credentials per 08 §6).
+- **Docker images** for `linux/amd64` and `linux/arm64` are built natively on the matching shared
+  runner (tags `arch-amd64`, `arch-arm64`) with rootless BuildKit, assembled into a multi-arch
+  manifest, and — on `main` and tags only, in the protected `release` environment with the release
+  deploy token (08 §6) — pushed to this project's GitLab container registry with their SBOM, tagged
+  with the version and the commit, and their digests recorded in the release notes. MR pipelines
+  build but never push. Images aren't signed yet (08 §6).
 - The owner's proof-of-concept deployment (Docker behind a Cloudflare Tunnel, Q6) pulls the image
   from the registry; a deploy job for it can follow once it exists.

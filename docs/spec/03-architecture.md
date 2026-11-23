@@ -23,7 +23,7 @@
 
 | Concern | Choice | Why |
 |---|---|---|
-| Language | TypeScript (strict), ES2022 modules | Shared types across engine/server/client |
+| Language | TypeScript (strict), ES2023 target, ESM (11 §2) | Shared types across engine/server/client |
 | Package manager | pnpm workspaces | Fast, strict, good monorepo support |
 | HTTP framework | [Hono](https://hono.dev) | Runs natively on Workers and Node; tiny; typed routes |
 | Validation and API description | Zod, with Hono's OpenAPI integration (`@hono/zod-openapi`) | One schema per endpoint drives validation, the generated OpenAPI 3.1 document and the generated typed client (05 §Conventions) |
@@ -63,13 +63,15 @@
 │  └─ server/              @your-move/server — runtime-agnostic Hono app: framework (lifecycle,
 │                          transitions, lobby, timeouts), accounts, tokens, admin, routes,
 │                          repositories, rate limiting, email templates. Depends on a `Platform`.
-│                          Knows games only through the generated registry.
+│                          Knows games only through the registry injected into createApp (§4);
+│                          never imports generated/ or any game package.
 ├─ games/                  First-party game packages, each with /engine, /client, /manifest (02 §7)
 │  ├─ example/             @your-move/game-example — reference module and template for authors
 │  ├─ words/               @your-move/game-words (engine includes rulesets/<id>/v<N>.json)
 │  └─ paths/               @your-move/game-paths
 ├─ instance.config.ts      Installed game packages for this instance (02 §7.3)
-├─ generated/              Server registry + client import map from `pnpm games:generate` (ignored by git)
+├─ generated/              Server registry + client import map from `pnpm games:generate` (ignored by
+│                          git, never committed); imported only by apps/worker, apps/node, apps/web
 ├─ mise.toml               Pinned Node and pnpm (11 §1)
 ├─ docs/spec/              This specification
 ├─ docs/adr/               Architecture decision records (11 §10)
@@ -84,7 +86,10 @@ rebrands changes `APP_NAME` (09), not package names. Packages meant for outside 
 
 ## 4. The `Platform` port
 
-`packages/server` exports `createApp(platform: Platform): Hono`. Each runtime builds a `Platform`:
+`packages/server` exports `createApp({ platform, games }: { platform: Platform; games: GameRegistry }): Hono`.
+`games` is the generated server registry (`type → { manifest, engines }`, 02 §7.3), which
+`apps/worker` and `apps/node` import from `generated/` and pass in, so the server package itself
+never depends on any game package. Each runtime builds a `Platform`:
 
 ```ts
 interface Platform {
@@ -265,8 +270,9 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
 - Purge blobs of deleted dictionaries no `lobby`/`active` game references (`game_resources`), and
   delete row-less upload blobs older than 1 h (words §9.5).
 - Resume unfinished account deletions (04 §Account deletion).
-- Cancel `lobby`/`active` games of a game type that is no longer installed (only possible after
-  a build with `--allow-orphans`, 02 §7.3), with no ranking.
+- Cancel **orphaned** `lobby`/`active` games — a game type or rules version no longer installed
+  (only possible after a deploy with `--allow-orphans` / `ALLOW_ORPHAN_GAMES`, 02 §7.3) — with
+  operator-cancel semantics, no ranking and `final_views` NULL.
 - Expire API tokens past `expires_at` (they're already refused; this only tidies rows).
 
 ## 9. Static assets and routing

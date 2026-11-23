@@ -48,6 +48,10 @@ no I/O, no clock, no direct randomness, and no imports from the framework, any r
 per supported rules version, typed by `@your-move/sdk`:
 
 ```ts
+// All of these types are exported by @your-move/sdk (§7.4). Schema<T> is a Zod schema: the SDK
+// declares zod (one pinned major) as a peer dependency and re-exports it as
+// "@your-move/sdk/schema", so engines build schemas without importing anything else.
+type Schema<T> = z.ZodType<T>;
 type Seat = number;                                        // 0..seats-1, fixed at start (§4)
 type GameError = { code: string; detail?: unknown };       // module codes, never a reserved code (§2.2)
 type Text = (string | { seat: Seat })[];                   // names are inserted at render time (§5)
@@ -55,6 +59,7 @@ type ModuleConfig = unknown;                               // parsed from this m
 type ResourceRequest = { kind: "dictionary"; id: string; version?: number };  // framework resource kinds (§2.1 rule 7)
 type ListSummary = { headline: Text; scores?: number[] };  // one line in the game list
 type FrameworkError = { code: string; message: string; detail?: unknown };   // 05 §Errors
+type GameEnvelope = /* 05 §Common types; defined in the SDK, re-used by @your-move/api-client */;
 type SubmitResult = { ok: true; game: GameEnvelope; view: unknown } | { ok: false; error: GameError | FrameworkError };
 type ResourceMeta = {                                      // metadata only, never contents (08 T22)
   kind: "dictionary"; id: string; version: number; name: string;
@@ -209,15 +214,14 @@ only `@your-move/sdk` (including its client helpers), React, and their own packa
 interface GameClientModule<Options, Action, View, PreviewResult> {
   type: string;
   versions: number[];                 // every server module version whose views/records it can render
-  name: string;                       // neutral display name, e.g. "Words"
-  icon: Component;                    // original artwork (SVG)
+  // name, icon and rules text live in the manifest (§7.2), so the new-game picker never loads a client chunk
   OptionsForm: Component<{ catalog; value: unknown; onChange(input: unknown) }>; // edits the unresolved input; catalog = this module's part of /api/v1/catalog
   Board: Component<{
     game: GameEnvelope; view: View;   // view shape per game.gameVersion
     submit(action: Action): Promise<SubmitResult>;
     preview(action: Action): Promise<PreviewResult | GameError>;   // local when possible, else server
   }>;
-  RulesSheet: Component<{ options: Options; gameVersion: number }>;
+  RulesSheet: Component<{ options: Options; gameVersion: number }>;   // may render the manifest's rules markdown (§7.2)
   HistoryItem: Component<{ record: unknown; gameVersion: number; names: string[] }>;
 }
 ```
@@ -238,20 +242,25 @@ to compute previews locally (e.g. word scores), but it is always non-authoritati
 
 ```
                   ┌──── creator cancels / lobby expires (14 days from creation) ────▶ cancelled / expired
-                  │
+                  │     (an operator may also cancel a lobby)
  create ──▶ lobby ┼── all seats joined (auto-start, §4 Start), or creator presses Start ──▶ active ──▶ finished
                   │                                                                        │   (result() non-null)
-                  └── a decline/leave leaves joined + invited < min ────────▶ declined ◀───┘
+                  └── a decline/leave leaves joined + invited < min ────────▶ declined ◀───┤
                       and no join link is live                     (a decline or timeout before a seat's
                                                                     first action leaves < min playing)
+                                                                                           │
+                                                   operator cancel (§4) ──▶ cancelled ◀────┘
 ```
 
 **Creating.** The creator chooses the game type, options (resolved by `resolveOptions`), the seat
 count (within `players(options)`, else `400 INVALID_SEAT_COUNT`), the **turn timeout** (whole days,
 1–30, default `defaultTurnTimeoutDays(options)`; validated by the framework, never by the module)
 the **seat order** (`join`: the creator first, then others in the order they joined; or
-`random`) and **AI assistance** (`aiAssistance: "off" | "allowed"`, §9.3; default `off` whenever
-the game will have two or more human seats). The framework checks resource authorisation (§2.1 rule 7) and calls
+`random`) and **AI assistance** (`aiAssistance: "off" | "allowed"`, §9.3). The default is `off`
+whenever the game has **any open seat** (a seat not filled by the creator or one of the creator's
+own AI accounts at creation: invitees, email seats and link seats are all open) or two or more
+human seats; otherwise (the creator alone with their own AI accounts) it is `allowed`. It is fixed
+at creation and never changes. The framework checks resource authorisation (§2.1 rule 7) and calls
 `validateStart(options, seats)` for the chosen seat count; failure → `409 INVALID_SEATS` and nothing
 is stored. The turn timeout, seat order and AI-assistance setting are shown on every invitation
 and in the lobby, and the AI setting also in the game header.
@@ -259,7 +268,11 @@ and in the lobby, and the AI setting also in the game header.
 **Seats in the lobby.** The creator holds the first seat. Each other seat is filled by one of:
 
 - **One of the creator's own AI accounts** (§9.2), picked at creation. It is auto-joined, is
-  labelled AI everywhere, and is the only way an AI account is ever seated.
+  labelled "<owner>'s AI" everywhere, and is the only way an AI account is ever seated. If the game
+  type declares hidden information (manifest `hiddenInformation`, §7.2), an owner's AI seats are
+  allowed only when no other human can join: every non-creator seat is one of the creator's own AI
+  accounts (`400 AI_SEATS_NOT_ALLOWED` otherwise), because the owner can read their agent's hand
+  through its token (08 T31).
 - **A past opponent picked from the list** (by user id). Whether they're added straight away
   depends on *their* setting **who can add me to games** (`whoCanAddMe`, 06 §6.2): with
   `pastOpponents` (the default) they're *auto-joined* (`joined`) and notified; with `nobody` they get
@@ -302,7 +315,11 @@ never pushes or emails.
 **Start.** The creator may press **Start** once at least `min` seats are joined; unfilled seats are
 dropped. The game also starts **automatically** once every seat is `joined`, except while a join
 link is live or any `joined` row has `joined_via = join_link`: then only the creator's Start begins it, so
-the creator always sees who joined through a link before play starts. At start the framework, in
+the creator always sees who joined through a link before play starts. A game with an AI seat (other
+than one where every other seat is the creator's own AI) or with `aiAssistance = allowed` and
+another human never auto-starts, and a past opponent picked for it gets an **invitation** instead
+of an auto-join, whatever their `whoCanAddMe`: every human sees the AI seats and the AI setting and
+accepts knowingly (08 T31). At start the framework, in
 the start transition:
 
 1. re-checks blocks between every pair of joined users: if a pair has a block, the member of the
@@ -320,7 +337,8 @@ the start transition:
    recorded rng), sets them `playing`;
 5. calls `setup` with the final seat count, and starts the clocks for `toAct`.
 
-So a 2-player game against a past opponent (default setting) starts the moment it's created.
+So a 2-player game against a past opponent (default setting, no AI) starts the moment it's
+created, and so does a game of the creator against their own AI accounts.
 
 **Decline / leave / remove (lobby).** An invited or joined non-creator may decline (or leave, if
 joined). The seat reopens. Only decline and leave check whether the lobby can still fill: it ends
@@ -371,9 +389,14 @@ transition, and stores rank/score from `result()` when the game finishes. (The f
 
 **Operator cancel.** An admin (05 §Admin API) may cancel a `lobby` or `active` game, e.g. after
 abuse or an orphaned game type (§7.3). It is a framework-only transition: the module isn't called,
-state is frozen, ranks stay NULL, `end_reason = cancelled`, `final_views` are written as for any
-terminal status after start, and members get one "cancelled by the operator" notification. The
-action is recorded in `admin_audit` (04).
+state is frozen, ranks stay NULL, `games.status = cancelled`, `end_reason = operator_cancelled`.
+For an `active` game, `playing` rows become `out` with `out_reason = cancelled`, `final_views` are
+written as for any terminal status after start (§5) — unless the game type or rules version has no
+engine any more (§7.3), in which case `final_views` stay NULL and the game displays from the
+envelope only — and the game stays in members' lists for 90 days like a finished game. A lobby
+cancel behaves like the creator's cancel. Seated members of an active game get one "cancelled by
+the operator" notification; the admin's `reason` is never shown to players (it stays in
+`admin_audit`, 04).
 
 **Every transition** (join, accept, remove, leave, start, action, resign, timeout, decline, cancel,
 operator cancel, expiry) goes through the `write_token` optimistic-concurrency write (03 §5.2) and bumps the game
@@ -408,8 +431,9 @@ start, remove, join, accept or cancel simply makes the guard fail.
   deletion), so history and notifications never need module code to display. Members read the log
   through `GET /api/v1/games/:id/history` (05), which returns only `seq`, `seat`, `kind`, `record` and
   `describe` — never the action or the draws.
-- When a game reaches **any terminal status after start** (`finished`, or `declined` before a first
-  action), the framework stores `final_views`: for each seat its final `view` and `summary`, plus a
+- When a game reaches **any terminal status after start** (`finished`; `declined` before a first
+  action; `cancelled` by an operator after start), the framework stores `final_views` (except for
+  an orphaned game whose engine is gone, §7.3): for each seat its final `view` and `summary`, plus a
   public `view(state, null)` and `summary(state, null)`. A player only ever receives their own
   seat's entry. Every non-active, non-lobby game is displayed from them, so it can still be shown
   after the server-side engine version is retired (§7). Games that never started have no state and
@@ -441,11 +465,20 @@ set and seat count, with seeded randomness:
    `out` never returns to `playing` or `toAct`; `toAct` is empty exactly when `result()` is non-null.
 6. **CPU budget**: per-call CPU for `validate` + `apply` (and `preview`) on the `worstCase` inputs
    stays within the budget in 08 T25.
+7. **Isolation between games**: two random games are played interleaved through the same loaded
+   engine module and compared with the same games played alone; every view, record, `validate` and
+   `preview` result must be identical. This catches module-level state (e.g. a wrongly keyed cache)
+   leaking one game's hidden state into another.
+
+The kit has two modes: **fast** (a few hundred games per package; run by `pnpm build`, the Docker
+build and the deploy path through `pnpm games:verify --fast`) and **full** (thousands of games per
+option set and seat count; run in CI's test stage and in each game package's own CI).
 
 The kit itself is tested against deliberately **broken fixture modules** (one leaks hidden state
 into a view, one into an error detail, one into a record, one into the public view; one has a
 no-op `perturbHidden`; one reads resources in `setup`; one is nondeterministic; one never
-terminates; one leaves `toAct` non-empty after the end): the kit MUST fail each one.
+terminates; one leaves `toAct` non-empty after the end; one keeps hidden state in a module-level
+variable shared between games): the kit MUST fail each one.
 
 The framework, not the kit, enforces that only seats in `toAct` may act (05 `/actions`).
 
@@ -457,20 +490,35 @@ Module-specific tests (rules tables, scoring edge cases) are in addition to the 
 
 A game module is an npm package with three entry points (`package.json` `exports`):
 
-| Entry point | Contents | May import |
-|---|---|---|
-| `<pkg>/engine` | One `GameDefinition` per supported rules version (§7.4), as a map `{ [version]: GameDefinition }` | `@your-move/sdk` (types and pure helpers) and the package's own pure code. Nothing else: no `node:*`, no runtime, framework or DOM APIs, no I/O libraries (§7.5) |
-| `<pkg>/client` | The `GameClientModule` (§3) | `@your-move/sdk` (including its client helpers), React, the package's own `/engine` and static assets bundled with it |
-| `<pkg>/manifest` | The `GameManifest` (§7.2), a plain data module | Nothing |
+| Entry point | Named export | Contents | May import |
+|---|---|---|---|
+| `<pkg>/engine` | `engines` | One `GameDefinition` per supported rules version (§7.4), as a map `{ [version: number]: GameDefinition }` | `@your-move/sdk` (types, pure helpers, `@your-move/sdk/schema`) and pure code bundled into the package. Nothing else (§7.5) |
+| `<pkg>/client` | `client` | The `GameClientModule` (§3) | `@your-move/sdk` (including its client helpers), React, the package's own `/engine` and static assets bundled with it |
+| `<pkg>/manifest` | `manifest` | The `GameManifest` (§7.2), a plain data module | Nothing |
 
 A package also ships its own tests, runs the generic test kit (§6) in its own CI, and states its
-licence in `package.json` (an OSI-approved permissive licence from the allow-list in 11 §6, or the
-operator must accept it explicitly, §7.3).
+licence in `package.json` (a permissive licence from the allow-list in 11 §6, or the operator must
+accept it explicitly, §7.3).
 
 First-party games live in this repository under `games/<id>/` as workspace packages with exactly
 this shape (`@your-move/game-example`, `@your-move/game-words`, `@your-move/game-paths`) and are
 published like any third-party game (§7.4). The repository's own build never reaches into a game
 package except through these three entry points.
+
+#### 7.1.1 `package.json` and entry-point contract
+
+- **ESM only**, `"type": "module"`. Each entry point is **built JavaScript plus `.d.ts`**
+  (TypeScript sources are not consumed): `exports` maps `"./engine"`, `"./client"` and
+  `"./manifest"` to objects with `types` and `import` conditions (and nothing else; no `require`,
+  no `browser`/`node` forks). Every entry point uses the named export above; no default exports.
+- **Dependencies**: `@your-move/sdk`, `zod` and (for the client) `react` are **peerDependencies**
+  only (the instance supplies them); the SDK range is the package's statement of compatibility
+  (§7.4). An engine may **bundle** pure third-party code into its built output (e.g. a small
+  algorithm library) — bundled code is held to the same rules as the engine's own code — but its
+  published `dependencies` must be empty: an engine never imports another package at runtime. A
+  client may have ordinary `dependencies` (subject to the licence allow-list).
+- **Built-output rules** (§7.5) are checked on the files the `exports` map points at, so what is
+  verified is exactly what runs.
 
 ### 7.2 Manifest
 
@@ -479,26 +527,29 @@ interface GameManifest {
   type: string;            // ^[a-z][a-z0-9]{1,31}$, globally unique within an instance; the game_type stored in rows
   name: string;            // neutral display name ("Words"); no trademarks (CLAUDE.md)
   description: string;     // one line for the new-game picker
-  sdk: string;             // semver range of @your-move/sdk this package supports, e.g. "^1.2.0"
+  icon: string;            // SVG markup of original artwork, sanitised at build (no scripts, no external references)
   licence: string;         // SPDX id, must equal package.json "license"
   resources: ResourceRequest["kind"][];  // framework resource kinds the engine may request (§2.1 rule 7)
-  hiddenInformation: boolean;            // as in GameDefinition (§6.3), declared up front for the catalog
+  hiddenInformation: boolean;            // as in GameDefinition (§6.3), declared up front for the catalog and §4
   players: { min: number; max: number }; // overall bounds across all options
+  rules: { [version: number]: string };  // the rules as Markdown (no HTML), per rules version; served by the API (05) and the MCP server (§9.4)
   homepage?: string;       // source repository or docs
 }
 ```
 
-The manifest must agree with the engine: the kit checks that `type`, `hiddenInformation` and the
-`players` bounds match every exported `GameDefinition`, and that the engine only requests the
+SDK compatibility is stated once, by the package's `peerDependencies` range for `@your-move/sdk`;
+the manifest doesn't repeat it. The manifest must agree with the engine: the kit checks that
+`type`, `hiddenInformation` and the `players` bounds match every exported `GameDefinition`, that
+`rules` has an entry for every exported rules version, and that the engine only requests the
 resource kinds listed.
 
-### 7.3 Instance composition (build time)
+### 7.3 Instance composition (build time) and orphaned games (deploy and run time)
 
 Cloudflare Workers can't load code at runtime, so an instance's set of games is fixed when it is
 **built**:
 
-- `instance.config.ts` at the repository root (an operator's fork or a deployment repo edits it)
-  lists the installed game packages and whether each is enabled by default:
+- `instance.config.ts` at the repository root (an operator's fork edits it) lists the installed
+  game packages and whether each is enabled by default:
 
   ```ts
   export default defineInstance({
@@ -511,80 +562,119 @@ Cloudflare Workers can't load code at runtime, so an instance's set of games is 
   });
   ```
 
-  Game packages are ordinary dependencies in `package.json`, pinned by the lockfile.
+  Game packages are ordinary entries in the root `package.json` **`dependencies`** (never
+  `devDependencies`), pinned by the lockfile; Renovate identifies them from this list (11 §8).
 - `pnpm games:generate` (run by `pnpm build` and `pnpm dev:*`) reads the config and generates two
-  files, never edited by hand: the **server registry** (`type → { manifest, engines }`) and the
-  **client import map** (`type → () => import("<pkg>/client")`) used for lazy loading.
-- `pnpm games:verify` (run by `pnpm build` and in CI) fails the build when:
+  files into the git-ignored `generated/` directory, never edited by hand and never committed: the
+  **server registry** (`type → { manifest, engines }`) and the **client import map**
+  (`type → () => import("<pkg>/client")`) used for lazy loading. `packages/server` never imports
+  them: `apps/worker` and `apps/node` import the server registry and pass it in
+  (`createApp({ platform, games })`, 03 §4), and `apps/web` imports the client import map.
+- `pnpm games:verify` fails the build when:
   - two packages declare the same `type`, or a type id doesn't match the pattern;
-  - a package's `sdk` range doesn't include the SDK version the instance uses;
+  - the instance's `@your-move/sdk` version doesn't satisfy a package's SDK peer range;
   - a package's licence is outside the allow-list (11 §6) and not accepted in the config with
     `acceptLicence`;
-  - a package violates the architecture rules (§7.5) or fails the generic test kit (§6) under the
+  - a package violates the built-output rules (§7.5) or fails the generic test kit (§6) under the
     instance's SDK;
-  - the manifest disagrees with the engine (§7.2).
+  - the manifest disagrees with the engine (§7.2), or the manifest icon fails sanitisation.
+
+  `pnpm build`, the Docker build and the deploy path run it in **fast** mode; CI's test stage runs
+  the **full** kit (§6).
 - At runtime `ENABLED_GAMES` (09) still filters which installed types are offered for **new**
-  games. Disabling or uninstalling a type never breaks existing games: an installed but disabled
-  type keeps serving its `lobby`/`active` games; an uninstalled type's finished games display from
-  `final_views` (§5), and the build refuses to drop a type that still has `lobby`/`active` games
-  unless the operator passes `--allow-orphans` (those games then show "This game is no longer
-  available" and are cancelled by the sweep, with no ranking).
+  games; an installed but disabled type keeps serving its existing games.
+
+The build can't see an instance's database, so removing a game type or rules version that live
+games still use is caught at **deploy and run time**:
+
+- `pnpm games:check-db` lists every `lobby`/`active` game whose `game_type` isn't installed or whose
+  `game_version` isn't exported by the installed package. The Cloudflare deploy job (09 §6) runs it
+  against D1 before `wrangler deploy` and stops on any hit; the Node server runs the same check at
+  startup and refuses to start. The operator may override with `--allow-orphans` on the deploy
+  step (or `ALLOW_ORPHAN_GAMES=true` for one Node start), which accepts that those games become
+  orphaned.
+- At runtime an **orphaned** game (no engine for its type or version) answers every write with
+  `409 GAME_UNAVAILABLE`, displays from the envelope only ("This game is no longer available"),
+  and is cancelled by the sweep (operator cancel semantics, §4, with `final_views` NULL). Finished
+  games of a removed type keep displaying from `final_views` and stored `describe` text (§5).
 
 ### 7.4 Versions: rules, packages and the SDK
 
 - **Rules versions.** Each game row stores `game_type` and `game_version`. Any change to a module's
   rules or state shape releases a new rules `version`, exported alongside the old ones from
-  `/engine`. An old version stays exported while any `lobby` or `active` game may use it; new games
-  always use the latest. Finished games need no engine code: they display from `final_views` and
-  stored `describe` text. The client keeps rendering every version (§3).
+  `/engine`. An old version stays exported while any `lobby` or `active` game may use it (checked by
+  `games:check-db`, §7.3); new games always use the latest. Finished games need no engine code. The
+  client keeps rendering every version (§3).
 - **Package versions** follow semver and are released with Changesets (11 §7): a new rules version
   is a minor release; dropping an old rules version is a major release.
 - **Data within a version** (e.g. word-game rulesets, dictionaries) are **options** with their own
   versioning, as defined by the module.
 - **The SDK** (`@your-move/sdk`, with `@your-move/testkit`) is the contract between the framework
-  and every game. It follows semver strictly:
-  - **patch**: fixes with no type or behaviour change visible to modules;
-  - **minor**: additive only — new optional hooks, new optional fields in contexts, new helper
-    functions, new resource kinds. A module built against 1.2 works unchanged under 1.5;
-  - **major**: anything else (a new required hook, a changed signature, a stricter kit check that
-    existing correct modules could fail). A major release ships a migration note, and the framework
-    supports the previous major for at least 6 months (two SDK majors loaded side by side through
-    an adapter), so third-party games have time to upgrade.
+  and every game. Its only peer dependencies are `zod` (one pinned major, re-exported as
+  `@your-move/sdk/schema`) and, for its client helpers, `react`; it has no other dependencies. It
+  exports every type a module or client needs, including the client-facing API types
+  (`GameEnvelope`, `SubmitResult`, …) that `@your-move/api-client` also re-uses.
+  - **Until the MVP (M4) the SDK is `0.x`**: any minor may break, with a migration note. This keeps
+    the contract changeable while the framework (M3) and the first games exercise it.
+  - **From 1.0** it follows semver strictly: **patch** — fixes with no type or behaviour change
+    visible to modules; **minor** — additive only (new optional hooks, optional context fields,
+    helpers, resource kinds); **major** — anything else (a new required hook, a changed
+    signature, a stricter kit check that existing correct modules could fail), with a migration
+    note. An instance runs exactly one SDK version; a game whose peer range excludes it can't be
+    installed (§7.3), so a major gives game authors a clear upgrade signal rather than a silent
+    break.
   - The SDK's public surface is exactly what its entry points export; anything else is internal.
-    API Extractor (or an equivalent report) is checked in CI so an accidental surface change fails
-    the build.
+    `@microsoft/api-extractor` reports are committed and checked in CI, so an accidental surface
+    change fails the build.
 - **Publishing.** All `@your-move/*` packages meant for outside use (`sdk`, `testkit`,
   `api-client`, `mcp`, the first-party games) are published to this project's GitLab package
-  registry through its project-level npm endpoint. A game author's `.npmrc`:
+  registry through its project-level npm endpoint, only from `main`/tags (11 §9). Until the
+  `@your-move` scope is also claimed on the public npm registry (Q25), **every install instruction
+  names the registry explicitly** — a game author's `.npmrc`:
 
   ```
   @your-move:registry=https://<gitlab-host>/api/v4/projects/<project-id>/packages/npm/
   ```
 
-  Publishing to the public npm registry needs an npm organisation for the scope (Q25).
+  and one-off runs use `npx --registry=<that URL> @your-move/…`, never a bare `npx @your-move/…`
+  (which would resolve from npmjs, 08 T29).
 
 ### 7.5 Trust model for installed games
 
-Installing a game package means **trusting its code like any other dependency**: its engine runs
-inside the server (with access to whatever the server process can reach) and its client runs in
-players' browsers with the app's origin. There is no runtime sandbox in v1 (08 T27). What we do
-instead:
+Installing a game package means **trusting its code completely**. Its engine runs inside the
+server process and its client runs in players' browsers on the app's origin with their sessions.
+A malicious game can compromise the whole instance (other games' hidden state, request bodies, on
+Node possibly secrets) and the accounts of everyone who plays on it, including admins. There is no
+runtime sandbox in v1 (08 T27). What we do is make honest games verifiable and accidental damage
+unlikely, and reduce what a dishonest one can reach:
 
-- **Architecture rules shipped in the testkit** (`@your-move/testkit/depcruise`, a
-  dependency-cruiser ruleset): an engine may import only the SDK and its own files — no `node:*`,
-  no runtime globals such as `fetch`, `crypto`, timers or `Date` (lint rules), no DOM, no framework
-  packages; a client may import only the SDK, React and its own engine. `pnpm games:verify` runs
-  these against every installed package's built output, not just its sources.
-- **The generic test kit at build time** (§6) under the instance's SDK version.
+- **Built-output rules shipped in the testkit**, run by `pnpm games:verify` on the files each
+  package's `exports` map points at (§7.1.1):
+  - a dependency-cruiser ruleset (`@your-move/testkit/depcruise`): an engine imports only
+    `@your-move/sdk` (and `@your-move/sdk/schema`); a client only the SDK, React and its own engine;
+    no `node:*`, no DOM in engines, no framework packages;
+  - an ESLint config (`@your-move/testkit/eslint-engine`) on built engine output: a **globals
+    allow-list** (no `fetch`, `crypto`, `globalThis`/`self` access, timers, `Date.now()` or
+    `new Date()` without arguments, `Math.random`, `eval`/`Function`, `WebAssembly`, `process`), and
+    **no writes to built-in objects or prototypes** — consistent with CLAUDE.md's purity rule.
+- **The generic test kit at build time** (§6) under the instance's SDK version, including the
+  cross-game isolation check.
 - **Licence allow-list** and lockfile integrity (`pnpm install --frozen-lockfile`, 08 §6); game
-  packages come only from configured registries.
+  packages come only from configured registries, with the registry named explicitly (§7.4).
+- **Process hardening on Node** (09 §5): the server runs with
+  `--disallow-code-generation-from-strings`; config and secrets are read, then scrubbed from
+  `process.env`, **before** the generated game registry is loaded with a dynamic `import()`.
+  Workers already forbid code generation from strings.
 - **No remote code at runtime:** the CSP is unchanged (08 §3); a game's client assets are bundled
   into the app at build time, never fetched from elsewhere.
-- **Operator guidance** (09): install third-party games only from authors you trust, review the
-  diff on upgrade like any dependency, and keep Renovate's MRs for game packages on manual merge.
+- **Operator guidance** (09 §1.3): install third-party games only from authors you trust, review
+  the diff on every upgrade like any dependency (Renovate never automerges, 11 §8), and **don't play
+  games on an admin account**.
 
-Running engines in an isolate (a separate Worker, `worker_threads`, or a WebAssembly sandbox) is a
-possible later hardening; the pure, synchronous contract keeps that option open.
+Later hardening (not v1): freezing shared built-ins before engines load (SES `lockdown()`; whether
+it works on Workers is unknown and must be tested), and running engines in an isolate (a separate
+Worker, `worker_threads`, or a WebAssembly sandbox); the pure, synchronous contract keeps both
+options open.
 
 ### 7.6 The reference module (`example`)
 
@@ -620,36 +710,48 @@ public API (05), exactly like any other client, so it sees only what the seat it
 the module's `view` for that seat, public records and `describe` text. Every secrecy rule (§2.1
 rule 4, §6.3) therefore covers agents with no extra code.
 
-A move submitted with a token is an **AI move**. The framework records `via = "token"` on the
-logged action (04 `game_actions`), so history can show it.
+A move submitted with a token is an **AI move**. The framework records `via = "token"` (otherwise
+`"app"`) on the logged action (04 `game_actions`), and the history API returns it with each item
+(05), so every client can show it. Tokens are scoped (06 §8): an agent acting on seats it already
+holds needs only `read` and `play`; creating games and joining need separate opt-in scopes that an
+assistant should never be given.
 
 ### 9.2 AI accounts (AI opponents)
 
-- A human may create up to **3 AI accounts** (`users.kind = "agent"`, `owner_user_id` = the human)
-  in Settings, each with a display name; the app always shows it as "<name> (AI)" with an AI badge
-  in lobbies, headers, history, results, invitations and push text.
+- A human may have up to **3 AI accounts** at a time (`users.kind = "agent"`, `owner_user_id` =
+  the human), created in Settings with a display name; creating one is limited per day, and every
+  creation counts toward the owner's rename budget (06 §5), so delete-and-recreate can't be used as
+  a message channel. Only an onboarded owner (not re-prompted, 06 §5) can create AI accounts or
+  their tokens, and an AI account's tokens stop working while its owner isn't onboarded. The app
+  always shows an AI account as "<owner>'s AI <name>" with an AI badge — in lobbies, headers,
+  history, results, invitations and push text — so everyone knows whose agent it is.
 - AI accounts have no email address and can't sign in; they act only through tokens their owner
   creates for them (06 §8).
 - An AI account is seated **only by its owner, when the owner creates a game** (§4). It is
   auto-joined. Nobody else can pick, invite, add or link-join an AI account, and AI accounts can't
   create games, accept invitations, use join links or hold an invitation in v1.
-- Other people see the AI seat in the invitation and the lobby **before** they accept.
+- Other people see the AI seat, and whose it is, in the invitation and the lobby **before** they
+  accept; such games never auto-start (§4).
+- In a game type with hidden information, an owner's AI seats may only be used when every other
+  seat is one of the owner's own AI accounts (§4): the owner can read their agent's view through its
+  token, so mixing it with other humans would let them see a second hand.
 - AI accounts never form past-opponent pairs (04 `past_opponents`), never appear in anyone's
   past-opponents list, and can't block or be blocked (their owner's blocks apply instead: an AI
   account is treated as its owner for every block check).
 - Deleting the owner deletes their AI accounts (04 §Account deletion). An AI account's own games
   continue to work like any other player leaving: its seats resign through the normal deletion path.
-- Per-owner limits (05) bound how many games an owner may create with AI seats, so AI accounts
+- Per-owner limits (08 §4) bound how many games an owner may create with AI seats, so AI accounts
   can't be used to flood anyone.
 
 ### 9.3 AI assistance on human seats
 
 `aiAssistance` (§4) decides whether a **human** seat may be played by that human's agent:
 
-- `off` (default when the game has two or more human seats): a `play`-scoped token submitting an
-  action, resign or decline **for a human seat** gets `403 AI_NOT_ALLOWED`. Reading your own view,
-  history and previews with a `read`-scoped token is always allowed: an assistant may suggest, the
-  human decides and plays in the app.
+- `off` (the default whenever the game has an open seat or two or more humans, §4): a token
+  submitting an action, resign or decline **for a human seat** gets `403 AI_NOT_ALLOWED`. Reading
+  your own view and history and asking for previews with a `read`-scoped token is always allowed
+  (preview never runs the AI check, 05): an assistant may suggest, the human decides and plays in
+  the app.
 - `allowed`: a human's token may also submit. Every such move is shown in history as
   AI-assisted ("Sam (with AI) played …"), so it's never hidden from the other players.
 - AI accounts' seats (§9.2) always act through tokens; `aiAssistance` doesn't apply to them.
@@ -663,17 +765,25 @@ says so plainly.
 `@your-move/mcp` is a small local [Model Context Protocol](https://modelcontextprotocol.io) server
 (stdio) that a user runs on their own machine with their instance URL and an API token. It is a
 thin client of the public API (it uses `@your-move/api-client`) and adds no server-side code. Its
-tools: list my games, get a game (envelope + my view), read the rules of a game type, read history,
-preview a move, submit a move (only where §9.3 allows, or for an AI account), and list my
-invitations.
+tools: list my games, get a game (envelope + my view), read the rules of a game type
+(`GET /api/v1/games/types/:type/rules`, 05), read history, preview a move, submit a move (only where
+§9.3 allows, or for an AI account), and list my invitations. It never creates games, joins or
+accepts.
 
-Everything other people wrote — display names, `describe` text, game names — reaches the agent
-wrapped as **untrusted data** between explicit delimiters, and the tool descriptions warn the agent
-that such text may contain instructions it must not follow (prompt injection, 08 T28).
+- **Token handling**: the token is read from a file (mode 0600, e.g.
+  `~/.config/your-move/token`) or the OS keychain, never from the agent client's JSON config; the
+  server refuses non-`https` instance URLs except `localhost`. By default it **refuses tokens with
+  any scope beyond `read` and `play`** (and always refuses `admin` tokens); the docs recommend an
+  AI account's token, or a short-lived personal one.
+- **Untrusted data**: the whole `view`, every history record and every `describe` text, display
+  name and game name reach the agent wrapped as **untrusted data** between explicit delimiters
+  (third-party game views may contain text other players chose), and the tool descriptions warn the
+  agent that such text may contain instructions it must not follow (prompt injection, 08 T28).
 
-The MCP server is its own milestone (10 M8). Its acceptance includes two AI accounts playing
-complete `words` and `paths` games against each other on a development instance, which is also how
-the project's maintainers do exploratory testing.
+The MCP server is its own milestone (10 M8). Its acceptance runs **scripted** MCP-client tests
+(no language model): the owner against one of their own AI accounts in `words`, and the owner with
+two of their own AI accounts in `paths`, each to the end. Agents driven by a language model playing
+real games is a manual exploratory check the maintainers run, not a CI gate.
 
 ## 10. Out of scope (framework v1)
 

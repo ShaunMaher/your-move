@@ -112,8 +112,8 @@ Paths (games/paths.md)
 AI and the API (02 §9, 05, 06 §8)
 - A1. As a player I can create API tokens for my own tools, choosing what each may do, and revoke
   them at any time.
-- A2. As a player I can create an AI account ("Sam's bot"), connect my own agent to it, and seat it
-  in a game I create; everyone sees it is an AI before accepting.
+- A2. As a player I can create an AI account, connect my own agent to it, and seat it in a game I
+  create; everyone sees it is my AI ("Sam's AI Robo") before accepting.
 - A3. As a player I can let my agent read my games and suggest moves; it plays for me only in games
   whose creator allowed AI assistance, and those moves are marked in history.
 
