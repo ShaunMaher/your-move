@@ -70,7 +70,13 @@ export default async function setup(project: TestProject): Promise<() => void> {
     stdio: ["ignore", "inherit", "inherit"],
   });
   const url = `http://127.0.0.1:${String(port)}`;
-  await waitForHealth(url, child);
+  try {
+    await waitForHealth(url, child);
+  } catch (error) {
+    // Don't leave the server running when the suite can't start.
+    child.kill("SIGTERM");
+    throw error;
+  }
   project.provide("nodeUrl", url);
   return () => {
     child.kill("SIGTERM");
