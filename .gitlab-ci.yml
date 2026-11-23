@@ -8,9 +8,9 @@
 # refs that declare the environment receive them.
 #
 # Tools are verified, never piped into a shell: scripts/ci/install-mise.sh checks the mise release
-# against a committed SHA-256, and mise installs pnpm and the scanners with `--locked` against
-# mise.lock. Caches (.pnpm-store, .mise) live inside the project directory, are written only by
-# the validate job, and are ignored by every scanner.
+# against a committed SHA-256 on every run, and mise installs pnpm and the scanners with
+# `--locked` against mise.lock. Caches (.pnpm-store, .mise) live inside the project directory, are
+# written only by the validate job, and are ignored by every scanner.
 
 workflow:
   rules:
@@ -30,11 +30,12 @@ stages:
 
 variables:
   # Images pinned by digest; Renovate updates tag and digest together (renovate.json).
+  # The full Node image, not -slim, for every Node job: it has git and the system CA certificates
+  # that tools outside Node verify TLS with (workerd in the Worker contract tests, osv-scanner).
+  # The -slim image has neither; the server image (Dockerfile) stays -slim, since Node's own TLS
+  # uses its bundled roots.
   # renovate: datasource=docker depName=node
-  NODE_IMAGE: node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc
-  # The same Node with git, for jobs that read history.
-  # renovate: datasource=docker depName=node
-  NODE_GIT_IMAGE: node:26.13.1-trixie@sha256:e18c3ccdf7d71619990b0e85639f506e2028a95410999cab24cc373cbd10e0ac
+  NODE_IMAGE: node:26.13.1-trixie@sha256:e18c3ccdf7d71619990b0e85639f506e2028a95410999cab24cc373cbd10e0ac
   # renovate: datasource=docker depName=mcr.microsoft.com/playwright
   PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
   # The maintained kaniko fork (ADR 0003, F-10).
@@ -46,9 +47,10 @@ variables:
   CURL_IMAGE: curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93
   # renovate: datasource=docker depName=renovate/renovate
   RENOVATE_IMAGE: renovate/renovate:44.258.0@sha256:2948b8ed46aceac257f0488699272960efea87ee2644007368e64925c5d874fd
-  # Caches inside the project directory (the only place GitLab caches).
+  # Caches inside the project directory (the only place GitLab caches). pnpm 12 reads its settings
+  # from pnpm_config_* variables (it ignores npm_config_*); .pnpm checks the store is really here.
   MISE_DATA_DIR: $CI_PROJECT_DIR/.mise
-  npm_config_store_dir: $CI_PROJECT_DIR/.pnpm-store
+  pnpm_config_store_dir: $CI_PROJECT_DIR/.pnpm-store
   # The image repository; the name is the project's, never a product name (09 §4).
   IMAGE_REPOSITORY: $CI_REGISTRY_IMAGE/server
   WRANGLER_SEND_METRICS: "false"
@@ -91,6 +93,15 @@ default:
       paths: [.mise]
       policy: pull
 
+# The pnpm store must be the cached one inside the project directory (F-8): never a path that MR
+# and main jobs could share on the runner.
+.store-in-project: &store-in-project |
+  store="$(pnpm store path)"
+  case "$store" in
+    "$CI_PROJECT_DIR"/.pnpm-store/*) echo "pnpm store: $store" ;;
+    *) echo "pnpm's store is $store, outside $CI_PROJECT_DIR/.pnpm-store: is pnpm_config_store_dir set?"; exit 1 ;;
+  esac
+
 # Node, pnpm (and any MISE_TOOLS) from mise.lock, and the workspace installed.
 .pnpm:
   extends: .caches
@@ -101,6 +112,7 @@ default:
     # shellcheck disable=SC2086 # MISE_TOOLS is a list of tool names.
     - scripts/ci/install-mise.sh pnpm $MISE_TOOLS
     - export PATH="$MISE_DATA_DIR/bin:$MISE_DATA_DIR/shims:$PATH"
+    - *store-in-project
     # `prepare` runs games:generate (11 §3); git hooks are skipped in CI.
     - pnpm install --frozen-lockfile
 
@@ -115,7 +127,6 @@ default:
 validate:
   stage: validate
   extends: [.pnpm, .every-pipeline]
-  image: $NODE_GIT_IMAGE
   cache:
     - key:
         prefix: pnpm
@@ -128,7 +139,8 @@ validate:
       paths: [.mise]
       policy: pull-push
   variables:
-    MISE_TOOLS: gitleaks github:oasdiff/oasdiff
+    # Every tool any job installs, so this job fills the mise cache for all of them.
+    MISE_TOOLS: gitleaks github:oasdiff/oasdiff osv-scanner syft
     GIT_DEPTH: "0"
   script:
     - *sections
@@ -137,6 +149,10 @@ validate:
     - section typecheck "TypeScript"; pnpm typecheck; end typecheck
     - section arch "Architecture rules"; pnpm lint:arch; end arch
     - section unused "knip"; pnpm lint:unused; end unused
+    - section pins "Toolchain pins"
+    - pnpm lint:pins
+    - mise lock --check || { echo "mise.lock is out of date: run 'mise lock' and commit mise.lock"; exit 1; }
+    - end pins
     - section generated "Committed generated code"
     - pnpm api:generate
     - pnpm renovate:sync
@@ -176,7 +192,7 @@ test:
   needs: [validate]
   script:
     # Unit, integration, property, component and API contract tests (Node and Worker builds);
-    # the full game kit joins in M1.
+    # the full game kit joins in M1. workerd needs the system CA certificates (NODE_IMAGE).
     - pnpm test
   coverage: '/Lines\s*:\s*(\d+(?:\.\d+)?)%/'
   artifacts:
@@ -194,19 +210,13 @@ build:app:
   stage: build
   extends: [.pnpm, .every-pipeline]
   needs: [validate]
-  variables:
-    MISE_TOOLS: syft
   script:
     # games:generate, games:verify --fast, then every package: web, Node server, Worker bundle.
     - pnpm build
-    # On main and tags: a CycloneDX SBOM of the Worker bundle's production dependency tree.
-    - |
-      if [ "$CI_PIPELINE_SOURCE" != "merge_request_event" ]; then
-        pnpm --filter @your-move/worker deploy --prod sbom-src/worker
-        mkdir -p sbom
-        syft scan "dir:sbom-src/worker" --source-name worker --source-version "$CI_COMMIT_SHA" \
-          -o "cyclonedx-json=sbom/worker.cdx.json"
-      fi
+    # CycloneDX SBOMs of what each deployment ships: the production dependencies of the root
+    # (installed games, from M1), the web app (bundled into the SPA) and the Node server or the
+    # Worker. The image's own SBOM (base image and all) comes from its build job.
+    - pnpm sbom:app
   artifacts:
     expire_in: 1 week
     paths:
@@ -221,7 +231,8 @@ build:app:
 
 # Native per-architecture image builds with kaniko: no daemon, no privileges, no user namespaces.
 # Merge requests build without keeping the image; main and tags keep the tarball for the publish
-# job and write its SBOM (production dependencies only, from the image itself).
+# job and write its SBOM from the image itself. `--cleanup` removes the built image's filesystem
+# from the job container afterwards, so the SBOM step runs in kaniko's own busybox environment.
 .build-image:
   stage: build
   extends: .every-pipeline
@@ -249,6 +260,7 @@ build:app:
         --build-arg "IMAGE_PIPELINE_ID=$CI_PIPELINE_ID" \
         --build-arg "IMAGE_PIPELINE_URL=$CI_PIPELINE_URL" \
         --snapshot-mode=redo \
+        --cleanup \
         --no-push \
         --destination "$IMAGE_REPOSITORY:$CI_COMMIT_SHA-$ARCH" \
         $tar_args
@@ -298,7 +310,7 @@ e2e:
 security:secrets:
   stage: security
   extends: .every-pipeline
-  image: $NODE_GIT_IMAGE
+  image: $NODE_IMAGE
   needs: []
   cache:
     - key:
@@ -339,7 +351,9 @@ security:dependencies:
 
 # Proves a merge-request job can't read any secret (10 M0), even when it declares the secret's
 # environment: those variables are protected, and MR pipelines don't run on protected refs.
-# Prints only whether each variable is set.
+# ENV_SCOPE_CANARY, an unprotected variable scoped to each environment with the environment's
+# name as its value (docs/deploy.md), proves the job really got that environment's variables, so
+# the check can't pass vacuously. Prints only whether each variable is set.
 security:no-secrets-on-mr:
   stage: security
   extends: .merge-requests
@@ -353,6 +367,10 @@ security:no-secrets-on-mr:
     action: access
   script:
     - |
+      if [ "${ENV_SCOPE_CANARY:-}" != "$ENV" ]; then
+        echo "$ENV: ENV_SCOPE_CANARY is not \"$ENV\": this job didn't get the $ENV environment's variables, so the check below would prove nothing (docs/deploy.md)"
+        exit 1
+      fi
       exposed=0
       for name in RELEASE_DEPLOY_TOKEN RELEASE_DEPLOY_USER RENOVATE_TOKEN GITHUB_COM_TOKEN CLOUDFLARE_API_TOKEN D1_DATABASE; do
         if [ -n "$(printenv "$name" || true)" ]; then echo "$ENV: $name is set"; exposed=1; else echo "$ENV: $name is not set"; fi
@@ -380,10 +398,14 @@ publish:packages:
   extends: [.release, .caches]
   image: $NODE_IMAGE
   needs: [validate, test, build:app, e2e, security:secrets, security:dependencies]
+  variables:
+    # A fresh clone, never a checkout left on the runner by another pipeline.
+    GIT_STRATEGY: clone
   before_script:
     - *require-release-token
     - scripts/ci/install-mise.sh pnpm
     - export PATH="$MISE_DATA_DIR/bin:$MISE_DATA_DIR/shims:$PATH"
+    - *store-in-project
     # The packages were built in build:app; install without running any dependency's scripts.
     - pnpm install --frozen-lockfile --ignore-scripts
   script:
@@ -401,6 +423,9 @@ publish:image:
   image:
     name: $CRANE_IMAGE
     entrypoint: [""]
+  variables:
+    # Pushes only the build jobs' artifacts: no checkout at all.
+    GIT_STRATEGY: none
   needs:
     - validate
     - test
