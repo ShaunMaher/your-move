@@ -434,7 +434,8 @@ code and is logged below error level with the error's class and stack frames but
 which can quote the input. Anything else is a server fault, answered `500 INTERNAL` and logged at
 error level with class, message and stack: an error raised with a `5xx` status or with a status
 whose code only the handler can choose (`403`, `409`), and a parse error in anything but the
-request (stored JSON, an engine).
+request (stored JSON, an engine). A parse error (`SyntaxError`) is logged without its message,
+which quotes the text being parsed.
 
 **Module errors** from `validate` and `preview` are returned as `400 { error: { code, message,
 detail } }` with the module's code and detail as-is. From `resolveOptions` and `validateStart` they
