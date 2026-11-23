@@ -31,3 +31,12 @@ data/
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Local dev environment. Absent, the project works unchanged.
+.local/
+/.mcp.json
+__pycache__/
+
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json

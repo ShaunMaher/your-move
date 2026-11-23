@@ -14,11 +14,11 @@ precaches the shell and runtime-caches module chunks.
 | Route | Screen |
 |---|---|
 | `/signin` | Email entry → code entry (same screen, two steps) |
-| `/welcome` | Onboarding (only when `needsOnboarding`, 06 §5): display name with the "don't use your full name" warning, and the age confirmation |
-| `/` | Game list across all game types (each row: game icon, players, module `summary`, last action): *Your turn* · *Invitations* (accept/decline) · *Waiting* (their turn, lobbies) · *Finished* (collapsed); "New game" button |
+| `/welcome` | Onboarding (only when `needsOnboarding`, 06 §5): display name with the "don't use your full name" warning, the age confirmation, and an explicit "I'm under `MIN_AGE`" choice (shows the parent/carer message and deletes the new account) |
+| `/` | Game list across all game types (each row: game icon, players, `summary`, last action): *Your turn* · *Invitations* (accept/decline/block) · *Waiting* (their turn, lobbies) · *Finished* (collapsed, with the end reason) · *Hidden invitations* (collapsed, no badge, 06 §6.7); "New game" button |
 | `/new` | New game flow (§1.1) |
-| `/g/:id` | Lobby (status `lobby`: seats and their states, turn timeout, seat order, word list and other resources; for the creator: join-link share sheet, Remove per seat, Start/Cancel; for an invitation: Accept/Decline; for others: Leave) or the game frame + module `Board` |
-| `/join#<token>` | Join-link landing page: game type, options, turn timeout, creator and joined players; an explicit "Join" button. Signed-out visitors sign in first; the path and fragment are kept in `sessionStorage` (same-origin `/join` only) and restored afterwards (06 §6.8). Never joins automatically |
+| `/g/:id` | Lobby (status `lobby`: seats and their states, turn timeout, seat order, word list and other resources; invited seats show the typed address to the creator and "Invited" to everyone else; for the creator: join-link share sheet, Remove per seat, Start/Cancel; for an invitation: Accept/Decline/Block; for others: Leave) or the game frame + module `Board`. The history drawer pages through `GET /api/games/:id/history`. The finished screen shows ranks (or "Declined — no result") and, for the creator, "Add <name> to your players?" for link joiners (02 §4) |
+| `/join#<token>` | Join-link landing page: game type, options, turn timeout, creator and joined players; an explicit "Join" button. On load it reads the fragment and replaces the URL with plain `/join` (`history.replaceState`). Signed-out visitors sign in first; the path and fragment are kept in `sessionStorage` (same-origin `/join` only), restored afterwards, and cleared after a join or a `404` (06 §6.8). Never joins automatically |
 | `/settings` | Display name, **who can add me to games** (06 §6.2), notifications toggle, email nudges, devices/sessions, sign out, sign out everywhere, blocked players, delete account, about/licence/source link |
 | `/privacy` | Privacy page (08 §5), operator contact from config; says the service is for people aged `MIN_AGE`+ and that children play through a parent's account |
 | `/settings/word-lists` | My uploaded word lists: upload (file picker → name, language, rights checkbox → progress), list with "in use by N games", delete |
@@ -39,12 +39,15 @@ The app name comes from `/api/config` at runtime; nothing name-specific is baked
      operator lists come first, then "Your uploads", then an "Upload a word list…" entry that links
      to `/settings/word-lists`.
 3. **Players**: seat count stepper, shown only when the game allows more than one count. Pick past
-   opponents, or type emails (invite confirmation dialog for non-users). There's also an
-   "Add a join link for the open seats" toggle (with the warning that anyone with the link can see
-   the game and join), and a "Turn order: join order / random" choice.
+   opponents, or type emails. Typed addresses are shown back before Create ("Check the address:
+   sam@example.org") because the app never says whether an address has an account (06 §6.1, Q3);
+   a typo just becomes an invitation nobody receives. There's also an "Add a join link for the
+   open seats" toggle (with the warning that anyone with the link can see the game and join, and
+   that the game then waits for you to press Start), and a "Turn order: join order / random"
+   choice.
 4. **Pace**: turn timeout in days (1–30), defaulting to the game's `defaultTurnTimeoutDays`.
-5. **Create**. The game starts immediately if every seat is filled by auto-joined players;
-   otherwise it opens the lobby. If a join link was created, its URL is shown once with a share
+5. **Create**. The game starts immediately if every seat is filled by auto-joined past opponents
+   and there's no join link; otherwise it opens the lobby. If a join link was created, its URL is shown once with a share
    button.
 
 In the game frame, the menu shows the game's name and options (e.g. ruleset and word list), plus
@@ -121,7 +124,8 @@ previews show score only.
     dictionaries kept).
   - **Never cache `/api/*`** responses (network-only).
   - `navigateFallbackDenylist: [/^\/api\//, /^\/__dev\//, /^\/manifest\.webmanifest$/]` so
-    server-rendered pages (e.g. the unsubscribe page) are never replaced by the SPA shell.
+    server-rendered pages (the unsubscribe page lives at `/api/email/unsubscribe`, 05) are never
+    replaced by the SPA shell.
   - Show "New version available — reload" toast when an update is waiting.
   - `push` handler MUST call `showNotification` for every push (iOS revokes subscriptions that
     receive silent pushes). `notificationclick` focuses an existing window or opens `/g/:id`.

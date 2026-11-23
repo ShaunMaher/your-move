@@ -1,11 +1,12 @@
 # Specification
 
-Status: **DRAFT v0.6** (v0.2 revised after picky + security review; v0.3 adds selectable rulesets and dictionaries; v0.4 adds bring-your-own dictionaries; v0.5 turns the product into a multi-game framework, 2026-11-21; v0.6 applies the v0.5 picky + security review — contract hooks, framework-owned timeouts and seat order, invitations and `whoCanAddMe`, join-link hardening, upload quotas, minimum age, paths geometry — 2026-11-23, traceability in `docs/reviews/spec-v0.5.md`). Nothing is implemented yet. These documents are the source of truth for
+Status: **DRAFT v0.7** (v0.2 revised after picky + security review; v0.3 adds selectable rulesets and dictionaries; v0.4 adds bring-your-own dictionaries; v0.5 turns the product into a multi-game framework, 2026-11-21; v0.6 applies the v0.5 picky + security review — contract hooks, framework-owned timeouts and seat order, invitations and `whoCanAddMe`, join-link hardening, upload quotas, minimum age, paths geometry — 2026-11-23, traceability in `docs/reviews/spec-v0.5.md`; project named **Your Move**, 2026-11-23; v0.7 applies the v0.6 re-review — history endpoint, framework-only `declined` ending, no auto-start with join links, dictionary config moved to the framework, onboarding gate and under-age exit, hidden invitations — plus owner decisions Q2 (Workspace email) and Q3 (never reveal whether an address has an account), 2026-11-23, traceability in `docs/reviews/spec-v0.6.md`). Nothing is implemented yet. These documents are the source of truth for
 the coding agent; if code and spec disagree, the spec wins until the spec is changed on purpose.
 
-The product has no name yet. Everywhere a name would appear, use the configured value
-`APP_NAME` (see [09-operations.md](09-operations.md)). Never hard-code a product name in code,
-copy, emails, manifests, package names or Docker image names.
+The project is called **Your Move**. The name is still never hard-coded: everywhere it would
+appear, use the configured value `APP_NAME` (default `Your Move`, see
+[09-operations.md](09-operations.md)), so forks and self-hosted instances can rebrand without code
+changes. This applies to code, copy, emails, manifests, package names and Docker image names.
 
 | # | Document | What it covers |
 |---|----------|----------------|
@@ -38,18 +39,27 @@ Framework terms:
 |------|---------|
 | Game module | A self-contained game (rules engine + board UI) plugged into the framework (02). |
 | Game shell | The framework UI around every game: list, new-game flow, lobby, header, menu, history (02 §3). |
-| Seat | A player position in a started game, numbered from 0; seat order is turn order, set by the framework's seat order (02 §4). |
+| Seat | A player position in a started game, numbered from 0; seat order is turn order (02 §4). |
+| Seat order | The creator's choice of turn order: `join` (creator first, then in joining order) or `random` (a recorded draw at start) (02 §4). |
 | Lobby | A created game waiting for seats to fill before it starts (02 §4). |
-| Invitation | A lobby seat offered to an existing user who must accept it (per their `whoCanAddMe`), or to an email address with no account yet (06 §6). |
-| Join link | A shareable link that lets signed-in people take open lobby seats (06 §6.8). |
-| Past opponent | A user you've finished a game with (06 §6.9); can add you directly under the default setting. |
+| Open seat | A lobby seat not held by an `invited` or `joined` row; join links fill open seats (02 §4). |
+| Invitation | A lobby seat offered to an existing user, who must accept it: anyone added by email, or a past opponent whose `whoCanAddMe` is `nobody` (02 §4, 06 §6.2). |
+| Email-invite seat | A lobby seat for an address with no (onboarded) account; the person gets an invite email and the seat is **claimed** when they complete onboarding with that address (06 §6.3–6.4). |
+| Delivery | How an invitation reaches its target: `normal`, `hidden` (over the inbound cap; only in the collapsed *Hidden invitations* list) or `inert` (blocked pair; never delivered). All look the same to the creator (04, 06 §6.7). |
+| `whoCanAddMe` | A user's setting: `pastOpponents` (default; past opponents picked from the list auto-join you) or `nobody` (everything is an invitation) (06 §6.2). |
+| Join link | A shareable link that lets signed-in people take open lobby seats; a game with one waits for the creator's Start (06 §6.8). |
+| Past opponent | A user you've finished a game with, both having acted; link joiners only with the creator's confirmation (06 §6.9). Can add you directly under the default setting. |
+| Onboarding | Setting a display name and confirming `MIN_AGE` after first sign-in; until done the account is invisible to others (06 §5). |
+| Turn timeout / deadline | The creator's per-game limit (1–30 days) for a seat to act once it's in `toAct`; the deadline is when that seat's clock runs out (02 §4). |
 | Action | One move submitted by a player, defined by the game module. |
 | `toAct` | The set of seats that may act now (02 §2.3). |
 | Phase | A stretch of a game where several seats in `toAct` each act once, in any order (02 §2.3). |
 | View | What one seat (or the public) may see of a game's state; the only way state reaches a client (02 §2). |
 | Public record | A module's description of one transition, visible to every seat; used for history and notifications (02 §2.1). |
+| `Text` / `describe` | Display text made of strings and `{ seat }` placeholders, filled with current names when shown; `describe` turns a public record into `Text`, stored with each log entry (02 §5). |
+| Final views | Each seat's (and the public) last `view` and `summary`, stored when a started game ends; finished games display from them (02 §5). |
 | Resource | External data a module needs, loaded and authorised by the framework, e.g. a dictionary (02 §2.1). |
-| Out / eliminated | A seat no longer playing: eliminated by the rules, resigned or timed out (02 §4). |
+| Out / eliminated | A seat no longer playing: eliminated by the rules, resigned, timed out, or declined before a first action (never ranked) (02 §4). |
 | `endReason` | Module-defined reason a game ended, or a framework reason (`declined`, `cancelled`, `expired`). |
 | OTP | One-time password emailed to the user for sign-in. |
 
@@ -58,7 +68,9 @@ Word game terms (games/words.md):
 | Term | Meaning |
 |------|---------|
 | Ruleset | A versioned data file describing board, premium squares, tiles, rack size, bonuses and behaviour variants; chosen per game (words §8). |
-| Dictionary | A versioned word list with metadata (language, licence); chosen per game (words §9). |
+| Dictionary | A versioned word list with metadata (language, licence); chosen per game; a framework resource (words §9). |
+| Distribution | `public` (clients may download the list, e.g. ENABLE) or `serverOnly` (the list never leaves the server) (words §9.5). |
+| Operator / uploaded dictionary | A `serverOnly` list added by the instance operator for everyone, or uploaded by a player for games they create (words §9.5). |
 | Rack | The tiles a player currently holds (default 7). |
 | Bag | Undrawn tiles. Its order is server-secret. |
 | Bingo | Placing `rackSize` (default 7) tiles in a single play. Emptying a smaller late-game rack is not a bingo. |
@@ -71,3 +83,6 @@ Path game terms (games/paths.md):
 | Hand | The tiles a player holds (default 3), hidden from others. |
 | Marker | A player's piece, sitting on a notch and facing an empty square. |
 | Notch | One of 8 path endpoints on each square's edges, numbered 0–7 clockwise (paths §1). |
+| Edge notch | A notch on the outer edge of the board, numbered `0..8·boardSize−1` clockwise; markers start on one (paths §1). |
+| Tile id | A tile's stable number 0–34 from the canonical ordering of the 35 generated tiles (paths §1). |
+| Draw-order token | Marks who is dealt first when tiles return to an exhausted deck (paths §4). |

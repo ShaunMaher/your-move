@@ -43,10 +43,11 @@ pass in CI.
 ## M2 — Auth
 - DB schema + migrations on both drivers; repository interfaces + both adapters + shared repository
   contract tests; `Platform` for both runtimes; HKDF subkeys; `isLocalDev` predicate.
-- OTP request/verify, sessions, display-name onboarding, logout/logout-all, `/me`, rate limiting,
-  email providers (`console` + one real HTTP provider), security headers, Origin checks.
+- OTP request/verify, sessions, display-name onboarding (the age confirmation and its rules arrive
+  in M4), logout/logout-all, `/me`, rate limiting, email providers (`console`, `smtp` for Gmail SMTP
+  on Docker and the `gmail` API provider for Workers, Q2), security headers, Origin checks.
 - Sign-in UI + welcome screen, PWA manifest/icons/service worker basics.
-- **Accept:** integration tests for every 06 rule (expiry, attempts, 3-live-challenge behaviour,
+- **Accept:** integration tests for every 06 §3–§4 rule (expiry, attempts, 3-live-challenge behaviour,
   silent per-email drop creates no challenge, enumeration response *and* timing parity, rate limits
   incl. IP bucketing/XFF parsing, global caps); 50-parallel-verify race test on both drivers;
   logout-all test; Origin/JSON enforcement tests; `/__dev/emails` 404 in production config;
@@ -56,10 +57,12 @@ pass in CI.
 ## M3 — Framework + play words
 - Framework in `packages/server`: games registry, generic `games` / `game_players` /
   `game_actions` / `game_resources` / `past_opponents` storage, membership rules, lifecycle (lobby,
-  auto-join vs invitation per `whoCanAddMe`, accept, remove seat, start with seat order, decline,
-  leave, resign, cancel, lobby expiry), `toAct` sets and per-seat clocks, framework turn timeout
-  with reminders and sweep, final views and summaries, stored `describe` text, option resolution,
-  resource authorisation and loading, catalog/config/health endpoints, error table (05 §Errors).
+  auto-join of past opponents vs invitation per `whoCanAddMe`, accept, remove seat, start with seat
+  order and block re-check, decline, leave, resign, cancel, lobby expiry), `toAct` sets and per-seat
+  clocks, framework turn timeout with reminders and sweep, final views and summaries, stored
+  `describe` text and the history endpoint, option resolution with remembered options, resource
+  authorisation (framework `DICTIONARIES_*` config) and the `serverOnly` lookup reservation, module
+  config isolation, catalog/config/health endpoints, error table (05 §Errors).
 - Game shell UI: new-game flow (game picker → module options form → players), game list across
   types, lobby screen, game frame (header, menu, history drawer, finished/ranking screen), lazy
   module loading.
@@ -69,9 +72,14 @@ pass in CI.
 - **Accept:** transition race tests (03 §5.2 list: exactly one wins and no partial writes, both
   drivers); framework tests run with both `words` and the reference module (proves no game-specific
   code leaked into the framework), covering with the reference module: start below max, decline in
-  the lobby and before/after first action (ending `declined` vs resignation), leave, remove seat,
-  cancel, lobby expiry, `validateStart` failure, per-seat timeouts in a multi-seat phase (one
-  transition per seat, stops once the game ends), sweep idempotence, elimination shown as `out`;
+  the lobby and before/after first action (ending `declined` with no ranks and `final_views`, vs
+  `out_reason = declined` excluded from the ranking, vs resignation), a timeout before a first action
+  (same rule), leave, remove seat (foreign `playerId` → `404`, own row refused), cancel, lobby
+  expiry, the lobby `declined` check running only on decline/leave/remove, `validateStart` failure
+  at create, at Start and on an automatic start (trigger still succeeds), per-seat timeouts in a
+  multi-seat phase (one transition per seat, stops once the game ends), reminder reset on clock
+  restart, sweep idempotence, elimination shown as `out`, past-opponent pairs only between players
+  who both acted;
   membership tests (users who left or were removed before start get `404`, `yourSeat` from the
   renumbered row); `whoCanAddMe` tests for all three settings; Playwright two-player full words game
   on WebKit iPhone viewport; route-wide secrecy test (04 invariant 4, incl. only the viewer's
@@ -79,9 +87,9 @@ pass in CI.
   body-size/placement/socket-cap limits tested; p95 move latency measured.
 
 ## M4 — Invites, join links, notifications, polish
-- Email invites (email-invite seats, claim on sign-in, lobby expiry, limits, suppression,
-  unsubscribe routes per 05 §Email links).
-- Inbound invitation cap with `suppressed` invitations.
+- Email invites (email-invite seats, claim on onboarding, lobby expiry, limits, suppression,
+  unsubscribe route per 05 §Email links), with Q3's identical responses for every email case.
+- Inbound invitation caps with the *Hidden invitations* list; outbound email-invitee cap.
 - Join links (fragment tokens, create/rotate/revoke, landing page with explicit Join and
   `sessionStorage` return path, rate limits, block checks against every member, no re-entry after
   decline/leave/remove).
@@ -96,8 +104,17 @@ pass in CI.
   deletion (with step-up code) leaves opponents' history intact and passes with `foreign_keys=ON`;
   push-endpoint allow-list tests (T12); unsubscribe token + RFC 8058 one-click tests (T17);
   `invite_email` cleared on terminal states and no raw address in `invites`; join-link token tests
-  (T24), incl. that tokens never appear in server logs; inbound-cap test (T20); onboarding blocks
-  game creation until the age confirmation is given.
+  (T24), incl. that tokens never appear in server logs and that a game with a live link or a link
+  joiner never auto-starts; link joiners become past opponents only via the creator's
+  confirmation; inbound-cap tests (per creator and total, `hidden` invitations listed only under
+  *Hidden invitations*); **Q3 parity**: adding an onboarded user, an unknown address, an
+  un-onboarded account, a suppressed address, an over-cap address and a blocked user by email gives
+  identical responses and statistically indistinguishable timing; lobby endings send no push or
+  email (T18); unsubscribe GET/POST e2e on both targets with the service worker active; onboarding:
+  `403 ONBOARDING_REQUIRED` on game list, create, accept, join lookup and join until done, invites
+  claimed only at onboarding completion, "I'm under `MIN_AGE`" deletes the account, the sweep
+  deletes un-onboarded accounts after 7 days, raising `MIN_AGE` re-prompts; display-name rename
+  limit; blocking a lobby co-member removes/leaves the seat.
 
 ## M5 — Paths game
 - Requires the M4 child-safety items to be done.
@@ -121,7 +138,7 @@ pass in CI.
 - Operator dictionaries via `pnpm admin:dict:add`; `pnpm admin:dict:delete`.
 - **Accept:** a 280k-word list uploads and plays end-to-end on both targets; no route returns
   `serverOnly` contents, blob keys or hashes (route-wide test); using another user's or a deleted
-  upload in a new game returns the same `400 UNKNOWN_DICTIONARY` as a nonexistent id; an off-rack
+  upload in a new game returns the same `400 INVALID_OPTIONS` (`detail.code = UNKNOWN_DICTIONARY`) as a nonexistent id; an off-rack
   play never yields `INVALID_WORDS`; zip-bomb and oversized uploads rejected while streaming;
   orphaned blobs swept; quota counts deleted-but-unpurged uploads; delete-while-in-use keeps
   existing games working and the sweep purges afterwards; upload CPU measured on Workers.
