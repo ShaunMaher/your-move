@@ -100,6 +100,11 @@ The project's foundation, built to 11 (engineering standards) from the first com
   packaged as `@your-move/game-words` with its manifest (02 §7).
 - Releases: `v*` tag pipelines create a GitLab Release that records the image digests and the
   package versions published.
+- Release path: Changesets bumps a package **major** when a peer dependency it names is bumped
+  out of range, so an SDK minor would take `@your-move/testkit` (peer `@your-move/sdk` `^0.x`) to
+  1.0.0 and break "0.x until M4". Settle how the testkit and the SDK are versioned together (e.g. a
+  `fixed` group, or `onlyUpdatePeerDependentsWhenOutOfRange` with a peer range spanning `0.x`)
+  before the second SDK release; the first (0.1.0, M1a) bumped both together by hand.
 - **Accept:** a Maintainer-triggered MR pipeline's `CI_JOB_TOKEN` cannot push to a protected
   container repository or an `@your-move/*` package version (if it can, protection is raised to
   Owner, the release registry token is reissued with the Owner role, and the release credentials
@@ -144,6 +149,9 @@ The project's foundation, built to 11 (engineering standards) from the first com
   authorisation (framework `DICTIONARIES_*` config) and the `serverOnly` lookup reservation, module
   config isolation, catalog/config/health endpoints, error table (05 §Errors), all under `/api/v1`
   with the OpenAPI document and the per-game-type schema endpoint.
+- The type-level test of 02 §7.4: the SDK's client-facing API schemas (`GameEnvelope`,
+  `SubmitResult`, …) and the types `@your-move/api-client` generates from the routes that register
+  them are mutually assignable (the routes arrive here, so the test does too).
 - Game packages for real: `words` and `example` installed through `instance.config.ts`, the
   generated registry and client import map, `ENABLED_GAMES` filtering, `pnpm games:check-db` and
   the Node startup check, orphaned-game runtime behaviour (`409 GAME_UNAVAILABLE`), the rules
