@@ -1,0 +1,25 @@
+# The owner reviews the specification, the pipeline and security-relevant code (11 §6, 08).
+# Owners are the maintainers of the project's GitLab group.
+
+[Specification]
+/docs/spec/ @applications
+/docs/adr/ @applications
+/docs/security/ @applications
+/CLAUDE.md @applications
+/.claude/agents/ @applications
+
+[Pipeline and supply chain]
+/.gitlab-ci.yml @applications
+/renovate.json @applications
+/pnpm-workspace.yaml @applications
+/osv-scanner.toml @applications
+/.gitleaks.toml @applications
+/apps/node/Dockerfile @applications
+/apps/worker/wrangler.example.toml @applications
+/instance.config.ts @applications
+
+[Security-relevant code (08)]
+/packages/server/src/config/ @applications
+/packages/server/src/http/ @applications
+/apps/node/src/env.ts @applications
+/packages/testkit/src/ @applications
