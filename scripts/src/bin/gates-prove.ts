@@ -7,7 +7,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -139,6 +139,49 @@ const proofs: Record<string, Proof> = {
       return readFileSync(report, "utf8").includes('"RuleID": "your-move-api-token"')
         ? null
         : "gitleaks failed without the ym_pat_ rule";
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+
+  "secrets: a token committed in a tracked fixture package's dist/"() {
+    // The allow-list skips untracked caches and build output only: a tracked fixture package with
+    // a dist/ directory (scripts/test-fixtures) is scanned, in history and in the checkout.
+    const dir = mkdtempSync(join(tmpdir(), "gate-secrets-paths-"));
+    try {
+      const token = `ym_pat_${base62(12)}_${base62(43)}`;
+      const plant = (path: string) => {
+        mkdirSync(join(dir, path, ".."), { recursive: true });
+        writeFileSync(join(dir, path), `export const token = "${token}";\n`);
+      };
+      const cached = ".pnpm-store/v11/files/00/leak.js";
+      const fixture = "scripts/test-fixtures/games/registry/@fixture/game-x/dist/leak.js";
+      // As CI runs it: from the checkout, on ".", so reported paths are relative to it. Outside
+      // the repository mise's shim has no version to run, so use the binary it resolves here.
+      const which = exec("mise", ["which", "gitleaks"]);
+      const gitleaks = which.status === 0 ? which.output.trim() : "gitleaks";
+      const scan = (mode: "git" | "dir") =>
+        exec(
+          gitleaks,
+          [mode, ".", "--config", join(ROOT_DIR, ".gitleaks.toml"), "--no-banner", "--redact"],
+          { cwd: dir },
+        );
+      const git = (...args: string[]) =>
+        exec("git", ["-c", "user.name=gate", "-c", "user.email=gate@example.invalid", ...args], {
+          cwd: dir,
+        });
+      plant(cached);
+      if (git("init", "--quiet").status !== 0) return "git init failed";
+      const allowed = scan("dir");
+      if (allowed.status !== 0)
+        return `gitleaks reported the allow-listed cache:\n${allowed.output}`;
+      plant(fixture);
+      git("add", "--force", fixture);
+      if (git("commit", "--quiet", "-m", "fixture").status !== 0) return "git commit failed";
+      for (const mode of ["git", "dir"] as const) {
+        if (scan(mode).status === 0) return `gitleaks ${mode} passed the fixture`;
+      }
+      return null;
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
