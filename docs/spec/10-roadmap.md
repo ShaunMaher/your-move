@@ -4,24 +4,53 @@ Each milestone goes through the agent loop in `CLAUDE.md`: **coder → picky rev
 reviewer → coder fixes → owner sign-off**. A milestone is done only when its acceptance criteria
 pass in CI.
 
-## M0 — Skeleton
-- pnpm monorepo per 03 §3, TypeScript strict, lint/format, Vitest, `.gitlab-ci.yml` running
-  lint/typecheck/test.
-- `apps/worker` and `apps/node` both serve a hello-world Hono app from `packages/server` and the
-  Vite SPA shell.
-- Config schema + `.env.example`.
-- Shared security-header definition applied on Node and emitted as `_headers` for Cloudflare.
-- **Accept:** `pnpm dev:node` and `pnpm dev:worker` (wrangler dev) both serve the SPA and
-  `/api/health`; CI green; Docker image builds and runs; header test passes on both targets.
+## M0 — Skeleton and engineering standards
+The project's foundation, built to 11 (engineering standards) from the first commit.
+- Toolchain: `mise.toml` (Node 26 LTS, pnpm 12), `packageManager`, `engines` (11 §1).
+- pnpm monorepo per 03 §3 with every package directory created (empty packages export a
+  placeholder and a test), `@your-move/*` scope, TypeScript project references and the strict
+  settings (11 §2).
+- Quality tooling (11 §3–§6): Prettier, ESLint flat config (typescript-eslint strict type-checked,
+  React, hooks, jsx-a11y, import rules, eslint-comments), dependency-cruiser architecture rules
+  (11 §5, including the game-package ruleset in `packages/testkit`), knip, licence check, gitleaks,
+  OSV-Scanner, `.editorconfig`, `.gitattributes`, `CODEOWNERS`, `SECURITY.md`.
+- Tests wired (11 §4): Vitest workspace with coverage thresholds, fast-check, Testing Library,
+  Playwright (WebKit iPhone + Chromium) with one smoke test, the API contract-test harness running
+  against both runtimes.
+- Git workflow (11 §7): lefthook hooks, commitlint, Changesets (no packages published yet).
+- Renovate configuration (11 §8) and its scheduled pipeline using `RENOVATE_TOKEN`.
+- `.gitlab-ci.yml` with every stage in 11 §9 (publish jobs present but with nothing to publish).
+- `apps/worker` and `apps/node` both serve `packages/server`'s Hono app and the Vite SPA shell.
+  The API skeleton is versioned from the start: `GET /api/health` and `GET /api/v1/health`,
+  the OpenAPI document at `/api/v1/openapi.json` and its docs page, `@your-move/api-client`
+  generated from it and used by the SPA's health check, and the breaking-change check (05
+  §Versioning).
+- Instance composition plumbing (02 §7.3): `instance.config.ts` (empty game list), `pnpm
+  games:generate` and `pnpm games:verify` with their failure checks unit-tested against fixture
+  packages.
+- Config schema with secret redaction + `.env.example`; shared security-header definition applied
+  on Node and emitted as `_headers` for Cloudflare.
+- Docs: README quick start, CONTRIBUTING (dev setup, commands, conventions, review process), the
+  first three ADRs (11 §10), `docs/guides/writing-a-game.md` stub.
+- **Accept:** a fresh clone + `mise install` + `pnpm install` + `pnpm dev:node` / `pnpm dev:worker`
+  serves the SPA and the health endpoints; every 11 §9 stage runs green on an MR; each gate is
+  shown to fail on a deliberate violation (a lint error, an architecture-rule breach such as an
+  engine importing `node:fs`, a coverage drop, a leaked `ym_pat_` string, a disallowed licence, a
+  breaking OpenAPI change, a commit message not in Conventional Commits form); the Docker image
+  builds for amd64 and arm64 and runs; header test passes on both targets; Renovate's first run
+  opens its Dependency Dashboard.
 
 ## M1 — Game SDK + words engine + dictionary
-- `packages/sdk`: `GameDefinition` / `GameClientModule` types, recording `RandomSource`, `Resources`,
-  and the generic test kit (02 §6: schema, replay, perturbation secrecy, termination, turn sanity,
-  CPU budget).
-- **A reference module** kept as a test fixture (e.g. a tiny hidden-hand card game) that exercises
-  everything the word game doesn't: 2–4 players, a hidden hand, elimination, and one simultaneous
-  secret phase (multi-seat `toAct`). It proves the contract and kit before the word game uses them,
-  and drives the M3 framework tests.
+- `@your-move/sdk`: `GameDefinition` / `GameClientModule` / `GameManifest` types, recording
+  `RandomSource`, `Resources`; `@your-move/testkit`: the generic test kit (02 §6: schema, replay,
+  perturbation secrecy, termination, turn sanity, CPU budget) and the game-package architecture
+  rules (02 §7.5). SDK 1.0.0 published to the GitLab package registry through Changesets, with the
+  public-surface report (02 §7.4).
+- **The reference game package** `@your-move/game-example` (02 §7.6): exercises everything the
+  word game doesn't — 2–4 players, a hidden hand, elimination, and one simultaneous secret phase
+  (multi-seat `toAct`). It proves the contract and kit before the word game uses them, drives the
+  M3 framework tests, and is the template for third-party authors. `docs/guides/writing-a-game.md`
+  written around it.
 - **Broken fixture modules** (02 §6) that the kit must reject.
 - `words` ruleset schema, registry, behaviour variants (`swapOrder`), and the two MVP rulesets `classic` and
   `casual` (words §8.3) with original, symmetric premium layouts.
@@ -29,9 +58,12 @@ pass in CI.
   output, alphabet manifest), `DictionaryProvider`, lookup, and the ruleset↔dictionary compatibility
   check. MVP dictionary: `enable`.
 - `words` engine as a `GameDefinition` (games/words.md §10): setup/deal, placement validation, word
-  finding, scoring, swap/pass, resign/timeout, end conditions, final scoring, view, preview.
+  finding, scoring, swap/pass, resign/timeout, end conditions, final scoring, view, preview —
+  packaged as `@your-move/game-words` with its manifest (02 §7).
 - **Accept:** the kit fails every broken fixture and passes the reference module at 2, 3 and 4
-  players; words engine passes the generic test kit (including the CPU budget on `worstCase`
+  players; `pnpm games:verify` passes with `example` and `words` installed and fails when either
+  violates an architecture rule; a game package built in a separate scratch repository from the
+  published SDK, testkit and the guide passes the kit and installs into a local instance; words engine passes the generic test kit (including the CPU budget on `worstCase`
   inputs) under every ruleset; ≥ 95 % line coverage on
   engines and SDK; table-driven tests for every rule in games/words.md incl. edge
   cases (cross-words only, blanks on premiums, two DW stacking, bingo, extending existing words,
@@ -44,15 +76,22 @@ pass in CI.
 - DB schema + migrations on both drivers; repository interfaces + both adapters + shared repository
   contract tests; `Platform` for both runtimes; HKDF subkeys; `isLocalDev` predicate.
 - OTP request/verify, sessions, display-name onboarding (the age confirmation and its rules arrive
-  in M4), logout/logout-all, `/me`, rate limiting, email providers (`console`, `smtp` for Gmail SMTP
-  on Docker and the `gmail` API provider for Workers, Q2), security headers, Origin checks.
+  in M4), logout/logout-all, `/me`, rate limiting, email providers (`console` and `smtp`; `gmail`
+  arrives in M4, Q2), security headers, Origin checks (cookie requests only; bearer tokens arrive in
+  M3).
+- Step-up codes (06 §7) and the Admin API foundation (05 §Admin API): `ADMIN_EMAILS`, admin
+  step-up, `admin_audit`, `status`, user lookup, suspend/unsuspend, revoke sessions; `pnpm admin:*`
+  client with `status` and the user commands.
 - Sign-in UI + welcome screen, PWA manifest/icons/service worker basics.
 - **Accept:** integration tests for every 06 §3–§4 rule (expiry, attempts, 3-live-challenge behaviour,
   silent per-email drop creates no challenge, enumeration response *and* timing parity, rate limits
   incl. IP bucketing/XFF parsing, global caps); 50-parallel-verify race test on both drivers;
   logout-all test; Origin/JSON enforcement tests; `/__dev/emails` 404 in production config;
   zero CSP violations in Playwright; verified on a real iPhone home-screen install that sign-in
-  persists across app restarts and that the home-screen label uses the runtime `APP_NAME`.
+  persists across app restarts and that the home-screen label uses the runtime `APP_NAME`; admin
+  tests: non-admin `404`/`403`, step-up required and expiring after 10 minutes, every request
+  audited (allowed and refused), lookup never echoes the email, suspension revokes sessions and
+  sends the suspension notice instead of a code; the admin OpenAPI document isn't served publicly.
 
 ## M3 — Framework + play words
 - Framework in `packages/server`: games registry, generic `games` / `game_players` /
@@ -62,7 +101,14 @@ pass in CI.
   clocks, framework turn timeout with reminders and sweep, final views and summaries, stored
   `describe` text and the history endpoint, option resolution with remembered options, resource
   authorisation (framework `DICTIONARIES_*` config) and the `serverOnly` lookup reservation, module
-  config isolation, catalog/config/health endpoints, error table (05 §Errors).
+  config isolation, catalog/config/health endpoints, error table (05 §Errors), all under `/api/v1`
+  with the OpenAPI document and the per-game-type schema endpoint.
+- Game packages for real: `words` and `example` installed through `instance.config.ts`, the
+  generated registry and client import map, `ENABLED_GAMES` filtering, the orphaned-type check.
+- API tokens (06 §8): creation with step-up, scopes, `ym_pat_` format, HMAC storage, bearer auth
+  (Origin-exempt, no cookie+bearer), per-token limits, revocation, the creation email; `aiAssistance`
+  option and `403 AI_NOT_ALLOWED` on human seats, `via` recorded and shown in history (02 §9.3).
+- Admin: cancel a game (operator cancel, 02 §4).
 - Game shell UI: new-game flow (game picker → module options form → players), game list across
   types, lobby screen, game frame (header, menu, history drawer, finished/ranking screen), lazy
   module loading.
@@ -86,7 +132,11 @@ pass in CI.
   the invite-claim races (03 §5.2); Playwright two-player full words game
   on WebKit iPhone viewport; route-wide secrecy test (04 invariant 4, incl. only the viewer's
   `final_views` entry); WebSocket upgrade Origin and session revocation tests;
-  body-size/placement/socket-cap limits tested; p95 move latency measured.
+  body-size/placement/socket-cap limits tested; p95 move latency measured; token tests (scope
+  enforcement on every route, session-only routes refuse tokens, revoked/expired → `401`,
+  cookie+bearer → `400`, token moves in an `off` game → `403 AI_NOT_ALLOWED` and in an `allowed`
+  game shown as AI-assisted); the same API contract suite green against the Node and Worker builds;
+  the web app uses only `@your-move/api-client`.
 
 ## M4 — Invites, join links, notifications, polish
 - Email invites (email-invite seats, claim on onboarding, lobby expiry, limits, suppression,
@@ -138,6 +188,8 @@ pass in CI.
 
 ## M5 — Paths game
 - Requires the M4 child-safety items to be done.
+- `@your-move/game-paths` package (02 §7), installed through `instance.config.ts`; the
+  writing-a-game guide revised with anything learned.
 - `paths` engine (games/paths.md): tile-set generator (35) and canonical ids, notch/rotation/edge
   maths, marker phase, movement, collisions, self-elimination rule, skipping empty hands, deck
   exhaustion + draw-order token, ranking.
@@ -155,7 +207,8 @@ pass in CI.
   commit, removals applied), quotas (per-user incl. deleted-but-unpurged, instance-wide, account
   maturity), My word lists screen, picker integration, debounced server previews with per-word
   lookup limits, help page with official sources.
-- Operator dictionaries via `pnpm admin:dict:add`; `pnpm admin:dict:delete`.
+- Operator dictionaries through the Admin API (`POST`/`DELETE /api/v1/admin/dictionaries`) and the
+  `pnpm admin:dict:add` / `admin:dict:delete` clients; admin email-suppression endpoints.
 - **Accept:** a 280k-word list uploads and plays end-to-end on both targets; no route returns
   `serverOnly` contents, blob keys or hashes (route-wide test); using another user's or a deleted
   upload in a new game returns the same `400 INVALID_OPTIONS` (`detail.code = UNKNOWN_DICTIONARY`) as a nonexistent id; an off-rack
@@ -167,6 +220,19 @@ pass in CI.
 - Scope decided by Q20 (e.g. adult-managed profiles without email, device sign-in codes issued by the
   adult, restricted capabilities). Requires a privacy review first. (The minimum-age confirmation
   and parent-account guidance ship in M4.)
+
+## M8 — AI players and MCP
+- AI accounts (02 §9.2): create/rename/delete in Settings, tokens for them, seating by the owner at
+  creation, "(AI)" labels and badges everywhere, owner-equivalence for blocks, limits.
+- `@your-move/mcp` (02 §9.4): the local stdio MCP server over `@your-move/api-client`, with the
+  untrusted-data wrapping and tool-description warnings (08 T28); published.
+- A short guide: connecting your own agent as an assistant or an opponent.
+- **Accept:** two AI accounts, each driven by an agent through the MCP server, play complete
+  `words` and `paths` games against each other on a development instance; an AI account can't be
+  invited, picked, link-joined or create a game; a human seat with `aiAssistance: "off"` refuses MCP
+  submits; prompt-injection fixtures in display names and `describe` text reach the agent only
+  inside the untrusted-data delimiters. The maintainers use this setup for exploratory testing from
+  then on.
 
 ## Later (ideas, not committed)
 

@@ -16,6 +16,10 @@ source (attackers can read the code). Design so that reading the code doesn't he
 6. Licensed and uploaded word lists (`serverOnly` dictionaries) and their rights attestations.
 7. **Minors' safety and privacy**: children may play through a parent's account (Q20); a game is
    aimed at groups of kids. No stranger should be able to contact them (T20, T24).
+8. **API tokens** (06 §8): each one acts as its account, within its scopes.
+9. **The admin capability** (05 §Admin API): suspend, delete and cancel across the instance.
+10. **The build**: installed game packages and the published `@your-move/*` packages that other
+    instances and game authors depend on.
 
 ## 2. Threats and required controls
 
@@ -25,8 +29,8 @@ source (attackers can read the code). Design so that reading the code doesn't he
 | T2 | Email bombing a victim / OTP spray across many addresses | per-email request limits with silent drop (no challenge created); per-IP-prefix limits; **instance-wide OTP email cap** (§4); optional Turnstile, auto-enabled by the circuit breaker |
 | T3 | Spam via invite emails (using us as a relay), incl. Sybil accounts | sign-in required; fixed template; display-name restrictions (06 §5); per-inviter, new-account, per-target and **instance-wide** invite caps; suppression list + one-click unsubscribe; inviter identity shown in email |
 | T4 | Account enumeration | `/otp/request` identical response *and* timing parity (06 §3.2); `/otp/verify` errors indistinguishable with dummy HMAC; adding players by email gives the same response, work and timing whether or not the address has an account, is un-onboarded, suppressed, over a cap or blocked (06 §6.1, Q3); invited users' names are hidden until they accept; adding by email never auto-joins; rows never `joined` show no name or id to anyone in any state (declined and removed included, 05 §Common types); per-pair limits keyed by the typed address's `emailId`; only literal duplicate invitees are rejected; invite claims are invisible to other members (02 §4). Residual (accepted): signals that need a real person to act — someone **signs up** with the address and then **accepts** or **declines** the invitation (06 §6, privacy note) |
-| T5 | Session theft / lingering access | `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Lax`; tokens hashed at rest; sessions list + revoke; logout-all; revocation also kills push subscriptions and live sockets (06 §4); step-up OTP for account deletion |
-| T6 | CSRF | `SameSite=Lax` + strict `Origin` check on every state-changing request and the WebSocket upgrade; JSON-only bodies (05 conventions). Exemptions are listed explicitly: the unsubscribe route `/api/email/unsubscribe` (Origin and JSON) and the dictionary upload route (JSON only). No state change on GET — including timeouts (sweep only) and unsubscribe (GET shows a page). |
+| T5 | Session theft / lingering access | `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Lax`; tokens hashed at rest; sessions list + revoke; logout-all; revocation also kills push subscriptions and live sockets (06 §4); step-up OTP for account deletion, API-token creation and admin actions (06 §7) |
+| T6 | CSRF | `SameSite=Lax` + strict `Origin` check on every cookie-authenticated state-changing request and the WebSocket upgrade (bearer-token requests are exempt — browsers never attach them — and a request may not carry both, 05 §Conventions); JSON-only bodies (05 conventions). Exemptions are listed explicitly: the unsubscribe route `/api/v1/email/unsubscribe` (Origin and JSON) and the dictionary upload route (JSON only). No state change on GET — including timeouts (sweep only) and unsubscribe (GET shows a page). |
 | T7 | XSS / HTML injection | React escaping only; **no `dangerouslySetInnerHTML`** (lint rule); strict CSP (§3); display names treated as untrusted everywhere, including email HTML templates (escaped) and push payloads (plain text) |
 | T8 | Cheating: reading hidden information (other hands, bag/deck order, secret actions) | Game data leaves the server only via module `view()`, the viewer's own `final_views` entry, public `record`s and `describe` text (04 invariant 4); generic perturbation test for every module covering views, summaries, `toAct`, `seatStatus`, error codes and details (including for illegal actions) and records (02 §6); `state`, `rng` and raw actions never serialised; `500`s carry no detail and logs never contain inputs, state or validator "received" values (09 §5); WebSocket carries only invalidations, to members only |
 | T9 | Cheating: illegal moves, acting out of turn, replaying requests | Framework enforces membership (04 §Membership, so rows from before seat renumbering never grant access), `toAct` and `expectedVersion` + `write_token` transitions (03 §5.2); module schema + `validate` re-check every action server-side; client previews are never trusted |
@@ -45,8 +49,13 @@ source (attackers can read the code). Design so that reading the code doesn't he
 | T22 | Leaking `serverOnly` word lists (licensing exposure for the operator) | No route serves list contents, blob keys or hashes (tested on every route); `distribution` checked server-side; the service worker never caches them; the preview endpoint takes only a full module action and runs every rack/structural check before any lookup (words §10.3); `serverOnly` lookups are limited **per word looked up** per user and per game (§4); only the uploader can use an upload in new games (T11); logs never contain dictionary contents. Accepted residual: a determined opponent can still probe words from their own racks, slowly |
 | T23 | Copyright complaints about uploads | Uploads are private to the uploader's games; rights attestation stored; takedown contact on the help/privacy page; operator script to delete any upload (`pnpm admin:dict:delete <id>`) |
 | T24 | Join-link abuse (guessing, leaked or forwarded links, joining someone's game uninvited) | 128-bit tokens stored hashed; token in the URL fragment so it never reaches logs; URL shown only on create/rotate; expire at start / revoke / rotate / lobby expiry / 7 days; sign-in and an explicit Join tap required (no auto-join after sign-in; return path kept in `sessionStorage`, same-origin `/join` only); block checks against every member; people who declined, left or were removed (while that link was live) can't come back through it; lookup/join rate-limited per user and IP; indistinguishable `404`s; a game with a live link or any link joiner never auto-starts, so the creator always sees who joined and can remove them before Start; link joiners become past opponents only of the creator and only if the creator confirms; the join page removes the token from the address bar and history; the share UI warns that anyone with the link can join |
-| T25 | Malicious/buggy game module crashing or slowing the server | Modules are first-party code reviewed like the rest; module exceptions → `500` without partial writes (transition aborts); per-call CPU budget (≤ 5 ms p99 on reference hardware) checked by the test kit on each module's `worstCase` inputs (02 §6); `serverOnly` dictionary loads limited per user (§4) |
+| T25 | Malicious/buggy game module crashing or slowing the server | Modules are reviewed code (first-party, or third-party installed deliberately, T27); module exceptions → `500` without partial writes (transition aborts); per-call CPU budget (≤ 5 ms p99 on reference hardware) checked by the test kit on each module's `worstCase` inputs (02 §6); `serverOnly` dictionary loads limited per user (§4) |
 | T26 | Forced forfeits through game settings | The turn timeout is a framework setting, an integer 1–30 days, validated before the module sees options, and shown on every invitation and in the lobby (02 §4). A player who never acted takes no loss: declining or timing out before a first action either ends the game `declined` with no ranking (if too few would remain) or puts the seat out as `declined`, excluded from the ranking (02 §4) |
+| T27 | A malicious or compromised **third-party game package** (02 §7) | Installing a game is trusting its code like any dependency — it runs in the server and in players' browsers; there is no runtime sandbox in v1 (02 §7.5). Controls: packages are installed only by the operator, named in `instance.config.ts` and pinned by the lockfile; `pnpm games:verify` at every build enforces the architecture rules on the built output (engine imports only the SDK: no `node:*`, network, timers, `crypto` or DOM; client imports only the SDK, React and its engine), runs the generic test kit, checks the manifest and the licence allow-list; client assets are bundled at build time and the CSP forbids remote code (§3); Renovate never auto-merges game packages (11 §8); operator guidance in 09. Residual (accepted): a package that passes these checks but hides malicious code in allowed constructs; an isolate sandbox is a later hardening |
+| T28 | **Prompt injection** against users' AI agents through game content | Display names, `describe` text and anything else other people write reach agents only through `@your-move/mcp` wrapped as untrusted data between explicit delimiters, with tool descriptions warning the agent not to follow instructions inside it (02 §9.4); the MCP server exposes only the token's own scopes, so an injected instruction can at worst play or resign the agent's own seat, never reach other accounts or secrets. Display-name rules (06 §5.1) still apply |
+| T29 | **API token** theft or misuse | Tokens are opt-in, scoped (`read` / `play` / `admin`), expire within a year, are shown once and stored as HMACs (`token/v1`, 06 §8); creating one needs a session **and** a fresh step-up code, and emails the account; a token can't mint tokens, change settings, manage sessions or delete the account; `ym_pat_` prefix so leaked tokens are caught by secret scanning (gitleaks in CI and pre-commit, 11 §6); per-token rate limits (§4); revocable at once; suspension and deletion revoke them; cookie + bearer on one request is rejected, and bearer requests can't be forged cross-site, so they're Origin-exempt |
+| T30 | **Admin API** abuse (stolen admin session, malicious operator tooling) | Admins come only from `ADMIN_EMAILS` config; every admin action needs a step-up code within 10 minutes or an `admin`-scope token; separate, low rate limits (§4); append-only `admin_audit` for every request, allowed or refused (04); admins can't see hidden game state or browse email addresses (lookup by exact address only); admin routes are excluded from the public OpenAPI document. Residual: whoever controls the deployment's config controls the admin list — operators are trusted by definition |
+| T31 | **AI players passing as people, or undisclosed AI help** | AI accounts always show "(AI)" and a badge in every place a name appears, can be seated only by their owner when the owner creates a game, and are visible before anyone accepts (02 §9.2); token moves are logged with `via = token` and shown as AI or AI-assisted in history; `aiAssistance` defaults to `off` for games with two or more people and is shown on invitations, so token play on a human seat needs everyone's knowing consent (`403 AI_NOT_ALLOWED`, 02 §9.3). Residual (accepted, stated on the rules page): a player can script their own browser session or copy suggestions by hand |
 
 ## 3. HTTP security headers
 
@@ -96,6 +105,12 @@ generated `_headers` file for static assets (03 §9). One shared definition gene
 | Join-link lookups and joins per IP (bucketed) | 60 / h | `429` |
 | Join-link creations per user | 20 / day | `429` |
 | Any authenticated write per user | 300 / min | `429` |
+| Requests per API token | 120 / min, 10,000 / day (the account's limits apply too) | `429` |
+| Failed bearer authentications per IP (bucketed) | 30 / h | `429` |
+| API token creations per user | 5 / day | `429` |
+| Games created with AI seats, per owner | 20 / day | `429` |
+| Admin requests per admin | 60 / min | `429` |
+| Admin step-up codes per admin | 5 / h | `429` |
 
 Instance-wide numbers are sized for a friends-and-family deployment; operators raise them in config.
 "Alert" = an `error`-level structured log with a stable `alert` field, so it can be wired to
@@ -162,9 +177,17 @@ whatever notification the operator uses.
 - Lockfile committed; `pnpm install --frozen-lockfile` everywhere.
 - Install scripts: pnpm's `onlyBuiltDependencies` allow-list set explicitly (e.g. `better-sqlite3`,
   `esbuild`, `workerd`); all others blocked. Runtime Docker image built with `pnpm deploy --prod`.
-- Minimal runtime deps, each justified and permissively licensed; `pnpm audit --prod` in CI;
-  dependency updates via Renovate with a minimum release age (e.g. 3 days) and no auto-merge for
-  runtime deps.
+- Minimal runtime deps, each justified and permissively licensed (allow-list checked in CI, 11 §6);
+  OSV-Scanner on the lockfile in CI and nightly; dependency updates via Renovate (11 §8) with a
+  minimum release age (3 days), no auto-merge for runtime deps or game packages, and auto-merge
+  only for patch/minor dev dependencies after a green pipeline.
+- Secret scanning: gitleaks in CI and as a pre-commit hook, with a rule for the `ym_pat_` token
+  prefix (06 §8). GitLab push protection where available.
+- Published packages (`@your-move/*`, 02 §7.4) are built and published only by the protected
+  `main` pipeline through Changesets, with the GitLab job token scoped to this project's package
+  registry; provenance (the commit and pipeline that built each version) is recorded in the
+  package metadata. No developer publishes from a workstation.
+- An SBOM (CycloneDX) is generated for every Docker image and Worker bundle built on `main`.
 - CI images and Docker base images pinned by digest.
 - Cloudflare deploy credentials: `CLOUDFLARE_API_TOKEN` is a **protected + masked** GitLab variable
   scoped to a `production` environment that only the default branch/tags can deploy to. The token

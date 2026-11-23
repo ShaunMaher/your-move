@@ -113,6 +113,11 @@ mostly painless.
   a 24 h maximum lifetime, so a missed revocation can't outlive a day (03 §6).
 - On sign-out the client also unsubscribes its push subscription and clears per-game local state
   (rack order) — shared devices.
+- **Suspension** (05 §Admin API): suspending a user deletes their sessions and revokes their tokens
+  (with the same socket closing as above). While suspended, `/otp/request` still answers `202` as
+  always, but the email sent is a fixed "Your account is suspended" notice instead of a code, so
+  only the address holder learns of it; any request with a surviving session gets
+  `403 SUSPENDED`.
 - **Local-dev mode** (cookie name `sid` without `Secure`/`__Host-`, `console` email provider, the
   `/__dev/*` routes) is enabled only when the *parsed* `PUBLIC_URL` has scheme `http` and host exactly
   `localhost`, `127.0.0.1` or `[::1]`. Any other `PUBLIC_URL` with these settings ⇒ refuse to start.
@@ -133,7 +138,7 @@ Verify on a real device during M2.
   never deletes them and their games carry on for the other players. Nothing else is collected
   about age. Children play through a parent's account (Q20); the privacy page
   says so (08 §5), and user-facing copy never markets the service to children.
-- **"I'm under `MIN_AGE`"** is an explicit choice on the same screen (`POST /api/me/under-age`,
+- **"I'm under `MIN_AGE`"** is an explicit choice on the same screen (`POST /api/v1/me/under-age`,
   logged as `under_age_exit` without the email). It shows "Ask a parent or carer to sign in and
   play with you on their account." What happens next depends on the account:
   - **New account** (`onboarded_at` NULL): the account and its sessions are deleted at once, with
@@ -178,7 +183,7 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
 1. **Adding players never reveals whether an email has an account** (Q3). The creator adds
    invitees by email or from past opponents (`userId`, which must be a past opponent). Each email is
    normalised and validated; the creator's own address → `CANNOT_PLAY_SELF`. Every other valid
-   address gets a seat and an identical response (05 `POST /api/games`):
+   address gets a seat and an identical response (05 `POST /api/v1/games`):
    - an onboarded user → an invitation (§6.2), shown to them unless the pair has a block;
    - no account, or an account that hasn't finished onboarding → an email-invite seat (§6.3);
    - a block in either direction between that user and the creator **or any earlier invitee in the
@@ -317,10 +322,51 @@ person to act: someone **signs up** with the address and then **accepts** (the s
 or **declines** (only an invitation can be declined, never an email-invite seat). These are accepted
 residuals (08 T4).
 
-## 7. Account deletion
+## 7. Step-up: account deletion, tokens, admin
 
-Step-up required: the client requests a fresh code (`POST /api/me/delete/otp`, same OTP machinery
-and limits, purpose-bound challenge), then calls `DELETE /api/me { code }`. A stolen session alone
-cannot delete the account. Then → 04 §Account deletion. Sends a confirmation email afterwards.
-Immediate and irreversible (no grace period in v1); backups age out per the documented retention
-(09 §4).
+Some actions need proof that the account holder is present, not just a session: a fresh code sent
+to the account's email (same OTP machinery and limits as sign-in, purpose-bound challenges, 04
+`otp_challenges.purpose`). A stolen session alone can't do any of them.
+
+- **Account deletion** (purpose `delete_account`): the client requests a code
+  (`POST /api/v1/me/delete/otp`), then calls `DELETE /api/v1/me { code }`. Then → 04 §Account
+  deletion. Sends a confirmation email afterwards. Immediate and irreversible (no grace period in
+  v1); backups age out per the documented retention (09 §4).
+- **Creating an API token** (purpose `step_up`, §8): the code is sent with the create request.
+- **Admin actions** (purpose `step_up`, 05 §Admin API): a verified code marks the session as
+  stepped up for 10 minutes.
+
+## 8. API tokens and AI accounts
+
+Personal API tokens let a person's own tools — scripts, an MCP server, an AI agent (02 §9) — use
+the public API without a browser session.
+
+- **Format:** `ym_pat_` followed by an id and 256 random bits (base62), e.g.
+  `ym_pat_<id>_<secret>`. The fixed prefix lets secret scanners (gitleaks, GitLab and GitHub push
+  protection) recognise a leaked token; the project's gitleaks config includes the rule (11 §6).
+- **Storage:** only `HMAC-SHA256(K_token, secret)` with the HKDF subkey `token/v1` (09 §1.1),
+  compared in constant time after looking up the id. The token is shown once, at creation.
+- **Creation:** in Settings, session only, with a `step_up` code (§7). The user picks a name,
+  scopes (`read`, `play`; `admin` only for admins, 05 §Admin API) and an expiry of 1–365 days.
+  At most 10 live tokens per account.
+- **What a token can't do:** create or revoke tokens, change settings or display name, manage
+  sessions, push subscriptions or blocks, onboard, or delete the account. Those are session only
+  (05 §Conventions).
+- **Use:** `Authorization: Bearer …`. Bearer requests don't need `Origin` (they can't be forged
+  cross-site) and must not also carry a session cookie. Per-token rate limits (08 §4) apply on top
+  of the account's limits; `last_used_at` is updated at most once a minute. An unknown, expired or
+  revoked token gets `401 UNAUTHENTICATED`; failures are counted per IP bucket like failed
+  sign-ins.
+- **Revocation:** from Settings at any time, by suspension (05 §Admin API) and by account
+  deletion. Revocation takes effect on the next request; tokens hold no socket.
+- **Notifications:** creating a token sends the account an email ("A new API token '<name>' was
+  created for your account") so a hijacked session can't quietly mint one.
+
+**AI accounts** (02 §9.2) are users with `kind = agent` and no email. They never sign in: the only
+way to act as one is a token its owner created for it (same rules as above; never the `admin`
+scope). Display-name rules (§5.1) apply, and the app adds "(AI)" and a badge wherever the name is
+shown, so an agent can't pass as a person. An AI account is treated as its owner for block checks,
+and can't be invited, picked, added or link-joined by anyone (06 §6). Owners see their agents'
+tokens and games in Settings. An AI account is created already onboarded (`onboarded_at` set, no age
+confirmation of its own — its owner's applies), receives no pushes or emails, and is suspended
+and deleted together with its owner.

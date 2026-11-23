@@ -5,9 +5,13 @@ centred column with a larger board.
 
 The app is a **game shell** (02 §3): it owns sign-in, the game list, new-game flow, lobby, the
 in-game frame (header, menu, history drawer, finished screen), settings and notifications. Each game
-type's board UI is a separately bundled `GameClientModule` (`games/<id>/client`), lazy-loaded with
-dynamic `import()` the first time a game of that type is opened or created. The service worker
-precaches the shell and runtime-caches module chunks.
+type's board UI is the `/client` entry point of an installed game package (02 §7), lazy-loaded
+through the generated client import map (02 §7.3) the first time a game of that type is opened or
+created. The service worker precaches the shell and runtime-caches module chunks.
+
+The app talks to the server **only through `@your-move/api-client`** (05, 11 §5): the same typed
+client, generated from the OpenAPI document, that other developers and the MCP server use. There
+are no app-only endpoints.
 
 ## 1. Screens
 
@@ -17,15 +21,23 @@ precaches the shell and runtime-caches module chunks.
 | `/welcome` | Onboarding (only when `needsOnboarding`, 06 §5 — for a new account, or a re-prompt after a `MIN_AGE` rise, which shows only the age step): display name with the "don't use your full name" warning, the age confirmation, and an explicit "I'm under `MIN_AGE`" choice (shows the parent/carer message; deletes a new account, but for a re-prompted account only signs out this session). The re-prompt is addressed to the account holder |
 | `/` | Game list across all game types (each row: game icon, players, `summary`, last action): *Your turn* · *Invitations* (accept/decline/block) · *Waiting* (their turn, lobbies) · *Finished* (collapsed, with the end reason) · *Hidden invitations* (collapsed, no badge, fetched separately with `?invitations=hidden`, 06 §6.7); "New game" button |
 | `/new` | New game flow (§1.1) |
-| `/g/:id` | Lobby (status `lobby`: seats and their states, turn timeout, seat order, word list and other resources; rows never joined show the creator the typed address (or the picked past opponent's name) only while invited, and otherwise only their state ("Invited", "Declined", "Removed"), which is all everyone else ever sees; for the creator: join-link share sheet, Remove per seat, Start/Cancel; for an invitation: Accept/Decline/Block; for others: Leave) or the game frame + module `Board`. The history drawer pages through `GET /api/games/:id/history`. The finished screen shows ranks (or "Declined — no result") and, for the creator, "Add <name> to your players?" for link joiners (02 §4) |
+| `/g/:id` | Lobby (status `lobby`: seats and their states, turn timeout, seat order, word list and other resources; rows never joined show the creator the typed address (or the picked past opponent's name) only while invited, and otherwise only their state ("Invited", "Declined", "Removed"), which is all everyone else ever sees; for the creator: join-link share sheet, Remove per seat, Start/Cancel; for an invitation: Accept/Decline/Block; for others: Leave) or the game frame + module `Board`. The history drawer pages through `GET /api/v1/games/:id/history`. The finished screen shows ranks (or "Declined — no result") and, for the creator, "Add <name> to your players?" for link joiners (02 §4) |
 | `/join#<token>` | Join-link landing page: game type, options, turn timeout, creator and joined players; an explicit "Join" button. On load it reads the fragment and replaces the URL with plain `/join` (`history.replaceState`). Signed-out visitors sign in first; the path and fragment are kept in `sessionStorage` (same-origin `/join` only), restored afterwards, and cleared after a join or a `404` (06 §6.8). Never joins automatically |
 | `/settings` | Display name, **who can add me to games** (06 §6.2), notifications toggle, email nudges, devices/sessions, sign out, sign out everywhere, blocked players, delete account, about/licence/source link |
+| `/settings/api` | **API tokens** (06 §8): list (name, scopes, acts as, created, expires, last used), create (name, scopes, expiry, acting as me or one of my AI accounts; asks for a step-up code; shows the token **once** with a copy button and a warning), revoke. **AI accounts** (02 §9.2): create (display name), rename, delete, see their games. A link to the API docs page (`/api/v1/docs`) and the MCP guide |
 | `/privacy` | Privacy page (08 §5), operator contact from config; says the service is for people aged `MIN_AGE`+ and that children play through a parent's account, and that the email provider keeps copies of sent emails (sign-in codes, invitations) and for how long (operator-configured text) |
 | `/settings/word-lists` | My uploaded word lists: upload (file picker → name, language, rights checkbox → progress), list with "in use by N games", delete |
 | `/help/word-lists` | "Where can I get a word list?" (words §9.5): official sources only, licence reminder, accepted file format |
 | `/install` | Short illustrated "Add to Home Screen" guide (shown as a dismissible banner on iOS Safari when not standalone) |
 
-The app name comes from `/api/config` at runtime; nothing name-specific is baked into the build.
+The app name comes from `/api/v1/config` at runtime; nothing name-specific is baked into the build.
+
+**AI labels** (02 §9.2, 08 T31): wherever a player's name appears — game list, lobby, header,
+history, finished screen, invitations — an AI account shows "<name> (AI)" with an AI badge
+(icon + accessible label "AI player"). Moves made through a token show an "AI" marker in the
+history drawer. Games with AI assistance allowed show it in the header and lobby.
+
+There is no admin UI in v1; operators use the Admin API and its command-line client (09 §1.2).
 
 ### 1.1 New game flow
 
@@ -45,7 +57,11 @@ The app name comes from `/api/config` at runtime; nothing name-specific is baked
    open seats" toggle (with the warning that anyone with the link can see the game and join, and
    that the game then waits for you to press Start), and a "Turn order: join order / random"
    choice.
-4. **Pace**: turn timeout in days (1–30), defaulting to the game's `defaultTurnTimeoutDays`.
+   If the creator has AI accounts, they can add them to seats here ("Add my AI").
+4. **Pace and AI**: turn timeout in days (1–30), defaulting to the game's `defaultTurnTimeoutDays`;
+   **AI assistance** off / allowed (02 §9.3), defaulting to off when two or more people will play,
+   with a one-line explanation ("Allowed: players may let their own AI agent make moves; those moves
+   are marked").
 5. **Create**. The game starts immediately if every seat is filled by auto-joined past opponents
    and there's no join link; otherwise it opens the lobby. If a join link was created, its URL is shown once with a share
    button.
@@ -93,7 +109,7 @@ by the shell for every game.)
 
 ## 3. Engine use on the client (word game)
 
-The client imports `@app/game-words` (with every ruleset bundled) and the dictionary lookup to compute:
+The `words` client imports `@your-move/game-words/engine` (with every ruleset bundled) and the dictionary lookup to compute:
 placement validity, words formed, score, bingo. The game's own `rulesetId@version` and
 `dictionaryId` are used. This mirrors the server exactly (same code). For `serverOnly`
 dictionaries the client computes placement and score locally and gets word validity from the
@@ -124,7 +140,7 @@ previews show score only.
     dictionaries kept).
   - **Never cache `/api/*`** responses (network-only).
   - `navigateFallbackDenylist: [/^\/api\//, /^\/__dev\//, /^\/manifest\.webmanifest$/]` so
-    server-rendered pages (the unsubscribe page lives at `/api/email/unsubscribe`, 05) are never
+    server-rendered pages (the unsubscribe page lives at `/api/v1/email/unsubscribe`, 05) are never
     replaced by the SPA shell.
   - Show "New version available — reload" toast when an update is waiting.
   - `push` handler MUST call `showNotification` for every push (iOS revokes subscriptions that

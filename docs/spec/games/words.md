@@ -304,7 +304,7 @@ dictionaries as a list from day one, so adding one is a data change plus a build
   additions/removals bump the version.
 - The server is authoritative. The client downloads the game's dictionary by versioned, hashed URL
   (from the game envelope's `resources[].downloadUrl`, 05, so it works even after the dictionary is
-  disabled for new games; the new-game screen uses `GET /api/catalog`), caches it in the service
+  disabled for new games; the new-game screen uses `GET /api/v1/catalog`), caches it in the service
   worker, and uses it only for instant validity/score previews.
 - Server lookup is a binary search directly over the sorted text. No index is built, so loading
   costs only I/O and no request pays a parse cost (Workers Free: 10 ms CPU/request). Dictionaries are

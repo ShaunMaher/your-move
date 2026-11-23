@@ -36,10 +36,11 @@ equal.
 | `DATABASE_PATH` | Node | `/data/app.sqlite` | |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | no | | Enables Turnstile on OTP request (manually or via the circuit breaker). On Cloudflare the web build also needs `TURNSTILE_ENABLED=true` for the static CSP (03 §9). |
 | `LIMIT_*` | no | see 08 §4 | Overrides for rate limits / instance-wide caps |
-| `ENABLED_GAMES` | no | all registered | Comma-separated game types offered for new games (02 §7). Type ids match `^[a-z][a-z0-9]*$` |
+| `ENABLED_GAMES` | no | every installed package not marked `enabled: false` in `instance.config.ts` | Comma-separated game types offered for **new** games (02 §7.3). Must name installed types only (refuse to start otherwise). Type ids match `^[a-z][a-z0-9]{1,31}$` |
+| `ADMIN_EMAILS` | no | (none) | Comma-separated addresses of admins (05 §Admin API). Matched against the signed-in user's normalised email on every admin request; an empty list disables the Admin API |
 | `DICTIONARIES_ENABLED` | no | all bundled | Comma-separated built-in dictionary ids offered for new games (words §9.3); framework resource config (02 §2.1 rule 7) |
 | `DICTIONARY_UPLOADS` | no | `true` | `false` disables user uploads (Q18) |
-| `DICTIONARIES_EXTRA` | no | (none) | Operator dictionaries: comma-separated ids, each registered with `pnpm admin:dict:add <id> <file> --name … --language …`, which validates (id format per words §9.5), stores the file in `BlobStore` under a generated key and inserts the `dictionaries` row (always `serverOnly`) |
+| `DICTIONARIES_EXTRA` | no | (none) | Operator dictionaries: comma-separated ids, each added through the Admin API (`POST /api/v1/admin/dictionaries`, or `pnpm admin:dict:add <id> <file> --name … --language …`, §1.2), which validates (id format per words §9.5), stores the file in `BlobStore` under a generated key and inserts the `dictionaries` row (always `serverOnly`) |
 | `LOG_LEVEL` | no | `info` | |
 | `LIMIT_DICT_TOTAL_BYTES` | no | `2147483648` | Instance-wide cap on stored uploaded dictionaries (08 §4) |
 | `BLOB_DIR` | Node | `/data/blobs` | `BlobStore` root for Docker; preferably its own volume or size-limited, so uploads can't fill the database disk |
@@ -64,11 +65,30 @@ label:
 | `ip/v1` | IP-bucket hashing in rate limits and audit events | rate-limit counters reset; audit correlation breaks |
 | `unsub/v1` | unsubscribe token MAC | old unsubscribe links stop working — **avoid**; if rotated, keep verifying `v1` too |
 | `email-id/v1` | `emailId` = HMAC of normalised email: suppression list, per-target invite limits, log identifiers | **suppression list silently empties** → previously unsubscribed/bounced addresses get mailed again. Never rotate this subkey without re-keying the table. |
+| `token/v1` | API token hashing (06 §8) | every API token stops working — users must create new ones |
 
 Rotation procedure (documented in `docs/deploy.md`): introduce `APP_SECRET_PREVIOUS`; derive `v1`
 keys from the previous secret for verification of `unsub` and for `email-id` lookups while a
 one-off job re-hashes `email_suppressions` (and new `v2` labels are used for writes). Until that job
 exists, **rotating `APP_SECRET` is unsupported** and the docs say so.
+
+### 1.2 Admin commands
+
+Every administrative task is an Admin API endpoint (05 §Admin API) — Workers has no shell. The
+`pnpm admin:*` scripts are thin clients of that API: they read `ADMIN_URL` (the instance's
+`PUBLIC_URL`) and an `admin`-scope token from `ADMIN_TOKEN` (or `ADMIN_TOKEN_FILE`) in the
+operator's shell, never from the repository. Commands: `admin:status`, `admin:user:lookup`,
+`admin:user:suspend`, `admin:user:unsuspend`, `admin:user:delete`, `admin:game:cancel`,
+`admin:dict:add`, `admin:dict:delete`, `admin:suppression:remove`, `admin:audit`.
+
+### 1.3 Installing games
+
+The installed games are listed in `instance.config.ts` (02 §7.3). To add a third-party game:
+add the package to `package.json` (from a registry you trust), add it to `instance.config.ts`,
+run `pnpm build` (which runs `pnpm games:verify`), and deploy. Before installing, read 02 §7.5:
+a game package runs inside your server and your players' browsers, so treat it like any other
+dependency — trust the author, pin the version, read the diff on every upgrade, and keep
+Renovate's merge requests for game packages on manual merge (the default, 11 §8).
 
 ## 2. Email delivery
 
@@ -122,7 +142,7 @@ that work on both runtimes, plus SMTP for Node only.
   addresses and is NOT suitable).
 - The sending domain MUST have SPF, DKIM and DMARC configured (for the Workspace domain these should
   already exist — verify before go-live); document this in `docs/deploy.md`.
-- Every non-OTP email carries `List-Unsubscribe` (pointing at `/api/email/unsubscribe`, 05) and
+- Every non-OTP email carries `List-Unsubscribe` (pointing at `/api/v1/email/unsubscribe`, 05) and
   `List-Unsubscribe-Post: List-Unsubscribe=One-Click` headers; the `gmail` (raw MIME) and `smtp`
   paths support them.
 - Templates: plain-text + minimal HTML, no remote images, no tracking pixels, no link tracking.
@@ -188,7 +208,7 @@ that work on both runtimes, plus SMTP for Node only.
 ## 5. Observability
 
 - Structured JSON logs (`level`, `msg`, `requestId`, `route`, `status`, `durationMs`, `userId`
-  where relevant). `route` is the route **pattern** (`/api/games/:id`), never the raw path. Never
+  where relevant). `route` is the route **pattern** (`/api/v1/games/:id`), never the raw path. Never
   log OTPs, tokens, cookies, request bodies, emails in any form other than the HMAC `emailId`, or
   game secrets.
 - Validation and module errors are logged by code and path only, never with input values
@@ -200,10 +220,13 @@ that work on both runtimes, plus SMTP for Node only.
 
 ## 6. CI (GitLab)
 
-`.gitlab-ci.yml` stages: `install` (`--frozen-lockfile`) → `lint` + `typecheck` → `test` (unit +
-integration on both DB drivers) → `build` (web, worker, node) → `e2e` (Playwright, WebKit +
-Chromium) → `docker` (build image; push to GitLab registry on default branch) → `deploy` (manual
-job, `production` environment, default branch/tags only: `wrangler d1 migrations apply` then
-`wrangler deploy`, from the build artifact without re-installing; credentials per 08 §6). Also
-`pnpm audit --prod` and a licence check that all runtime dependencies are permissively licensed
-(BSD/MIT/Apache/ISC/0BSD/public domain). CI images pinned by digest.
+The pipeline, its stages and the quality gates are defined in 11 §9. Deployment specifics:
+
+- **Cloudflare deploy** is a manual job in the `production` environment, default branch and tags
+  only: `wrangler d1 migrations apply`, then `wrangler deploy`, from the already-built artifact
+  without re-installing (credentials per 08 §6).
+- **Docker images** for `linux/amd64` and `linux/arm64` are built on `main` and tags, pushed to
+  this project's GitLab container registry, signed with their SBOM attached (08 §6), and tagged
+  with the version and the commit.
+- The owner's proof-of-concept deployment (Docker behind a Cloudflare Tunnel, Q6) pulls the image
+  from the registry; a deploy job for it can follow once it exists.

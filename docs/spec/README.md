@@ -1,27 +1,29 @@
 # Specification
 
-Status: **DRAFT v0.8.1** (v0.2 revised after picky + security review; v0.3 adds selectable rulesets and dictionaries; v0.4 adds bring-your-own dictionaries; v0.5 turns the product into a multi-game framework, 2026-11-21; v0.6 applies the v0.5 picky + security review — contract hooks, framework-owned timeouts and seat order, invitations and `whoCanAddMe`, join-link hardening, upload quotas, minimum age, paths geometry — 2026-11-23, traceability in `docs/reviews/spec-v0.5.md`; project named **Your Move**, 2026-11-23; v0.7 applies the v0.6 re-review — history endpoint, framework-only `declined` ending, no auto-start with join links, dictionary config moved to the framework, onboarding gate and under-age exit, hidden invitations — plus owner decisions Q2 (Workspace email) and Q3 (never reveal whether an address has an account), 2026-11-23, traceability in `docs/reviews/spec-v0.6.md`; v0.8 applies the v0.7 final review — Q3 gaps closed (names of never-joined rows, per-pair limits by `emailId`, literal duplicates only, invisible claims), blocks never recreate past opponents, Gmail via a `gmail.send`-only OAuth token, decline wording, `checkConfig`, tunnel hardening, 2026-11-23, traceability in `docs/reviews/spec-v0.7.md`; v0.8.1 applies the v0.8 focused verification, 2026-11-23, same record). Nothing is implemented yet. These documents are the source of truth for
+Status: **DRAFT v0.9** (v0.2 revised after picky + security review; v0.3 adds selectable rulesets and dictionaries; v0.4 adds bring-your-own dictionaries; v0.5 turns the product into a multi-game framework, 2026-11-21; v0.6 applies the v0.5 picky + security review — contract hooks, framework-owned timeouts and seat order, invitations and `whoCanAddMe`, join-link hardening, upload quotas, minimum age, paths geometry — 2026-11-23, traceability in `docs/reviews/spec-v0.5.md`; project named **Your Move**, 2026-11-23; v0.7 applies the v0.6 re-review — history endpoint, framework-only `declined` ending, no auto-start with join links, dictionary config moved to the framework, onboarding gate and under-age exit, hidden invitations — plus owner decisions Q2 (Workspace email) and Q3 (never reveal whether an address has an account), 2026-11-23, traceability in `docs/reviews/spec-v0.6.md`; v0.8 applies the v0.7 final review — Q3 gaps closed (names of never-joined rows, per-pair limits by `emailId`, literal duplicates only, invisible claims), blocks never recreate past opponents, Gmail via a `gmail.send`-only OAuth token, decline wording, `checkConfig`, tunnel hardening, 2026-11-23, traceability in `docs/reviews/spec-v0.7.md`; v0.8.1 applies the v0.8 focused verification, 2026-11-23, same record; v0.9 adds games as packages from other repositories composed at build time, API first with a versioned `/api/v1` and an Admin API, API tokens, AI accounts, AI assistance and an MCP server, and the engineering standards (11) that M0 delivers, 2026-11-23). Nothing is implemented yet. These documents are the source of truth for
 the coding agent; if code and spec disagree, the spec wins until the spec is changed on purpose.
 
 The project is called **Your Move**. The name is still never hard-coded: everywhere it would
 appear, use the configured value `APP_NAME` (default `Your Move`, see
 [09-operations.md](09-operations.md)), so forks and self-hosted instances can rebrand without code
-changes. This applies to code, copy, emails, manifests, package names and Docker image names.
+changes. This applies to code, copy, emails, manifests and Docker image names. Package names
+(`@your-move/*`) are the project's identity rather than branding and stay as they are in a fork.
 
 | # | Document | What it covers |
 |---|----------|----------------|
 | 01 | [Product](01-product.md) | Goals, users, scope, non-goals, user stories |
-| 02 | [Game framework](02-game-framework.md) | Game module contract, lifecycle (lobby, seats, turns, timeouts), secrecy, replay, test kit |
+| 02 | [Game framework](02-game-framework.md) | Game module contract, lifecycle (lobby, seats, turns, timeouts), secrecy, replay, test kit, game packages, AI players |
 | G1 | [Game: words](games/words.md) | Crossword-tile word game: rules, rulesets, dictionaries, module contract |
 | G2 | [Game: paths](games/paths.md) | Path-laying tile game for 2–8 players |
 | 03 | [Architecture](03-architecture.md) | Repo layout, runtimes (Cloudflare + Docker), storage, realtime, Durable Objects |
 | 04 | [Data model](04-data-model.md) | Tables, columns, invariants |
-| 05 | [API](05-api.md) | HTTP + WebSocket contract |
-| 06 | [Auth & accounts](06-auth.md) | Email OTP, sessions, display names, invites |
+| 05 | [API](05-api.md) | Versioned public HTTP + WebSocket API, OpenAPI, tokens, Admin API |
+| 06 | [Auth & accounts](06-auth.md) | Email OTP, sessions, display names, invites, step-up, API tokens, AI accounts |
 | 07 | [Frontend & PWA](07-frontend.md) | React app, mobile layout, interaction, PWA/iOS specifics |
 | 08 | [Security](08-security.md) | Threat model and required controls |
 | 09 | [Operations](09-operations.md) | Configuration, email delivery, deploy targets, observability |
 | 10 | [Roadmap](10-roadmap.md) | Milestones and acceptance criteria |
+| 11 | [Engineering standards](11-engineering.md) | Toolchain, TypeScript, lint, tests, architecture rules, hygiene, releases, Renovate, CI, ADRs |
 | -- | [Open questions](open-questions.md) | Decisions we still need from the owner |
 
 ## Conventions used in these docs
@@ -38,6 +40,17 @@ Framework terms:
 | Term | Meaning |
 |------|---------|
 | Game module | A self-contained game (rules engine + board UI) plugged into the framework (02). |
+| Game package | An npm package that ships a game module through three entry points: `/engine`, `/client`, `/manifest` (02 §7.1). |
+| Manifest | A game package's metadata: type id, name, SDK range, licence, resource kinds (02 §7.2). |
+| SDK | `@your-move/sdk`, the versioned contract between the framework and every game package; `@your-move/testkit` holds the generic test kit (02 §6, §7.4). |
+| Instance config | `instance.config.ts`: the game packages an instance installs; composed at build time (02 §7.3). |
+| API token | A personal, scoped (`read` / `play` / `admin`), expiring credential (`ym_pat_…`) for the public API (06 §8). |
+| AI account | An account of kind `agent`, owned by a person, with no email, acting only through tokens and always labelled AI (02 §9.2). |
+| AI assistance | The per-game setting that decides whether people's own agents may make moves on human seats (02 §9.3). |
+| AI move | A move submitted with an API token (`via = token`), shown as AI or AI-assisted in history (02 §9.1). |
+| MCP server | `@your-move/mcp`, a local Model Context Protocol server that lets a person's agent use the API (02 §9.4). |
+| Admin | A user listed in `ADMIN_EMAILS`, able to use the Admin API with a step-up code or an `admin` token (05 §Admin API). |
+| Step-up | A fresh, purpose-bound email code proving the account holder is present (06 §7). |
 | Game shell | The framework UI around every game: list, new-game flow, lobby, header, menu, history (02 §3). |
 | Seat | A player position in a started game, numbered from 0; seat order is turn order (02 §4). |
 | Seat order | The creator's choice of turn order: `join` (creator first, then in joining order) or `random` (a recorded draw at start) (02 §4). |

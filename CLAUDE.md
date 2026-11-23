@@ -4,6 +4,10 @@
 word game and a path-laying tile game): mobile-first React PWA, runtime-agnostic TypeScript server
 deployable to Cloudflare Workers (D1 + Durable Objects) or Docker (Node + SQLite). BSD-2-Clause.
 
+Games are **packages** (02 §7): first-party games under `games/` are built exactly like third-party
+games in other repositories, and the product is **API first** (05): the web app is one client of the
+public `/api/v1` API. Engineering standards are in `docs/spec/11-engineering.md`.
+
 **The spec in `docs/spec/` is the source of truth.** Read `docs/spec/README.md` first, then the
 documents relevant to your task. If the spec is wrong or ambiguous, stop and raise it — don't
 silently diverge. Unanswered owner decisions are in `docs/spec/open-questions.md`; use the
@@ -12,15 +16,19 @@ recommended default and note that you did.
 ## Hard rules
 
 - **Never hard-code the product name.** The project is called Your Move, but code, copy, emails and
-  manifests use `APP_NAME` from config (default `Your Move`) so forks can rebrand. Package scope is `@app/*`.
+  manifests use `APP_NAME` from config (default `Your Move`) so forks can rebrand. Package names are
+  project identity, not branding: the scope is `@your-move/*`.
 - **No trademarked names** (Scrabble, Words With Friends, etc.) in code, UI, docs-for-users or assets.
   Spec docs may reference them only to describe lineage.
-- Game engines (`games/*/engine`) are pure: no I/O, no `Date.now()`, no `Math.random()`, no direct
-  `crypto` calls, no imports from the framework or runtimes. Randomness arrives as a `RandomSource`
-  argument (02 §2). Every module must pass the generic test kit (02 §6).
-- The framework (`packages/server`) knows games only through the `GameDefinition` contract — no
-  game-specific code in the framework. Game UIs talk to the API only through the shell's
-  `submit`/`preview` (02 §3).
+- Game engines (a game package's `/engine`) are pure: no I/O, no `Date.now()`, no `Math.random()`,
+  no direct `crypto` calls, no imports from the framework, runtimes or the DOM. Randomness arrives as
+  a `RandomSource` argument (02 §2). Every game package must pass the generic test kit (02 §6) and
+  the architecture rules (11 §5).
+- The framework (`packages/server`) knows games only through installed game packages and the
+  `GameDefinition` contract — no game-specific code in the framework, and first-party games get no
+  special path. Game UIs talk to the API only through the shell's `submit`/`preview` (02 §3).
+- Every capability is a documented `/api/v1` endpoint defined by one Zod schema (05); the web app
+  uses only `@your-move/api-client`. Breaking changes within v1 are not allowed.
 - **No trademarked game names, characters, art or look** for any game module — shared mechanics
   only, with our own names and original art.
 - Core server code (`packages/server`) uses Web-standard APIs only. Cloudflare-specific code lives in
@@ -38,7 +46,7 @@ recommended default and note that you did.
 ## Agent workflow (per milestone in docs/spec/10-roadmap.md)
 
 1. **coder** implements the milestone on a feature branch, with tests, until CI-equivalent checks
-   pass locally (`pnpm lint && pnpm typecheck && pnpm test`).
+   pass locally (`pnpm format && pnpm lint && pnpm lint:arch && pnpm typecheck && pnpm test`).
 2. **picky-reviewer** reviews the diff against the spec and code-quality bar; returns findings.
 3. **security-reviewer** reviews the same diff against `docs/spec/08-security.md`; returns findings.
 4. **coder** fixes or explicitly rebuts each finding. Accepted-risk security items are recorded in
@@ -49,9 +57,18 @@ Reviewers do not edit code. The coder does not mark its own work as reviewed.
 
 ## Commands (to be created in M0)
 
-- `pnpm install` · `pnpm dev:node` · `pnpm dev:worker` · `pnpm lint` · `pnpm typecheck` · `pnpm test`
-- `pnpm test:e2e` · `pnpm build` · `pnpm cf:migrate` · `pnpm cf:deploy` · `pnpm gen:vapid` · `pnpm gmail:authorize` ·
-  `docker build -f apps/node/Dockerfile .`
+Toolchain: `mise install` (Node and pnpm pinned in `mise.toml`, 11 §1), then:
+
+- `pnpm install` · `pnpm dev:node` · `pnpm dev:worker` · `pnpm build`
+- Quality: `pnpm format` · `pnpm lint` · `pnpm lint:arch` · `pnpm lint:unused` · `pnpm typecheck` ·
+  `pnpm test` · `pnpm test:e2e`
+- Games: `pnpm games:generate` · `pnpm games:verify`
+- API: `pnpm api:generate` (OpenAPI document + `@your-move/api-client`)
+- Releases: `pnpm changeset`
+- Ops: `pnpm cf:migrate` · `pnpm cf:deploy` · `pnpm gen:vapid` · `pnpm gmail:authorize` ·
+  `pnpm admin:*` (Admin API client, 09 §1.2) · `docker build -f apps/node/Dockerfile .`
+
+Commits follow Conventional Commits (11 §7); published packages need a changeset.
 
 ## Local environment
 
