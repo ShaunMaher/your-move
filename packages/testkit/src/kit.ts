@@ -5,7 +5,6 @@
  * game, the seed that reproduces it.
  */
 import {
-  RESERVED_ERROR_CODES,
   isGameError,
   listSummarySchema,
   recordRandom,
@@ -13,85 +12,29 @@ import {
   textSchema,
   type AnyGameDefinition,
   type GameEngines,
-  type GameManifest,
-  type OptionsContext,
   type RandomSource,
   type Resources,
   type Seat,
 } from "@your-move/sdk";
 
 import { canonical, isPlainJson, sameJson } from "./canonical.js";
+import { resolveCombos } from "./combos.js";
+import { checkCpu } from "./cpu.js";
 import { checkManifest } from "./manifest.js";
 import { scriptedRandom, seededRandom } from "./random.js";
+import {
+  GameAborted,
+  Reporter,
+  errorName,
+  jsonClone,
+  viewers,
+  type Combo,
+  type Where,
+} from "./report.js";
+import type { KitOptions, KitReport } from "./types.js";
 
-/**
- * `fast`: a few hundred games per package (`pnpm games:verify --fast`); `full`: a thousand games per
- * option set and seat count (CI's test stage and each game package's own CI), 02 §6.
- *
- * @public
- */
-export type KitMode = "fast" | "full";
+export type { KitFailure, KitMode, KitOptions, KitProperty, KitReport } from "./types.js";
 
-/**
- * The kit's checks (02 §6), plus the manifest check of 02 §7.2.
- *
- * @public
- */
-export type KitProperty =
-  "schema" | "replay" | "secrecy" | "termination" | "turns" | "cpu" | "isolation" | "manifest";
-
-/**
- * One failed check.
- *
- * @public
- */
-export interface KitFailure {
-  readonly property: KitProperty;
-  readonly message: string;
-  /** The rules version it failed on. */
-  readonly version?: number;
-  /** The seat count of the failing game. */
-  readonly seats?: number;
-  /** The seed that reproduces the failing game. */
-  readonly seed?: number;
-}
-
-/**
- * How to run the kit.
- *
- * @public
- */
-export interface KitOptions {
-  readonly mode: KitMode;
-  /** The package's manifest: when given, it must agree with every engine (02 §7.2). */
-  readonly manifest?: GameManifest;
-  /** Option inputs to resolve and play, each with every allowed seat count. Default `[{}]`. */
-  readonly optionInputs?: readonly unknown[];
-  /** What `resolveOptions` and `catalog` see. Default: `configSchema` parsed from `{}`, no resources. */
-  readonly context?: OptionsContext;
-  /** Resources passed to `validate` and `preview` while playing (replay always uses none). */
-  readonly resources?: Resources;
-  /** The first seed; game `n` uses `seed + n`. Default 1. */
-  readonly seed?: number;
-  /** Games per option set and seat count, overriding the mode's number. */
-  readonly games?: number;
-  /** Per-call CPU budget in milliseconds for `worstCase` inputs (08 T25). Default 5. */
-  readonly cpuBudgetMs?: number;
-}
-
-/**
- * What the kit found.
- *
- * @public
- */
-export interface KitReport {
-  readonly failures: readonly KitFailure[];
-  /** How many games were played. */
-  readonly games: number;
-}
-
-/** At most this many failures are kept per property; the rest add nothing. */
-const MAX_FAILURES_PER_PROPERTY = 5;
 /** Games per package in fast mode, spread over the option sets and seat counts. */
 const FAST_GAMES = 300;
 const FULL_GAMES = 1000;
@@ -99,15 +42,6 @@ const FULL_GAMES = 1000;
 const EXIT_CHANCE = 40;
 /** Possibly-illegal actions tried per step and per secrecy sample. */
 const ANY_ACTIONS = 2;
-
-/** Ends the current game after its first failure. */
-class GameAborted extends Error {}
-
-interface Combo {
-  readonly def: AnyGameDefinition;
-  readonly options: unknown;
-  readonly seats: number;
-}
 
 interface LogEntry {
   readonly kind: "action" | "resign" | "decline" | "timeout";
@@ -119,9 +53,8 @@ interface LogEntry {
 /** What a game looked like from outside at one point: used by the isolation check. */
 type Observation = string;
 
-class Kit {
-  readonly failures: KitFailure[] = [];
-  private readonly counts = new Map<KitProperty, number>();
+/** Plays games through one engine and checks them (02 §6.2–§6.5, §6.7). */
+class Kit extends Reporter {
   games = 0;
   /** Secrecy samples taken while a game was in progress, and how many perturbed something. */
   private samples = 0;
@@ -131,165 +64,9 @@ class Kit {
   readonly resources: Resources;
 
   constructor(options: KitOptions, resources: Resources) {
+    super();
     this.options = options;
     this.resources = resources;
-  }
-
-  fail(property: KitProperty, message: string, where: Partial<KitFailure> = {}): void {
-    const count = this.counts.get(property) ?? 0;
-    this.counts.set(property, count + 1);
-    if (count < MAX_FAILURES_PER_PROPERTY) this.failures.push({ property, message, ...where });
-  }
-
-  /** Calls into the module; an exception is a failure of `property` (exceptions are bugs, 02 §2.1). */
-  call<T>(property: KitProperty, what: string, where: Partial<KitFailure>, fn: () => T): T {
-    try {
-      return fn();
-    } catch (error) {
-      this.fail(property, `${what} threw ${errorName(error)}`, where);
-      throw new GameAborted();
-    }
-  }
-
-  check(ok: boolean, property: KitProperty, message: string, where: Partial<KitFailure>): void {
-    if (!ok) {
-      this.fail(property, message, where);
-      throw new GameAborted();
-    }
-  }
-
-  // --- static checks (02 §6.1) ---------------------------------------------------------------
-
-  /** Resolves the option inputs and checks the module's schemas and codes; returns what to play. */
-  combos(def: AnyGameDefinition): Combo[] {
-    const where = { version: def.version };
-    const reserved = def.errorCodes.filter((code) => RESERVED_ERROR_CODES.includes(code));
-    if (reserved.length > 0) {
-      this.fail(
-        "schema",
-        `errorCodes contains reserved codes: ${reserved.join(", ")} (02 §2.2)`,
-        where,
-      );
-    }
-    const ctx = this.context(def);
-    if (ctx === null) return [];
-    try {
-      this.gameErrorOrOk(def, def.checkConfig(ctx.config, ctx.resources), "checkConfig", where);
-      const catalog = def.catalog(ctx);
-      if (!def.catalogSchema.safeParse(catalog).success) {
-        this.fail("schema", "catalog() doesn't match catalogSchema", where);
-      }
-      for (const garbage of [null, 42, "x", [1], { unknownOption: true }]) {
-        const resolved = def.resolveOptions(garbage, ctx);
-        if (isGameError(resolved)) this.errorCode(def, resolved.code, "resolveOptions", where);
-        else if (!def.optionsSchema.safeParse(resolved).success) {
-          this.fail(
-            "schema",
-            "resolveOptions returned options that don't match optionsSchema",
-            where,
-          );
-        }
-      }
-    } catch (error) {
-      this.fail("schema", `option resolution threw ${errorName(error)}`, where);
-      return [];
-    }
-
-    const combos: Combo[] = [];
-    for (const input of this.options.optionInputs ?? [{}]) {
-      let options: unknown;
-      try {
-        options = def.resolveOptions(input, ctx);
-      } catch (error) {
-        this.fail("schema", `resolveOptions threw ${errorName(error)}`, where);
-        continue;
-      }
-      if (isGameError(options)) {
-        this.fail(
-          "schema",
-          `resolveOptions refused option input ${canonical(input)}: ${options.code}`,
-          where,
-        );
-        continue;
-      }
-      if (!def.optionsSchema.safeParse(options).success) {
-        this.fail("schema", "resolved options don't match optionsSchema", where);
-        continue;
-      }
-      try {
-        const { min, max } = def.players(options);
-        const timeout = def.defaultTurnTimeoutDays(options);
-        if (!Number.isInteger(timeout) || timeout < 1 || timeout > 30) {
-          this.fail(
-            "schema",
-            "defaultTurnTimeoutDays must be a whole number of days from 1 to 30",
-            where,
-          );
-        }
-        if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || min > max) {
-          this.fail(
-            "schema",
-            `players() returned an invalid range ${String(min)}–${String(max)}`,
-            where,
-          );
-          continue;
-        }
-        let playable = 0;
-        for (let seats = min; seats <= max; seats += 1) {
-          const start = def.validateStart(options, seats);
-          if (isGameError(start)) {
-            this.errorCode(def, start.code, "validateStart", where);
-          } else {
-            playable += 1;
-            combos.push({ def, options, seats });
-          }
-        }
-        if (playable === 0) {
-          this.fail(
-            "schema",
-            `validateStart refuses every seat count for ${canonical(input)}`,
-            where,
-          );
-        }
-      } catch (error) {
-        this.fail("schema", `players/validateStart threw ${errorName(error)}`, where);
-      }
-    }
-    return combos;
-  }
-
-  private context(def: AnyGameDefinition): OptionsContext | null {
-    if (this.options.context !== undefined) return this.options.context;
-    const config = def.configSchema.safeParse({});
-    if (!config.success) {
-      this.fail("schema", "configSchema doesn't accept an empty configuration; pass context", {
-        version: def.version,
-      });
-      return null;
-    }
-    return { config: config.data, resources: [] };
-  }
-
-  private gameErrorOrOk(
-    def: AnyGameDefinition,
-    value: unknown,
-    what: string,
-    where: Partial<KitFailure>,
-  ): void {
-    if (isGameError(value)) this.errorCode(def, value.code, what, where);
-    else if (!sameJson(value, { ok: true }))
-      this.fail("schema", `${what} must return OK or a GameError`, where);
-  }
-
-  private errorCode(
-    def: AnyGameDefinition,
-    code: string,
-    what: string,
-    where: Partial<KitFailure>,
-  ): void {
-    if (!def.errorCodes.includes(code)) {
-      this.fail("schema", `${what} returned code ${code}, which isn't in errorCodes`, where);
-    }
   }
 
   // --- one game ------------------------------------------------------------------------------
@@ -387,7 +164,7 @@ class Kit {
     playing: readonly Seat[],
     acted: ReadonlySet<Seat>,
     rng: RandomSource,
-    where: Partial<KitFailure>,
+    where: Where,
     observe?: (observation: Observation) => void,
   ): {
     log: Omit<LogEntry, "draws">;
@@ -455,7 +232,7 @@ class Kit {
     state: unknown,
     seat: Seat,
     rng: RandomSource,
-    where: Partial<KitFailure>,
+    where: Where,
   ): unknown {
     const action = this.call("turns", "randomAction", where, () =>
       def.test.randomAction(state, seat, rng, this.resources),
@@ -481,7 +258,7 @@ class Kit {
     state: unknown,
     seat: Seat,
     action: unknown,
-    where: Partial<KitFailure>,
+    where: Where,
     res = this.resources,
   ): unknown {
     const verdict = this.call("schema", "validate", where, () =>
@@ -503,7 +280,7 @@ class Kit {
     state: unknown,
     seat: Seat,
     action: unknown,
-    where: Partial<KitFailure>,
+    where: Where,
   ): unknown {
     if (def.preview === undefined) return undefined;
     const result = this.call("schema", "preview", where, () =>
@@ -523,7 +300,7 @@ class Kit {
   private record(
     def: AnyGameDefinition,
     record: unknown,
-    where: Partial<KitFailure>,
+    where: Where,
     observe?: (o: Observation) => void,
   ): void {
     this.check(
@@ -543,7 +320,7 @@ class Kit {
   }
 
   /** States are stored as JSON (02 §5): every state must survive the round trip unchanged. */
-  private roundTrip(state: unknown, after: string, where: Partial<KitFailure>): unknown {
+  private roundTrip(state: unknown, after: string, where: Where): unknown {
     this.check(
       isPlainJson(state),
       "schema",
@@ -555,7 +332,7 @@ class Kit {
 
   // --- turn sanity (02 §6.5) -----------------------------------------------------------------
 
-  private playing(def: AnyGameDefinition, state: unknown, where: Partial<KitFailure>): Seat[] {
+  private playing(def: AnyGameDefinition, state: unknown, where: Where): Seat[] {
     const status = this.call("turns", "seatStatus", where, () => def.seatStatus(state));
     return status.flatMap((value, seat) => (value === "playing" ? [seat] : []));
   }
@@ -565,7 +342,7 @@ class Kit {
     state: unknown,
     seats: number,
     out: Set<Seat>,
-    where: Partial<KitFailure>,
+    where: Where,
   ): Seat[] {
     const toAct = this.call("turns", "toAct", where, () => def.toAct(state));
     const status = this.call("turns", "seatStatus", where, () => def.seatStatus(state));
@@ -612,7 +389,7 @@ class Kit {
   private ranking(
     result: NonNullable<ReturnType<AnyGameDefinition["result"]>>,
     seats: number,
-    where: Partial<KitFailure>,
+    where: Where,
   ): void {
     const { ranking, endReason } = result;
     const ranks = ranking.map((entry) => entry.rank);
@@ -641,7 +418,7 @@ class Kit {
     def: AnyGameDefinition,
     state: unknown,
     seats: number,
-    where: Partial<KitFailure>,
+    where: Where,
     observe?: (o: Observation) => void,
   ): void {
     for (const viewer of viewers(seats)) {
@@ -672,7 +449,7 @@ class Kit {
     toAct: readonly Seat[],
     acted: ReadonlySet<Seat>,
     rng: RandomSource,
-    where: Partial<KitFailure>,
+    where: Where,
   ): void {
     const before = canonical(state);
     for (const viewer of viewers(seats)) {
@@ -736,7 +513,7 @@ class Kit {
     acted: ReadonlySet<Seat>,
     who: string,
     rng: RandomSource,
-    where: Partial<KitFailure>,
+    where: Where,
   ): void {
     const transitions: { what: string; run: (s: unknown, r: RandomSource) => unknown }[] = [];
     for (const seat of toAct) {
@@ -817,7 +594,7 @@ class Kit {
     setupDraws: readonly number[],
     log: readonly LogEntry[],
     expected: unknown,
-    where: Partial<KitFailure>,
+    where: Where,
   ): void {
     const none: Resources = {};
     const draws = replayRandom(setupDraws);
@@ -864,50 +641,6 @@ class Kit {
     );
   }
 
-  // --- CPU budget (02 §6.6, 08 T25) ----------------------------------------------------------
-
-  cpu(combo: Combo, seed: number): void {
-    const { def, options, seats } = combo;
-    const where = { version: def.version, seats, seed };
-    const budget = this.options.cpuBudgetMs ?? 5;
-    const runs = this.options.mode === "full" ? 100 : 20;
-    let cases: readonly { state: unknown; seat: Seat; action: unknown }[];
-    try {
-      cases = def.test.worstCase(options, seats, seededRandom(seed));
-    } catch (error) {
-      this.fail("cpu", `worstCase threw ${errorName(error)}`, where);
-      return;
-    }
-    for (const [index, { state, seat, action }] of cases.entries()) {
-      const times: number[] = [];
-      try {
-        for (let run = 0; run < runs; run += 1) {
-          const copy = jsonClone(state);
-          const start = performance.now();
-          const verdict = def.validate(copy, seat, action, this.resources);
-          def.preview?.(copy, seat, action, this.resources);
-          if (!isGameError(verdict)) def.apply(copy, seat, action, seededRandom(run));
-          times.push(performance.now() - start);
-        }
-      } catch (error) {
-        this.fail("cpu", `worstCase input ${String(index)} threw ${errorName(error)}`, where);
-        continue;
-      }
-      // The 99th percentile: the slowest of the fastest 99 % of runs.
-      const p99 = [...times]
-        .sort((a, b) => a - b)
-        .slice(0, Math.ceil(times.length * 0.99))
-        .reduce((slowest, time) => Math.max(slowest, time), 0);
-      if (p99 > budget) {
-        this.fail(
-          "cpu",
-          `worstCase input ${String(index)} took ${p99.toFixed(2)} ms (p99), over the ${String(budget)} ms budget`,
-          where,
-        );
-      }
-    }
-  }
-
   // --- isolation (02 §6.7) -------------------------------------------------------------------
 
   isolation(combo: Combo, seedA: number, seedB: number): void {
@@ -915,6 +648,7 @@ class Kit {
     const run = (seeds: readonly number[]): Observation[][] => {
       const seen = seeds.map((): Observation[] => []);
       const games = seeds.map((seed, index) => this.game(combo, seed, (o) => seen[index]?.push(o)));
+      const tallies = [this.samples, this.perturbed] as const;
       this.quietly(() => {
         let live = games.length;
         while (live > 0) {
@@ -928,6 +662,7 @@ class Kit {
           }
         }
       });
+      [this.samples, this.perturbed] = tallies;
       return seen;
     };
     const alone = [...run([seedA]), ...run([seedB])];
@@ -940,33 +675,6 @@ class Kit {
       );
     }
   }
-
-  /** Runs `fn` without recording failures: used to collect observations only. */
-  private quietly(fn: () => void): void {
-    const saved = [...this.failures];
-    const savedCounts = new Map(this.counts);
-    const savedSamples = [this.samples, this.perturbed];
-    try {
-      fn();
-    } finally {
-      this.failures.splice(0, this.failures.length, ...saved);
-      this.counts.clear();
-      for (const [key, value] of savedCounts) this.counts.set(key, value);
-      [this.samples, this.perturbed] = savedSamples as [number, number];
-    }
-  }
-}
-
-/** States are JSON (02 §5), so a JSON copy is a full copy. */
-const jsonClone = (value: unknown): unknown => JSON.parse(JSON.stringify(value)) as unknown;
-
-const viewers = (seats: number): (Seat | null)[] => [
-  ...Array.from({ length: seats }, (_, seat) => seat),
-  null,
-];
-
-function errorName(error: unknown): string {
-  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
 /**
@@ -989,7 +697,7 @@ export function runKit(engines: GameEngines, options: KitOptions): KitReport {
   const seed0 = options.seed ?? 1;
   let seed = seed0;
   for (const def of Object.values(engines)) {
-    const combos = kit.combos(def);
+    const combos = resolveCombos(kit, def, options);
     if (combos.length === 0) continue;
     const perCombo =
       options.games ??
@@ -1000,7 +708,7 @@ export function runKit(engines: GameEngines, options: KitOptions): KitReport {
         kit.games += 1;
         kit.play(combo, seed);
       }
-      kit.cpu(combo, seed);
+      checkCpu(kit, combo, seed, options, kit.resources);
       const pairs = options.mode === "full" ? 20 : 3;
       for (let pair = 0; pair < pairs; pair += 1) {
         seed += 2;
