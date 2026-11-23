@@ -22,7 +22,7 @@
     },
     {
       "customType": "regex",
-      "description": "Versions pinned in CI scripts (e.g. the mise release). A version bump also needs the new SHA-256 values committed next to it, or the checksum check fails the pipeline.",
+      "description": "Versions pinned in CI scripts (the mise release). A mise bump also needs the new SHA-256 values from the release's signed SHASUMS256 committed next to it, or install-mise.sh fails the pipeline; Renovate can't do that, so mise has its own group.",
       "managerFilePatterns": ["/^scripts/ci/.+\\.sh$/"],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\n\\s*[A-Z_]+=\"(?<currentValue>[^\"]+)\""
@@ -48,6 +48,18 @@
       "groupName": "React"
     },
     { "matchFileNames": [".gitlab-ci.yml", "scripts/ci/**"], "groupName": "CI images and tools" },
+    {
+      "description": "One update for every pin of the same tool, across mise.toml, the Dockerfile, the CI images and packageManager; pnpm lint:pins fails when they differ. Renovate refreshes mise.lock with the mise.toml change (its mise manager runs mise lock).",
+      "matchPackageNames": ["node"],
+      "groupName": "Node"
+    },
+    { "matchPackageNames": ["pnpm"], "groupName": "pnpm" },
+    {
+      "description": "The mise release needs its checksums updated by hand (scripts/ci/install-mise.sh), so it never holds up other updates.",
+      "matchPackageNames": ["jdx/mise"],
+      "groupName": "mise (update checksums by hand)",
+      "addLabels": ["needs-checksums"]
+    },
     {
       "description": "Kaniko comes from a community fork (F-10): read its release notes before merging.",
       "matchPackageNames": ["ghcr.io/osscontainertools/kaniko"],
