@@ -28,12 +28,15 @@ function renderServerRegistry(games: readonly LoadedGame[]): string {
   );
   return [
     HEADER,
+    'import type { GameEngines, GameManifest } from "@your-move/sdk";',
     ...imports,
-    ...(imports.length > 0 ? [""] : []),
+    "",
     "/** Installed game packages, injected into `createApp` by each runtime. */",
-    entries.length > 0
-      ? `export const installedGames = [\n${entries.join("\n")}\n] as const;`
-      : "export const installedGames = [] as const;",
+    "export const installedGames: readonly {",
+    "  readonly manifest: GameManifest;",
+    "  readonly engines: GameEngines;",
+    "  readonly enabledByDefault: boolean;",
+    `}[] = [${entries.length > 0 ? `\n${entries.join("\n")}\n` : ""}];`,
     "",
   ].join("\n");
 }

@@ -325,6 +325,9 @@ importers:
 
   .:
     dependencies:
+      '@your-move/game-example':
+        specifier: workspace:*
+        version: link:games/example
       '@your-move/sdk':
         specifier: workspace:*
         version: link:packages/sdk
@@ -515,6 +518,9 @@ importers:
       '@your-move/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
+      '@your-move/testkit':
+        specifier: workspace:*
+        version: link:../../packages/testkit
       jsdom:
         specifier: 'catalog:'
         version: 31.0.1
