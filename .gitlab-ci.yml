@@ -1,0 +1,450 @@
+# The pipeline (docs/spec/11-engineering.md §9, 09 §6, 08 §6).
+#
+# Stages 1–5 run on every merge request; publish and deploy run only on main and v* tags.
+# Every job is unprivileged (no Docker-in-Docker). Secrets live only in variables that are both
+# protected and scoped to one environment (release, renovate, production): our GitLab is
+# Community Edition, which has no protected environments, so only jobs on protected refs that
+# declare the environment receive them.
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG =~ /^v/
+
+stages:
+  - validate
+  - test
+  - build
+  - e2e
+  - security
+  - publish
+  - deploy
+
+variables:
+  # Pinned by digest; Renovate updates tag and digest together. NODE_IMAGE matches mise.toml.
+  NODE_IMAGE: node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc
+  PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+  KANIKO_IMAGE: martizih/kaniko:v1.29.2-debug@sha256:b3cadc638a5b0a7e8ae7b3b76704821b2b5f191163222da401283541c8fa2d41
+  CRANE_IMAGE: gcr.io/go-containerregistry/crane:debug@sha256:e78770b31258a3846f878036d9c1f63fbe4c871f9f56990bf77fd95c013e3c1b
+  SYFT_IMAGE: anchore/syft:v1.57.2@sha256:e97e20b6e6d1699c60296b66ab337941724f9bd06ac279d893eda89601fc4b2a
+  CURL_IMAGE: curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93
+  RENOVATE_IMAGE: renovate/renovate:44.258.0@sha256:2948b8ed46aceac257f0488699272960efea87ee2644007368e64925c5d874fd
+  # The mise release that installs the non-npm tools pinned in mise.toml (11 §1).
+  MISE_VERSION: v2026.11.12
+  # The image repository; the name is the project's, never a product name (09 §4).
+  IMAGE_REPOSITORY: $CI_REGISTRY_IMAGE/server
+  FF_TIMESTAMPS: "true"
+
+default:
+  interruptible: true
+  timeout: 15 minutes
+
+# --- Templates --------------------------------------------------------------------------------
+
+# Every non-scheduled pipeline (merge requests, main, tags).
+.every-pipeline:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - when: on_success
+
+.merge-requests:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+.main-and-tags:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG =~ /^v/
+
+# Node with the pinned pnpm and the workspace installed (frozen lockfile, store cached).
+.pnpm:
+  image: $NODE_IMAGE
+  variables:
+    PNPM_STORE: $CI_PROJECT_DIR/.pnpm-store
+  cache:
+    key:
+      files: [pnpm-lock.yaml]
+    paths: [.pnpm-store]
+  before_script:
+    # Node 26 ships without corepack: install the pnpm that package.json pins.
+    - npm install --global --no-fund --no-audit "$(node -p 'require("./package.json").packageManager')"
+    - pnpm config set store-dir "$PNPM_STORE"
+    # `prepare` runs games:generate (11 §3); git hooks are skipped in CI.
+    - pnpm install --frozen-lockfile
+
+# git and the mise-pinned gitleaks, osv-scanner and oasdiff (11 §1: CI installs the same pins).
+.tools:
+  image: $NODE_IMAGE
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl git >/dev/null
+    - curl -fsSL https://mise.run | MISE_VERSION="$MISE_VERSION" MISE_INSTALL_PATH=/usr/local/bin/mise sh
+    - mise trust "$CI_PROJECT_DIR/mise.toml"
+    - mise install gitleaks osv-scanner github:oasdiff/oasdiff
+    - export PATH="$HOME/.local/share/mise/shims:$PATH"
+
+.pnpm-and-tools:
+  extends: .pnpm
+  before_script:
+    - !reference [.tools, before_script]
+    - !reference [.pnpm, before_script]
+
+# --- 1. validate -------------------------------------------------------------------------------
+
+validate:code:
+  stage: validate
+  extends: [.pnpm, .every-pipeline]
+  script:
+    - pnpm games:generate
+    - pnpm format:check
+    - pnpm lint
+    - pnpm typecheck
+    - pnpm lint:arch
+    - pnpm lint:unused
+
+validate:generated:
+  stage: validate
+  extends: [.pnpm-and-tools, .every-pipeline]
+  script:
+    # Committed generated code must match what the generators produce (11 §3).
+    - pnpm api:generate
+    - pnpm renovate:sync
+    - pnpm api:surface
+    - git diff --exit-code -- packages/api-client renovate.json packages/sdk/api-report
+
+validate:gates:
+  stage: validate
+  extends: [.pnpm-and-tools, .every-pipeline]
+  script:
+    # Each gate fails on a deliberate violation, against the real configs (10 M0).
+    - pnpm gates:prove
+
+validate:merge-request:
+  stage: validate
+  extends: [.pnpm-and-tools, .merge-requests]
+  variables:
+    GIT_DEPTH: "0"
+  script:
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    # Conventional Commits on every commit and on the MR title (squash commits use it, 11 §7).
+    - pnpm exec commitlint --from "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --to HEAD --verbose
+    - printf '%s\n' "$CI_MERGE_REQUEST_TITLE" | pnpm exec commitlint --verbose
+    # A changeset for every change to a published package; Renovate MRs are exempt (11 §7).
+    - |
+      case "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" in
+        renovate/*) echo "Renovate MR: no changeset needed" ;;
+        *) pnpm exec changeset status --since="$CI_MERGE_REQUEST_DIFF_BASE_SHA" ;;
+      esac
+    # No breaking change within /api/v1 (05 §Versioning).
+    - |
+      if git show "$CI_MERGE_REQUEST_DIFF_BASE_SHA:packages/api-client/openapi/v1.json" > /tmp/openapi-base.json 2>/dev/null; then
+        oasdiff breaking /tmp/openapi-base.json packages/api-client/openapi/v1.json --fail-on ERR
+      else
+        echo "The target branch has no OpenAPI document yet: nothing to compare"
+      fi
+
+# --- 2. test -----------------------------------------------------------------------------------
+
+test:
+  stage: test
+  extends: [.pnpm, .every-pipeline]
+  variables:
+    WRANGLER_SEND_METRICS: "false"
+  script:
+    # Unit, integration, property, component and API contract tests on both runtimes; the full
+    # game kit joins in M1.
+    - pnpm test
+  coverage: '/Lines\s*:\s*(\d+(?:\.\d+)?)%/'
+  artifacts:
+    when: always
+    expire_in: 1 week
+    reports:
+      junit: reports/junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura-coverage.xml
+
+# --- 3. build ----------------------------------------------------------------------------------
+
+build:app:
+  stage: build
+  extends: [.pnpm, .every-pipeline]
+  variables:
+    WRANGLER_SEND_METRICS: "false"
+  script:
+    # games:generate, games:verify --fast, then every package: web, Node server, Worker bundle
+    # and the dependency-free games:check-db bundle for the deploy job.
+    - pnpm build
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - apps/web/dist/
+      - apps/node/dist/
+      - apps/worker/dist/
+      - generated/installed.json
+      - scripts/dist/games-check-db.mjs
+      # Built output of the packages Changesets publishes from main.
+      - packages/*/dist/
+      - games/*/dist/
+
+# Native per-architecture image builds with kaniko: no daemon, no privileges, no user namespaces.
+# MR pipelines build but never push; the image tarball goes to the publish stage on main.
+.build-image:
+  stage: build
+  extends: .every-pipeline
+  image:
+    name: $KANIKO_IMAGE
+    entrypoint: [""]
+  needs: []
+  script:
+    - mkdir -p images
+    - >-
+      /kaniko/executor
+      --context "dir://$CI_PROJECT_DIR"
+      --dockerfile apps/node/Dockerfile
+      --custom-platform "linux/$ARCH"
+      --build-arg "IMAGE_TITLE=$CI_PROJECT_NAME"
+      --build-arg "IMAGE_VERSION=${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}"
+      --build-arg "IMAGE_REVISION=$CI_COMMIT_SHA"
+      --build-arg "IMAGE_SOURCE=$CI_PROJECT_URL"
+      --no-push
+      --destination "$IMAGE_REPOSITORY:$CI_COMMIT_SHA-$ARCH"
+      --tar-path "images/image-$ARCH.tar"
+  artifacts:
+    expire_in: 2 days
+    paths: [images/]
+
+build:image:amd64:
+  extends: .build-image
+  tags: [arch-amd64]
+  variables:
+    ARCH: amd64
+
+build:image:arm64:
+  extends: .build-image
+  tags: [arch-arm64]
+  variables:
+    ARCH: arm64
+
+build:sbom:
+  stage: build
+  extends: .every-pipeline
+  image:
+    name: $SYFT_IMAGE
+    entrypoint: [""]
+  needs: [build:image:amd64, build:image:arm64]
+  script:
+    # CycloneDX SBOMs for both images and for the production dependency tree the Worker bundles.
+    - /syft scan "docker-archive:images/image-amd64.tar" -o "cyclonedx-json=images/sbom-amd64.cdx.json"
+    - /syft scan "docker-archive:images/image-arm64.tar" -o "cyclonedx-json=images/sbom-arm64.cdx.json"
+    - /syft scan "file:pnpm-lock.yaml" -o "cyclonedx-json=images/sbom-lockfile.cdx.json"
+  artifacts:
+    expire_in: 2 days
+    paths: [images/*.cdx.json]
+
+# --- 4. e2e ------------------------------------------------------------------------------------
+
+e2e:
+  stage: e2e
+  extends: [.pnpm, .every-pipeline]
+  image: $PLAYWRIGHT_IMAGE
+  needs: [build:app]
+  parallel: 2
+  script:
+    # Against the Node build output from build:app, never the Docker image (11 §9).
+    - pnpm --filter @your-move/e2e exec playwright test --shard="$CI_NODE_INDEX/$CI_NODE_TOTAL"
+  artifacts:
+    when: on_failure
+    expire_in: 1 week
+    paths:
+      - tests/e2e/test-results/
+      - tests/e2e/playwright-report/
+    reports:
+      junit: reports/e2e-junit.xml
+
+# --- 5. security -------------------------------------------------------------------------------
+
+security:secrets:
+  stage: security
+  extends: [.tools, .every-pipeline]
+  needs: []
+  variables:
+    GIT_DEPTH: "0"
+  script:
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+        gitleaks git --config .gitleaks.toml --redact --no-banner --log-opts="$CI_MERGE_REQUEST_DIFF_BASE_SHA..HEAD" .
+      else
+        gitleaks git --config .gitleaks.toml --redact --no-banner .
+      fi
+    - gitleaks dir --config .gitleaks.toml --redact --no-banner .
+
+security:vulnerabilities:
+  stage: security
+  extends: [.pnpm-and-tools]
+  needs: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_TASK == "nightly"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - when: on_success
+  script:
+    - pnpm lint:vulns
+
+security:licences:
+  stage: security
+  extends: [.pnpm, .every-pipeline]
+  needs: []
+  script:
+    - pnpm lint:licences
+
+# Proves an MR pipeline can't read any secret (10 M0). Prints only whether each is set.
+security:no-secrets-on-mr:
+  stage: security
+  extends: .merge-requests
+  image: $NODE_IMAGE
+  needs: []
+  script:
+    - |
+      exposed=0
+      for name in RENOVATE_TOKEN RELEASE_DEPLOY_TOKEN RELEASE_DEPLOY_USER CLOUDFLARE_API_TOKEN; do
+        if [ -n "$(printenv "$name")" ]; then echo "$name: set"; exposed=1; else echo "$name: not set"; fi
+      done
+      exit "$exposed"
+
+# --- 6. publish (main and v* tags; release environment) ----------------------------------------
+
+.release:
+  stage: publish
+  extends: .main-and-tags
+  interruptible: false
+  environment:
+    name: release
+    action: prepare
+  before_script:
+    - |
+      if [ -z "${RELEASE_DEPLOY_TOKEN:-}" ] || [ -z "${RELEASE_DEPLOY_USER:-}" ]; then
+        echo "RELEASE_DEPLOY_TOKEN and RELEASE_DEPLOY_USER (a deploy token with write_package_registry and write_registry, in protected variables scoped to the release environment) are not configured; nothing can be published (08 §6)."
+        exit 1
+      fi
+
+publish:packages:
+  extends: .release
+  image: $NODE_IMAGE
+  needs: [test, build:app]
+  script:
+    - npm install --global --no-fund --no-audit "$(node -p 'require("./package.json").packageManager')"
+    # The packages were built in build:app; install without running any dependency's scripts.
+    - pnpm install --frozen-lockfile --ignore-scripts
+    # The project's own package registry, with the deploy token; never CI_JOB_TOKEN (08 §6).
+    - REGISTRY="${CI_API_V4_URL#https:}/projects/${CI_PROJECT_ID}/packages/npm/"
+    - echo "@your-move:registry=https:${REGISTRY}" >> .npmrc
+    - echo "${REGISTRY}:_authToken=\${RELEASE_DEPLOY_TOKEN}" >> .npmrc
+    # Publishes every non-private package whose version isn't in the registry yet. Until the
+    # first packages leave "private": true (M1), there is nothing to publish.
+    - pnpm exec changeset publish
+
+publish:image:
+  extends: .release
+  image:
+    name: $CRANE_IMAGE
+    entrypoint: [""]
+  needs: [build:image:amd64, build:image:arm64, build:sbom, test, e2e]
+  before_script:
+    - !reference [.release, before_script]
+    - crane auth login "$CI_REGISTRY" -u "$RELEASE_DEPLOY_USER" -p "$RELEASE_DEPLOY_TOKEN"
+  script:
+    - crane push images/image-amd64.tar "$IMAGE_REPOSITORY:$CI_COMMIT_SHA-amd64"
+    - crane push images/image-arm64.tar "$IMAGE_REPOSITORY:$CI_COMMIT_SHA-arm64"
+    - >-
+      crane index append
+      -m "$IMAGE_REPOSITORY:$CI_COMMIT_SHA-amd64"
+      -m "$IMAGE_REPOSITORY:$CI_COMMIT_SHA-arm64"
+      -t "$IMAGE_REPOSITORY:$CI_COMMIT_SHA"
+    - '[ -z "$CI_COMMIT_TAG" ] || crane tag "$IMAGE_REPOSITORY:$CI_COMMIT_SHA" "$CI_COMMIT_TAG"'
+    # Deployments pull by digest (08 §6, 09 §4); record it for the release notes and the smoke job.
+    - DIGEST="$(crane digest "$IMAGE_REPOSITORY:$CI_COMMIT_SHA")"
+    - echo "IMAGE_REF=$IMAGE_REPOSITORY@$DIGEST" | tee image.env
+  artifacts:
+    paths: [images/*.cdx.json]
+    reports:
+      dotenv: image.env
+
+# Pulls the pushed image by digest as a service and checks /api/health (09 §6).
+publish:smoke:
+  stage: publish
+  extends: .main-and-tags
+  image: $CURL_IMAGE
+  needs: [publish:image]
+  services:
+    - name: $IMAGE_REF
+      alias: app
+  variables:
+    PUBLIC_URL: https://smoke.invalid
+    # A throwaway value for the smoke container only.
+    APP_SECRET: c21va2UtdGVzdC1vbmx5LW5vdC1hLXJlYWwtc2VjcmV0LTAxMjM0NTY3 # gitleaks:allow
+    EMAIL_PROVIDER: smtp
+    SMTP_URL: smtp://smoke.invalid
+    EMAIL_FROM: no-reply@smoke.invalid
+    OPERATOR_CONTACT: ops@smoke.invalid
+  script:
+    - for i in $(seq 1 30); do curl -fsS http://app:8080/api/health && exit 0; sleep 2; done; exit 1
+
+# --- 7. deploy (manual; production environment) ------------------------------------------------
+
+deploy:cloudflare:
+  stage: deploy
+  extends: .main-and-tags
+  image: $NODE_IMAGE
+  needs: [build:app, publish:smoke]
+  when: manual
+  interruptible: false
+  environment:
+    name: production
+  variables:
+    WRANGLER_SEND_METRICS: "false"
+    # Wrangler is fetched without running any install scripts; nothing else is installed.
+    npm_config_ignore_scripts: "true"
+  script:
+    - |
+      if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${D1_DATABASE:-}" ]; then
+        echo "CLOUDFLARE_API_TOKEN and D1_DATABASE are not configured; the Cloudflare deploy is wired up with D1 in M2–M3 (09 §6)."
+        exit 1
+      fi
+    # Reads only generated/installed.json plus one fixed query; never imports game code (08 §6).
+    - export WRANGLER_BIN="$(npm exec --yes --package=wrangler@4.165.0 -- which wrangler)"
+    - node scripts/dist/games-check-db.mjs --d1 "$D1_DATABASE" --installed generated/installed.json
+    - cd apps/worker && "$WRANGLER_BIN" d1 migrations apply "$D1_DATABASE" --remote && "$WRANGLER_BIN" deploy
+
+# --- Scheduled ---------------------------------------------------------------------------------
+
+# The only job that receives RENOVATE_TOKEN: a protected variable scoped to this environment.
+renovate:
+  stage: validate
+  image: $RENOVATE_IMAGE
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_TASK == "renovate"
+  interruptible: false
+  timeout: 30 minutes
+  environment:
+    name: renovate
+    action: access
+  variables:
+    RENOVATE_PLATFORM: gitlab
+    RENOVATE_ENDPOINT: $CI_API_V4_URL
+    RENOVATE_REPOSITORIES: $CI_PROJECT_PATH
+    RENOVATE_ONBOARDING: "false"
+    RENOVATE_REQUIRE_CONFIG: required
+    LOG_LEVEL: info
+  script:
+    - |
+      if [ -z "${RENOVATE_TOKEN:-}" ]; then
+        echo "RENOVATE_TOKEN (protected, scoped to the renovate environment) is not configured."
+        exit 1
+      fi
+    - renovate
