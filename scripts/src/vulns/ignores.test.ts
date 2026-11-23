@@ -15,10 +15,10 @@ const FINDINGS = parseFindings(`
 const toml = (entry: string) => `# comment\n[[IgnoredVulns]]\n${entry}\n`;
 
 describe("parseIgnoredVulns", () => {
-  it("reads ids, dates and reasons, ignoring other tables and comments", () => {
+  it("reads ids, dates and reasons, ignoring comments", () => {
     expect(
       parseIgnoredVulns(
-        '[[IgnoredVulns]]\nid = "GHSA-1"\nignoreUntil = 2027-01-31\nreason = "F-11: dev only" # why\n\n[[PackageOverrides]]\nname = "x"\n',
+        '# note\n[[IgnoredVulns]]\nid = "GHSA-1"\nignoreUntil = 2027-01-31\nreason = "F-11: dev only" # why\n',
       ),
     ).toEqual([{ id: "GHSA-1", ignoreUntil: "2027-01-31", reason: "F-11: dev only" }]);
   });
@@ -62,6 +62,12 @@ describe("parseIgnoredVulns", () => {
     ["invalid TOML", "[[IgnoredVulns]\nid = 1\n"],
     ["IgnoredVulns as a single table", '[IgnoredVulns]\nid = "GHSA-1"\n'],
     ["an entry that isn't a table", 'IgnoredVulns = ["GHSA-1"]\n'],
+    ["a PackageOverrides ignore", '[[PackageOverrides]]\nname = "x"\nignore = true\n'],
+    [
+      "a PackageOverrides vulnerability ignore",
+      '[[PackageOverrides]]\nname = "x"\n[PackageOverrides.vulnerability]\nignore = true\n',
+    ],
+    ["any other top-level key", 'GoVersionOverride = "1.22"\n'],
   ])("fails closed on %s", (_, source) => {
     expect(() => parseIgnoredVulns(source)).toThrow();
   });

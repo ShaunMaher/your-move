@@ -1,6 +1,8 @@
 # OSV-Scanner (docs/spec/11-engineering.md §6). A known vulnerability fails the pipeline unless it
 # is ignored here with an `ignoreUntil` date and a `reason` naming its accepted-risk entry
-# (F-<n>) in docs/security/findings.md, which carries the same expiry. Example:
+# (F-<n>) in docs/security/findings.md, which carries the same expiry. Nothing else may be set
+# here: `pnpm lint:vulns` refuses any other key, since PackageOverrides can silence findings too.
+# Example:
 #
 # [[IgnoredVulns]]
 # id = "GHSA-xxxx-xxxx-xxxx"

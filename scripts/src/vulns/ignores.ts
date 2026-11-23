@@ -29,9 +29,18 @@ function text(value: unknown, date = false): string | undefined {
  * Reads the `IgnoredVulns` entries of osv-scanner.toml with a real TOML parser, so every form
  * osv-scanner accepts (comments after headers, spaced headers, inline arrays) is seen. Throws on
  * invalid TOML or an `IgnoredVulns` that isn't an array of tables, so the check fails closed.
+ * Any other top-level key is refused too: `PackageOverrides` (and whatever osv-scanner adds) can
+ * also silence findings, and nothing here checks those against an accepted risk.
  */
 export function parseIgnoredVulns(source: string): IgnoredVuln[] {
-  const entries = parse(source)["IgnoredVulns"] ?? [];
+  const config = parse(source);
+  const others = Object.keys(config).filter((key) => key !== "IgnoredVulns");
+  if (others.length > 0) {
+    throw new Error(
+      `osv-scanner.toml: only IgnoredVulns is allowed (found ${others.join(", ")}); other settings can silence findings without an accepted-risk entry`,
+    );
+  }
+  const entries = config["IgnoredVulns"] ?? [];
   if (!Array.isArray(entries)) throw new Error("osv-scanner.toml: IgnoredVulns must be an array");
   return entries.map((entry: unknown) => {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
