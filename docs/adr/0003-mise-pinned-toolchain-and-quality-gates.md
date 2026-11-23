@@ -14,8 +14,8 @@ machine" and flaky CI follow.
 - **mise pins the toolchain** in `mise.toml`: Node 26.13.1, pnpm 12.21.0, and the non-npm tools
   (gitleaks, osv-scanner, oasdiff, syft). `mise.lock` records each tool's download URL and SHA-256
   for the CI platforms, and CI installs with `mise install --locked`; the mise release itself is
-  checked against a SHA-256 committed in `scripts/ci/install-mise.sh`. Nothing is piped into a
-  shell. `package.json` repeats the Node and pnpm pins (`packageManager` with the pnpm tarball's
+  checked against a SHA-256 committed in `scripts/ci/install-mise.sh`, on every run. Nothing is
+  piped into a shell. `package.json` repeats the Node and pnpm pins (`packageManager` with the pnpm tarball's
   SHA-512, for corepack users). Every npm
   dependency is pinned exactly, once, in the pnpm catalog (`pnpm-workspace.yaml`); new versions
   must be three days old (`minimumReleaseAge`), install scripts are allowed only for the packages
@@ -53,6 +53,17 @@ machine" and flaky CI follow.
   and no signatures; Renovate labels its updates for a review against the fork's release notes.
   The residual risk is accepted as F-10. The spec allows "kaniko (or rootless BuildKit)", so a
   runner that grants user namespaces can switch back without a new decision.
+- **Where each checksum's trust comes from.** A checksum only proves a download matches what was
+  recorded when it was pinned; what makes the recorded value trustworthy differs per tool:
+  - the mise release: trust on first use, from the release's `SHASUMS256.txt` when it was pinned.
+    When bumping mise, take the checksums from the release's signed checksum file and verify its
+    signature, rather than the unsigned one;
+  - pnpm: GitHub build attestations, verified by mise when `mise.lock` was written
+    (`mise lock --check` lists the provenance of each entry);
+  - syft: its cosign signature, verified by mise the same way;
+  - gitleaks, osv-scanner and oasdiff: checksums only, as mise obtained them when `mise.lock` was
+    written (from mise-versions and the projects' release checksum files), so trust on first use
+    as well.
 - **Coverage thresholds are per package**, generated from the workspace list in one Vitest run:
   each package's own sources must reach 80 % lines on their own (not as part of a repository-wide
   average), and game engines, the SDK and the testkit 95 % lines and branches. Lowering one needs

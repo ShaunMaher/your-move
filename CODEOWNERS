@@ -20,13 +20,22 @@
 /mise.toml @applications
 /mise.lock @applications
 /package.json @applications
+/pnpm-lock.yaml @applications
 /pnpm-workspace.yaml @applications
+/apps/*/package.json @applications
+/packages/*/package.json @applications
+/games/*/package.json @applications
+/scripts/package.json @applications
+/tests/*/package.json @applications
+/.changeset/config.json @applications
 /.npmrc @applications
 /renovate.json @applications
 /osv-scanner.toml @applications
 /.gitleaks.toml @applications
 /.dockerignore @applications
 /apps/node/Dockerfile @applications
+/apps/node/scripts/ @applications
+/apps/worker/scripts/ @applications
 /apps/worker/wrangler.example.toml @applications
 /instance.config.ts @applications
 
@@ -50,3 +59,6 @@
 /apps/node/src/ @applications
 /apps/worker/src/ @applications
 /packages/testkit/src/ @applications
+/packages/sdk/src/schema.ts @applications
+/apps/web/index.html @applications
+/apps/web/vite.config.ts @applications

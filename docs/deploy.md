@@ -87,5 +87,11 @@ The nightly OSV scan is a schedule with `SCHEDULE_TASK=nightly`. Every merge req
 one job per environment that declares that environment, prints whether each of these variables is
 set, and fails if any is.
 
+So that check can't pass just because a job never received its environment's variables, each
+environment also has an **`ENV_SCOPE_CANARY`** variable: **not** protected, not secret, scoped to
+that environment, with the environment's name as its value (`release`, `renovate`,
+`production`). Each job first requires `ENV_SCOPE_CANARY` to equal its environment's name, and
+fails otherwise. Keep all three; add one for any new environment.
+
 The project setting **"Use separate caches for protected branches" must stay on**: it keeps caches
 written by merge-request pipelines out of the pipelines that hold the release credentials.
