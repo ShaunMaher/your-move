@@ -220,7 +220,7 @@ writes the arm64 caches (M0 review CI-1). Stages, in order:
    (`node apps/node/dist` with SQLite), not the Docker image; traces and screenshots kept as
    artifacts on failure.
 5. **security** — gitleaks, OSV-Scanner, licence check (§6).
-6. **publish** (`main`/tags only, `release` environment, deploy token, 08 §6) —
+6. **publish** (`main`/tags only, `release` environment, release credentials, 08 §6) —
    `changeset publish` to the GitLab package registry; per-arch images pushed and joined into a
    multi-arch manifest with `crane`; digests recorded in the release notes (from M1); then a **smoke job**
    pulls the new image by digest as a `services:` container and checks `/api/health` (09 §6).

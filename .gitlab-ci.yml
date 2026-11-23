@@ -436,7 +436,7 @@ security:no-secrets-on-mr:
         exit 1
       fi
       exposed=0
-      for name in RELEASE_DEPLOY_TOKEN RELEASE_DEPLOY_USER RENOVATE_TOKEN GITHUB_COM_TOKEN CLOUDFLARE_API_TOKEN D1_DATABASE; do
+      for name in RELEASE_DEPLOY_TOKEN RELEASE_DEPLOY_USER RELEASE_REGISTRY_TOKEN RELEASE_REGISTRY_USER RENOVATE_TOKEN GITHUB_COM_TOKEN CLOUDFLARE_API_TOKEN D1_DATABASE; do
         if [ -n "$(printenv "$name" || true)" ]; then echo "$ENV: $name is set"; exposed=1; else echo "$ENV: $name is not set"; fi
       done
       exit "$exposed"
@@ -454,7 +454,15 @@ security:no-secrets-on-mr:
 
 .require-release-token: &require-release-token |
   if [ -z "${RELEASE_DEPLOY_TOKEN:-}" ] || [ -z "${RELEASE_DEPLOY_USER:-}" ]; then
-    echo "RELEASE_DEPLOY_TOKEN and RELEASE_DEPLOY_USER (a deploy token with write_package_registry and write_registry, in masked, protected variables scoped to the release environment) are not configured; nothing can be published (08 §6)."
+    echo "RELEASE_DEPLOY_TOKEN and RELEASE_DEPLOY_USER (a deploy token with write_package_registry, in masked, protected variables scoped to the release environment) are not configured; no packages can be published (08 §6)."
+    exit 1
+  fi
+
+# Protected container repositories refuse deploy tokens (they have no role), so images are pushed
+# with a Maintainer-role project access token limited to the container registry (08 §6, F-9).
+.require-registry-token: &require-registry-token |
+  if [ -z "${RELEASE_REGISTRY_TOKEN:-}" ] || [ -z "${RELEASE_REGISTRY_USER:-}" ]; then
+    echo "RELEASE_REGISTRY_TOKEN and RELEASE_REGISTRY_USER (a Maintainer-role project access token with only read_registry and write_registry, and its bot user name, in masked, protected variables scoped to the release environment) are not configured; no image can be pushed (08 §6)."
     exit 1
   fi
 
@@ -501,8 +509,8 @@ publish:image:
     - security:secrets
     - security:dependencies
   before_script:
-    - *require-release-token
-    - printf '%s' "$RELEASE_DEPLOY_TOKEN" | crane auth login "$CI_REGISTRY" -u "$RELEASE_DEPLOY_USER" --password-stdin
+    - *require-registry-token
+    - printf '%s' "$RELEASE_REGISTRY_TOKEN" | crane auth login "$CI_REGISTRY" -u "$RELEASE_REGISTRY_USER" --password-stdin
   script:
     - crane push images/image-amd64.tar "$IMAGE_REPOSITORY:$CI_COMMIT_SHA-amd64"
     - crane push images/image-arm64.tar "$IMAGE_REPOSITORY:$CI_COMMIT_SHA-arm64"

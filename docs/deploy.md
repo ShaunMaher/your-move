@@ -85,12 +85,27 @@ Our GitLab is Community Edition (no protected environments), so each secret is a
 **masked, protected** (only `main` and protected `v*` tags receive it) **and scoped to one
 environment**:
 
-| Variable                                      | Environment  | Used by                                                                                                    |
-| --------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------- |
-| `RENOVATE_TOKEN`                              | `renovate`   | the scheduled Renovate job (schedule variable `SCHEDULE_TASK=renovate`)                                    |
-| `GITHUB_COM_TOKEN`                            | `renovate`   | Renovate's lookups of GitHub releases (mise tools, mise itself): a read-only token for public repositories |
-| `RELEASE_DEPLOY_USER`, `RELEASE_DEPLOY_TOKEN` | `release`    | publishing packages and images (a deploy token with `write_package_registry` and `write_registry`)         |
-| `CLOUDFLARE_API_TOKEN`, `D1_DATABASE`         | `production` | the Workers deploy job, once it exists                                                                     |
+| Variable                                          | Environment  | Used by                                                                                                    |
+| ------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------- |
+| `RENOVATE_TOKEN`                                  | `renovate`   | the scheduled Renovate job (schedule variable `SCHEDULE_TASK=renovate`)                                    |
+| `GITHUB_COM_TOKEN`                                | `renovate`   | Renovate's lookups of GitHub releases (mise tools, mise itself): a read-only token for public repositories |
+| `RELEASE_DEPLOY_USER`, `RELEASE_DEPLOY_TOKEN`     | `release`    | `publish:packages`: a deploy token; it needs only `write_package_registry`                                 |
+| `RELEASE_REGISTRY_USER`, `RELEASE_REGISTRY_TOKEN` | `release`    | `publish:image`: a Maintainer-role project access token for the container registry only (below)            |
+| `CLOUDFLARE_API_TOKEN`, `D1_DATABASE`             | `production` | the Workers deploy job, once it exists                                                                     |
+
+**The release registry token** (`RELEASE_REGISTRY_TOKEN`, with the token's bot user name in
+`RELEASE_REGISTRY_USER`) is a project access token with the **Maintainer** role and only the
+`read_registry` and `write_registry` scopes (no `api`). It exists because the protected container
+repository rule (`applications/your-move*`, push = Maintainer, delete = Owner) refuses deploy
+tokens, which have no role. It can push or overwrite any image in this project's container registry
+(including `v*` tags) and nothing else; deletion is reserved to Owner by the protection rule. It
+can't call the API, push code or publish packages (findings.md F-9). Our CE version's npm package
+protection rule takes no delete level. Both publish jobs share the `release` environment, so
+`publish:packages` also receives this token until M1 gives them separate scopes (findings.md F-8).
+To rotate it before the expiry date shown in the project's access-token settings, create a new token
+with the same name, role and scopes, update both variables, then revoke the old one. The release
+deploy token holds only `read_package_registry` and `write_package_registry`; rotate it the same
+way.
 
 The nightly OSV scan is a schedule with `SCHEDULE_TASK=nightly`. Every merge request pipeline runs
 one job per environment that declares that environment, prints whether each of these variables is

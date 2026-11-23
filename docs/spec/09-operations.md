@@ -256,11 +256,11 @@ The pipeline, its stages and the quality gates are defined in 11 §9. Deployment
   (credentials per 08 §6).
 - **Docker images** for `linux/amd64` and `linux/arm64` are built natively on the matching shared
   runner (tags `arch-amd64`, `arch-arm64`) with kaniko (or rootless BuildKit), assembled into a multi-arch
-  manifest, and — on `main` and tags only, in the `release` environment with the release deploy
-  token (protected, environment-scoped variables; our GitLab CE has no protected environments,
-  08 §6) — pushed to this project's GitLab container registry, tagged with the version and the
-  commit, with their SBOMs kept as pipeline artifacts and (from M1) their digests recorded in the
-  release notes. MR pipelines build but
+  manifest, and — on `main` and tags only, in the `release` environment with the release registry
+  token (a Maintainer-role, registry-only project access token in protected, environment-scoped
+  variables; our GitLab CE has no protected environments, 08 §6) — pushed to this project's GitLab
+  container registry, tagged with the version and the commit, with their SBOMs kept as pipeline
+  artifacts and (from M1) their digests recorded in the release notes. MR pipelines build but
   never push, so they can't run the image (end-to-end tests run against the Node build output
   instead, 11 §9). On `main`, a **smoke job** after the push pulls the new image by digest as a CI
   `services:` container and checks that `/api/health` answers. Images aren't signed yet (08 §6).
