@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-
 import { defineConfig, devices } from "@playwright/test";
 
 /**
@@ -7,10 +5,8 @@ import { defineConfig, devices } from "@playwright/test";
  * same artifact the build stage produces; `pnpm build` first when running locally.
  */
 const PORT = 4173;
+// Built by `pnpm build` (CI: the build:app artifact). Without it the web server fails to start.
 const SERVER = new URL("../../apps/node/dist/main.js", import.meta.url);
-if (!existsSync(SERVER)) {
-  throw new Error("apps/node/dist/main.js is missing: run `pnpm build` before `pnpm test:e2e`");
-}
 
 export default defineConfig({
   testDir: "src",
