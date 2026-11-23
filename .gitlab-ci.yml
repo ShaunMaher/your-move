@@ -213,11 +213,14 @@ test:
     # Wrangler's own log file goes where the artifacts can keep it.
     WRANGLER_LOG_PATH: $CI_PROJECT_DIR/reports/wrangler-logs
   script:
-    # Unit, integration, property, component and API contract tests; the full game kit joins in
-    # M1. The Worker half of the contract suite runs in test:worker instead (see there): to fold it
-    # back, drop the --exclude and the test:worker job. Vitest matches --exclude against each
-    # project's own directory, so only an absolute path names this one file and no other.
+    # Unit, integration, property, component and API contract tests. The Worker half of the
+    # contract suite runs in test:worker instead (see there): to fold it back, drop the --exclude
+    # and the test:worker job. Vitest matches --exclude against each project's own directory, so
+    # only an absolute path names this one file and no other.
     - pnpm test --exclude "$CI_PROJECT_DIR/tests/contract/src/worker.test.ts"
+    # The full game kit and every other games:verify check on each installed game (02 §6, 11 §4);
+    # the build stage runs the fast kit.
+    - pnpm games:verify
   after_script:
     # The Worker build writes Wrangler's log, but a job that fails earlier writes none: an empty
     # directory keeps the artifact upload from warning.

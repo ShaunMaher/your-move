@@ -29,7 +29,8 @@
   "files": [
     "dist",
     "!dist/**/*.test.*",
-    "!dist/.tsbuildinfo"
+    "!dist/.tsbuildinfo",
+    "!dist/api-report-temp"
   ],
   "scripts": {
     "build": "tsc --build",

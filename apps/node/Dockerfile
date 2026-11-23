@@ -23,7 +23,8 @@ RUN pnpm install --frozen-lockfile
 RUN pnpm games:generate \
  && pnpm games:verify --fast \
  && pnpm --filter @your-move/web build \
- && pnpm --filter @your-move/node build
+ && pnpm --filter @your-move/node build \
+ && pnpm games:check-inputs --only web,node
 # Production dependencies only (08 §6). The server bundle is self-contained today; this keeps the
 # image right once native modules (the SQLite driver, M2) are external.
 RUN pnpm --filter @your-move/node deploy --prod /deploy \

@@ -1,21 +1,24 @@
 /**
  * `pnpm games:verify` (docs/spec/02-game-framework.md §7.3, §7.5): the build-time checks every
- * installed game package must pass. This is the M0 subset (10 M0): type ids, the SDK peer range,
- * licences, the dependency rules of 02 §7.1.1 and the import ruleset. The test kit, the
- * manifest-versus-engine check, icon sanitisation and the built-output ESLint rules arrive in M1.
+ * installed game package must pass: type ids, the SDK peer range, licences, the dependency rules
+ * of 02 §7.1.1, the import ruleset and the engine ESLint rules on built output, the generic test
+ * kit (fast or full), and the manifest-versus-engine and icon checks.
  * The package contract itself (02 §7.1.1) is checked when the package is read (./packages.ts) and,
  * for the files inside it, here.
  */
-import { relative } from "node:path";
+import { relative, resolve, sep } from "node:path";
 
 import { isGameType } from "@your-move/sdk";
+import { runKit, type KitMode } from "@your-move/testkit";
 import { gamePackageRules } from "@your-move/testkit/depcruise";
+import { engineEslintConfig } from "@your-move/testkit/eslint-engine";
 import { cruise, type ICruiseResult } from "dependency-cruiser";
+import { ESLint } from "eslint";
 import { satisfies, validRange } from "semver";
 
 import { isAllowedExpression } from "../licences/policy.js";
 import type { LoadedGame } from "./load.js";
-import { packageFileProblems } from "./packages.js";
+import { packageFileProblems, packedFiles } from "./packages.js";
 
 /** The instance supplies these; a game names them only as peers (02 §7.1.1). */
 const ALLOWED_PEERS: ReadonlySet<string> = new Set(["@your-move/sdk", "react", "zod"]);
@@ -30,6 +33,13 @@ export interface VerifyOptions {
   readonly sdkDir: string;
   /** This repository's workspace packages (real paths): see ./workspace.ts. */
   readonly workspaceDirs: ReadonlySet<string>;
+  /**
+   * The test kit's mode. `pnpm games:verify` always runs the kit; only tests of the package and
+   * import rules, whose fixture packages have no real engines, leave it out.
+   */
+  readonly kit?: KitMode;
+  /** Receives every package file the checks covered (absolute paths). */
+  readonly checked?: Set<string>;
 }
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&");
@@ -147,8 +157,21 @@ function checkDependencies(game: LoadedGame): string[] {
   return problems;
 }
 
+/** What the import check found: its problems, and the package's own files it visited. */
+interface ImportCheck {
+  readonly problems: string[];
+  /** Every file of the package reachable from its three entry points (absolute paths). */
+  readonly files: readonly string[];
+  /** The files reachable from the engine and manifest entry points: the ESLint rules' scope. */
+  readonly engineFiles: readonly string[];
+}
+
 /** Runs the testkit's import ruleset (02 §7.5) over the files the package's `exports` names. */
-async function checkImports(game: LoadedGame, rootDir: string, sdkDir: string): Promise<string[]> {
+async function checkImports(
+  game: LoadedGame,
+  rootDir: string,
+  sdkDir: string,
+): Promise<ImportCheck> {
   const rel = (file: string): string => relative(rootDir, file);
   const exact = (file: string): string => `^${escapeRegExp(rel(file))}$`;
   const ownDir = escapeRegExp(rel(game.pkg.dir));
@@ -177,25 +200,109 @@ async function checkImports(game: LoadedGame, rootDir: string, sdkDir: string): 
     },
   });
   const output = result.output as ICruiseResult;
-  return output.summary.violations.map(
+  const problems = output.summary.violations.map(
     (violation) =>
       `${game.packageName}: ${violation.rule.name}: ${violation.from} must not reach ${violation.to}`,
   );
+  // The package's own modules and the edges between them, to find what each entry reaches.
+  const own = (source: string): boolean =>
+    resolve(rootDir, source).startsWith(`${game.pkg.dir}${sep}`);
+  const edges = new Map(
+    output.modules
+      .filter((module) => own(module.source))
+      .map((module) => [
+        module.source,
+        module.dependencies.map((dependency) => dependency.resolved).filter(own),
+      ]),
+  );
+  const reach = (entries: readonly string[]): string[] => {
+    const seen = new Set<string>();
+    const queue = entries.map((entry) => rel(entry));
+    for (let next = queue.pop(); next !== undefined; next = queue.pop()) {
+      if (seen.has(next) || !edges.has(next)) continue;
+      seen.add(next);
+      queue.push(...(edges.get(next) ?? []));
+    }
+    return [...seen].map((source) => resolve(rootDir, source)).sort();
+  };
+  return {
+    problems,
+    files: reach([entries.engine, entries.client, entries.manifest]),
+    engineFiles: reach([entries.engine, entries.manifest]),
+  };
 }
 
-/** Every problem with the installed games; empty when the instance may be built. */
+/**
+ * The engine ESLint rules (02 §7.5: globals allow-list, no writes to built-ins) on the built
+ * engine and manifest output: exactly the files Node and the bundlers load.
+ */
+async function checkEngineLint(
+  game: LoadedGame,
+  rootDir: string,
+  files: readonly string[],
+): Promise<string[]> {
+  if (files.length === 0) return [];
+  const relativeFiles = files.map((file) => relative(rootDir, file));
+  const eslint = new ESLint({
+    cwd: rootDir,
+    // Installed packages live under node_modules, which ESLint ignores by default.
+    ignore: false,
+    overrideConfigFile: true,
+    overrideConfig: [
+      { languageOptions: { ecmaVersion: 2023, sourceType: "module" } },
+      ...engineEslintConfig(relativeFiles),
+    ],
+  });
+  const results = await eslint.lintFiles(relativeFiles);
+  return results.flatMap((result) =>
+    result.messages.map(
+      (message) =>
+        `${game.packageName}: ${relative(rootDir, result.filePath)}:${String(message.line)}: ${message.message} (${message.ruleId ?? "parse"})`,
+    ),
+  );
+}
+
+/** The generic test kit (02 §6) and the manifest-versus-engine check (02 §7.2), icon included. */
+function checkKit(game: LoadedGame, mode: KitMode): string[] {
+  try {
+    const report = runKit(game.engines, { mode, manifest: game.manifest });
+    return report.failures.map(
+      (failure) =>
+        `${game.packageName}: kit ${failure.property}${failure.version === undefined ? "" : ` (rules version ${String(failure.version)}${failure.seats === undefined ? "" : `, ${String(failure.seats)} seats`}${failure.seed === undefined ? "" : `, seed ${String(failure.seed)}`})`}: ${failure.message}`,
+    );
+  } catch (error) {
+    return [
+      `${game.packageName}: the test kit couldn't run its engines: ${error instanceof Error ? error.name : "error"}`,
+    ];
+  }
+}
+
+/**
+ * Every problem with the installed games; empty when the instance may be built. The files each
+ * package's checks covered are added to `options.checked`, for the bundler-input check that runs
+ * after the builds (10 M1).
+ */
 export async function verifyGames(options: VerifyOptions): Promise<string[]> {
   const problems = checkIdentity(options.games);
   for (const game of options.games) {
     const workspace = options.workspaceDirs.has(game.pkg.dir);
+    const imports = await checkImports(game, options.rootDir, options.sdkDir);
     problems.push(
       ...(workspace ? [] : checkWorkspaceRanges(game)),
-      ...packageFileProblems(game.packageName, game.pkg.dir, workspace),
+      ...packageFileProblems(
+        game.packageName,
+        game.pkg.dir,
+        workspace,
+        workspace ? packedFiles(game.pkg.dir) : undefined,
+      ),
       ...checkSdk(game, options.sdkVersion, workspace),
       ...checkLicence(game),
       ...checkDependencies(game),
-      ...(await checkImports(game, options.rootDir, options.sdkDir)),
+      ...imports.problems,
+      ...(await checkEngineLint(game, options.rootDir, imports.engineFiles)),
+      ...(options.kit === undefined ? [] : checkKit(game, options.kit)),
     );
+    for (const file of imports.files) options.checked?.add(file);
   }
   return problems;
 }

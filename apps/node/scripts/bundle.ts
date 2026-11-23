@@ -15,8 +15,15 @@ import { build } from "esbuild";
 export const REQUIRE_BANNER =
   'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);\n';
 
-/** Bundles `apps/node/src/main.ts` into `outdir` (emptied first); returns the files written. */
-export async function bundleServer(outdir: string): Promise<string[]> {
+/**
+ * Bundles `apps/node/src/main.ts` into `outdir` (emptied first); returns the files written.
+ * `onInputs` receives every input file, relative to the working directory, for the bundler-input
+ * check (`pnpm games:check-inputs`, 10 M1).
+ */
+export async function bundleServer(
+  outdir: string,
+  onInputs?: (inputs: readonly string[]) => void,
+): Promise<string[]> {
   rmSync(outdir, { recursive: true, force: true });
   const result = await build({
     entryPoints: [new URL("../src/main.ts", import.meta.url).pathname],
@@ -31,6 +38,7 @@ export async function bundleServer(outdir: string): Promise<string[]> {
     metafile: true,
     logLevel: "warning",
   });
+  onInputs?.(Object.keys(result.metafile.inputs));
   const main = join(outdir, "main.js");
   writeFileSync(main, REQUIRE_BANNER + readFileSync(main, "utf8"));
   // The banner is one line: start the source map's mappings one generated line later, so stack

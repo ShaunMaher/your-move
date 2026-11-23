@@ -296,6 +296,88 @@ describe("packageFileProblems", () => {
       "@x/game: must not contain CommonJS (dist/y.cjs) (02 §7.1.1)",
     ]);
   });
+
+  it("compares names case-insensitively, as case-insensitive file systems do", () => {
+    const dir = packageWith({
+      "package.json": "{}",
+      "PACKAGE.JSON": "{}",
+      "dist/Package.Json": "{}",
+      "dist/x.CJS": "",
+      "dist/Node_Modules/x.js": "",
+    });
+    expect(new Set(packageFileProblems("@x/game", dir, false))).toEqual(
+      new Set([
+        '@x/game: must not contain another package.json (PACKAGE.JSON): Node and bundlers would read its "imports", "browser" and "type" (02 §7.1.1)',
+        '@x/game: must not contain another package.json (dist/Package.Json): Node and bundlers would read its "imports", "browser" and "type" (02 §7.1.1)',
+        "@x/game: must not contain CommonJS (dist/x.CJS) (02 §7.1.1)",
+        "@x/game: must not contain a node_modules directory (dist/Node_Modules) (02 §7.1.1)",
+      ]),
+    );
+  });
+
+  it("in a workspace package, checks only the files publishing would include, and every symlink", () => {
+    const dir = packageWith({
+      "package.json": "{}",
+      "dist/engine/index.js": "",
+      "src/fixtures/package.json": "{}",
+      "vitest.config.cts": "",
+      "coverage/node_modules/x.js": "",
+    });
+    symlinkSync("/", join(dir, "src/escape"));
+    const packed = new Set(["package.json", "dist/engine/index.js"]);
+    expect(packageFileProblems("@x/game", dir, true, packed)).toEqual([
+      "@x/game: src/escape links outside the package",
+    ]);
+    // A package from a registry is checked in full whatever the list says.
+    expect(packageFileProblems("@x/game", dir, false, packed)).toHaveLength(4);
+  });
+});
+
+describe("games:verify with the test kit", () => {
+  it("runs the kit and the engine ESLint rules on a package that passes them", async () => {
+    const checked = new Set<string>();
+    const problems = await verifyGames({
+      rootDir: FIXTURES,
+      games: await load("@fixture/game-kit"),
+      sdkVersion: "1.2.0",
+      sdkDir: SDK_DIR,
+      workspaceDirs: new Set(),
+      kit: "fast",
+      checked,
+    });
+    expect(problems).toEqual([]);
+    expect([...checked].map((file) => file.slice(file.indexOf("game-kit/"))).sort()).toEqual([
+      "game-kit/dist/client/index.js",
+      "game-kit/dist/engine/index.js",
+      "game-kit/dist/manifest.js",
+    ]);
+  });
+
+  it("fails a package that breaks the engine rules or the kit", async () => {
+    const problems = await verifyGames({
+      rootDir: FIXTURES,
+      games: await load("@fixture/game-kitbad"),
+      sdkVersion: "1.2.0",
+      sdkDir: SDK_DIR,
+      workspaceDirs: new Set(),
+      kit: "fast",
+    });
+    const text = problems.join("\n");
+    expect(text).toMatch(/game-kitbad\/dist\/engine\/index\.js:\d+: .*Date/u);
+    expect(text).toMatch(/kit (termination|turns) \(rules version 1, 2 seats, seed \d+\)/u);
+  });
+
+  it("reports engines the kit can't run", async () => {
+    const problems = await verifyGames({
+      rootDir: FIXTURES,
+      games: await load("@fixture/game-good"),
+      sdkVersion: "1.2.0",
+      sdkDir: SDK_DIR,
+      workspaceDirs: new Set(),
+      kit: "fast",
+    });
+    expect(problems.join("\n")).toMatch(/@fixture\/game-good: (the test kit couldn't run|kit )/u);
+  });
 });
 
 describe("workspacePackageDirs", () => {
