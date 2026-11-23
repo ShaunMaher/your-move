@@ -1,0 +1,23 @@
+{
+  "name": "@your-move/server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The runtime-agnostic server: Hono app, framework, accounts and API",
+  "license": "BSD-2-Clause",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@hono/zod-openapi": "catalog:",
+    "@your-move/sdk": "workspace:*",
+    "@your-move/shared": "workspace:*",
+    "hono": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "fast-check": "catalog:",
+    "vitest": "catalog:"
+  }
+}

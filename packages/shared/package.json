@@ -1,0 +1,20 @@
+{
+  "name": "@your-move/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Zod schemas for the public API: the source of the OpenAPI document",
+  "license": "BSD-2-Clause",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@hono/zod-openapi": "catalog:",
+    "hono": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}

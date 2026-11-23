@@ -1,0 +1,37 @@
+{
+  "name": "@your-move/api-client",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Typed client for the public HTTP API, generated from its OpenAPI document",
+  "license": "BSD-2-Clause",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./openapi.json": "./openapi/v1.json"
+  },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./openapi.json": "./openapi/v1.json"
+    }
+  },
+  "files": [
+    "dist",
+    "openapi",
+    "!dist/**/*.test.*",
+    "!dist/.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "dependencies": {
+    "openapi-fetch": "catalog:"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}

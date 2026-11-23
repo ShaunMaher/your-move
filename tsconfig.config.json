@@ -1,0 +1,13 @@
+{
+  // The repository's own TypeScript config files, so they are type-checked and lintable.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "rootDir": ".",
+    "outDir": "node_modules/.cache/tsc-config",
+    "tsBuildInfoFile": "node_modules/.cache/tsc-config/.tsbuildinfo",
+    "emitDeclarationOnly": true
+  },
+  "include": ["vitest.config.ts", "instance.config.ts", "knip.config.ts"],
+  "references": [{ "path": "scripts" }]
+}

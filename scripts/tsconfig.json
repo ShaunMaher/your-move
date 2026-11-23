@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "rootDir": "src",
+    "outDir": "dist/types",
+    "tsBuildInfoFile": "dist/types/.tsbuildinfo",
+    "emitDeclarationOnly": true
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../packages/sdk" },
+    { "path": "../packages/testkit" },
+    { "path": "../packages/server" }
+  ]
+}
