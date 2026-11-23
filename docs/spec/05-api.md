@@ -28,9 +28,9 @@ rejected (`.strict()`).
 | POST | `/api/auth/otp/verify` **public** | `{ email, code }` | `200 { user, needsOnboarding }` + `Set-Cookie`. `needsOnboarding` is true until a display name is set and the age confirmation given for the current `MIN_AGE` (06 §5). Errors: `400 INVALID_CODE` (wrong, expired, consumed or unknown — indistinguishable), `429 RATE_LIMITED`. |
 | POST | `/api/auth/logout` | `{}` | `204`, clears cookie, deletes session |
 | POST | `/api/auth/logout-all` | `{}` | `204`, deletes all of the user's sessions |
-| GET | `/api/me` | | `200 { id, email, displayName, settings, ageAttested }` or `401` |
+| GET | `/api/me` | | `200 { id, email, displayName, settings, ageAttested, needsOnboarding }` or `401`. `needsOnboarding` is true until onboarding is complete, and again for a re-prompted user after a `MIN_AGE` rise (06 §5) |
 | PATCH | `/api/me` | `{ displayName?, settings?, ageAttested?: true }` | `200` user. `settings` accepts only known keys (`emailNudges`, `whoCanAddMe`, theme). The request that completes onboarding sets `onboarded_at` and claims email-invite seats (06 §6.4). Display-name changes after onboarding: at most 3 per 30 days (`429 RATE_LIMITED`), each logged (06 §5) |
-| POST | `/api/me/under-age` | `{}` | Only while onboarding is incomplete: deletes the just-created account and its session at once (06 §5, 04 §Account deletion). `204`, clears cookie; `409 WRONG_STATUS` once onboarded |
+| POST | `/api/me/under-age` | `{}` | Only while `needsOnboarding` is true — a new account, or one re-prompted after a `MIN_AGE` rise: deletes the account and its sessions at once, with no step-up code (06 §5, 04 §Account deletion), and suppresses invite emails to the address. `204`, clears cookie; `409 WRONG_STATUS` when `needsOnboarding` is false |
 | POST | `/api/me/delete/otp` | `{}` | `202` — emails a `delete_account`-purpose code (06 §7) |
 | DELETE | `/api/me` | `{ code }` | `204` if the code is a valid `delete_account` code; else `400 INVALID_CODE` |
 | GET | `/api/me/sessions` | | list of `{ id, createdAt, lastSeenAt, userAgent, current }` |
@@ -55,36 +55,39 @@ GameEnvelope = {
                 downloadUrl?: string /* public distribution only: versioned, hashed (words §9.4) */ }],  // never blob keys or hashes
   players: [{ playerId?: string /* game_players.id; creator only, lobby only (for remove-seat) */,
               seat: number | null /* null in lobby */, userId: string | null, displayName: string | null,
-              invitedAs?: string /* the address the creator typed; creator only, until accepted */,
+              invitedAs?: string /* creator only, while joinedAt is null: the address they typed, or the picked past opponent's name */,
               state: "invited" | "joined" | "declined" | "left" | "removed" | "playing" | "out",
               outReason?: "eliminated" | "resigned" | "timed_out" | "declined", rank?: number, score?: number,
               deadline?: number /* when this seat times out, if in toAct */, isYou: boolean, isCreator: boolean }],
   yourSeat: number | null, toAct: number[], yourTurn: boolean,
-  yourInvitation: boolean,                   // you hold an `invited` seat (accept/decline)
+  yourInvitation: "normal" | "hidden" | null, // you hold an `invited` seat (accept/decline); hidden ones never badge
   joinLink?: { active: boolean, expiresAt: number | null },  // creator only, lobby only; the URL is shown only on create/rotate
-  canAddPlayers?: { userId, displayName }[], // creator only, finished games: link joiners who acted and aren't yet past opponents (02 §4)
+  canAddPlayers?: { userId, displayName }[], // creator only, finished games: link joiners who acted, aren't yet past opponents, and have no block with the creator either way (02 §4)
   createdAt, lastActionAt
 }
-GameSummary = { id, gameType, status, endReason, yourTurn, yourInvitation, players (as in the envelope),
+GameSummary = { id, gameType, status, endReason, yourTurn, yourInvitation /* as in the envelope */, players (as in the envelope),
   summary: { headline: Text, scores? },     // module summary(state, yourSeat) while active; the stored final summary after start;
                                             // in the lobby a framework Text, e.g. "Waiting for 2 players"
   lastAction: { describe: Text, byYou: boolean } | null,
-  lastActionAt, unread: boolean, version }
+  lastActionAt, unread: boolean /* always false for a hidden invitation */, version }
 ```
 
 **Who sees what in `players[]`.** In the lobby: rows in `invited`, `joined`, `declined`, `left` and
-`removed`. An `invited` row has `displayName: null` and `userId: null` for everyone until it is
-accepted: the creator sees `invitedAs` (the address they typed) or "Invited" for a past opponent
-picked from the list; other members see only "Invited". `normal`, `hidden` and `inert` invitations
-look identical (Q3, 04). Link joiners (and the join lookup) see only `joined` rows. After start:
-only seated players. A player's envelope never contains an email other than the creator's own typed
-`invitedAs` values.
+`removed`. **Any row that has never been `joined` (`joined_at` NULL) has `displayName: null` and
+`userId: null` for everyone, in every state** — invited, declined or removed alike — so neither a
+removal nor a decline reveals whether a typed address has an account (Q3). The creator sees
+`invitedAs` (the address they typed, or the picked past opponent's name) and the state; other
+members see only the state ("Invited", "Declined", "Removed"). `normal`, `hidden` and `inert`
+invitations look identical (Q3, 04). Link joiners (and the join lookup) see only `joined` rows.
+After start: only seated players. A player's envelope never contains an email other than the
+creator's own typed `invitedAs` values.
 
 ### `GET /api/games`
 The viewer's games (membership as in 04), newest activity first: all `lobby`/`active`; `finished`
 from the last 90 days; `declined`/`cancelled`/`expired` from the last 7 days. Cursor-paginated
-(`?cursor=`, 50 per page; `nextCursor`). Filters: `?status=`, `?gameType=`, `?invitations=true`
-(normal invitations), `?invitations=hidden` (the collapsed *Hidden invitations*, 06 §6.7).
+(`?cursor=`, 50 per page; `nextCursor`). **Hidden invitations are excluded by default.** Filters:
+`?status=`, `?gameType=`, `?invitations=true` (normal invitations), `?invitations=hidden` (the
+collapsed *Hidden invitations*, 06 §6.7).
 `403 ONBOARDING_REQUIRED` until onboarding is complete.
 
 ### `POST /api/games`
@@ -103,10 +106,12 @@ from the last 90 days; `declined`/`cancelled`/`expired` from the last 7 days. Cu
 **Email invitees never reveal whether an address has an account** (06 §6.1, Q3). Every valid email
 gets a seat and the response is the same whether the address belongs to an onboarded user (who gets
 an invitation), to nobody or to an un-onboarded account (email-invite seat), is on the suppression
-list or over an invite cap (seat created, no email sent), or belongs to someone with a block in
-either direction with the creator or another invitee (an `inert` seat that is never delivered). The
-work done and the response time are the same in every case (06 §3.2 approach: same reads and writes,
-emails sent via `waitUntil`).
+list or over an invite cap (seat created, no email sent), belongs to someone with a block in either
+direction with the creator or another invitee (an `inert` seat that is never delivered), or belongs
+to a user already added in the same request, by `userId` or another address (an `inert` email-only
+seat with `user_id` NULL). The work done and the response time are the same in every case (06 §3.2
+approach: same reads and writes, emails sent via `waitUntil`). Per-pair limits count an email
+invitee by its `emailId` (the HMAC of the typed address), never by the user it resolves to (06 §6.7).
 
 | Case | Response |
 |---|---|
@@ -116,9 +121,9 @@ emails sent via `waitUntil`).
 | `seats` outside `players(options)` | `400 INVALID_SEAT_COUNT` |
 | `turnTimeoutDays` not an integer 1–30 | `400 INVALID_TIMEOUT` |
 | `validateStart(options, seats)` fails | `409 INVALID_SEATS { detail: { code, detail? } }` — nothing created |
-| More invitees than `seats - 1`, duplicates, an invalid address, or a `userId` that isn't a past opponent | `400 INVALID_INVITEES` |
+| More invitees than `seats - 1`, **literal** duplicates (the same normalised address twice, or the same `userId` twice), an invalid address, or a `userId` that isn't a past opponent or has a block in either direction with the creator or another invitee | `400 INVALID_INVITEES` |
 | The creator's own email or id | `400 CANNOT_PLAY_SELF` |
-| Creator has too many non-finished games they created (per pair > 5, total > 50) — counts only games the **creator** created | `409 TOO_MANY_GAMES` |
+| Creator has too many `lobby`/`active` games they created (per pair > 5, total > 50) — counts only games the **creator** created; a pair is (creator, `userId`) for picked invitees and (creator, `emailId`) for every typed address, whatever it resolves to | `409 TOO_MANY_GAMES` |
 | More email invitees than allowed (per user, 08 §4; counted for every email, whatever it turns out to be) | `429 RATE_LIMITED` — nothing created |
 | Onboarding incomplete | `403 ONBOARDING_REQUIRED` |
 | Other rate limits (06 §6) | `429 RATE_LIMITED` |
@@ -168,9 +173,9 @@ All take `{ expectedVersion }` and are framework transitions (03 §5.2).
 |---|---|---|---|
 | POST | `/api/games/:id/start` | Creator, in `lobby`, with ≥ min joined → `active` (unfilled seats dropped; blocks re-checked, 02 §4) | `403 NOT_ALLOWED`, `409 WRONG_STATUS`, `409 NOT_ENOUGH_PLAYERS`, `409 INVALID_SEATS` (module `validateStart`) |
 | POST | `/api/games/:id/accept` | Holder of a user invitation (normal or hidden), in `lobby` → `joined`. If the accepter has a block in either direction with any joined member, the invitation becomes `declined` instead and the answer is `404` | `403 ONBOARDING_REQUIRED`, `409 WRONG_STATUS` |
-| POST | `/api/games/:id/decline` | Invited or joined non-creator in `lobby`, or a `playing` player before their first action (02 §4: ends the game `declined` if fewer than `min` would remain, else `out_reason = declined`) | `403 NOT_ALLOWED` (creator), `409 ALREADY_ACTED`, `409 WRONG_STATUS` |
+| POST | `/api/games/:id/decline` | Invited or joined non-creator in `lobby`, or any `playing` player — the creator included — before their first action (02 §4: ends the game `declined` if fewer than `min` would remain, else `out_reason = declined`) | `403 NOT_ALLOWED` (the creator in `lobby`: cancel instead), `409 ALREADY_ACTED`, `409 WRONG_STATUS` |
 | POST | `/api/games/:id/leave` | Joined non-creator, in `lobby` | `403 NOT_ALLOWED`, `409 WRONG_STATUS` |
-| POST | `/api/games/:id/remove-seat` | Creator, in `lobby`: `{ expectedVersion, playerId }` → that row becomes `removed` (`removed_at` set; an email seat's address is cleared). `playerId` must be a row of **this** game and not the creator's own | `403 NOT_ALLOWED`, `404` (no such row in this game), `409 WRONG_STATUS` |
+| POST | `/api/games/:id/remove-seat` | Creator, in `lobby`: `{ expectedVersion, playerId }` → that row becomes `removed` (`removed_at` set; an email seat's address is cleared). `playerId` must be a row of **this** game and not the creator's own. A remove never ends the lobby (02 §4) | `403 NOT_ALLOWED`, `404` (no such row in this game), `409 WRONG_STATUS` |
 | POST | `/api/games/:id/resign` | Any `playing` player, in `active` | `409 WRONG_STATUS` |
 | POST | `/api/games/:id/cancel` | Creator, in `lobby` → `cancelled` (realtime only, no push) | `403 NOT_ALLOWED`, `409 WRONG_STATUS` |
 
@@ -185,7 +190,7 @@ These don't take `expectedVersion`.
 | POST | `/api/games/:id/join-link` | Creator, in `lobby`: create or rotate the join link → `{ url, expiresAt }` (the only time the URL is returned). Changes `join_links` only, not the game row. Errors: `403 NOT_ALLOWED`, `409 WRONG_STATUS`, `429` |
 | DELETE | `/api/games/:id/join-link` | Creator: revoke (body-less). Never ends the lobby (02 §4). `204`; `403 NOT_ALLOWED` |
 | POST | `/api/games/:id/seen` | `{ version }` — marks activity as read (not a transition). `204` |
-| POST | `/api/games/:id/add-player` | Creator of a `finished` game: `{ userId }` → records creator ↔ that link joiner as past opponents, if both acted (02 §4, 06 §6.9). `204`; `404` if not one of `canAddPlayers` |
+| POST | `/api/games/:id/add-player` | Creator of a `finished` game: `{ userId }` → records creator ↔ that link joiner as past opponents, if both acted and neither has blocked the other (02 §4, 06 §6.9). `204`; `404` if not one of `canAddPlayers` or a block exists in either direction |
 
 ### Join links
 The token travels in the URL **fragment** (`PUBLIC_URL/join#<token>`), so it never reaches server
@@ -194,7 +199,7 @@ or proxy logs. The web page reads it and calls:
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/api/join/lookup` | `{ token }` → `200 { game: { id, gameType, options, resources, turnTimeoutDays, creatorName, players (joined only, names only), openSeats } }` or `404` (invalid, revoked, expired, full, blocked with any member, the viewer declined/left this game, or was removed while this link was live — indistinguishable) |
-| POST | `/api/join` | `{ token }` → takes an open seat → `200 { game }`; same `404` cases; `409 ALREADY_JOINED`. If the viewer already holds an invitation in this game (of any delivery), joining accepts it instead of taking another seat. Server-side retries on version conflict (02 §4), so callers never see `STALE_GAME` |
+| POST | `/api/join` | `{ token }` → takes an open seat → `200 { game }`; same `404` cases; `409 ALREADY_JOINED`. Blocks are checked against **every** row in the game (`404` if any). If the viewer already holds a `normal` or `hidden` invitation in this game, joining accepts it instead of taking another seat (`joined_via = invitation`); an `inert` row is never accepted (its block makes the join `404` anyway). Server-side retries on version conflict (02 §4), so callers never see `STALE_GAME` |
 
 Both return `403 ONBOARDING_REQUIRED` until onboarding is complete, and both are rate-limited per
 user and per IP (08 §4); a link join counts only against the joiner's own limits, never the
@@ -210,7 +215,7 @@ creator's game caps. Joining always requires an explicit tap on Join (07 §1).
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/config` **public** | `{ appName, appShortName, operatorContact, minAge, vapidPublicKey?, turnstileSiteKey?, uploadsEnabled }` — non-sensitive values only (`uploadsEnabled` = framework `DICTIONARY_UPLOADS`) |
-| GET | `/api/catalog` | `{ games: [{ type, version, name, players, defaultTurnTimeoutDays, defaults, catalog }] }` for enabled game types. `defaults` = the viewer's `lastOptions[type]` with any key dropped that `resolveOptions` rejects against the current `ctx.resources` (so a deleted upload or disabled ruleset is never offered). `catalog` = module `catalog(ctx)` with `ctx.resources` = built-in and operator resources that are enabled (`DICTIONARIES_ENABLED`, `DICTIONARIES_EXTRA`) plus the **viewer's own** non-deleted uploads; it never contains `blob_key`, `sha256` or `size_bytes`. Public dictionaries carry their versioned, hashed download URL |
+| GET | `/api/catalog` | `{ games: [{ type, version, name, players, defaultTurnTimeoutDays, defaults, catalog }] }` for enabled game types. `defaults` follows the create path's rule: the viewer's `lastOptions[type]` if `resolveOptions` accepts it against the current `ctx.resources`, otherwise `{}` (module defaults), so a deleted upload or disabled ruleset is never offered. `catalog` = module `catalog(ctx)` with `ctx.resources` = built-in and operator resources that are enabled (`DICTIONARIES_ENABLED`, `DICTIONARIES_EXTRA`) plus the **viewer's own** non-deleted uploads; it never contains `blob_key`, `sha256` or `size_bytes`. Public dictionaries carry their versioned, hashed download URL |
 | GET | `/api/health` **public** | `200 { ok: true }` — no version or config details |
 | GET | `/manifest.webmanifest` **public** | Generated from config (07 §4) |
 

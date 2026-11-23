@@ -50,7 +50,7 @@ Reviewers do not edit code. The coder does not mark its own work as reviewed.
 ## Commands (to be created in M0)
 
 - `pnpm install` · `pnpm dev:node` · `pnpm dev:worker` · `pnpm lint` · `pnpm typecheck` · `pnpm test`
-- `pnpm test:e2e` · `pnpm build` · `pnpm cf:migrate` · `pnpm cf:deploy` · `pnpm gen:vapid` ·
+- `pnpm test:e2e` · `pnpm build` · `pnpm cf:migrate` · `pnpm cf:deploy` · `pnpm gen:vapid` · `pnpm gmail:authorize` ·
   `docker build -f apps/node/Dockerfile .`
 
 ## Local environment

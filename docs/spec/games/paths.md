@@ -121,8 +121,9 @@ flags eliminations before the player confirms.
 - **Resign / timeout**: the player's marker is removed (`out`, reason `resigned` / `timed_out`),
   their hand returns to the deck (§4), and play continues if two or more remain. With one left,
   they win. A player who declines or times out before their first action (placing their marker)
-  goes through `onResign` / `onTimeout` the same way, but the framework records them as
-  `declined` and leaves them out of the ranking (02 §4).
+  goes through `onResign(…, "decline")` (02 §2.1 rule 9): the marker and hand are handled the same
+  way, but the record has type `decline` and says they declined, never that they resigned; the
+  framework records them as `declined` and leaves them out of the ranking (02 §4).
 - There are no points; `result()` returns ranks only.
 
 ## 6. Options (variants)
@@ -160,12 +161,13 @@ Options = {
 - **View**: board, all markers (positions, out status and reasons), phase, `toAct`, `deckCount`,
   `handCounts`, `yourHand` (null for the public view), `tokenHolder`. History comes from the
   framework's history endpoint (02 §3), not the view. After the game ends: everyone's remaining hand.
-- **Record** (`PathsRecord`): `{ seat, type: "place-marker" | "place-tile" | "resign" | "timeout",
+- **Record** (`PathsRecord`): `{ seat, type: "place-marker" | "place-tile" | "resign" | "decline" | "timeout",
   tileId?, rotation?, square?, moves: [{ seat, path: { r, c, n }[] }], eliminated: Seat[],
   collided: Seat[][], skipped: Seat[] }`. The full movement trace is public, so every client can
   animate it. Records never mention drawn or returned tiles.
 - **Preview**: not needed on the server; the client engine computes it locally (§3).
-- `describe`: `[{seat:0}, " placed a tile — ", {seat:2}, " and ", {seat:3}, " crashed!"]`;
+- `describe`: `[{seat:0}, " placed a tile — ", {seat:2}, " and ", {seat:3}, " crashed!"]`; for
+  `decline`: `[{seat:1}, " declined the game"]`;
   `summary`: headline "4 left of 6 · your turn".
 - **Termination bound** (`maxActions`): `players` (markers) + 35 (tiles) + `players`
   (resigns/timeouts). Skips are not actions.

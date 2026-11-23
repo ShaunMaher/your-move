@@ -39,7 +39,7 @@
 │  ├─ worker/              Cloudflare entry: Worker fetch handler, Durable Object classes,
 │  │                       cron handler, wrangler.toml (template), D1 binding
 │  └─ node/                Node entry: HTTP server, ws hub, SQLite, interval scheduler,
-│                          Dockerfile, docker-compose.example.yml
+│                          Dockerfile, docker-compose.tunnel.yml, docker-compose.caddy.yml (09 §4)
 ├─ packages/
 │  ├─ sdk/                 GameDefinition + GameClientModule types, RandomSource, Resources,
 │  │                       and the generic test kit (02 §2, §3, §6). No runtime deps.
@@ -125,8 +125,9 @@ per-game DO (with D1 as an index) is a contained change behind the `GameReposito
 ### 5.2 Game state transitions (actions and everything else)
 
 Every `games` row has an integer `version` and a `write_token`. **Every** state change to a game —
-action, join, accept, remove, start, resign, decline, leave, cancel, invite claim, expiry, timeout
-(02 §4) — is a *transition* applied like this:
+action, join, accept, remove, start, resign, decline, leave, cancel, expiry, timeout (02 §4) — is a
+*transition* applied like this. (Invite claims update only the claimed `game_players` row, guarded by
+its state, and deliberately don't bump `version`, 02 §4.)
 
 1. Load game state + version.
 2. Compute the new state with the game module (pure), with recorded randomness and pre-loaded
@@ -158,12 +159,14 @@ code so behaviour is identical.
 Required tests (M3/M4): two concurrent moves at the same version → exactly one succeeds and the
 database matches the winner's state exactly, on both drivers; same for move-vs-decline,
 **sweep timeout vs a last-second move**, start-vs-cancel, accept-vs-remove, accept-vs-cancel,
-remove-vs-join, claim-vs-cancel, a claim or accept that triggers an automatic start, and
-join-vs-join for the last open seat.
+remove-vs-join, an accept or join that triggers an automatic start, join-vs-join for the last open
+seat, and the invite-claim races (02 §4): claim-vs-start, claim-vs-remove, claim-vs-cancel, and
+**create-vs-onboarding** (a game created while the invitee completes onboarding is claimed by the
+sweep, 06 §6.4).
 
 Clients send `expectedVersion` with every client-initiated transition, which doubles as
-double-submit protection. Transitions the server starts itself (join, invite claim, sweep, account
-deletion) reload and retry up to 3 times on `stale`; if the transition no longer applies after a
+double-submit protection. Transitions the server starts itself (join, sweep, account deletion)
+reload and retry up to 3 times on `stale`; if the transition no longer applies after a
 reload (e.g. the seat filled), the caller gets the outcome for the new state (e.g. the join link's
 indistinguishable `404`).
 
@@ -202,14 +205,14 @@ unsupported and the app SHOULD refuse to start if it detects another live instan
 - **Web Push** (VAPID) to subscribed devices when it becomes a user's turn, a past opponent adds
   them to a new game (auto-join), or a game that reached `active` ends. A new invitation (not
   `hidden` or `inert`) sends only the generic "You have a new game invitation" push, at most one per
-  recipient per day (06 §6.2). Lobby endings (`cancelled`,
-  `expired`, `declined` from the lobby, including cancels caused by account deletion) send realtime
-  invalidations only — no push, no email. iOS supports this only for home-screen web apps (16.4+) and only
+  recipient per day (06 §6.2). Every other lobby event (joins by others, accepts, declines,
+  leaves, removals) and lobby endings (`cancelled`, `expired`, `declined` from the lobby, including
+  cancels caused by account deletion) send realtime invalidations only — no push, no email (02 §4). iOS supports this only for home-screen web apps (16.4+) and only
   after a user gesture grants permission — the UI asks after the first game is created, not at
   sign-in.
 - Push text is built only from public `describe` text (02 §5) and display names, never from state
-  (e.g. "Alex played QUIZ for 64. Your turn."). Invitations and lobby join/leave/remove events
-  never send pushes (06 §6.2).
+  (e.g. "Alex played QUIZ for 64. Your turn."). The auto-join push is "<creator> added you to a
+  game"; the invitation push names nobody (06 §6.2).
 - Implemented once in `packages/server` using WebCrypto (RFC 8291 aes128gcm + RFC 8292 VAPID) or a
   vetted Workers-compatible library; must work on both runtimes.
 - Optional email nudge (default off, per-user setting): "It's your turn" after 24 h idle, max one
@@ -224,7 +227,10 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
 `setInterval`. Every step is idempotent and uses the same transition mechanism as actions:
 
 - Expire OTPs, sessions, invites, join links and rate-limit buckets.
-- Delete accounts that haven't completed onboarding 7 days after creation (06 §5).
+- Delete accounts that haven't completed onboarding 7 days after creation — only rows with
+  `onboarded_at IS NULL`, never users re-prompted after a `MIN_AGE` rise (06 §5).
+- Claim any `invited` email seat in a `lobby` game whose `invite_email` matches an onboarded user
+  (catches games created during onboarding and failed claims; 06 §6.4).
 - Apply per-seat turn timeouts via module `onTimeout`: overdue seats one transition at a time, in
   seat order, reloading and re-checking `toAct` and the deadline before each (02 §4).
 - Send timeout reminders (50 % and 24 h before, 02 §4; tracked in `timeout_reminders_sent`, which
@@ -278,8 +284,9 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
   reserves the action's worst case (for `words`, `placements + 1` words); if that doesn't fit, it
   returns `429` without calling the module. The `has()` wrapper passed to the module counts real
   lookups and throws a sentinel (→ `429`, transition aborted) if they exceed the reservation, so a
-  request that crosses the limit never returns `INVALID_WORDS`. Unused reservation is refunded in
-  the transition batch. An exhausted budget blocks moves as well as previews in that game until the
+  request that crosses the limit never returns `INVALID_WORDS`. The lookups actually made are
+  always charged; the unused part of the reservation is refunded in the transition batch, or — when
+  there is none (a failed `validate`, any preview) — by one follow-up write after the response. An exhausted budget blocks moves as well as previews in that game until the
   window passes; the limits are sized well above normal play.
 - `ResourceProvider` (framework): `authorizeForNewGame(kind, id, userId)`, `listForUser(kind,
   userId)` (feeds `OptionsContext.resources` and the catalog), `load(kind, id)`, and per kind an

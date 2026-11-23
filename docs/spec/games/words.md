@@ -473,7 +473,9 @@ debounced (§9.5).
 - `onResign` / `onTimeout` (2-player): the game ends; the other player wins regardless of score
   (§6). Record type `resign` / `timeout`. `seatStatus` reports the resigning/timed-out seat `out`.
   (A decline or timeout before a player's first action never reaches the module in a 2-player game:
-  the framework ends it `declined`, 02 §4.)
+  the framework ends it `declined`, 02 §4. If `reason` is `"decline"` — only possible once 3–4
+  player games exist — the record type is `decline` and `describe` says the player declined, never
+  that they resigned, 02 §2.1 rule 9.)
 - `result()`: ranking by final score (ties share rank) for `out` / `scoreless` endings; the
   non-resigning player ranks 1 for `resign` / `timeout`.
 - `summary()`: `{ headline: [{seat:0}, " 212 – 187 ", {seat:1}], scores }`, rendered as

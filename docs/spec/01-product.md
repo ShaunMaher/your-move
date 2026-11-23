@@ -62,10 +62,12 @@ Framework
 - F3. My game list shows all my games of every type: *Your turn*, *Invitations*, *Waiting*,
   *Finished*.
 - F4. I choose whether people I've finished a game with can add me to games straight away, or
-  nobody can. Everyone else sends me an invitation that I accept or decline; my lock screen only ever
-  says "You have a new game invitation", never who sent it.
+  nobody can. Everyone else sends me an invitation that I accept or decline; for an invitation my
+  lock screen only says "You have a new game invitation", never who sent it (if I've turned email
+  nudges on, the invitation email does name them). A past opponent adding me shows their name.
 - F5. Adding someone by email never tells me whether they already have an account: the app shows
-  the address back so I can check it, and the seat shows that address until they accept.
+  the address back so I can check it, and the seat shows that address until they accept —
+  even if I remove it or they decline.
 
 Words (games/words.md)
 - G1. As a player I start a new game by entering an opponent's email address and choosing a

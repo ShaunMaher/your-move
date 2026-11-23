@@ -25,7 +25,7 @@ Conventions:
 | display_name | TEXT NULL | NULL until onboarding completed (06 §5). Wherever a name is shown (UI, push, email) and it is NULL, the fallback label "New player" is used |
 | settings | TEXT NOT NULL DEFAULT '{}' | JSON: `{ emailNudges: boolean, whoCanAddMe: "pastOpponents" \| "nobody" (default "pastOpponents", 06 §6.2), lastGameType?: string, lastOptions?: { [gameType]: unknown }, ... }` |
 | age_attested_at | INTEGER NULL | when the user confirmed they meet `MIN_AGE` (06 §5); NULL until onboarding completed |
-| age_attested_min_age | INTEGER NULL | the `MIN_AGE` value in force when they confirmed; if the operator raises `MIN_AGE` above it, the user must confirm again |
+| age_attested_min_age | INTEGER NULL | the `MIN_AGE` value in force when they confirmed. If the operator raises `MIN_AGE` above it, the user is **re-prompted** (06 §5): `onboarded_at` is never cleared, the sweep never deletes them, but they get `403 ONBOARDING_REQUIRED` on the gated endpoints until they confirm again |
 | onboarded_at | INTEGER NULL | set when display name and age confirmation are both done (06 §5). Until then the account is treated as unknown for invitations and is deleted by the sweep after 7 days |
 | deletion_requested_at | INTEGER NULL | set when account deletion starts; the sweep resumes unfinished deletions (§Account deletion) |
 | created_at, updated_at | INTEGER | |
@@ -83,10 +83,10 @@ At most 3 *live* challenges per (email, purpose); issuing a 4th burns the oldest
 | invite_email | TEXT NULL | normalised; the address the creator typed, on any seat added by email (email-invite seat or user invitation) while `invited`. Shown only to the creator. Cleared on accept and on any terminal outcome (06 §6.5) |
 | state | TEXT | `invited` · `joined` · `declined` · `left` · `removed` (lobby) · `playing` · `out` (seated, active/finished) · `dropped` (unfilled invitation at start); `declined`/`left`/`removed`/`dropped` rows stay after start with `seat` NULL (02 §4) |
 | out_reason | TEXT NULL | `eliminated` · `resigned` · `timed_out` · `declined` (out before a first action; never ranked, 02 §4) |
-| joined_via | TEXT NULL | `creator` · `added` (auto-joined past opponent) · `invitation` (accepted) · `email_invite` · `join_link` |
-| delivery | TEXT NOT NULL DEFAULT 'normal' | for `invited` rows: `normal` · `hidden` (over the target's inbound cap, 06 §6.7: shown only in their collapsed *Hidden invitations*, no notification) · `inert` (blocked pair: never delivered, never claimable). The creator sees all three the same way (Q3) |
+| joined_via | TEXT NULL | `creator` · `added` (auto-joined past opponent) · `invitation` (accepted — including an invited user who joins through the link, 02 §4) · `email_invite` · `join_link` |
+| delivery | TEXT NOT NULL DEFAULT 'normal' | for `invited` rows: `normal` · `hidden` (over the target's inbound cap, 06 §6.7: shown only in their collapsed *Hidden invitations*, no notification) · `inert` (blocked pair, or a typed address that resolves to a user already added in the same request: never delivered, never claimable, never accepted, `user_id` NULL for the latter, 06 §6.1). The creator sees all three the same way (Q3) |
 | removed_at | INTEGER NULL | when the creator removed this seat; compared with `join_links.created_at` (06 §6.8) |
-| joined_at | INTEGER NULL | for `seat_order = join`, and "who joined later" in the start-time block check (02 §4) |
+| joined_at | INTEGER NULL | for `seat_order = join`, and "who joined later" in the start-time block check (02 §4). A row with `joined_at` NULL never exposes a display name or user id in any response (05 §Common types) |
 | to_act | INTEGER NOT NULL DEFAULT 0 | 1 if this seat is in `toAct` — denormalised for "your turn" queries; updated in the same transition |
 | to_act_since | INTEGER NULL | per-seat timeout clock (02 §2.3) |
 | acted_once | INTEGER NOT NULL DEFAULT 0 | for "decline before first action" (02 §4) |
@@ -112,7 +112,7 @@ in state `joined`, `playing` or `out`, or an `invited` row with their `user_id` 
 | game_id | TEXT FK ON DELETE CASCADE | PK(game_id, seq) |
 | seq | INTEGER | 1-based; equals `games.action_count` after insert |
 | seat | INTEGER NOT NULL | the acting (or resigning/declining/timed-out) seat |
-| kind | TEXT | `action` · `resign` · `timeout` · `decline` (after start, when the game continues). Lobby events and the framework-only `declined` ending are not logged (02 §5) |
+| kind | TEXT | `action` · `resign` · `timeout` · `decline` (a decline or timeout before a first action, after start, when the game continues; replayed as `onResign(…, "decline")`). Lobby events, invite claims and the framework-only `declined` ending are not logged (02 §5) |
 | action 🔒 | TEXT NULL | the module action as submitted (secret: e.g. which tiles were swapped); NULL for other kinds |
 | record | TEXT NOT NULL | module `PublicRecord` JSON — public |
 | describe | TEXT NOT NULL | JSON `Text` from module `describe(record)` (02 §5) — public |
@@ -141,7 +141,8 @@ Written (both directions) in the transition that finishes a game (status `finish
 every pair of seated users who **both** have `acted_once = 1`, except players who joined through a
 link: they're never paired automatically. The creator may confirm one afterwards ("Add <name> to
 your players?", `POST /api/games/:id/add-player`, 05), which writes only creator ↔ that player, and
-only if both acted (06 §6.9). Deleted in both directions when either user blocks the other. Read by
+only if both acted (06 §6.9). **Never written for a pair with a block in either direction** (checked
+in the same transition), and deleted in both directions when either user blocks the other. Read by
 `whoCanAddMe` checks and `/api/players/recent`.
 
 ### `join_links`
@@ -226,7 +227,9 @@ Framework-level (module-specific invariants live in each game doc):
    order by `kind` (02 §5) with their recorded `rng` reproduces `games.state` exactly.
 2. `games.version` increases by exactly 1 per accepted transition (03 §5.2), and never otherwise.
 3. `game_players.to_act = 1` exactly for the seats in the module's `toAct(state)`; none when the
-   game isn't `active`. `state = out` exactly for the seats `seatStatus(state)` reports `out`.
+   game isn't `active`. While the game is `active`, `state = out` exactly for the seats
+   `seatStatus(state)` reports `out` (the framework-only `declined` ending sets the decliner `out`
+   without the module, 02 §4).
 4. **Secrecy**: no API response, WebSocket message, push payload or log line contains `state`,
    `setup_rng`, `game_actions.action` or `game_actions.rng`, or another seat's entry of
    `final_views`. Game data reaches clients only through module `view()` (or the viewer's own
@@ -234,6 +237,8 @@ Framework-level (module-specific invariants live in each game doc):
    tests, a route-wide runtime test, and the module perturbation test (02 §6).
 5. After start, a `game_players` row has a non-NULL `seat` exactly when its state is `playing` or
    `out`; every other row has `seat` NULL and is `declined`, `left`, `removed` or `dropped`.
+6. **Blocks and past opponents**: no `past_opponents` row ever exists for a pair with a block in
+   either direction (06 §6.10).
 
 ## Account deletion
 
@@ -243,7 +248,8 @@ deleted first, so the account is unusable from the moment deletion starts.
 
 1. Delete sessions (cascades push subscriptions; live sockets closed, 06 §4).
 2. For each of the user's games:
-   - `active` where they're `playing`: a real resign transition (module `onResign`; others notified);
+   - `active` where they're `playing`: a real resign transition (module `onResign`; others notified),
+     or the decline rule if they haven't acted yet (02 §4);
    - `lobby` they created: cancel (deleting its `invites`/`join_links` rows and clearing every
      `invite_email` — third parties' addresses; realtime invalidation only, no push or email, 02 §4);
    - other `lobby` games: a real `leave` (or decline, if `invited`) transition, so no orphaned
@@ -258,7 +264,10 @@ deleted first, so the account is unusable from the moment deletion starts.
 Accounts that never finished onboarding (`onboarded_at` NULL) hold no game rows (invitations are
 claimed only at onboarding, 06 §6.4), so their deletion — immediately when the user says they're
 under `MIN_AGE`, or by the sweep 7 days after creation (06 §5) — is steps 1, 3, 4 and 5, with no
-step-up code.
+step-up code. A user **re-prompted** after a `MIN_AGE` rise who says they're under it gets the full
+deletion (steps 1–5), also without a step-up code. Either way the under-age exit adds the address
+to `email_suppressions` (reason `unsubscribed`) and makes every `invited` email seat for it `inert`,
+so no more invite emails arrive.
 
 If a step fails, the deletion is retried from the start by the next sweep (a `deletion_requested_at`
 marker on the user row); every step is safe to repeat.

@@ -75,13 +75,15 @@ pass in CI.
   the lobby and before/after first action (ending `declined` with no ranks and `final_views`, vs
   `out_reason = declined` excluded from the ranking, vs resignation), a timeout before a first action
   (same rule), leave, remove seat (foreign `playerId` → `404`, own row refused), cancel, lobby
-  expiry, the lobby `declined` check running only on decline/leave/remove, `validateStart` failure
+  expiry, the lobby `declined` check running only on decline/leave (never on remove), `validateStart` failure
   at create, at Start and on an automatic start (trigger still succeeds), per-seat timeouts in a
   multi-seat phase (one transition per seat, stops once the game ends), reminder reset on clock
   restart, sweep idempotence, elimination shown as `out`, past-opponent pairs only between players
   who both acted;
   membership tests (users who left or were removed before start get `404`, `yourSeat` from the
-  renumbered row); `whoCanAddMe` tests for all three settings; Playwright two-player full words game
+  renumbered row); `whoCanAddMe` tests for both settings; a decline before a first action by the
+  creator and by others (record says "declined", never "resigned"); `checkConfig` failing startup;
+  the invite-claim races (03 §5.2); Playwright two-player full words game
   on WebKit iPhone viewport; route-wide secrecy test (04 invariant 4, incl. only the viewer's
   `final_views` entry); WebSocket upgrade Origin and session revocation tests;
   body-size/placement/socket-cap limits tested; p95 move latency measured.
@@ -99,7 +101,10 @@ pass in CI.
   account, and a copy review that nothing markets the service to children.
 - Web Push (VAPID) + optional email nudges.
 - Install guide banner, update toast, dark mode, accessibility pass.
-- Docker compose example with Caddy, deploy docs, backup docs.
+- Docker deployment: `apps/node/docker-compose.tunnel.yml` (the proof-of-concept deployment behind a
+  Cloudflare Tunnel, Q6) and `docker-compose.caddy.yml`, with the two-network layout and `*_FILE`
+  secrets (09 §4), deploy docs (incl. the `gmail` operator setup, 09 §2), backup docs.
+- `gmail` email provider (OAuth refresh token, `gmail.send` only) and the shared MIME builder.
 - **Accept:** push received on an installed iPhone; invite → signup → game appears; account
   deletion (with step-up code) leaves opponents' history intact and passes with `foreign_keys=ON`;
   push-endpoint allow-list tests (T12); unsubscribe token + RFC 8058 one-click tests (T17);
@@ -108,13 +113,24 @@ pass in CI.
   joiner never auto-starts; link joiners become past opponents only via the creator's
   confirmation; inbound-cap tests (per creator and total, `hidden` invitations listed only under
   *Hidden invitations*); **Q3 parity**: adding an onboarded user, an unknown address, an
-  un-onboarded account, a suppressed address, an over-cap address and a blocked user by email gives
-  identical responses and statistically indistinguishable timing; lobby endings send no push or
-  email (T18); unsubscribe GET/POST e2e on both targets with the service worker active; onboarding:
+  un-onboarded account, a suppressed address, an over-cap address, a blocked user and an address
+  of a user already added in the same request by email gives identical responses and statistically
+  indistinguishable timing — and stays identical after the creator **removes** the seat, after the
+  per-pair caps are hit with the same address, and when an invitation is claimed (no version
+  bump or realtime event for other members); rows never joined show no name or id in any state;
+  blocked pairs: never written as past opponents (04 invariant 6), `add-player` `404`,
+  `userId` invitees with a block → `INVALID_INVITEES`, claims apply the full block rule and the
+  inbound cap; the sweep claims seats for invitees who onboarded during creation;
+  lobby endings and lobby events other than auto-join and invitation send no push or email, the
+  invitation push names nobody (T18); unsubscribe GET/POST e2e on both targets with the service worker active; onboarding:
   `403 ONBOARDING_REQUIRED` on game list, create, accept, join lookup and join until done, invites
   claimed only at onboarding completion, "I'm under `MIN_AGE`" deletes the account, the sweep
-  deletes un-onboarded accounts after 7 days, raising `MIN_AGE` re-prompts; display-name rename
-  limit; blocking a lobby co-member removes/leaves the seat.
+  deletes un-onboarded accounts after 7 days (never re-prompted ones), raising `MIN_AGE`
+  re-prompts and gates the same endpoints, "I'm under" for a re-prompted user runs the full
+  deletion and suppresses invite emails; display-name rename limit; blocking a lobby co-member
+  removes/leaves the seat; tunnel deployment: `TRUST_PROXY=cloudflare` with `TRUST_PROXY_PEERS`
+  (foreign peer → `400`), the container health check passing without `CF-Connecting-IP`, no
+  published ports; MIME builder tests with hostile display names (T14); `*_FILE` secrets.
 
 ## M5 — Paths game
 - Requires the M4 child-safety items to be done.

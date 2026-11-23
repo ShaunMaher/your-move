@@ -47,6 +47,16 @@ type ResourceRequest = { kind: "dictionary"; id: string; version?: number };  //
 type ListSummary = { headline: Text; scores?: number[] };  // one line in the game list
 type FrameworkError = { code: string; message: string; detail?: unknown };   // 05 §Errors
 type SubmitResult = { ok: true; game: GameEnvelope; view: unknown } | { ok: false; error: GameError | FrameworkError };
+type ResourceMeta = {                                      // metadata only, never contents (08 T22)
+  kind: "dictionary"; id: string; version: number; name: string;
+  language: string; alphabet: string[];                    // what compatibility checks need (words §9.3)
+  distribution: "public" | "serverOnly"; source: "builtin" | "operator" | "upload";
+};
+type ResourceCatalog = ResourceMeta[];
+type Resources = {                                         // loaded for one game, synchronous (§2.1 rule 6)
+  dictionary?: { id: string; version: number; has(word: string): boolean };
+};
+type ExitReason = "resign" | "decline";                    // why a seat leaves through onResign/onTimeout (§4)
 
 interface GameDefinition<Options, State, Action, View, PublicRecord, PreviewResult = never> {
   type: string;                 // "words"
@@ -69,6 +79,7 @@ interface GameDefinition<Options, State, Action, View, PublicRecord, PreviewResu
   validateStart(options: Options, seats: number): Ok | GameError;  // e.g. enough tiles for this many players
   defaultTurnTimeoutDays(options: Options): number;        // framework owns the timeout (§4); this is only the default
   resources(options: Options): ResourceRequest[];          // e.g. [{ kind: "dictionary", id: "enable" }]
+  checkConfig(config: ModuleConfig, catalog: ResourceCatalog): Ok | GameError; // startup (§2.1 rule 8), e.g. default dictionary enabled and compatible
 
   // Playing (pure; replayed, §5)
   setup(ctx: { options: Options; seats: number; rng: RandomSource }): State;   // no resources (rule 6)
@@ -76,8 +87,8 @@ interface GameDefinition<Options, State, Action, View, PublicRecord, PreviewResu
   seatStatus(state: State): ("playing" | "out")[];         // "out" = eliminated by the rules (or resigned/timed out)
   validate(state: State, seat: Seat, action: Action, res: Resources): Ok | GameError;
   apply(state: State, seat: Seat, action: Action, rng: RandomSource): { state: State; record: PublicRecord };
-  onResign(state: State, seat: Seat, rng: RandomSource): { state: State; record: PublicRecord };
-  onTimeout(state: State, seat: Seat, rng: RandomSource): { state: State; record: PublicRecord };
+  onResign(state: State, seat: Seat, rng: RandomSource, reason: ExitReason): { state: State; record: PublicRecord };
+  onTimeout(state: State, seat: Seat, rng: RandomSource): { state: State; record: PublicRecord };   // only for seats that have acted (§4)
   result(state: State): null | {                           // null while in progress
     ranking: { seat: Seat; rank: number; score?: number }[]; // standard competition ranking (§4)
     endReason: string;                                       // module-defined, e.g. "out", "last-standing"
@@ -142,7 +153,14 @@ Enforced by the generic test kit (§6) where possible:
    environment (which holds `APP_SECRET`), because `catalog()` output reaches clients. Module type
    ids match `^[a-z][a-z0-9]*$` so prefixes can't overlap. Startup errors name the failing key but
    never echo config values. The framework config never contains module-specific variables, and
-   modules never read framework resource config.
+   modules never read framework resource config. Cross-checks between the two (e.g. the words
+   default dictionary must be enabled and compatible) go through `checkConfig(config, catalog)`,
+   which the framework calls at startup with the metadata of every enabled built-in and operator
+   resource; an error stops startup and names the module key.
+9. **Exit reasons**: `onResign` receives `reason`. `"decline"` is used for a seat leaving before
+   its first action (§4): the module removes the seat exactly as for a resignation, but its record
+   and `describe` text say the player *declined* (e.g. [{seat:2}, " declined the game"]), never
+   "resigned", and nothing in the record presents it as a loss.
 
 ### 2.2 Reserved error codes
 
@@ -211,7 +229,7 @@ to compute previews locally (e.g. word scores), but it is always non-authoritati
                   │
  create ──▶ lobby ┼── all seats joined (auto-start, §4 Start), or creator presses Start ──▶ active ──▶ finished
                   │                                                                        │   (result() non-null)
-                  └── a decline/leave/remove leaves joined + invited < min ──▶ declined ◀───┘
+                  └── a decline/leave leaves joined + invited < min ────────▶ declined ◀───┘
                       and no join link is live                     (a decline or timeout before a seat's
                                                                     first action leaves < min playing)
 ```
@@ -243,30 +261,38 @@ is stored. The turn timeout and seat order are shown on every invitation and in 
   held by an `invited` or `joined` row. A user who already holds an invitation in the game and joins
   through the link is treated as accepting it.
 
-Until an invitation is accepted, the creator sees the seat as the address they typed (or
-"Invited" for a past opponent who must accept); other members see only "Invited" (06 §6.1).
+A row that has never been `joined` (`joined_at` NULL) never shows a display name or user id to
+anyone, in any state (`invited`, `declined`, `removed`, `dropped`, 05 §Common types): the creator
+sees the address they typed (or "Invited"/"Declined"/"Removed" for a picked past opponent), other
+members see only the state (06 §6.1).
 
 *Past opponents* are pairs of users who both took at least one action (`acted_once`) in a game that
 reached `finished`. A player who joined through a link is never recorded automatically: at the end
 the creator is asked "Add <name> to your players?" and only a yes records the pair (creator ↔ that
-player, never the other players; 06 §6.9).
+player, never the other players; 06 §6.9). A pair with a block in either direction is never
+recorded, at the finish or through that question (06 §6.10).
 
 The creator can **remove** any other seat while in the lobby (`removed`); a removed user can't rejoin
-through the link that was live when they were removed (06 §6.8). Lobby joins, leaves, removals and
-lobby endings (`cancelled`, `expired`, `declined` from the lobby) send realtime invalidations only,
+through the link that was live when they were removed (06 §6.8).
+
+**Lobby notifications.** The only pushes a lobby causes go to the person being added: an auto-join
+push naming the creator ("<creator> added you to a game") and the generic invitation push that names
+nobody (06 §6.2). Joins by others, accepts, declines, leaves, removals and lobby endings
+(`cancelled`, `expired`, `declined` from the lobby) send realtime invalidations to members only,
 never pushes or emails.
 
 **Start.** The creator may press **Start** once at least `min` seats are joined; unfilled seats are
 dropped. The game also starts **automatically** once every seat is `joined`, except while a join
-link is live or any seat was filled through a join link: then only the creator's Start begins it, so
+link is live or any `joined` row has `joined_via = join_link`: then only the creator's Start begins it, so
 the creator always sees who joined through a link before play starts. At start the framework, in
 the start transition:
 
 1. re-checks blocks between every pair of joined users: if a pair has a block, the member of the
    pair who joined later is moved to `removed` (realtime only); if fewer than `min` remain the start
-   fails with `409 NOT_ENOUGH_PLAYERS` (or, for an automatic start, simply doesn't happen);
+   fails with `409 NOT_ENOUGH_PLAYERS` (or, for an automatic start, simply doesn't happen); a pair
+   with a block never becomes past opponents later either;
 2. calls `validateStart(options, joinedCount)`. On failure, Start returns `409 INVALID_SEATS`; an
-   automatic start simply doesn't happen, the triggering transition (accept, join, claim) still
+   automatic start simply doesn't happen, the triggering transition (accept or join) still
    succeeds, and the game waits in the lobby for the creator;
 3. marks every row that isn't `joined` as out of the game: `declined`, `left` and `removed` rows
    keep their state, unfilled `invited` rows become `dropped`, all with `seat` NULL and
@@ -279,21 +305,25 @@ the start transition:
 So a 2-player game against a past opponent (default setting) starts the moment it's created.
 
 **Decline / leave / remove (lobby).** An invited or joined non-creator may decline (or leave, if
-joined). The seat reopens. Only these transitions (decline, leave, remove) check whether the lobby
-can still fill: it ends as `declined` when `joined + invited < min` (every `invited` row counts,
-whatever its delivery, 04) and no join link is live; otherwise it waits for a join, Start or expiry.
-Revoking a link or its expiry never ends a lobby by itself. The creator leaving means cancelling.
+joined). The seat reopens. Only decline and leave check whether the lobby can still fill: it ends
+as `declined` when `joined + invited < min` (every `invited` row counts, whatever its delivery, 04)
+and no join link is live; otherwise it waits for a join, Start or expiry. A **remove** never ends
+the lobby — the creator chose it, and can still share a link, add players or cancel. Revoking a
+link or its expiry never ends a lobby by itself either. The creator leaving means cancelling.
 
-**Before a seat's first action (active game).** A `playing` seat that hasn't acted yet
-(`acted_once = 0`) may **decline**; the same rule applies if it **times out** before acting:
+**Before a seat's first action (active game).** Any `playing` seat that hasn't acted yet
+(`acted_once = 0`), the creator's included, may **decline**; the same rule applies if it **times
+out** before acting:
 
 - If fewer than `min` playing seats would remain, the game ends as **`declined`**. This is a
   framework-only transition: the module isn't called, nothing is logged, the state is frozen as it
-  is, no seat gets a rank (`rank` NULL for everyone), `end_reason = declined`, and `final_views` are
-  written from the frozen state. Moves the creator already made don't change this.
-- Otherwise the seat is out with `out_reason = declined`: the transition is logged (`decline` or
-  `timeout`) and dispatched to `onResign` / `onTimeout`, and play continues. Seats out as `declined`
-  are excluded from the final ranking (below).
+  is, the declining (or timed-out) seat's row is set `out` with `out_reason = declined`, no seat
+  gets a rank (`rank` NULL for everyone), `end_reason = declined`, and `final_views` are written
+  from the frozen state. Moves other players already made don't change this.
+- Otherwise the seat is out with `out_reason = declined`: the transition is logged as `decline`
+  (for a timeout too) and dispatched to `onResign(…, "decline")`, so the record says "declined"
+  (§2.1 rule 9), and play continues. Seats out as `declined` are excluded from the final ranking
+  (below).
 
 Either way a player who never acted takes no loss.
 
@@ -304,8 +334,8 @@ continues. A resignation is a loss.
 **Timeouts.** A seat that has been in `toAct` for the game's turn timeout is overdue. The sweep
 (03 §8) handles overdue seats one transition at a time, in seat order, reloading the game and
 re-checking `toAct` and the deadline before each; once a timeout ends the game no further ones run.
-An overdue seat that never acted follows the rule above; otherwise `onTimeout` runs and the seat's
-`out_reason` is `timed_out`. Reminders go out at 50 % of the timeout and, for timeouts of 3 days or
+An overdue seat that never acted follows the rule above (logged as `decline`); otherwise
+`onTimeout` runs and the seat's `out_reason` is `timed_out`. Reminders go out at 50 % of the timeout and, for timeouts of 3 days or
 more, 24 h before the deadline; each clock restart resets the reminder count (§2.3). Timeouts never
 apply in the lobby, which has its own expiry: 14 days from creation, not extended by joins.
 
@@ -313,23 +343,32 @@ apply in the lobby, which has its own expiry: 14 days from creation, not extende
 `removed`; while active or finished, `playing` · `out` for seated players, and `declined` · `left` ·
 `removed` · `dropped` for unseated rows kept from the lobby. `out_reason` is `resigned`,
 `timed_out` or `declined` when the framework caused it, otherwise `eliminated`. After every
-transition the framework reads `seatStatus(state)` and stores newly-out seats in the same
-transition, and stores rank/score from `result()` when the game finishes.
+module transition the framework reads `seatStatus(state)` and stores newly-out seats in the same
+transition, and stores rank/score from `result()` when the game finishes. (The framework-only
+`declined` ending sets the decliner's row itself; 04 invariant 3 covers `active` games only.)
 
 **Ranking** uses standard competition ranking: tied seats share a rank and the next rank skips
 (1, 2, 2, 4). The framework drops seats whose `out_reason` is `declined` from `result().ranking`
 (their `rank` stays NULL) and re-ranks the rest by the module's order with the same convention.
 
 **Every transition** (join, accept, remove, leave, start, action, resign, timeout, decline, cancel,
-expiry, invite claim) goes through the `write_token` optimistic-concurrency write (03 §5.2) and
-bumps the game `version`. Transitions the server starts itself (join, claim, sweep, account
-deletion) retry up to 3 times on a version conflict.
+expiry) goes through the `write_token` optimistic-concurrency write (03 §5.2) and bumps the game
+`version`. Transitions the server starts itself (join, sweep, account deletion) retry up to 3 times
+on a version conflict.
+
+**Invite claims are not game transitions.** Claiming an email-invite seat (06 §6.4) is a
+row-level update of that one `game_players` row, guarded by `state = 'invited' AND user_id IS NULL`
+and the game being in `lobby`. It doesn't bump the game `version`, sends no realtime event to
+other members, and changes nothing the creator or other members can see (the row still shows the
+typed address or "Invited"); only the claimant's own game list updates. A concurrent start, remove
+or cancel simply makes the guard fail.
 
 ## 5. State, history and replay
 
 - The server stores the module's full `State` as JSON (secret, 🔒) in the game row, plus an action
-  log of **module transitions only**: kinds `action` (→ `apply`), `resign` (→ `onResign`),
-  `timeout` (→ `onTimeout`) and `decline` after start when the game continues (→ `onResign`). Each
+  log of **module transitions only**: kinds `action` (→ `apply`), `resign` (→ `onResign(…,
+  "resign")`), `timeout` (→ `onTimeout`) and `decline` — a decline or timeout before a first action
+  when the game continues (→ `onResign(…, "decline")`). Each
   entry holds the seat, the action (🔒), the `PublicRecord`, the record's `describe` text, and the
   recorded random draws (🔒). Lobby events and the framework-only `declined` ending (§4) change
   `game_players` and `games.status` but aren't logged; `action_count` counts log rows only.
@@ -390,7 +429,7 @@ Module-specific tests (rules tables, scoring edge cases) are in addition to the 
   lazy imports). Operators choose which games are offered for new games with `ENABLED_GAMES`.
 - Each game row stores `game_type` and `game_version`. Any change to a module's rules or state
   shape releases a new `version`. The old version's engine code stays registered on the server
-  while any non-finished game uses it, and new games always use the latest version. Finished games
+  while any `lobby` or `active` game uses it, and new games always use the latest version. Finished games
   need no engine code: they display from `final_views` and stored `describe` text.
 - Data that varies within a version (e.g. word-game rulesets, dictionaries) are **options** with
   their own versioning, as defined by the module.
@@ -403,8 +442,10 @@ The framework UI handles 2–8 players from day one:
 - The game header shows avatars (initials) in seat order, who is out, each seat's deadline when it
   is to act, and scores or ranks as the module's `summary` provides.
 - The finished screen shows the ranking with ties and the end reason (e.g. "Declined — no result").
-- Notifications are sent to seats whose clock started ("your turn"), and to every seated player
-  when a game that reached `active` ends. Lobby endings send no push or email (§4).
+- Pushes go to seats whose clock started ("your turn"); to every seated player when a game that
+  reached `active` ends; to a user auto-joined by a past opponent ("<creator> added you to a
+  game"); and to a user with a new invitation, generically ("You have a new game invitation",
+  06 §6.2). Nothing else in the lobby pushes, and lobby endings send no push or email (§4).
 
 ## 9. Out of scope (framework v1)
 

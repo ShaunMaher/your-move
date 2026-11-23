@@ -11,8 +11,8 @@ source (attackers can read the code). Design so that reading the code doesn't he
    sign in).
 4. Game integrity (hidden hands, bag/deck order, secret actions; fair turn enforcement).
 5. Operator secrets (`APP_SECRET`, VAPID private key, email provider credentials — including, for
-   the Gmail provider, a Google service-account key that can send mail as the sending user —
-   Cloudflare API token).
+   the Gmail provider, an OAuth refresh token that can send mail as the dedicated sender user —
+   Cloudflare API token, Cloudflare Tunnel token).
 6. Licensed and uploaded word lists (`serverOnly` dictionaries) and their rights attestations.
 7. **Minors' safety and privacy**: children may play through a parent's account (Q20); a game is
    aimed at groups of kids. No stranger should be able to contact them (T20, T24).
@@ -24,7 +24,7 @@ source (attackers can read the code). Design so that reading the code doesn't he
 | T1 | OTP brute force | 8-digit codes, 5 attempts/challenge, atomic attempt counting (06 §3.1), per-email and per-IP-prefix limits, global circuit breaker, constant-time compare, codes HMAC-hashed at rest |
 | T2 | Email bombing a victim / OTP spray across many addresses | per-email request limits with silent drop (no challenge created); per-IP-prefix limits; **instance-wide OTP email cap** (§4); optional Turnstile, auto-enabled by the circuit breaker |
 | T3 | Spam via invite emails (using us as a relay), incl. Sybil accounts | sign-in required; fixed template; display-name restrictions (06 §5); per-inviter, new-account, per-target and **instance-wide** invite caps; suppression list + one-click unsubscribe; inviter identity shown in email |
-| T4 | Account enumeration | `/otp/request` identical response *and* timing parity (06 §3.2); `/otp/verify` errors indistinguishable with dummy HMAC; adding players by email gives the same response, work and timing whether or not the address has an account, is un-onboarded, suppressed, over a cap or blocked (06 §6.1, Q3); invited users' names are hidden until they accept; adding by email never auto-joins. Residual: a seat changes from the typed address to a name only when a real person accepts |
+| T4 | Account enumeration | `/otp/request` identical response *and* timing parity (06 §3.2); `/otp/verify` errors indistinguishable with dummy HMAC; adding players by email gives the same response, work and timing whether or not the address has an account, is un-onboarded, suppressed, over a cap or blocked (06 §6.1, Q3); invited users' names are hidden until they accept; adding by email never auto-joins; rows never `joined` show no name or id to anyone in any state (declined and removed included, 05 §Common types); per-pair limits keyed by the typed address's `emailId`; only literal duplicate invitees are rejected; invite claims are invisible to other members (02 §4). Residual (accepted): signals that need a real person to act — someone **signs up** with the address and then **accepts** or **declines** the invitation (06 §6, privacy note) |
 | T5 | Session theft / lingering access | `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Lax`; tokens hashed at rest; sessions list + revoke; logout-all; revocation also kills push subscriptions and live sockets (06 §4); step-up OTP for account deletion |
 | T6 | CSRF | `SameSite=Lax` + strict `Origin` check on every state-changing request and the WebSocket upgrade; JSON-only bodies (05 conventions). Exemptions are listed explicitly: the unsubscribe route `/api/email/unsubscribe` (Origin and JSON) and the dictionary upload route (JSON only). No state change on GET — including timeouts (sweep only) and unsubscribe (GET shows a page). |
 | T7 | XSS / HTML injection | React escaping only; **no `dangerouslySetInnerHTML`** (lint rule); strict CSP (§3); display names treated as untrusted everywhere, including email HTML templates (escaped) and push payloads (plain text) |
@@ -34,13 +34,13 @@ source (attackers can read the code). Design so that reading the code doesn't he
 | T11 | IDOR | **Every user-owned row** (games via membership, sessions, push subscriptions, blocks, settings, uploaded dictionaries, join links via the game's creator) is queried scoped by the session's `user_id`. Using a resource in a new game is authorised by `ResourceProvider.authorizeForNewGame` (02 §2.1): someone else's or a deleted upload looks exactly like an unknown id. Blocks can only target past opponents or users who hold or held a row in a game with the blocker. `remove-seat` accepts only a row of the same game, never the creator's own. Non-owned resources return `404`. Tests use foreign, deleted and nonexistent ids. |
 | T12 | Push endpoint SSRF / abuse | Parse with `URL`; require `https:`, no userinfo, no explicit port other than 443, hostname not an IP literal; host must equal or be a label-boundary suffix of an allow-listed push service (`push.apple.com`, `fcm.googleapis.com`, `notify.windows.com`, `push.services.mozilla.com`) — e.g. `x.push.apple.com` ✓, `evilpush.apple.com` ✗, `push.apple.com.evil.tld` ✗. Outbound fetch with `redirect: "manual"` and a 5 s timeout. Keys validated (P-256 point, 16-byte auth). ≤ 10 subscriptions/user. |
 | T13 | DoS / resource abuse | Body size limit (16 kB), placements ≤ rackSize, rate limits on all write endpoints, game count caps (counted against the creator only), WebSocket per-user cap, per-IP upgrade limit, 1 KiB WS message cap, Cloudflare's edge protection on CF target |
-| T14 | Email header injection | Recipient addresses validated by schema; subject/body from templates; provider HTTP APIs (structured JSON); SMTP via a library, never hand-built headers |
-| T15 | Secret leakage | Secrets only from env/secret bindings; the Gmail provider's service-account key is scoped by domain-wide delegation to the `gmail.send` scope only and to the one sending user, stored only as a Worker secret, and rotated if exposed (09 §2); `.dev.vars`/`.env` git-ignored; logs never contain OTPs, tokens, cookies, request bodies, raw or masked emails (only the HMAC `emailId`) |
+| T14 | Email header injection | Recipient addresses validated by schema; subject/body from templates; provider HTTP APIs (structured JSON); SMTP via a library. The Gmail provider sends raw MIME, so it goes through **one MIME builder** that RFC 2047-encodes every non-ASCII header value and rejects CR/LF in every header value (display names, subjects, addresses); unit tests use hostile display names (CR/LF, `Bcc:` injection, very long and non-ASCII names) |
+| T15 | Secret leakage | Secrets only from env/secret bindings, and on Docker preferably from files via `*_FILE` variables backed by Docker secrets (so `docker inspect` doesn't show them, 09 §1); the Gmail provider uses **no domain-wide delegation**: an Internal OAuth client and a refresh token granted once by a dedicated sender user, scope `gmail.send` only, so a leak lets an attacker send mail as that one user and nothing else (no reading mail, no other users); the sender user has IMAP and POP disabled; credentials revoked and re-issued if exposed (09 §2); `.dev.vars`/`.env` git-ignored; logs never contain OTPs, tokens, cookies, request bodies, raw or masked emails (only the HMAC `emailId`) |
 | T16 | Supply chain | See §6 |
 | T17 | Unsubscribe-link forgery | HMAC-signed, purpose-bound tokens (05 §Email links); GET shows a page, POST changes state |
-| T18 | Privacy leakage via lock-screen notifications | Push text is built only from module `describe` text of public records and display names (02 §5) — never emails or hidden state. Invitations get only a generic push that names nobody ("You have a new game invitation", ≤ 1 per recipient per day, never for `hidden` or `inert` invitations) and, with email nudges on, one fixed-template email (06 §6.2). No pushes or emails for lobby join/leave/remove events, or lobby endings (`cancelled`, `expired`, `declined` from the lobby, including account-deletion cancels); "game ended" notifications only for games that reached `active` (02 §4, 03 §7) |
+| T18 | Privacy leakage via lock-screen notifications | Push text is built only from module `describe` text of public records and display names (02 §5) — never emails or hidden state. In the lobby, only the person being added gets a push: an auto-join by a past opponent ("<creator> added you to a game") or a new invitation, whose push names nobody ("You have a new game invitation", ≤ 1 per recipient per day, never for `hidden` or `inert` invitations); with email nudges on, an invitation also sends one fixed-template email naming the inviter (06 §6.2). No pushes or emails for joins by others, accepts, declines, leaves, removals or lobby endings (`cancelled`, `expired`, `declined` from the lobby, including account-deletion cancels); "game ended" notifications only for games that reached `active` (02 §4, 03 §7) |
 | T19 | Dev-only features in production | All dev behaviour (`console` email, `/__dev/*`, non-`__Host-` cookie) gated by the single `isLocalDev(config)` predicate (06 §4), which requires the parsed `PUBLIC_URL` host to be exactly `localhost`/`127.0.0.1`/`[::1]` over `http`. CI test: production build returns 404 for `/__dev/emails`. |
-| T20 | Harassment and unsolicited contact (incl. of minors) | `whoCanAddMe` (default: only past opponents picked from the list auto-join; adding by email is always an invitation whose push names nobody, 06 §6.2); past-opponent pairs form only at game end between players who both acted, and link joiners only with the creator's explicit confirmation (06 §6.9); inbound invitation cap per creator (1/day) and in total (3/day), over-cap invitations go to a collapsed *Hidden invitations* list (06 §6.7); outbound cap on email invitees; blocks checked between **every** pair of users in a game when seats are added, on accept, on join and at start, and blocking a lobby co-member takes effect at once (06 §6.10); invited users' names hidden until they accept; creator can remove seats in the lobby; per-pair game-creation limits; a decline or timeout before a first action is never a loss; active-game caps count only the creator's own games; display-name rules (06 §5.1) and a rename limit (3 per 30 days, logged); un-onboarded accounts are invisible to others. Residual (accepted): a past opponent can auto-join a user into an N-player game alongside third parties the user has never met, who then become past opponents if everyone acts; `whoCanAddMe = nobody` avoids it |
+| T20 | Harassment and unsolicited contact (incl. of minors) | `whoCanAddMe` (default: only past opponents picked from the list auto-join; adding by email is always an invitation whose push names nobody, 06 §6.2); past-opponent pairs form only at game end between players who both acted, and link joiners only with the creator's explicit confirmation (06 §6.9); a blocked pair is never written as past opponents, `add-player`/`canAddPlayers` exclude blocked pairs, and picked `userId` invitees are block-checked explicitly (04 invariant 6); invite claims apply the full block rule against every row and the inbound cap (06 §6.4); inbound invitation cap per creator (1/day) and in total (3/day), over-cap invitations go to a collapsed *Hidden invitations* list (06 §6.7); outbound cap on email invitees; blocks checked between **every** pair of users in a game when seats are added, on accept, on join and at start, and blocking a lobby co-member takes effect at once (06 §6.10); names and ids of rows never joined hidden from everyone; creator can remove seats in the lobby; per-pair game-creation limits; a decline or timeout before a first action is never a loss; active-game caps count only the creator's own games; display-name rules (06 §5.1) and a rename limit (3 per 30 days, logged); un-onboarded accounts are invisible to others. Residual (accepted): a past opponent can auto-join a user into an N-player game alongside third parties the user has never met, who then become past opponents if everyone acts; `whoCanAddMe = nobody` avoids it |
 | T21 | Dictionary upload abuse (resource exhaustion, zip bombs, using us as file storage, offensive names) | Streamed upload with compressed + decompressed size caps, word-count cap, strict charset/sorted validation (so arbitrary files are rejected), per-user quota counting every not-yet-purged blob, daily limits, instance-wide byte and daily caps with alert, account maturity (7 days or a finished game), temporary-key upload with orphan sweep, server-generated UUID keys (filesystem adapter rejects keys not matching `^[a-z0-9-]{1,64}$` and checks the resolved path stays under `BLOB_DIR`), separate Docker volume for blobs recommended, name validated like display names, Origin check |
 | T22 | Leaking `serverOnly` word lists (licensing exposure for the operator) | No route serves list contents, blob keys or hashes (tested on every route); `distribution` checked server-side; the service worker never caches them; the preview endpoint takes only a full module action and runs every rack/structural check before any lookup (words §10.3); `serverOnly` lookups are limited **per word looked up** per user and per game (§4); only the uploader can use an upload in new games (T11); logs never contain dictionary contents. Accepted residual: a determined opponent can still probe words from their own racks, slowly |
 | T23 | Copyright complaints about uploads | Uploads are private to the uploader's games; rights attestation stored; takedown contact on the help/privacy page; operator script to delete any upload (`pnpm admin:dict:delete <id>`) |
@@ -76,12 +76,12 @@ generated `_headers` file for static assets (03 §9). One shared definition gene
 | OTP verify per IP | 50 / h | `429` |
 | **OTP emails instance-wide** | 200 / h, 1,000 / day | silent; alert; auto-Turnstile if configured |
 | **Failed verifies instance-wide** | 500 / h | alert; auto-Turnstile if configured |
-| Email invitees per user (every typed address, whatever it turns out to be) | 10 / day, 30 / h | `429`, nothing created |
-| Game creation per pair / per user | 5 / day / 30 / day | `429` |
+| Email invitees per user (every typed address, whatever it turns out to be) | 10 / day, 5 / h | `429`, nothing created |
+| Game creation per pair / per user (a pair is creator + `userId`, or creator + `emailId` for a typed address, 06 §6.7) | 5 / day / 30 / day | `429` |
 | Invite emails per inviter (addresses without an account) | 5 / day, 20 / 30 days (2 / day for new accounts, 06 §6.6) | silent (seat created, no email) |
 | Invite emails per target address (by email HMAC) | 3 / 30 days | silent (seat created, no email) |
 | **Invite emails instance-wide** | 100 / day | silent; alert |
-| New accounts per IP (bucketed) | 10 / day | silent on `/otp/request` for unknown emails from that bucket |
+| New accounts per IP (bucketed) | 10 / day | silent on `/otp/request` for unknown emails from that bucket (a never-emailed challenge is still inserted, for verify parity, 06 §3.2) |
 | WebSocket upgrades per IP | 30 / min | `429` |
 | Moves per user | 120 / min | `429` |
 | Preview per user | 300 / min | `429` |
@@ -106,9 +106,17 @@ whatever notification the operator uses.
 - **Source of the client IP**: Cloudflare Workers → `CF-Connecting-IP`. Node → by `TRUST_PROXY`:
   `false` → the socket address; `xff` → the entry `TRUST_PROXY_HOPS` positions from the **right** of
   `X-Forwarded-For` (the leftmost entries are attacker-controlled; if the header has fewer entries
-  than hops, use the socket address); `cloudflare` (Cloudflare Tunnel) → `CF-Connecting-IP`, and the
-  request is rejected with `400` if the header is missing or not a valid IP. `xff` and `cloudflare`
-  are safe only when the app port is unreachable except through the proxy/tunnel (09 §4).
+  than hops, use the socket address); `cloudflare` (Cloudflare Tunnel) → `CF-Connecting-IP`.
+- In `xff` and `cloudflare` modes the **socket peer must be in `TRUST_PROXY_PEERS`** (CIDR list,
+  default the private ranges `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`, loopback);
+  a request from any other peer gets `400`, and startup logs a warning naming the mode. This stops
+  header spoofing if the app port is ever reachable some other way; the deployment must still keep
+  the port unpublished (09 §4).
+- The header is required only where a client IP is used (rate-limited and audited routes): there a
+  missing or invalid `CF-Connecting-IP` (or `X-Forwarded-For` with too few entries) gets `400`.
+  `/api/health` never needs it, so the container's own health check works.
+- **Cloudflare Pseudo IPv4** must be off, or set to "Add header" — never "Overwrite", which puts
+  Class E pseudo-addresses in `CF-Connecting-IP` and defeats IPv6 bucketing (09 §4).
 - Node warning when `TRUST_PROXY=false` and all recent requests come from private/loopback
   addresses (likely a misconfigured proxy, which would put every user in one bucket).
 - **Normalise** IPv4-mapped IPv6 (`::ffff:a.b.c.d`) to IPv4 *before* bucketing.
@@ -116,7 +124,8 @@ whatever notification the operator uses.
   /56 at 4×, /48 at 10×.
 - Keys store `HMAC(K_ip, bucket)`, never raw IPs.
 - Unit tests cover mapped addresses, XFF parsing with spoofed left entries, `CF-Connecting-IP`
-  handling (missing/invalid → `400`), and IPv6 layering.
+  handling (missing/invalid → `400` on an IP-using route), peers outside `TRUST_PROXY_PEERS`
+  (→ `400`), `/api/health` without the header (→ `200`), and IPv6 layering.
 
 ## 5. Privacy
 
@@ -135,6 +144,14 @@ whatever notification the operator uses.
   terminal invite states, and the `invites` table stores only the `emailId` HMAC; account deletion
   per 04; logs and backups per the operator's documented
   retention (09 §4–5), stated on the privacy page.
+- **Email provider copies** (accepted residual for the proof of concept): the Gmail provider can't
+  avoid Gmail keeping a copy of every sent message in the sender user's *Sent* folder — every OTP,
+  every typed invitee address and who invited whom — and replies and bounces land in that mailbox.
+  Mitigations: a dedicated sender user used for nothing else, IMAP and POP disabled for it, and the
+  operator purges its *Sent* folder regularly (or applies a retention rule, if their Workspace
+  edition supports one). The privacy page states that the email provider keeps copies of sent
+  messages and for how long. Move to a transactional provider before the instance grows beyond
+  friends and family (Q2).
 - A privacy page (`/privacy`) is part of the app; operator contact comes from config.
 
 ## 6. Supply chain and CI
@@ -157,6 +174,7 @@ whatever notification the operator uses.
 - The **security-reviewer** agent reviews every milestone diff against this document before merge.
 - Findings and accepted risks are tracked in `docs/security/findings.md` (status: open / fixed /
   accepted-risk with rationale). Initial accepted risks: per-email verify lockout DoS (06 §3); the
-  N-player past-opponent spread noted under T20.
+  N-player past-opponent spread noted under T20; the T4 residuals (sign-up followed by accept or
+  decline); Gmail *Sent*-folder copies of every email (§5), until a transactional provider is used.
 - `SECURITY.md` at repo root describes how to report vulnerabilities, with a contact placeholder
   until the project has a public security contact.
