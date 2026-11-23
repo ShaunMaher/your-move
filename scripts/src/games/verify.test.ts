@@ -138,9 +138,14 @@ describe("games:verify", () => {
       /must not contain CommonJS \(dist\/engine\/helper\.cjs\)/u,
     ],
     [
-      "a symlink out of the package",
+      "a symlinked package.json inside the package (its target's browser map would redirect bundlers)",
+      ["@fixture/game-pjlink"],
+      /must not contain another package\.json \(dist\/engine\/package\.json\)/u,
+    ],
+    [
+      "any symlink in a package from a registry",
       ["@fixture/game-outlink"],
-      /dist\/vendor links outside the package/u,
+      /must not contain a symlink \(dist\/vendor\)/u,
     ],
     [
       "a client importing a package other than the SDK, React and Zod",
@@ -256,6 +261,12 @@ describe("packageFileProblems", () => {
     ]);
   });
 
+  it("refuses a symlink leading out of a workspace package", async () => {
+    expect((await verifyAsWorkspace("@fixture/game-outlink")).join("\n")).toMatch(
+      /dist\/vendor links outside the package/u,
+    );
+  });
+
   it("skips a workspace package's own node_modules, where pnpm links its dev dependencies", () => {
     expect(packageFileProblems("@x/game", packageWith(BUNDLED), true)).toEqual([]);
   });
@@ -267,11 +278,23 @@ describe("packageFileProblems", () => {
     ]);
   });
 
-  it("ignores a dangling symlink and follows none inside the package", () => {
+  it("in a workspace package, ignores a dangling symlink and follows none inside the package", () => {
     const dir = packageWith({ "package.json": "{}", "dist/engine/index.js": "" });
     symlinkSync("missing.js", join(dir, "dist/engine/gone.js"));
     symlinkSync("engine", join(dir, "dist/again"));
-    expect(packageFileProblems("@x/game", dir, false)).toEqual([]);
+    expect(packageFileProblems("@x/game", dir, true)).toEqual([]);
+  });
+
+  it("checks a symlink's own name: a linked package.json or .cjs file is refused even in a workspace package", () => {
+    const dir = packageWith({ "package.json": "{}", "dist/meta.json": "{}", "dist/x.js": "" });
+    symlinkSync("../meta.json", join(dir, "dist/engine-package.json"));
+    mkdirSync(join(dir, "dist/engine"));
+    symlinkSync("../meta.json", join(dir, "dist/engine/package.json"));
+    symlinkSync("x.js", join(dir, "dist/y.cjs"));
+    expect(packageFileProblems("@x/game", dir, true)).toEqual([
+      '@x/game: must not contain another package.json (dist/engine/package.json): Node and bundlers would read its "imports", "browser" and "type" (02 §7.1.1)',
+      "@x/game: must not contain CommonJS (dist/y.cjs) (02 §7.1.1)",
+    ]);
   });
 });
 

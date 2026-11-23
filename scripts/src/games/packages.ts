@@ -77,7 +77,8 @@ const TARGET_EXTENSIONS = {
 
 /**
  * Problems with the files inside a game package (02 §7.1.1): another `package.json`, a
- * `node_modules` directory, a CommonJS file, or a symlink out of the package. A workspace package's
+ * `node_modules` directory or a CommonJS file (by name, symlinks included), and any symlink in a
+ * package from a registry (or, in a workspace package, one leading out of it). A workspace package's
  * own top-level `node_modules` is where pnpm links its development dependencies, and is skipped;
  * a published package never has one, so for anything installed from a registry it is refused.
  */
@@ -93,22 +94,25 @@ export function packageFileProblems(name: string, dir: string, workspace: boolea
         }
         continue;
       }
-      if (entry.isSymbolicLink()) {
-        if (existsSync(path) && !realpathSync(path).startsWith(`${dir}${sep}`)) {
-          problems.push(`${name}: ${rel} links outside the package`);
-        }
-        // A link inside the package is checked where it points.
-        continue;
-      }
-      if (entry.isDirectory()) {
-        walk(path);
-      } else if (entry.name === "package.json" && current !== dir) {
+      // Checked by name first, so a symlink can't hide a package.json or a CommonJS file.
+      if (entry.name === "package.json" && current !== dir) {
         problems.push(
           `${name}: must not contain another package.json (${rel}): Node and bundlers would read its "imports", "browser" and "type" (02 §7.1.1)`,
         );
       } else if (/\.c[jt]s$/u.test(entry.name)) {
         problems.push(`${name}: must not contain CommonJS (${rel}) (02 §7.1.1)`);
       }
+      if (entry.isSymbolicLink()) {
+        if (!workspace) {
+          // A published tarball can't carry symlinks, so one here didn't come from a registry.
+          problems.push(`${name}: must not contain a symlink (${rel}) (02 §7.1.1)`);
+        } else if (existsSync(path) && !realpathSync(path).startsWith(`${dir}${sep}`)) {
+          problems.push(`${name}: ${rel} links outside the package`);
+        }
+        // A link inside a workspace package is checked where it points.
+        continue;
+      }
+      if (entry.isDirectory()) walk(path);
     }
   };
   walk(dir);
