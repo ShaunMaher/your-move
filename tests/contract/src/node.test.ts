@@ -1,25 +1,14 @@
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+/**
+ * The contract suite against the Node build (`node apps/node/dist/main.js`), started by the
+ * global setup on a free port.
+ */
+import { inject } from "vitest";
 
-import { createNodeApp } from "@your-move/node";
-import { createJsonLogger, parseConfig } from "@your-move/server";
-
-import { CONTRACT_SECRETS, CONTRACT_VARS } from "./env.js";
 import { contractSuite } from "./suite.js";
 
-const now = (): Date => new Date();
-const app = createNodeApp({
-  platform: {
-    config: parseConfig(
-      { ...CONTRACT_VARS, ...CONTRACT_SECRETS },
-      { runtime: "node", installedGames: [] },
-    ),
-    log: createJsonLogger({ level: "error", now, sink: () => undefined }),
-    now,
+contractSuite("Node", () => ({
+  fetch: (request) => {
+    const url = new URL(request.url);
+    return fetch(new Request(`${inject("nodeUrl")}${url.pathname}${url.search}`, request));
   },
-  games: [],
-  staticRoot: mkdtempSync(join(tmpdir(), "contract-static-")),
-});
-
-contractSuite("Node", () => ({ fetch: (request) => Promise.resolve(app.fetch(request)) }));
+}));

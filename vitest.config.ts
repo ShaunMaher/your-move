@@ -3,12 +3,14 @@ import { dirname } from "node:path";
 
 import { defineConfig, type TestProjectInlineConfiguration } from "vitest/config";
 
+/** Every workspace package. */
+const ROOTS = globSync(["{apps,packages,games,tests}/*/package.json", "scripts/package.json"])
+  .map((file) => dirname(file))
+  .sort();
+
 /** Every workspace package with tests. A package with its own vitest.config.ts uses it. */
 function projects(): (string | TestProjectInlineConfiguration)[] {
-  const roots = globSync(["{apps,packages,games,tests}/*/package.json", "scripts/package.json"])
-    .map((file) => dirname(file))
-    .sort();
-  return roots.map((root) =>
+  return ROOTS.map((root) =>
     existsSync(`${root}/vitest.config.ts`)
       ? root
       : {
@@ -18,11 +20,31 @@ function projects(): (string | TestProjectInlineConfiguration)[] {
   );
 }
 
+/** Packages held to 95 % lines and branches throughout; game engines are added below (11 §4). */
+const STRICT: ReadonlySet<string> = new Set(["packages/sdk", "packages/testkit"]);
+
 /**
- * One Vitest run over every package (11 §4). Coverage thresholds fail the run: games' engines and
- * the SDK and testkit at 95 % lines and branches, everything else at 80 % lines. Lowering one needs
- * an ADR.
+ * Coverage thresholds per package (11 §4): every package's own sources at 80 % lines on their own,
+ * not as part of one aggregate; game engines, the SDK and the testkit at 95 % lines and branches.
+ * The test-only packages under tests/ have no sources of their own. Lowering one needs an ADR.
  */
+interface Threshold {
+  lines: number;
+  branches?: number;
+}
+
+function thresholds(): Record<string, Threshold> {
+  const perPackage = ROOTS.filter((root) => !root.startsWith("tests/")).map(
+    (root): [string, Threshold] => [
+      `${root}/src/**`,
+      STRICT.has(root) ? { lines: 95, branches: 95 } : { lines: 80 },
+    ],
+  );
+  const engines: [string, Threshold] = ["games/*/src/engine/**", { lines: 95, branches: 95 }];
+  return Object.fromEntries([...perPackage, engines]);
+}
+
+/** One Vitest run over every package (11 §4); coverage thresholds fail the run. */
 export default defineConfig({
   test: {
     projects: projects(),
@@ -48,12 +70,7 @@ export default defineConfig({
         "apps/web/src/main.tsx",
         "scripts/src/bin/**",
       ],
-      thresholds: {
-        lines: 80,
-        "games/*/src/engine/**": { lines: 95, branches: 95 },
-        "packages/sdk/src/**": { lines: 95, branches: 95 },
-        "packages/testkit/src/**": { lines: 95, branches: 95 },
-      },
+      thresholds: thresholds(),
     },
     reporters: process.env["CI"] ? ["default", "junit"] : ["default"],
     outputFile: { junit: "reports/junit.xml" },

@@ -8,7 +8,6 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@your-move/api-client": "workspace:*",
-    "@your-move/node": "workspace:*",
     "@your-move/server": "workspace:*",
     "@your-move/shared": "workspace:*",
     "vitest": "catalog:",

@@ -34,7 +34,7 @@ export default defineConfig({
       PUBLIC_URL: `http://localhost:${String(PORT)}`,
       APP_NAME: "E2E Games",
       // The published local-dev secret, accepted only with an http://localhost PUBLIC_URL.
-      APP_SECRET: "bG9jYWwtZGV2LW9ubHktbm90LWEtc2VjcmV0LWRvLW5vdC11c2U=", // gitleaks:allow
+      APP_SECRET: "bG9jYWwtZGV2LW9ubHktbm90LWEtc2VjcmV0LWRvLW5vdC11c2U=",
       EMAIL_PROVIDER: "console",
       EMAIL_FROM: "no-reply@localhost",
       OPERATOR_CONTACT: "ops@localhost",
