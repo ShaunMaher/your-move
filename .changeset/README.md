@@ -10,5 +10,5 @@ Releases are done by hand, without a bot: a maintainer runs `pnpm changeset vers
 `chore(release): version packages`. When it merges, the publish job on `main` runs
 `changeset publish` to the GitLab package registry (08 §6).
 
-Packages stay `"private": true` until the milestone that fills them (10 M0), so nothing is
-versioned or published yet.
+Packages stay `"private": true` until the milestone that fills them (10 M0). `@your-move/sdk` and
+`@your-move/testkit` left it in M1; the SDK stays `0.x` until the MVP (02 §7.4).
