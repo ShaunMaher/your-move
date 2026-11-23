@@ -198,17 +198,19 @@ whatever notification the operator uses.
   tags matching `v*`, protected so only Maintainers can create them) **and environment-scoped**
   (only jobs that declare that environment receive it). An MR pipeline gets neither.
 - **Publishing** packages (`@your-move/*`, 02 §7.4) and images happens only in jobs on `main`/tags
-  that declare the **`release` environment**, authenticated with a **deploy token**
-  (`write_package_registry`, `write_registry`) held in a masked, protected variable scoped to that
-  environment — **never `CI_JOB_TOKEN`**, which every pipeline (including MR and Renovate
+  that declare the **`release` environment**, with credentials held in masked, protected variables
+  scoped to that environment: packages with a **deploy token** (`write_package_registry`), images
+  with a **Maintainer-role project access token** limited to `read_registry` and `write_registry`
+  (no `api`), because protected container repositories refuse deploy tokens, which have no role —
+  **never `CI_JOB_TOKEN`**, which every pipeline (including MR and Renovate
   pipelines running new dependency code) receives with the triggering user's rights. GitLab
   **protected packages** for `@your-move/*` and **protected container tags** require the Maintainer
   role to push, so a Developer-level token or a compromised MR job can't publish over a release.
-  M1 verifies that both protection features exist on our CE version and that the deploy token can
-  publish through them; if not, the fallback (recorded in findings.md F-9) is a Maintainer-role
-  project access token in the same protected, environment-scoped variable, with protected variables
-  and protected refs as the only confinement. M0/M1 acceptance proves the release credential
-  publishes from `main` and that an MR pipeline can't read it.
+  Both protection features exist on our CE version. M1 verifies that the deploy token can publish
+  protected packages; if not, packages take the same fallback images already use (findings.md
+  F-9): a Maintainer-role project access token, with protected variables and protected refs as the
+  only confinement. M0/M1 acceptance proves the release credentials publish from `main` and that
+  an MR pipeline can't read them.
   No developer publishes from a workstation. Image signing is a later decision (cosign keyless
   needs an OIDC issuer Sigstore trusts; a self-hosted GitLab isn't one); until then deployments
   **pull images by digest**, recorded in the release notes (from M1; until then in the publish
