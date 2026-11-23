@@ -20,9 +20,9 @@ export interface BoardProps<Action, View, PreviewResult> {
   /** The viewer's view; its shape follows `game.gameVersion`. */
   readonly view: View;
   /** Submits an action through the shell; the module never talks to the API itself. */
-  submit(action: Action): Promise<SubmitResult>;
+  readonly submit: (action: Action) => Promise<SubmitResult>;
   /** A non-authoritative preview: local when possible, else from the server. */
-  preview(action: Action): Promise<PreviewResult | GameError>;
+  readonly preview: (action: Action) => Promise<PreviewResult | GameError>;
 }
 
 /**
@@ -35,7 +35,7 @@ export interface OptionsFormProps {
   readonly catalog: unknown;
   /** The unresolved options input. */
   readonly value: unknown;
-  onChange(input: unknown): void;
+  readonly onChange: (input: unknown) => void;
 }
 
 /**
@@ -55,6 +55,8 @@ export interface RulesSheetProps<Options> {
  */
 export interface HistoryItemProps {
   readonly record: unknown;
+  /** The entry's stored `describe` text: what to show for a record the module can't render. */
+  readonly describe: Text;
   readonly gameVersion: number;
   /** Display names by seat, as the shell renders them. */
   readonly names: readonly string[];

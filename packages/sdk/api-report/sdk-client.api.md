@@ -15,9 +15,9 @@ export interface BoardProps<Action, View, PreviewResult> {
     // (undocumented)
     readonly game: GameEnvelope;
     // Warning: (ae-forgotten-export) The symbol "GameError" needs to be exported by the entry point client.d.ts
-    preview(action: Action): Promise<PreviewResult | GameError>;
+    readonly preview: (action: Action) => Promise<PreviewResult | GameError>;
     // Warning: (ae-forgotten-export) The symbol "SubmitResult" needs to be exported by the entry point client.d.ts
-    submit(action: Action): Promise<SubmitResult>;
+    readonly submit: (action: Action) => Promise<SubmitResult>;
     readonly view: View;
 }
 
@@ -43,6 +43,7 @@ export interface GameClientModule<Options = unknown, Action = unknown, View = un
 
 // @public
 export interface HistoryItemProps {
+    readonly describe: Text_2;
     // (undocumented)
     readonly gameVersion: number;
     readonly names: readonly string[];
@@ -54,7 +55,7 @@ export interface HistoryItemProps {
 export interface OptionsFormProps {
     readonly catalog: unknown;
     // (undocumented)
-    onChange(input: unknown): void;
+    readonly onChange: (input: unknown) => void;
     readonly value: unknown;
 }
 

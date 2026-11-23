@@ -226,7 +226,7 @@ interface GameClientModule<Options, Action, View, PreviewResult> {
     preview(action: Action): Promise<PreviewResult | GameError>;   // local when possible, else server
   }>;
   RulesSheet: Component<{ options: Options; gameVersion: number }>;   // may render the manifest's rules markdown (§7.2)
-  HistoryItem: Component<{ record: unknown; gameVersion: number; names: string[] }>;
+  HistoryItem: Component<{ record: unknown; describe: Text; gameVersion: number; names: string[] }>; // describe: the stored fallback text
 }
 ```
 
