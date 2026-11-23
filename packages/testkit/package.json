@@ -1,7 +1,6 @@
 {
   "name": "@your-move/testkit",
   "version": "0.0.0",
-  "private": true,
   "description": "The generic test kit and built-output rules every game package must pass",
   "license": "BSD-2-Clause",
   "type": "module",
@@ -30,6 +29,7 @@
   "files": [
     "dist",
     "!dist/**/*.test.*",
+    "!dist/test-support.*",
     "!dist/.tsbuildinfo"
   ],
   "scripts": {
@@ -39,6 +39,7 @@
     "globals": "catalog:"
   },
   "peerDependencies": {
+    "@your-move/sdk": "workspace:^",
     "dependency-cruiser": "^18.0.0",
     "eslint": "^9.0.0"
   },
@@ -51,9 +52,11 @@
     }
   },
   "devDependencies": {
+    "@your-move/sdk": "workspace:*",
     "dependency-cruiser": "catalog:",
     "eslint": "catalog:",
     "typescript-eslint": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
   }
 }
