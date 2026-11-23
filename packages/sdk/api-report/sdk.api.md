@@ -4,8 +4,206 @@
 
 ```ts
 
+import { z } from 'zod';
+
+// @public
+export type AnyGameDefinition = GameDefinition<unknown, unknown, unknown, unknown, unknown, unknown>;
+
+// @public
+export function assertRange(maxExclusive: number): void;
+
+// @public
+export type ExitReason = "resign" | "decline";
+
+// @public
+export type FrameworkError = z.infer<typeof frameworkErrorSchema>;
+
+// @public
+export const frameworkErrorSchema: z.ZodObject<{
+    code: z.ZodString;
+    message: z.ZodString;
+    detail: z.ZodOptional<z.ZodUnknown>;
+}, z.core.$strip>;
+
 // @public
 export const GAME_TYPE_PATTERN: RegExp;
+
+// @public
+export interface GameDefinition<Options = unknown, State = unknown, Action = unknown, View = unknown, PublicRecord = unknown, PreviewResult = never> {
+    // (undocumented)
+    readonly actionSchema: Schema<Action>;
+    // (undocumented)
+    apply(state: State, seat: Seat, action: Action, rng: RandomSource): Transition<State, PublicRecord>;
+    // (undocumented)
+    catalog(ctx: OptionsContext): unknown;
+    // (undocumented)
+    readonly catalogSchema: Schema<unknown>;
+    // (undocumented)
+    checkConfig(config: ModuleConfig, catalog: ResourceCatalog): Ok | GameError;
+    // (undocumented)
+    readonly configSchema: Schema<ModuleConfig>;
+    // (undocumented)
+    defaultTurnTimeoutDays(options: Options): number;
+    // (undocumented)
+    describe(record: PublicRecord): Text;
+    readonly errorCodes: readonly string[];
+    // (undocumented)
+    onResign(state: State, seat: Seat, rng: RandomSource, reason: ExitReason): Transition<State, PublicRecord>;
+    // (undocumented)
+    onTimeout(state: State, seat: Seat, rng: RandomSource): Transition<State, PublicRecord>;
+    // (undocumented)
+    readonly optionsSchema: Schema<Options>;
+    // (undocumented)
+    players(options: Options): {
+        readonly min: number;
+        readonly max: number;
+    };
+    // (undocumented)
+    preview?(state: State, seat: Seat, action: Action, res: Resources): PreviewResult | GameError;
+    // (undocumented)
+    readonly previewSchema?: Schema<PreviewResult>;
+    // (undocumented)
+    readonly recordSchema: Schema<PublicRecord>;
+    // (undocumented)
+    resolveOptions(input: unknown, ctx: OptionsContext): Options | GameError;
+    // (undocumented)
+    resources(options: Options): readonly ResourceRequest[];
+    // (undocumented)
+    result(state: State): GameResult | null;
+    // (undocumented)
+    seatStatus(state: State): ("playing" | "out")[];
+    // (undocumented)
+    setup(ctx: {
+        readonly options: Options;
+        readonly seats: number;
+        readonly rng: RandomSource;
+    }): State;
+    // (undocumented)
+    summary(state: State, viewer: Seat | null): ListSummary;
+    // (undocumented)
+    readonly test: GameTestHooks<Options, State, Action>;
+    // (undocumented)
+    toAct(state: State): Seat[];
+    readonly type: string;
+    // (undocumented)
+    validate(state: State, seat: Seat, action: Action, res: Resources): Ok | GameError;
+    // (undocumented)
+    validateStart(options: Options, seats: number): Ok | GameError;
+    readonly version: number;
+    // (undocumented)
+    view(state: State, viewer: Seat | null): View;
+    // (undocumented)
+    readonly viewSchema: Schema<View>;
+}
+
+// @public
+export type GameEngines = Readonly<Record<number, AnyGameDefinition>>;
+
+// @public
+export type GameEnvelope = z.infer<typeof gameEnvelopeSchema>;
+
+// @public
+export const gameEnvelopeSchema: z.ZodObject<{
+    id: z.ZodString;
+    gameType: z.ZodString;
+    gameVersion: z.ZodNumber;
+    options: z.ZodUnknown;
+    status: z.ZodEnum<{
+        lobby: "lobby";
+        active: "active";
+        finished: "finished";
+        declined: "declined";
+        cancelled: "cancelled";
+        expired: "expired";
+    }>;
+    version: z.ZodNumber;
+    endReason: z.ZodNullable<z.ZodString>;
+    turnTimeoutDays: z.ZodNumber;
+    seatOrder: z.ZodEnum<{
+        join: "join";
+        random: "random";
+    }>;
+    aiAssistance: z.ZodEnum<{
+        off: "off";
+        allowed: "allowed";
+    }>;
+    available: z.ZodBoolean;
+    resources: z.ZodArray<z.ZodObject<{
+        kind: z.ZodLiteral<"dictionary">;
+        id: z.ZodString;
+        name: z.ZodString;
+        distribution: z.ZodOptional<z.ZodEnum<{
+            public: "public";
+            serverOnly: "serverOnly";
+        }>>;
+        uploadedBy: z.ZodOptional<z.ZodString>;
+        downloadUrl: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    players: z.ZodArray<z.ZodObject<{
+        playerId: z.ZodOptional<z.ZodString>;
+        seat: z.ZodNullable<z.ZodNumber>;
+        userId: z.ZodNullable<z.ZodString>;
+        displayName: z.ZodNullable<z.ZodString>;
+        kind: z.ZodEnum<{
+            human: "human";
+            agent: "agent";
+        }>;
+        aiOwnerName: z.ZodOptional<z.ZodString>;
+        invitedAs: z.ZodOptional<z.ZodString>;
+        state: z.ZodEnum<{
+            out: "out";
+            declined: "declined";
+            invited: "invited";
+            joined: "joined";
+            left: "left";
+            removed: "removed";
+            playing: "playing";
+        }>;
+        outReason: z.ZodOptional<z.ZodEnum<{
+            declined: "declined";
+            cancelled: "cancelled";
+            eliminated: "eliminated";
+            resigned: "resigned";
+            timed_out: "timed_out";
+        }>>;
+        rank: z.ZodOptional<z.ZodNumber>;
+        score: z.ZodOptional<z.ZodNumber>;
+        deadline: z.ZodOptional<z.ZodNumber>;
+        isYou: z.ZodBoolean;
+        isCreator: z.ZodBoolean;
+    }, z.core.$strip>>;
+    yourSeat: z.ZodNullable<z.ZodNumber>;
+    toAct: z.ZodArray<z.ZodNumber>;
+    yourTurn: z.ZodBoolean;
+    yourInvitation: z.ZodNullable<z.ZodEnum<{
+        normal: "normal";
+        hidden: "hidden";
+    }>>;
+    joinLink: z.ZodOptional<z.ZodObject<{
+        active: z.ZodBoolean;
+        expiresAt: z.ZodNullable<z.ZodNumber>;
+    }, z.core.$strip>>;
+    canAddPlayers: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        userId: z.ZodString;
+        displayName: z.ZodString;
+    }, z.core.$strip>>>;
+    createdAt: z.ZodNumber;
+    lastActionAt: z.ZodNullable<z.ZodNumber>;
+}, z.core.$strip>;
+
+// @public
+export interface GameError {
+    // (undocumented)
+    readonly code: string;
+    // (undocumented)
+    readonly detail?: unknown;
+}
+
+// @public
+export const gameErrorSchema: z.ZodObject<{
+    code: z.ZodString;
+    detail: z.ZodOptional<z.ZodUnknown>;
+}, z.core.$strip>;
 
 // @public
 export interface GameManifest {
@@ -25,9 +223,349 @@ export interface GameManifest {
 }
 
 // @public
+export const gamePlayerSchema: z.ZodObject<{
+    playerId: z.ZodOptional<z.ZodString>;
+    seat: z.ZodNullable<z.ZodNumber>;
+    userId: z.ZodNullable<z.ZodString>;
+    displayName: z.ZodNullable<z.ZodString>;
+    kind: z.ZodEnum<{
+        human: "human";
+        agent: "agent";
+    }>;
+    aiOwnerName: z.ZodOptional<z.ZodString>;
+    invitedAs: z.ZodOptional<z.ZodString>;
+    state: z.ZodEnum<{
+        out: "out";
+        declined: "declined";
+        invited: "invited";
+        joined: "joined";
+        left: "left";
+        removed: "removed";
+        playing: "playing";
+    }>;
+    outReason: z.ZodOptional<z.ZodEnum<{
+        declined: "declined";
+        cancelled: "cancelled";
+        eliminated: "eliminated";
+        resigned: "resigned";
+        timed_out: "timed_out";
+    }>>;
+    rank: z.ZodOptional<z.ZodNumber>;
+    score: z.ZodOptional<z.ZodNumber>;
+    deadline: z.ZodOptional<z.ZodNumber>;
+    isYou: z.ZodBoolean;
+    isCreator: z.ZodBoolean;
+}, z.core.$strip>;
+
+// @public
+export const gameResourceSchema: z.ZodObject<{
+    kind: z.ZodLiteral<"dictionary">;
+    id: z.ZodString;
+    name: z.ZodString;
+    distribution: z.ZodOptional<z.ZodEnum<{
+        public: "public";
+        serverOnly: "serverOnly";
+    }>>;
+    uploadedBy: z.ZodOptional<z.ZodString>;
+    downloadUrl: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+
+// @public
+export interface GameResult {
+    readonly endReason: string;
+    // (undocumented)
+    readonly ranking: readonly RankingEntry[];
+}
+
+// @public
+export const gameStatusSchema: z.ZodEnum<{
+    lobby: "lobby";
+    active: "active";
+    finished: "finished";
+    declined: "declined";
+    cancelled: "cancelled";
+    expired: "expired";
+}>;
+
+// @public
+export interface GameTestHooks<Options, State, Action> {
+    readonly hiddenInformation: boolean;
+    maxActions(options: Options, seats: number): number;
+    perturbHidden(state: State, viewer: Seat | null, rng: RandomSource): State;
+    readonly publicRandomness?: boolean;
+    randomAction(state: State, seat: Seat, rng: RandomSource, res: Resources): Action;
+    randomAnyAction(state: State, seat: Seat, rng: RandomSource): Action;
+    worstCase(options: Options, seats: number, rng: RandomSource): readonly WorstCase<State, Action>[];
+}
+
+// @public
+export function isGameError(value: unknown): value is GameError;
+
+// @public
 export function isGameType(value: string): boolean;
 
 // @public
+export interface ListSummary {
+    // (undocumented)
+    readonly headline: Text;
+    // (undocumented)
+    readonly scores?: readonly number[];
+}
+
+// @public
+export const listSummarySchema: z.ZodObject<{
+    headline: z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+        seat: z.ZodNumber;
+    }, z.core.$strict>]>>;
+    scores: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
+}, z.core.$strict>;
+
+// @public
+export type ModuleConfig = unknown;
+
+// @public
+export const OK: Ok;
+
+// @public
+export interface Ok {
+    // (undocumented)
+    readonly ok: true;
+}
+
+// @public
+export interface OptionsContext {
+    readonly config: ModuleConfig;
+    readonly resources: ResourceCatalog;
+}
+
+// @public
+export interface RandomSource {
+    nextInt(maxExclusive: number): number;
+}
+
+// @public
+export interface RankingEntry {
+    // (undocumented)
+    readonly rank: number;
+    // (undocumented)
+    readonly score?: number;
+    // (undocumented)
+    readonly seat: Seat;
+}
+
+// @public
+export interface RecordingRandom {
+    readonly draws: readonly number[];
+    readonly rng: RandomSource;
+}
+
+// @public
+export function recordRandom(source: RandomSource): RecordingRandom;
+
+// @public
+export class ReplayMismatchError extends Error {
+    constructor(message: string);
+}
+
+// @public
+export function replayRandom(draws: readonly number[]): ReplaySource;
+
+// @public
+export interface ReplaySource extends RandomSource {
+    remaining(): number;
+}
+
+// @public
+export const RESERVED_ERROR_CODES: readonly string[];
+
+// @public
+export type ResourceCatalog = readonly ResourceMeta[];
+
+// @public
 export type ResourceKind = "dictionary";
+
+// @public
+export interface ResourceMeta {
+    // (undocumented)
+    readonly alphabet: readonly string[];
+    // (undocumented)
+    readonly distribution: "public" | "serverOnly";
+    readonly downloadUrl?: string;
+    // (undocumented)
+    readonly id: string;
+    // (undocumented)
+    readonly kind: ResourceKind;
+    // (undocumented)
+    readonly language: string;
+    // (undocumented)
+    readonly name: string;
+    // (undocumented)
+    readonly source: "builtin" | "operator" | "upload";
+    // (undocumented)
+    readonly version: number;
+}
+
+// @public
+export interface ResourceRequest {
+    // (undocumented)
+    readonly id: string;
+    // (undocumented)
+    readonly kind: ResourceKind;
+    // (undocumented)
+    readonly version?: number;
+}
+
+// @public
+export interface Resources {
+    // (undocumented)
+    readonly dictionary?: {
+        readonly id: string;
+        readonly version: number;
+        has(word: string): boolean;
+    };
+}
+
+// @public
+export type Schema<T> = z.ZodType<T>;
+
+// @public
+export type Seat = number;
+
+// @public
+export function shuffle<T>(items: readonly T[], rng: RandomSource): T[];
+
+// @public
+export type SubmitResult = z.infer<typeof submitResultSchema>;
+
+// @public
+export const submitResultSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    ok: z.ZodLiteral<true>;
+    game: z.ZodObject<{
+        id: z.ZodString;
+        gameType: z.ZodString;
+        gameVersion: z.ZodNumber;
+        options: z.ZodUnknown;
+        status: z.ZodEnum<{
+            lobby: "lobby";
+            active: "active";
+            finished: "finished";
+            declined: "declined";
+            cancelled: "cancelled";
+            expired: "expired";
+        }>;
+        version: z.ZodNumber;
+        endReason: z.ZodNullable<z.ZodString>;
+        turnTimeoutDays: z.ZodNumber;
+        seatOrder: z.ZodEnum<{
+            join: "join";
+            random: "random";
+        }>;
+        aiAssistance: z.ZodEnum<{
+            off: "off";
+            allowed: "allowed";
+        }>;
+        available: z.ZodBoolean;
+        resources: z.ZodArray<z.ZodObject<{
+            kind: z.ZodLiteral<"dictionary">;
+            id: z.ZodString;
+            name: z.ZodString;
+            distribution: z.ZodOptional<z.ZodEnum<{
+                public: "public";
+                serverOnly: "serverOnly";
+            }>>;
+            uploadedBy: z.ZodOptional<z.ZodString>;
+            downloadUrl: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        players: z.ZodArray<z.ZodObject<{
+            playerId: z.ZodOptional<z.ZodString>;
+            seat: z.ZodNullable<z.ZodNumber>;
+            userId: z.ZodNullable<z.ZodString>;
+            displayName: z.ZodNullable<z.ZodString>;
+            kind: z.ZodEnum<{
+                human: "human";
+                agent: "agent";
+            }>;
+            aiOwnerName: z.ZodOptional<z.ZodString>;
+            invitedAs: z.ZodOptional<z.ZodString>;
+            state: z.ZodEnum<{
+                out: "out";
+                declined: "declined";
+                invited: "invited";
+                joined: "joined";
+                left: "left";
+                removed: "removed";
+                playing: "playing";
+            }>;
+            outReason: z.ZodOptional<z.ZodEnum<{
+                declined: "declined";
+                cancelled: "cancelled";
+                eliminated: "eliminated";
+                resigned: "resigned";
+                timed_out: "timed_out";
+            }>>;
+            rank: z.ZodOptional<z.ZodNumber>;
+            score: z.ZodOptional<z.ZodNumber>;
+            deadline: z.ZodOptional<z.ZodNumber>;
+            isYou: z.ZodBoolean;
+            isCreator: z.ZodBoolean;
+        }, z.core.$strip>>;
+        yourSeat: z.ZodNullable<z.ZodNumber>;
+        toAct: z.ZodArray<z.ZodNumber>;
+        yourTurn: z.ZodBoolean;
+        yourInvitation: z.ZodNullable<z.ZodEnum<{
+            normal: "normal";
+            hidden: "hidden";
+        }>>;
+        joinLink: z.ZodOptional<z.ZodObject<{
+            active: z.ZodBoolean;
+            expiresAt: z.ZodNullable<z.ZodNumber>;
+        }, z.core.$strip>>;
+        canAddPlayers: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            userId: z.ZodString;
+            displayName: z.ZodString;
+        }, z.core.$strip>>>;
+        createdAt: z.ZodNumber;
+        lastActionAt: z.ZodNullable<z.ZodNumber>;
+    }, z.core.$strip>;
+    view: z.ZodUnknown;
+}, z.core.$strip>, z.ZodObject<{
+    ok: z.ZodLiteral<false>;
+    error: z.ZodUnion<readonly [z.ZodObject<{
+        code: z.ZodString;
+        message: z.ZodString;
+        detail: z.ZodOptional<z.ZodUnknown>;
+    }, z.core.$strip>, z.ZodObject<{
+        code: z.ZodString;
+        detail: z.ZodOptional<z.ZodUnknown>;
+    }, z.core.$strip>]>;
+}, z.core.$strip>], "ok">;
+
+// @public
+export type Text = readonly (string | {
+    readonly seat: Seat;
+})[];
+
+// @public
+export const textSchema: z.ZodArray<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+    seat: z.ZodNumber;
+}, z.core.$strict>]>>;
+
+// @public
+export interface Transition<State, PublicRecord> {
+    // (undocumented)
+    readonly record: PublicRecord;
+    // (undocumented)
+    readonly state: State;
+}
+
+// @public
+export interface WorstCase<State, Action> {
+    // (undocumented)
+    readonly action: Action;
+    // (undocumented)
+    readonly seat: Seat;
+    // (undocumented)
+    readonly state: State;
+}
 
 ```

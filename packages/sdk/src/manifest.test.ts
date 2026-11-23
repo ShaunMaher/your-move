@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { GAME_TYPE_PATTERN, isGameType } from "./index.js";
+import { GAME_TYPE_PATTERN, isGameType } from "./manifest.js";
 
 describe("isGameType", () => {
   it.each([
