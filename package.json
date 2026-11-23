@@ -21,6 +21,7 @@
     "lint:unused": "pnpm games:generate && knip --treat-config-hints-as-errors",
     "lint:licences": "tsx scripts/src/bin/licences-check.ts",
     "lint:vulns": "tsx scripts/src/bin/vulns-check.ts",
+    "lint:pins": "tsx scripts/src/bin/pins-check.ts",
     "typecheck": "pnpm games:generate && tsc --build",
     "test": "pnpm games:generate && vitest run --coverage",
     "test:watch": "vitest",
@@ -31,6 +32,7 @@
     "api:generate": "tsx scripts/src/bin/api-generate.ts",
     "renovate:sync": "tsx scripts/src/bin/renovate-sync.ts",
     "gates:prove": "tsx scripts/src/bin/gates-prove.ts",
+    "sbom:app": "pnpm --filter . --filter @your-move/web --filter @your-move/node sbom --prod --sbom-format cyclonedx --sbom-type application --out sbom/node.cdx.json && pnpm --filter . --filter @your-move/web --filter @your-move/worker sbom --prod --sbom-format cyclonedx --sbom-type application --out sbom/worker.cdx.json",
     "api:surface": "pnpm --filter @your-move/sdk run api:surface",
     "changeset": "changeset"
   },
