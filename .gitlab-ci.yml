@@ -417,7 +417,8 @@ security:dependencies:
 # environment: those variables are protected, and MR pipelines don't run on protected refs.
 # ENV_SCOPE_CANARY, an unprotected variable scoped to each environment with the environment's
 # name as its value (docs/deploy.md), proves the job really got that environment's variables, so
-# the check can't pass vacuously. Prints only whether each variable is set.
+# the check can't pass vacuously. Prints only whether each variable is set. The environments and
+# variables match docs/deploy.md's secrets table (scripts/src/ci/no-secrets-on-mr.test.ts).
 security:no-secrets-on-mr:
   stage: security
   extends: .merge-requests
