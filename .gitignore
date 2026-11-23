@@ -1,0 +1,33 @@
+# deps / build
+node_modules/
+dist/
+build/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# generated word list artefacts (rebuilt from source list)
+packages/dictionary/generated/
+
+# Cloudflare
+.wrangler/
+.dev.vars
+.dev.vars.*
+
+# local data / secrets
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-journal
+*.db
+data/
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Claude Code local settings
+.claude/settings.local.json
