@@ -168,11 +168,14 @@ export function createApp(options: AppOptions): App {
     }
     // Anything else is a server fault, including an HTTPException with a 5xx or unmapped status
     // and a SyntaxError from parsing something other than the request (stored JSON, an engine).
+    // V8's JSON.parse messages quote the text being parsed, which may be input or game secrets, so
+    // a SyntaxError is logged by class and stack frames only (09 §5).
     log.error("unhandled error", {
       ...context,
       errorClass: error.name,
-      errorMessage: error.message,
-      stack: error.stack,
+      ...(error instanceof SyntaxError
+        ? { stack: stackFrames(error) }
+        : { errorMessage: error.message, stack: error.stack }),
     });
     return c.json(errorBody("INTERNAL", "Something went wrong."), 500);
   });

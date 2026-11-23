@@ -231,6 +231,24 @@ describe("errors and logging", () => {
     expect(platform.lines.some((line) => line["msg"] === "request rejected")).toBe(false);
   });
 
+  it("logs a JSON.parse failure without its message, which quotes the text being parsed", async () => {
+    let parseError: unknown;
+    try {
+      // V8 quotes short input whole: Unexpected token 's', "secretval" is not valid JSON.
+      JSON.parse("secretval");
+    } catch (error) {
+      parseError = error;
+    }
+    expect(parseError).toBeInstanceOf(SyntaxError);
+    expect(String(parseError)).toContain("secretval");
+    const { app, platform } = throwing(parseError as SyntaxError);
+    expect((await app.request("/api/v1/config")).status).toBe(500);
+    const logged = platform.lines.find((line) => line["level"] === "error");
+    expect(logged).toMatchObject({ msg: "unhandled error", errorClass: "SyntaxError" });
+    expect(String(logged?.["stack"])).toMatch(/^\s+at /u);
+    expect(JSON.stringify(platform.lines)).not.toContain("secretval");
+  });
+
   it("rejects a malformed JSON body as 400 BAD_REQUEST: Hono's validator raises an HTTPException", async () => {
     const { app, platform } = setup();
     app.openapi(
