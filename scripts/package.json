@@ -20,8 +20,10 @@
     "openapi-typescript": "catalog:",
     "prettier": "catalog:",
     "semver": "catalog:",
+    "smol-toml": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
+    "yaml": "catalog:",
     "zod": "catalog:"
   }
 }

@@ -53,6 +53,7 @@
   "devDependencies": {
     "dependency-cruiser": "catalog:",
     "eslint": "catalog:",
+    "typescript-eslint": "catalog:",
     "vitest": "catalog:"
   }
 }
