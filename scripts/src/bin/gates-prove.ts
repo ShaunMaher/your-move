@@ -87,6 +87,33 @@ const proofs: Record<string, Proof> = {
     return null;
   },
 
+  "games:verify: the installed example's engine importing React and reading the clock"() {
+    const engineDir = join(ROOT_DIR, "games/example/src/engine");
+    const index = join(engineDir, "index.ts");
+    const original = readFileSync(index, "utf8");
+    const rebuild = (): Result => exec("pnpm", ["--filter", "@your-move/game-example", "build"]);
+    let result: Result;
+    try {
+      writeFileSync(index, `${original}import "./gate-fixture.js";\n`);
+      result = withFile(
+        join(engineDir, "gate-fixture.ts"),
+        'import { version } from "react";\n\nexport const stamp = `${version}@${String(Date.now())}`;\n',
+        () => exec("pnpm", ["games:verify", "--fast"]),
+      );
+    } finally {
+      writeFileSync(index, original);
+      for (const built of [".js", ".js.map", ".d.ts", ".d.ts.map"]) {
+        rmSync(join(ROOT_DIR, `games/example/dist/engine/gate-fixture${built}`), { force: true });
+      }
+      rebuild();
+    }
+    if (result.status === 0) return "games:verify passed";
+    for (const expected of ["game-engine-imports", "time only as an argument"]) {
+      if (!result.output.includes(expected)) return `games:verify did not report ${expected}`;
+    }
+    return null;
+  },
+
   "coverage: an untested function in the SDK drops it below 95 %"() {
     const args = [
       "exec",
