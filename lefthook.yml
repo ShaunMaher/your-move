@@ -1,0 +1,24 @@
+# Git hooks (docs/spec/11-engineering.md §7), installed by `pnpm install`. Hooks are a
+# convenience; CI is the gate.
+pre-commit:
+  parallel: true
+  jobs:
+    - name: prettier
+      glob: "*.{ts,tsx,js,mjs,cjs,json,yml,yaml,md,css,html}"
+      run: pnpm exec prettier --check --ignore-unknown {staged_files}
+    - name: eslint
+      glob: "*.{ts,tsx,js,mjs,cjs}"
+      run: pnpm exec eslint --max-warnings 0 --no-warn-ignored {staged_files}
+    - name: gitleaks
+      # The mise-pinned binary (mise.toml), scanning only what is about to be committed.
+      run: gitleaks git --pre-commit --staged --redact --no-banner --config .gitleaks.toml
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: pnpm exec commitlint --edit {1}
+
+pre-push:
+  jobs:
+    - name: typecheck
+      run: pnpm typecheck

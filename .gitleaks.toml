@@ -1,0 +1,21 @@
+# Secret scanning (docs/spec/11-engineering.md §6): gitleaks in the pre-commit hook and in CI.
+# The default rules, plus one for this project's API tokens (06 §8), which forge push protection
+# doesn't recognise.
+title = "Your Move gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "your-move-api-token"
+description = "API token (ym_pat_<id>_<secret>, docs/spec/06-auth.md §8)"
+regex = '''ym_pat_[0-9A-Za-z]{1,64}_[0-9A-Za-z]{20,}'''
+keywords = ["ym_pat_"]
+
+[allowlist]
+description = "Values that are public by design"
+paths = [
+  # The published local-dev configuration: accepted by the server only with http://localhost.
+  '''^config/local-dev\.env$''',
+  '''(^|/)pnpm-lock\.yaml$''',
+]

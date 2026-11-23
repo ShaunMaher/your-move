@@ -1,0 +1,33 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Dependency updates (docs/spec/11-engineering.md §8, 08 §6). Nothing is ever automerged.",
+  "extends": ["config:best-practices", ":semanticCommits"],
+  "ignoreScripts": true,
+  "automerge": false,
+  "platformAutomerge": false,
+  "dependencyDashboard": true,
+  "schedule": ["* * * * 0,6"],
+  "vulnerabilityAlerts": { "enabled": true, "schedule": ["at any time"] },
+  "lockFileMaintenance": { "enabled": true, "schedule": ["* * 1 * *"] },
+  "enabledManagers": ["npm", "mise", "dockerfile", "gitlabci"],
+  "packageRules": [
+    { "matchDatasources": ["npm"], "minimumReleaseAge": "3 days" },
+    { "matchPackageNames": ["@types/**"], "groupName": "@types" },
+    {
+      "matchPackageNames": ["typescript-eslint", "@typescript-eslint/**"],
+      "groupName": "typescript-eslint"
+    },
+    { "matchPackageNames": ["vitest", "@vitest/**"], "groupName": "Vitest" },
+    {
+      "matchPackageNames": ["@playwright/test", "playwright", "mcr.microsoft.com/playwright"],
+      "groupName": "Playwright"
+    },
+    { "matchPackageNames": ["hono", "@hono/**"], "groupName": "Hono" },
+    { "matchPackageNames": ["drizzle-orm", "drizzle-kit"], "groupName": "Drizzle" },
+    {
+      "matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"],
+      "groupName": "React"
+    },
+    { "matchManagers": ["gitlabci"], "groupName": "CI images" }
+  ]
+}
