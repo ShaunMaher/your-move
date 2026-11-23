@@ -1,0 +1,117 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Your Move API",
+    "version": "1",
+    "description": "The public HTTP API. Everything is under /api/v1; changes within v1 are additive only."
+  },
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "properties": { "ok": { "type": "boolean", "enum": [true] } },
+        "required": ["ok"],
+        "additionalProperties": false
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "example": "NOT_FOUND" },
+              "message": { "type": "string" },
+              "detail": {}
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["error"],
+        "additionalProperties": false
+      },
+      "ClientConfig": {
+        "type": "object",
+        "properties": {
+          "appName": {
+            "type": "string",
+            "description": "Display name of this instance (APP_NAME)."
+          },
+          "appShortName": {
+            "type": "string",
+            "description": "Home-screen label of this instance (APP_SHORT_NAME)."
+          },
+          "operatorContact": {
+            "type": "string",
+            "description": "How to reach the instance operator."
+          },
+          "minAge": { "type": "integer", "description": "Minimum age confirmed at onboarding." },
+          "vapidPublicKey": {
+            "type": "string",
+            "description": "Web Push application server key, when push is configured."
+          },
+          "turnstileSiteKey": {
+            "type": "string",
+            "description": "Turnstile site key, when Turnstile is enabled."
+          },
+          "uploadsEnabled": {
+            "type": "boolean",
+            "description": "Whether players may upload word lists (DICTIONARY_UPLOADS)."
+          }
+        },
+        "required": ["appName", "appShortName", "operatorContact", "minAge", "uploadsEnabled"],
+        "additionalProperties": false
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "operationId": "getHealth",
+        "x-scope": "public",
+        "tags": ["Health"],
+        "summary": "Liveness check",
+        "description": "Public. Answers `{ ok: true }` while the server is up. Also served unversioned at `/api/health` for load balancers and container health checks.",
+        "responses": {
+          "200": {
+            "description": "The server is up.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/HealthResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config": {
+      "get": {
+        "operationId": "getConfig",
+        "x-scope": "public",
+        "tags": ["Config"],
+        "summary": "Instance configuration for clients",
+        "description": "Public. Non-sensitive values only.",
+        "responses": {
+          "200": {
+            "description": "The instance's client configuration.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ClientConfig" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {}
+}
