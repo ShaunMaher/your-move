@@ -10,7 +10,7 @@
 # Tools are verified, never piped into a shell: scripts/ci/install-mise.sh checks the mise release
 # against a committed SHA-256 on every run, and mise installs pnpm and the scanners with
 # `--locked` against mise.lock. Caches (.pnpm-store, .mise) live inside the project directory, are
-# written only by the validate job, and are ignored by every scanner.
+# kept per architecture, written by one job per architecture, and ignored by every scanner.
 
 workflow:
   rules:
@@ -47,6 +47,9 @@ variables:
   CURL_IMAGE: curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93
   # renovate: datasource=docker depName=renovate/renovate
   RENOVATE_IMAGE: renovate/renovate:44.258.0@sha256:2948b8ed46aceac257f0488699272960efea87ee2644007368e64925c5d874fd
+  # Caches are per architecture: mise's tools and native packages (workerd, esbuild) differ, so an
+  # arm64 job must never restore amd64 binaries. Jobs on the arm64 runner set CACHE_ARCH: arm64.
+  CACHE_ARCH: amd64
   # Caches inside the project directory (the only place GitLab caches). pnpm 12 reads its settings
   # from pnpm_config_* variables (it ignores npm_config_*); .pnpm checks the store is really here.
   MISE_DATA_DIR: $CI_PROJECT_DIR/.mise
@@ -79,16 +82,16 @@ default:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_TAG =~ /^v/
 
-# Every job but the validate job only reads the caches.
+# Only the validate job (amd64) and test:worker (arm64) write the caches; every other job reads.
 .caches:
   cache:
     - key:
-        prefix: pnpm
+        prefix: pnpm-$CACHE_ARCH
         files: [pnpm-lock.yaml]
       paths: [.pnpm-store]
       policy: pull
     - key:
-        prefix: mise
+        prefix: mise-$CACHE_ARCH
         files: [mise.lock]
       paths: [.mise]
       policy: pull
@@ -101,6 +104,21 @@ default:
     "$CI_PROJECT_DIR"/.pnpm-store/*) echo "pnpm store: $store" ;;
     *) echo "pnpm's store is $store, outside $CI_PROJECT_DIR/.pnpm-store: is pnpm_config_store_dir set?"; exit 1 ;;
   esac
+
+# What a runner offers workerd, printed when a test job fails: CPU model, flags and the x86-64
+# levels glibc sees, kernel, CPUs, memory, and whether the workerd binary starts at all.
+.runner-report: &runner-report |
+  if [ "$CI_JOB_STATUS" = "failed" ]; then
+    grep -m1 '^model name' /proc/cpuinfo || true
+    grep -m1 -E '^(flags|Features)' /proc/cpuinfo || true
+    if [ -x /lib64/ld-linux-x86-64.so.2 ]; then /lib64/ld-linux-x86-64.so.2 --help | grep -i 'x86-64-v' || true; fi
+    uname -a
+    echo "nproc: $(nproc)"
+    grep -E '^(MemTotal|MemAvailable)' /proc/meminfo || true
+    for workerd in node_modules/.pnpm/@cloudflare+workerd-linux-*/node_modules/@cloudflare/workerd-linux-*/bin/workerd; do
+      "$workerd" --version; echo "$workerd --version exited $?"
+    done
+  fi
 
 # Node, pnpm (and any MISE_TOOLS) from mise.lock, and the workspace installed.
 .pnpm:
@@ -129,12 +147,12 @@ validate:
   extends: [.pnpm, .every-pipeline]
   cache:
     - key:
-        prefix: pnpm
+        prefix: pnpm-$CACHE_ARCH
         files: [pnpm-lock.yaml]
       paths: [.pnpm-store]
       policy: pull-push
     - key:
-        prefix: mise
+        prefix: mise-$CACHE_ARCH
         files: [mise.lock]
       paths: [.mise]
       policy: pull-push
@@ -194,29 +212,13 @@ test:
   variables:
     # Wrangler's own log file goes where the artifacts can keep it.
     WRANGLER_LOG_PATH: $CI_PROJECT_DIR/reports/wrangler-logs
-    # TEMPORARY (CI-1, M0 review): debug-level Wrangler logging, which also runs workerd with
-    # --verbose, to diagnose the Worker contract tests failing only on the shared runner. Remove
-    # once CI-1 is resolved.
-    WRANGLER_LOG: debug
   script:
-    # Unit, integration, property, component and API contract tests (Node and Worker builds);
-    # the full game kit joins in M1. workerd needs the system CA certificates (NODE_IMAGE).
-    - pnpm test
+    # Unit, integration, property, component and API contract tests; the full game kit joins in
+    # M1. The Worker half of the contract suite runs in test:worker instead (see there): to fold it
+    # back, drop the --exclude and the test:worker job.
+    - pnpm test --exclude src/worker.test.ts
   after_script:
-    # What the runner offers workerd, printed when the job fails: CPU model, flags and the x86-64
-    # levels glibc sees, kernel, CPUs, memory, and whether the workerd binary starts at all.
-    - |
-      if [ "$CI_JOB_STATUS" = "failed" ]; then
-        grep -m1 '^model name' /proc/cpuinfo || true
-        grep -m1 -E '^(flags|Features)' /proc/cpuinfo || true
-        if [ -x /lib64/ld-linux-x86-64.so.2 ]; then /lib64/ld-linux-x86-64.so.2 --help | grep -i 'x86-64-v' || true; fi
-        uname -a
-        echo "nproc: $(nproc)"
-        grep -E '^(MemTotal|MemAvailable)' /proc/meminfo || true
-        for workerd in node_modules/.pnpm/@cloudflare+workerd-linux-*/node_modules/@cloudflare/workerd-linux-*/bin/workerd; do
-          "$workerd" --version; echo "$workerd --version exited $?"
-        done
-      fi
+    - *runner-report
   coverage: '/Lines\s*:\s*(\d+(?:\.\d+)?)%/'
   artifacts:
     when: always
@@ -228,6 +230,43 @@ test:
       coverage_report:
         coverage_format: cobertura
         path: coverage/cobertura-coverage.xml
+
+# The Worker half of the contract suite (workerd), on the arm64 runner. It is a separate job only
+# because the amd64 shared runner's VM CPU lacks SSE4.2 (x86-64-v2), which workerd's linux-64
+# build needs (M0 review CI-1; docs/deploy.md). Once that runner offers x86-64-v2, delete this job
+# and the --exclude in `test`. It covers no sources of its own, so coverage stays with `test`.
+test:worker:
+  stage: test
+  extends: [.pnpm, .every-pipeline]
+  tags: [arch-arm64]
+  needs: [validate]
+  variables:
+    CACHE_ARCH: arm64
+    WRANGLER_LOG_PATH: $CI_PROJECT_DIR/reports/wrangler-logs
+  # The only job on the arm64 runner that uses the caches, so it writes that architecture's.
+  cache:
+    - key:
+        prefix: pnpm-$CACHE_ARCH
+        files: [pnpm-lock.yaml]
+      paths: [.pnpm-store]
+      policy: pull-push
+    - key:
+        prefix: mise-$CACHE_ARCH
+        files: [mise.lock]
+      paths: [.mise]
+      policy: pull-push
+  script:
+    # The contract project's global setup builds the web app, Node server and Worker first.
+    - pnpm exec vitest run --project tests/contract src/worker.test.ts
+  after_script:
+    - *runner-report
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - reports/wrangler-logs/
+    reports:
+      junit: reports/junit.xml
 
 # --- 3. build ----------------------------------------------------------------------------------
 
@@ -339,7 +378,7 @@ security:secrets:
   needs: []
   cache:
     - key:
-        prefix: mise
+        prefix: mise-$CACHE_ARCH
         files: [mise.lock]
       paths: [.mise]
       policy: pull
@@ -422,7 +461,7 @@ security:no-secrets-on-mr:
 publish:packages:
   extends: [.release, .caches]
   image: $NODE_IMAGE
-  needs: [validate, test, build:app, e2e, security:secrets, security:dependencies]
+  needs: [validate, test, test:worker, build:app, e2e, security:secrets, security:dependencies]
   variables:
     # A fresh clone, never a checkout left on the runner by another pipeline.
     GIT_STRATEGY: clone
@@ -454,6 +493,7 @@ publish:image:
   needs:
     - validate
     - test
+    - test:worker
     - build:app
     - build:image:amd64
     - build:image:arm64
