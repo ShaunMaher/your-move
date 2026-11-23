@@ -204,8 +204,10 @@ whatever notification the operator uses.
   (no `api`), because protected container repositories refuse deploy tokens, which have no role —
   **never `CI_JOB_TOKEN`**, which every pipeline (including MR and Renovate
   pipelines running new dependency code) receives with the triggering user's rights. GitLab
-  **protected packages** for `@your-move/*` and **protected container tags** require the Maintainer
-  role to push, so a Developer-level token or a compromised MR job can't publish over a release.
+  **protected packages** for `@your-move/*` and **protected container repositories** (the
+  `applications/your-move*` path rule) require the Maintainer role to push, so a Developer-level
+  token or a compromised MR job can't publish over a release; deleting through the protected
+  container path needs Owner (our CE's package rule takes no delete level).
   Both protection features exist on our CE version. M1 verifies that the deploy token can publish
   protected packages; if not, packages take the same fallback images already use (findings.md
   F-9): a Maintainer-role project access token, with protected variables and protected refs as the

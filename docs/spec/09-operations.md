@@ -259,8 +259,8 @@ The pipeline, its stages and the quality gates are defined in 11 §9. Deployment
   manifest, and — on `main` and tags only, in the `release` environment with the release registry
   token (a Maintainer-role, registry-only project access token in protected, environment-scoped
   variables; our GitLab CE has no protected environments, 08 §6) — pushed to this project's GitLab
-  container registry, tagged with the version and the commit, with their SBOMs kept as pipeline artifacts and (from M1) their digests recorded in the
-  release notes. MR pipelines build but
+  container registry, tagged with the version and the commit, with their SBOMs kept as pipeline
+  artifacts and (from M1) their digests recorded in the release notes. MR pipelines build but
   never push, so they can't run the image (end-to-end tests run against the Node build output
   instead, 11 §9). On `main`, a **smoke job** after the push pulls the new image by digest as a CI
   `services:` container and checks that `/api/health` answers. Images aren't signed yet (08 §6).

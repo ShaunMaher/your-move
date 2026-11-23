@@ -78,10 +78,12 @@ The project's foundation, built to 11 (engineering standards) from the first com
   `games:verify` checks and what bundlers read: after the web, Node and Worker builds, every
   bundler metafile input under an installed game package's directory must be a file
   `games:verify` checked, or the build fails. Publishing to the GitLab package registry happens
-  from `main` after merge (11 §7). **Accept (release path):** GitLab protected packages for `@your-move/*` and protected
-  container tags are configured and shown to exist on our CE version (else the F-9 fallback is
-  applied and recorded); the release credentials publish from `main`, and an MR pipeline can
-  neither read them nor publish.
+  from `main` after merge (11 §7). **Accept (release path):** with GitLab protected packages for
+  `@your-move/*` and protected container repositories configured (both exist on our CE version,
+  since M0), the release credentials publish from `main` through them (if protected packages refuse
+  the deploy token, the F-9 fallback is applied to packages and recorded), and an MR pipeline can
+  neither read them nor publish; give the two publish jobs separate environment scopes so each sees
+  only its own credential (F-8).
 - **The reference game package** `@your-move/game-example` (02 §7.6): exercises everything the
   word game doesn't — 2–4 players, a hidden hand, elimination, and one simultaneous secret phase
   (multi-seat `toAct`). It proves the contract and kit before the word game uses them, drives the
@@ -98,9 +100,10 @@ The project's foundation, built to 11 (engineering standards) from the first com
   packaged as `@your-move/game-words` with its manifest (02 §7).
 - Releases: `v*` tag pipelines create a GitLab Release that records the image digests and the
   package versions published.
-- **Accept:** a Maintainer-triggered MR pipeline's `CI_JOB_TOKEN` cannot push a protected
-  container tag or an `@your-move/*` package version (if it can, protection is raised to Owner and
-  the release credentials are confirmed to still publish; F-9);
+- **Accept:** a Maintainer-triggered MR pipeline's `CI_JOB_TOKEN` cannot push to a protected
+  container repository or an `@your-move/*` package version (if it can, protection is raised to
+  Owner, the release registry token is reissued with the Owner role, and the release credentials
+  are confirmed to still publish; F-9);
   the kit fails every broken fixture and passes the reference module at 2, 3 and 4
   players; `pnpm games:verify` passes with `example` and `words` installed and fails when either
   violates an architecture rule; a game package built in a separate scratch repository from
