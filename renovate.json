@@ -5,11 +5,30 @@
   "ignoreScripts": true,
   "automerge": false,
   "platformAutomerge": false,
-  "dependencyDashboard": true,
+  "dependencyDashboard": { "enabled": true },
+  "ignorePaths": ["**/node_modules/**", "scripts/test-fixtures/**"],
   "schedule": ["* * * * 0,6"],
-  "vulnerabilityAlerts": { "enabled": true, "schedule": ["at any time"] },
+  "osvVulnerabilityAlerts": true,
   "lockFileMaintenance": { "enabled": true, "schedule": ["* * 1 * *"] },
-  "enabledManagers": ["npm", "mise", "dockerfile", "gitlabci"],
+  "enabledManagers": ["npm", "mise", "dockerfile", "gitlabci", "custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Images pinned in .gitlab-ci.yml variables, each annotated `# renovate: datasource=docker depName=…` on the line above.",
+      "managerFilePatterns": ["/(^|/)\\.gitlab-ci\\.yml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\n\\s*[A-Z_]+:\\s*[^:@\\s]+:(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "Versions pinned in CI scripts (e.g. the mise release). A version bump also needs the new SHA-256 values committed next to it, or the checksum check fails the pipeline.",
+      "managerFilePatterns": ["/^scripts/ci/.+\\.sh$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\n\\s*[A-Z_]+=\"(?<currentValue>[^\"]+)\""
+      ]
+    }
+  ],
   "packageRules": [
     { "matchDatasources": ["npm"], "minimumReleaseAge": "3 days" },
     { "matchPackageNames": ["@types/**"], "groupName": "@types" },
@@ -28,6 +47,11 @@
       "matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"],
       "groupName": "React"
     },
-    { "matchManagers": ["gitlabci"], "groupName": "CI images" }
+    { "matchFileNames": [".gitlab-ci.yml", "scripts/ci/**"], "groupName": "CI images and tools" },
+    {
+      "description": "Kaniko comes from a community fork (F-10): read its release notes before merging.",
+      "matchPackageNames": ["ghcr.io/osscontainertools/kaniko"],
+      "addLabels": ["review-release-notes"]
+    }
   ]
 }
