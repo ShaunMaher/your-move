@@ -194,16 +194,20 @@ build job can read it (08 §6). Rotation is noted in the operator's private note
 
 Pipelines run for merge requests and for `main`/tags (no duplicate branch pipelines). The pnpm
 store and mise's tools are cached inside the project directory, keyed by `pnpm-lock.yaml` and
-`mise.lock`; only the validate job writes the caches, and every job checks pnpm uses the cached
-store. Jobs run unprivileged (no Docker-in-Docker); untagged jobs run
-on the amd64 shared runner. Stages, in order:
+`mise.lock` and per architecture (mise's tools and native packages differ); only one job per
+architecture writes them (validate on amd64), and every job checks pnpm uses the cached store.
+Jobs run unprivileged (no Docker-in-Docker); untagged jobs run on the amd64 shared runner, whose
+CPU must offer x86-64-v2 (SSE4.2): workerd's linux-64 build fails to start without it. Until it
+does, the Worker half of the contract suite runs in its own job on the arm64 runner, which also
+writes the arm64 caches (M0 review CI-1). Stages, in order:
 
 1. **validate** — `pnpm games:generate` first (§3), then `prettier --check`, ESLint, `tsc -b`,
    `pnpm lint:arch`, knip, commitlint (MR),
    changeset check (§7), committed generated-code drift (§3), OpenAPI breaking-change check against
    the target branch (`oasdiff breaking`, 05 §Versioning), API Extractor report check.
 2. **test** — Vitest with coverage (unit, integration, property, component, the **full** game
-   kit, API contract on both runtimes); JUnit and Cobertura reports to the MR.
+   kit, API contract on both runtimes, the Worker half on arm64 for now, above); JUnit and
+   Cobertura reports to the MR.
 3. **build** — `pnpm games:verify --fast`, web app, Node server build (`apps/node/dist`), Worker
    bundle, `generated/installed.json` kept as an artifact for the deploy job, Docker image per
    architecture built natively with kaniko (or rootless BuildKit, where the runner grants user
