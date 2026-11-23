@@ -10,58 +10,19 @@ import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 import { config, configs as tsConfigs } from "typescript-eslint";
 
-/** Project rules from CLAUDE.md that lint can check. */
-const projectRules = {
-  meta: { name: "your-move" },
-  rules: {
-    "no-product-name": {
-      meta: {
-        type: "problem",
-        docs: { description: "The product name comes from APP_NAME, never a literal (CLAUDE.md)." },
-        messages: { literal: "Use APP_NAME from config; never hard-code the product name." },
-        schema: [],
-      },
-      create(context) {
-        const check = (node, text) => {
-          if (typeof text === "string" && /your\s+move/iu.test(text)) {
-            context.report({ node, messageId: "literal" });
-          }
-        };
-        return {
-          Literal: (node) => check(node, node.value),
-          TemplateElement: (node) => check(node, node.value.raw),
-          JSXText: (node) => check(node, node.value),
-        };
-      },
-    },
-    "no-dangerous-html": {
-      meta: {
-        type: "problem",
-        docs: { description: "No dangerouslySetInnerHTML anywhere (CLAUDE.md)." },
-        messages: { banned: "dangerouslySetInnerHTML is banned." },
-        schema: [],
-      },
-      create(context) {
-        return {
-          Identifier(node) {
-            if (node.name === "dangerouslySetInnerHTML")
-              context.report({ node, messageId: "banned" });
-          },
-          JSXIdentifier(node) {
-            if (node.name === "dangerouslySetInnerHTML")
-              context.report({ node, messageId: "banned" });
-          },
-        };
-      },
-    },
-  },
-};
+// Project rules from CLAUDE.md that lint can check (tested in scripts/src/lint).
+import { projectRules } from "./scripts/src/lint/project-rules.ts";
 
 const REACT_FILES = ["apps/web/**/*.{ts,tsx}", "games/*/src/client/**/*.{ts,tsx}"];
 
 export default config(
   {
     ignores: [
+      // CI caches and outputs kept inside the project directory.
+      ".pnpm-store/**",
+      ".mise/**",
+      "images/**",
+      "sbom/**",
       "**/dist/**",
       "**/dist-types/**",
       "**/coverage/**",
