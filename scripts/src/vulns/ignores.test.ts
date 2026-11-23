@@ -23,6 +23,49 @@ describe("parseIgnoredVulns", () => {
     ).toEqual([{ id: "GHSA-1", ignoreUntil: "2027-01-31", reason: "F-11: dev only" }]);
   });
 
+  const ONE = [{ id: "GHSA-1", ignoreUntil: "2027-01-31", reason: "F-11" }];
+
+  it.each([
+    [
+      "a comment after the header",
+      '[[IgnoredVulns]] # note\nid = "GHSA-1"\nignoreUntil = 2027-01-31\nreason = "F-11"\n',
+    ],
+    [
+      "a spaced header",
+      '[[ IgnoredVulns ]]\nid = "GHSA-1"\nignoreUntil = 2027-01-31\nreason = "F-11"\n',
+    ],
+    [
+      "an inline array",
+      'IgnoredVulns = [{ id = "GHSA-1", ignoreUntil = 2027-01-31, reason = "F-11" }]\n',
+    ],
+    [
+      "a date-time",
+      '[[IgnoredVulns]]\nid = "GHSA-1"\nignoreUntil = 2027-01-31T00:00:00Z\nreason = "F-11"\n',
+    ],
+    [
+      "a quoted key",
+      '[["IgnoredVulns"]]\n"id" = "GHSA-1"\nignoreUntil = 2027-01-31\nreason = "F-11"\n',
+    ],
+  ])("reads an entry written with %s", (_, source) => {
+    expect(parseIgnoredVulns(source)).toEqual(ONE);
+  });
+
+  it("leaves a value of the wrong type unset, so the check reports it", () => {
+    const [entry] = parseIgnoredVulns('[[IgnoredVulns]]\nid = 1\nignoreUntil = "soon"\n');
+    expect(entry).toEqual({ id: undefined, ignoreUntil: "soon", reason: undefined });
+    expect(checkIgnores(parseIgnoredVulns("[[IgnoredVulns]]\nid = 1\n"), FINDINGS)).toEqual([
+      "(an entry without an id): needs ignoreUntil = YYYY-MM-DD",
+    ]);
+  });
+
+  it.each([
+    ["invalid TOML", "[[IgnoredVulns]\nid = 1\n"],
+    ["IgnoredVulns as a single table", '[IgnoredVulns]\nid = "GHSA-1"\n'],
+    ["an entry that isn't a table", 'IgnoredVulns = ["GHSA-1"]\n'],
+  ])("fails closed on %s", (_, source) => {
+    expect(() => parseIgnoredVulns(source)).toThrow();
+  });
+
   it("finds no ignores in the committed file", () => {
     const committed = readFileSync(new URL("../../../osv-scanner.toml", import.meta.url), "utf8");
     expect(checkIgnores(parseIgnoredVulns(committed), FINDINGS)).toEqual([]);

@@ -3,6 +3,7 @@
  * `ignoreUntil` date, and a `reason` naming an `F-<n>` entry in docs/security/findings.md that is
  * `accepted-risk` and whose "Review by" is the same date.
  */
+import { parse } from "smol-toml";
 
 export interface IgnoredVuln {
   readonly id: string | undefined;
@@ -17,28 +18,32 @@ export interface Finding {
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/u;
 
-/** Reads the `[[IgnoredVulns]]` tables of osv-scanner.toml (string and date values only). */
-export function parseIgnoredVulns(toml: string): IgnoredVuln[] {
-  const entries: Record<string, string>[] = [];
-  let current: Record<string, string> | null = null;
-  for (const raw of toml.split("\n")) {
-    const line = raw.trim();
-    if (line === "" || line.startsWith("#")) continue;
-    if (line.startsWith("[")) {
-      current = line === "[[IgnoredVulns]]" ? {} : null;
-      if (current) entries.push(current);
-      continue;
+/** A TOML value as text: strings as they are, dates as `YYYY-MM-DD`, anything else unset. */
+function text(value: unknown, date = false): string | undefined {
+  if (typeof value === "string") return value;
+  if (date && value instanceof Date) return value.toISOString().slice(0, 10);
+  return undefined;
+}
+
+/**
+ * Reads the `IgnoredVulns` entries of osv-scanner.toml with a real TOML parser, so every form
+ * osv-scanner accepts (comments after headers, spaced headers, inline arrays) is seen. Throws on
+ * invalid TOML or an `IgnoredVulns` that isn't an array of tables, so the check fails closed.
+ */
+export function parseIgnoredVulns(source: string): IgnoredVuln[] {
+  const entries = parse(source)["IgnoredVulns"] ?? [];
+  if (!Array.isArray(entries)) throw new Error("osv-scanner.toml: IgnoredVulns must be an array");
+  return entries.map((entry: unknown) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new Error("osv-scanner.toml: every IgnoredVulns entry must be a table");
     }
-    const match = /^([A-Za-z]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|(\S+))\s*(?:#.*)?$/u.exec(line);
-    if (current && match?.[1] !== undefined) {
-      current[match[1]] = match[2] ?? match[3] ?? "";
-    }
-  }
-  return entries.map((entry) => ({
-    id: entry["id"],
-    ignoreUntil: entry["ignoreUntil"]?.slice(0, 10),
-    reason: entry["reason"],
-  }));
+    const fields = entry as Record<string, unknown>;
+    return {
+      id: text(fields["id"]),
+      ignoreUntil: text(fields["ignoreUntil"], true),
+      reason: text(fields["reason"]),
+    };
+  });
 }
 
 /** Reads the findings table of docs/security/findings.md: id → status and "Review by". */
