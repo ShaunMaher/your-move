@@ -5,13 +5,18 @@
 # title from the IMAGE_TITLE build argument.
 
 # Node 26 LTS, slim, pinned by digest (Renovate updates both). Same version as mise.toml.
+# renovate: datasource=docker depName=node
 ARG NODE_IMAGE=node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc
 
 FROM ${NODE_IMAGE} AS build
 WORKDIR /src
-# Node 26 ships without corepack: install the pnpm version package.json pins.
-COPY package.json ./
-RUN npm install --global --no-fund --no-audit "$(node -p 'require("./package.json").packageManager')"
+# Node 26 ships without corepack. pnpm comes from mise at the version and SHA-256 in mise.lock,
+# installed by a mise release whose SHA-256 is committed in scripts/ci/install-mise.sh.
+ENV MISE_DATA_DIR=/opt/mise
+ENV PATH=/opt/mise/bin:/opt/mise/shims:$PATH
+COPY mise.toml mise.lock ./
+COPY scripts/ci/ scripts/ci/
+RUN scripts/ci/install-mise.sh pnpm
 COPY . .
 RUN pnpm install --frozen-lockfile
 # The fast game kit and import rules run in every image build (02 §7.3).
@@ -30,11 +35,16 @@ ARG IMAGE_TITLE=app
 ARG IMAGE_VERSION=dev
 ARG IMAGE_REVISION=unknown
 ARG IMAGE_SOURCE=""
+ARG IMAGE_PIPELINE_ID=""
+ARG IMAGE_PIPELINE_URL=""
+# Provenance: the commit and the pipeline that built the image (08 §6).
 LABEL org.opencontainers.image.title="${IMAGE_TITLE}" \
       org.opencontainers.image.version="${IMAGE_VERSION}" \
       org.opencontainers.image.revision="${IMAGE_REVISION}" \
       org.opencontainers.image.source="${IMAGE_SOURCE}" \
-      org.opencontainers.image.licenses="BSD-2-Clause"
+      org.opencontainers.image.licenses="BSD-2-Clause" \
+      com.gitlab.ci.pipeline.id="${IMAGE_PIPELINE_ID}" \
+      com.gitlab.ci.pipeline.url="${IMAGE_PIPELINE_URL}"
 ENV NODE_ENV=production \
     PORT=8080
 WORKDIR /app

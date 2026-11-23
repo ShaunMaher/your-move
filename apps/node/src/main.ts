@@ -4,8 +4,8 @@
  *
  * 1. migrations and the orphan check against `installed.json` — from M2, when there is a database;
  * 2. read configuration and secrets (`*_FILE`), then scrub secrets from `process.env`;
- * 3. load the generated game registry with a dynamic `import()` and refuse to start unless it
- *    matches `installed.json`;
+ * 3. check code generation from strings is really off, then load the generated game registry with
+ *    a dynamic `import()`, and refuse to start unless it matches `installed.json`;
  * 4. serve.
  */
 import { readFileSync } from "node:fs";
@@ -22,6 +22,7 @@ import {
 } from "@your-move/server";
 
 import installedJson from "../../../generated/installed.json" with { type: "json" };
+import { codeGenerationFromStringsAllowed } from "./code-generation.js";
 import { resolveSecretFiles, scrubSecrets, SecretFileError } from "./env.js";
 import { parseNodeConfig } from "./node-config.js";
 import { createNodeApp } from "./server.js";
@@ -69,6 +70,11 @@ if (nodeConfig.trustProxy !== "false") {
   if (nodeConfig.trustProxyPeersDefaulted) {
     log.warn("TRUST_PROXY_PEERS is not set; trusting the broad private-range default");
   }
+}
+
+// Game code never runs in a process that can compile strings (02 §7.5).
+if (codeGenerationFromStringsAllowed()) {
+  exitWith("Refusing to start: run node with --disallow-code-generation-from-strings (02 §7.5).");
 }
 
 const { installedGames: games } = await import("../../../generated/server-registry.js");
