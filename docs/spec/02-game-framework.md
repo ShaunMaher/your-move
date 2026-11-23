@@ -147,7 +147,11 @@ Enforced by the generic test kit (§6) where possible:
    seat MUST NOT depend on information hidden from that seat. After `result()` is non-null, `view`
    may reveal anything the module chooses (e.g. final racks).
 5. **Public records** contain only information visible to every seat. They appear in history and
-   notifications, and `describe` builds text from the record alone.
+   notifications, and `describe` builds text from the record alone. Because the kit compares the
+   record of a transition on a state and on its perturbation (§6.3), a record never depends on
+   information hidden before the transition, even what the transition reveals (e.g. the cards
+   shown when a secret phase ends, or who lost a life because of them): such outcomes reach
+   players through `view`.
 6. **Resources** are loaded by the framework before calling the module and passed in as synchronous
    lookup objects, so the module stays pure. Example: a dictionary's `has(word): boolean`. Only
    `validate` and `preview` receive resources. `setup`, `apply`, `onResign` and `onTimeout` MUST NOT
@@ -592,7 +596,15 @@ Cloudflare Workers can't load code at runtime, so an instance's set of games is 
   - the manifest disagrees with the engine (§7.2), or the manifest icon fails sanitisation.
 
   `pnpm build` and the Docker build run it in **fast** mode; CI's test stage runs the **full** kit
-  (§6). **The deploy job never runs it**, nor anything else that imports game package code: deploy
+  (§6). A game package in this repository's workspace is built with its own `build` script before
+  `games:generate` and `games:verify` read it, so it is checked through its built `exports` like a
+  published package; for such a package the file-name rules of §7.1.1 cover the files `pnpm pack`
+  would publish, plus every symlink anywhere in it, and names are compared case-insensitively.
+- **Bundler-input closure.** `games:verify` records every package file its checks covered
+  (`generated/verified-files.json`); the web, Node and Worker builds record the files their
+  bundler read (`generated/bundles/<app>.json`); and `pnpm games:check-inputs`, the last step of
+  `pnpm build` (`--only web,node` in the Docker build), fails if any bundler input inside an
+  installed game package is not a file `games:verify` checked. **The deploy job never runs it**, nor anything else that imports game package code: deploy
   jobs hold deploy credentials (08 §6).
 - At runtime `ENABLED_GAMES` (09) still filters which installed types are offered for **new**
   games; an installed but disabled type keeps serving its existing games.
