@@ -211,9 +211,12 @@ whatever notification the operator uses.
   publishes from `main` and that an MR pipeline can't read it.
   No developer publishes from a workstation. Image signing is a later decision (cosign keyless
   needs an OIDC issuer Sigstore trusts; a self-hosted GitLab isn't one); until then deployments
-  **pull images by digest**, recorded in the release notes, and every package/image records the
-  commit and pipeline that built it.
-- An SBOM (CycloneDX) is generated for every Docker image and Worker bundle built on `main`.
+  **pull images by digest**, recorded in the release notes (from M1; until then in the publish
+  job's output), and every package/image records the commit and pipeline that built it.
+- CycloneDX SBOMs, kept as pipeline artifacts: one for every Docker image built on `main` and tags
+  (from the image itself), and one for what each deployment ships, the union of the production
+  dependency closures of the root (installed games), the web app and the Node server or the
+  Worker.
 - CI images and Docker base images pinned by digest.
 - **Runners**: the instance's shared runners (amd64 and arm64) aren't protected, so MR jobs and
   `main` jobs share hosts. Jobs therefore run unprivileged: no Docker-in-Docker, images built with

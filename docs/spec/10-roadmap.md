@@ -41,10 +41,10 @@ The project's foundation, built to 11 (engineering standards) from the first com
   `installed.json`) that `apps/*` inject into `createApp({ platform, games })`, run from the root
   `prepare` script and before typecheck, lint and test (11 §3); `pnpm games:check-db` reading only
   `installed.json`; and the **M0 subset** of `pnpm games:verify`: duplicate or invalid type ids, the
-  SDK peer-range check, the licence allow-list with `acceptLicence`, the dependency rules of 02 §7.1.1 (the SDK, `zod` and `react` as peers only, nothing
-  else as a peer, other `dependencies` reachable only from the client)
-  (02 §7.1.1), and the import ruleset, each
-  unit-tested against fixture packages, plus a `--fast` flag that is accepted and documented. The
+  SDK peer-range check, the licence allow-list with `acceptLicence`, the dependency rules of
+  02 §7.1.1 (the SDK, `zod` and `react` as peers only, nothing else as a peer, other
+  `dependencies` reachable only from the client), and the import ruleset, each unit-tested
+  against fixture packages, plus a `--fast` flag that is accepted and documented. The
   test-kit run, the manifest-vs-engine check, icon sanitisation, the built-output ESLint rules and
   the real fast/full split need the SDK types and kit, so they land in **M1**.
 - Config schema with secret redaction + `.env.example`; shared security-header definition applied
@@ -74,8 +74,11 @@ The project's foundation, built to 11 (engineering standards) from the first com
   and re-exports zod as `@your-move/sdk/schema`, with React helpers only at `@your-move/sdk/client`;
   the API Extractor report is committed. `pnpm games:verify` gains the rest of its checks (the kit,
   manifest-vs-engine, icon sanitisation, built-output ESLint rules on engine and manifest output,
-  fast/full modes). Publishing to the GitLab package registry happens from `main` after merge
-  (11 §7). **Accept (release path):** GitLab protected packages for `@your-move/*` and protected
+  fast/full modes). Once real games are composed, the builds close the gap between what
+  `games:verify` checks and what bundlers read: after the web, Node and Worker builds, every
+  bundler metafile input under an installed game package's directory must be a file
+  `games:verify` checked, or the build fails. Publishing to the GitLab package registry happens
+  from `main` after merge (11 §7). **Accept (release path):** GitLab protected packages for `@your-move/*` and protected
   container tags are configured and shown to exist on our CE version (else the F-9 fallback is
   applied and recorded); the release deploy token publishes from `main`, and an MR pipeline can
   neither read it nor publish.
@@ -331,5 +334,6 @@ The proof of concept deploys to Docker (Q6), so no milestone above deploys to Cl
 the Worker build is still built and tested in CI. The milestone that first deploys to Workers adds
 the CI deploy job (11 §9 stage 7, 09 §6): deploy `dist/worker` from the stage-3 artifact with
 `--no-bundle`; wrangler from a lockfile-pinned, `--ignore-scripts` install carried as an artifact;
-configuration generated from CI variables; no `pnpm install` in the job; `pnpm games:check-db`
-against D1 first; `pnpm cf:migrate` and `pnpm cf:deploy` with it.
+configuration generated from CI variables; no `pnpm install` in the job; `games:check-db` against
+D1 first, as a self-contained bundle built in stage 3 and carried in the artifact. The D1- and
+Workers-specific commands `pnpm cf:migrate` and `pnpm cf:deploy` arrive with it.
