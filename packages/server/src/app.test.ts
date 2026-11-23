@@ -249,6 +249,31 @@ describe("errors and logging", () => {
     expect(JSON.stringify(platform.lines)).not.toContain("secretval");
   });
 
+  it("keeps no line of a multi-line message, even one that looks like a stack frame", async () => {
+    let parseError: unknown;
+    try {
+      // V8 quotes the input with its newlines, so the message's second line reads like a frame.
+      JSON.parse("x\n    at SECRET1");
+    } catch (error) {
+      parseError = error;
+    }
+    expect(String((parseError as Error).stack)).toContain("\n    at SECRET1");
+    const { app, platform } = throwing(parseError as SyntaxError);
+    expect((await app.request("/api/v1/config")).status).toBe(500);
+    const logged = platform.lines.find((line) => line["level"] === "error");
+    expect(String(logged?.["stack"])).toMatch(/^\s+at /u);
+    expect(JSON.stringify(platform.lines)).not.toContain("SECRET1");
+  });
+
+  it("keeps no stack at all when the stack doesn't start with the error's own text", async () => {
+    const error = new SyntaxError("message");
+    error.stack = "SyntaxError: other\n    at SECRET2 (file.js:1:1)";
+    const { app, platform } = throwing(error);
+    expect((await app.request("/api/v1/config")).status).toBe(500);
+    expect(platform.lines.find((line) => line["level"] === "error")).toMatchObject({ stack: "" });
+    expect(JSON.stringify(platform.lines)).not.toContain("SECRET2");
+  });
+
   it("rejects a malformed JSON body as 400 BAD_REQUEST: Hono's validator raises an HTTPException", async () => {
     const { app, platform } = setup();
     app.openapi(
