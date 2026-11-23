@@ -1,6 +1,6 @@
 {
   "name": "@your-move/sdk",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "The contract between the game framework and every game package",
   "license": "BSD-2-Clause",
   "type": "module",
