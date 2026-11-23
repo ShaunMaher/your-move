@@ -1,0 +1,6 @@
+{
+  "name": "gate-fixture-copyleft",
+  "version": "1.0.0",
+  "description": "Gate fixture: a package under GPL-3.0-only (no code)",
+  "license": "GPL-3.0-only"
+}

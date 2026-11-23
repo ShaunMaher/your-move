@@ -7,11 +7,10 @@
  */
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { findViolations, parseExceptions } from "../licences/check.js";
 import { fail, ROOT_DIR } from "./cli.js";
 
 interface Result {
@@ -146,11 +145,35 @@ const proofs: Record<string, Proof> = {
   },
 
   "licences: a production dependency under GPL-3.0-only"() {
-    const exceptions = parseExceptions(readFileSync(join(ROOT_DIR, "docs/licences.md"), "utf8"));
-    const report = JSON.stringify({
-      "GPL-3.0-only": [{ name: "gate-fixture-copyleft", versions: ["1.0.0"] }],
-    });
-    return findViolations(report, exceptions).length === 1 ? null : "the licence check passed";
+    const clean = exec("pnpm", ["exec", "tsx", "scripts/src/bin/licences-check.ts"]);
+    if (clean.status !== 0) return `the repository's own licences fail:\n${clean.output}`;
+    // The real path: pnpm's licence listing of a project with a GPL production dependency (a
+    // local file: package, so the install works offline), checked by the real CLI. The copy
+    // lives under node_modules so the repository's mise and pnpm settings apply.
+    const dir = join(ROOT_DIR, "node_modules/.cache/gate-licences");
+    rmSync(dir, { recursive: true, force: true });
+    cpSync(join(ROOT_DIR, "scripts/test-fixtures/licences"), dir, { recursive: true });
+    try {
+      const install = exec(
+        "pnpm",
+        ["install", "--ignore-workspace", "--offline", "--ignore-scripts", "--no-frozen-lockfile"],
+        { cwd: dir },
+      );
+      if (install.status !== 0) return `the fixture project didn't install:\n${install.output}`;
+      const result = exec("pnpm", [
+        "exec",
+        "tsx",
+        "scripts/src/bin/licences-check.ts",
+        "--dir",
+        dir,
+      ]);
+      if (result.status === 0) return "the licence check passed";
+      return result.output.includes('gate-fixture-copyleft@file:copyleft: "GPL-3.0-only"')
+        ? null
+        : "the licence check failed for another reason";
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   },
 
   "OpenAPI: removing an endpoint from v1"() {

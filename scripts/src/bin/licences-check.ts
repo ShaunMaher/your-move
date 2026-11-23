@@ -1,17 +1,24 @@
 /**
  * `pnpm lint:licences` (11 §6): every production dependency is under an allow-listed licence or
  * has an owner decision in docs/licences.md. Uses pnpm's own licence listing; no extra dependency.
+ *
+ * `--dir <path>` checks another (non-workspace) project instead, with this repository's
+ * exceptions; `pnpm gates:prove` uses it on a fixture project with a GPL dependency.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseArgs } from "node:util";
 
 import { findViolations, parseExceptions } from "../licences/check.js";
 import { fail, ROOT_DIR, run } from "./cli.js";
 
 run("lint:licences", () => {
-  const report = execFileSync("pnpm", ["licenses", "list", "--prod", "--json", "--recursive"], {
-    cwd: ROOT_DIR,
+  const { values } = parseArgs({ options: { dir: { type: "string" } } });
+  const args = ["licenses", "list", "--prod", "--json"];
+  args.push(values.dir === undefined ? "--recursive" : "--ignore-workspace");
+  const report = execFileSync("pnpm", args, {
+    cwd: values.dir ?? ROOT_DIR,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });

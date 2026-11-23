@@ -3,11 +3,21 @@
  * known vulnerability in a production dependency that osv-scanner.toml doesn't ignore (11 §6).
  */
 import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { classifyFindings } from "../vulns/check.js";
+import { checkIgnores, parseFindings, parseIgnoredVulns } from "../vulns/ignores.js";
 import { fail, ROOT_DIR, run } from "./cli.js";
 
 run("lint:vulns", () => {
+  // Every ignore must be a recorded accepted risk with the same expiry.
+  const ignoreProblems = checkIgnores(
+    parseIgnoredVulns(readFileSync(join(ROOT_DIR, "osv-scanner.toml"), "utf8")),
+    parseFindings(readFileSync(join(ROOT_DIR, "docs/security/findings.md"), "utf8")),
+  );
+  if (ignoreProblems.length > 0) fail("lint:vulns", ignoreProblems);
+
   const scan = spawnSync(
     "osv-scanner",
     [
