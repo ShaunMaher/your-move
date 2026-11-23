@@ -191,14 +191,38 @@ test:
   stage: test
   extends: [.pnpm, .every-pipeline]
   needs: [validate]
+  variables:
+    # Wrangler's own log file goes where the artifacts can keep it.
+    WRANGLER_LOG_PATH: $CI_PROJECT_DIR/reports/wrangler-logs
+    # TEMPORARY (CI-1, M0 review): debug-level Wrangler logging, which also runs workerd with
+    # --verbose, to diagnose the Worker contract tests failing only on the shared runner. Remove
+    # once CI-1 is resolved.
+    WRANGLER_LOG: debug
   script:
     # Unit, integration, property, component and API contract tests (Node and Worker builds);
     # the full game kit joins in M1. workerd needs the system CA certificates (NODE_IMAGE).
     - pnpm test
+  after_script:
+    # What the runner offers workerd, printed when the job fails: CPU model, flags and the x86-64
+    # levels glibc sees, kernel, CPUs, memory, and whether the workerd binary starts at all.
+    - |
+      if [ "$CI_JOB_STATUS" = "failed" ]; then
+        grep -m1 '^model name' /proc/cpuinfo || true
+        grep -m1 -E '^(flags|Features)' /proc/cpuinfo || true
+        if [ -x /lib64/ld-linux-x86-64.so.2 ]; then /lib64/ld-linux-x86-64.so.2 --help | grep -i 'x86-64-v' || true; fi
+        uname -a
+        echo "nproc: $(nproc)"
+        grep -E '^(MemTotal|MemAvailable)' /proc/meminfo || true
+        for workerd in node_modules/.pnpm/@cloudflare+workerd-linux-*/node_modules/@cloudflare/workerd-linux-*/bin/workerd; do
+          "$workerd" --version; echo "$workerd --version exited $?"
+        done
+      fi
   coverage: '/Lines\s*:\s*(\d+(?:\.\d+)?)%/'
   artifacts:
     when: always
     expire_in: 1 week
+    paths:
+      - reports/wrangler-logs/
     reports:
       junit: reports/junit.xml
       coverage_report:

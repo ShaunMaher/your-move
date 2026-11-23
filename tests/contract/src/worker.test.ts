@@ -28,7 +28,18 @@ beforeAll(async () => {
       },
     ],
   });
-  await harness.listen();
+  try {
+    await harness.listen();
+  } catch (error) {
+    // Print the harness's server events and workerd's own logs leading up to the failure, without
+    // letting a problem printing them hide the original error.
+    try {
+      harness.debug();
+    } catch (debugError) {
+      console.error("harness.debug() failed", debugError);
+    }
+    throw error;
+  }
 }, 60_000);
 
 afterAll(async () => {
