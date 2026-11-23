@@ -140,6 +140,14 @@ const noBuiltInValues: Rule.RuleModule = {
   },
 };
 
+/** Keys that lead from a value to its constructor or prototype. */
+const PROTO_KEYS = "/^(constructor|__proto__)$/";
+
+/** Attribute selectors for `field` being a template literal without expressions naming a PROTO_KEY. */
+function staticTemplateKey(field: string): string {
+  return `[${field}.type='TemplateLiteral'][${field}.expressions.length=0][${field}.quasis.0.value.cooked=${PROTO_KEYS}]`;
+}
+
 /** Members whose only engine use would be to reach a built-in's internals indirectly. */
 const RESTRICTED_MEMBERS: readonly { object: string; property: string }[] = [
   ...[
@@ -214,14 +222,19 @@ export function engineEslintConfig(files: readonly string[]): Linter.Config[] {
             selector: "MetaProperty[meta.name='import']",
             message: "import.meta is host-provided; engines don't use it.",
           },
-          {
-            selector: "MemberExpression[property.name=/^(constructor|__proto__)$/]",
+          // `.constructor` and `__proto__` by name, by any static key (string or template literal)
+          // and by destructuring; a key computed at run time is beyond a static rule (F-5).
+          ...[
+            "MemberExpression[property.name=/^(constructor|__proto__)$/]",
+            `MemberExpression[property.value=${PROTO_KEYS}]`,
+            `MemberExpression[computed=true]${staticTemplateKey("property")}`,
+            `ObjectPattern > Property[computed=false][key.name=${PROTO_KEYS}]`,
+            `ObjectPattern > Property[key.value=${PROTO_KEYS}]`,
+            `ObjectPattern > Property[computed=true]${staticTemplateKey("key")}`,
+          ].map((selector) => ({
+            selector,
             message: "Engines don't reach constructors or prototypes through values.",
-          },
-          {
-            selector: "MemberExpression[property.value=/^(constructor|__proto__)$/]",
-            message: "Engines don't reach constructors or prototypes through values.",
-          },
+          })),
           {
             selector: "CallExpression[callee.name='Date']",
             message: "Date() reads the clock; engines get time only as an argument.",

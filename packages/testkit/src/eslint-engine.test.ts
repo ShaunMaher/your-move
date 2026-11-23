@@ -75,6 +75,21 @@ describe("engineEslintConfig", () => {
     ["import.meta.url", /import\.meta is host-provided/u],
     ["(() => 1).constructor", /constructors or prototypes/u],
     ['({})["__proto__"]', /constructors or prototypes/u],
+    ["new Date(0)[`constructor`].now()", /constructors or prototypes/u],
+    ["({})[`__proto__`]", /constructors or prototypes/u],
+    [
+      "(() => { const { constructor: C } = new Date(0); return C.now(); })()",
+      /constructors or prototypes/u,
+    ],
+    [
+      '(() => { const { "constructor": C } = new Date(0); return C; })()',
+      /constructors or prototypes/u,
+    ],
+    [
+      "(() => { const { [`constructor`]: C } = new Date(0); return C; })()",
+      /constructors or prototypes/u,
+    ],
+    ["(({ __proto__: p }) => p)({})", /constructors or prototypes/u],
     ["Math", /Use Math by name/u],
     ["[Math][0].max(1)", /Use Math by name/u],
     ["Object.values(Math)", /Use Math by name/u],
@@ -127,6 +142,17 @@ describe("engineEslintConfig", () => {
       "6: Use Math by name (a member, call or new), not as a value.",
       "7: Use Math by name (a member, call or new), not as a value.",
     ]);
+  });
+
+  it("allows template-literal keys with expressions and ordinary destructuring", () => {
+    expect(
+      messages(`
+        const board = { cells: [1, 2], size: 2 };
+        const key = "cells";
+        export const cells = board[\`\${key}\`];
+        export const { size, cells: list } = board;
+      `),
+    ).toEqual([]);
   });
 
   it("allows ordinary uses of the same names", () => {
