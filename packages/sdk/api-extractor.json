@@ -3,6 +3,7 @@
   // The SDK's public surface report (02 §7.4, 11 §3): committed under api-report/, and CI fails
   // when the surface changes without the report being regenerated (`pnpm api:surface`).
   "mainEntryPointFilePath": "<projectFolder>/dist/index.d.ts",
+  "newlineKind": "lf",
   "apiReport": {
     "enabled": true,
     "reportFileName": "sdk",
