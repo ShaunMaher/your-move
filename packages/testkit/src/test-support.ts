@@ -20,7 +20,7 @@ import {
 } from "@your-move/sdk";
 import { z } from "@your-move/sdk/schema";
 
-export interface ToyState {
+interface ToyState {
   readonly seats: number;
   readonly deck: readonly number[];
   readonly hands: readonly (readonly number[])[];
@@ -30,15 +30,15 @@ export interface ToyState {
   readonly marker?: number;
 }
 
-export interface ToyOptions {
+interface ToyOptions {
   readonly seats?: number | undefined;
 }
 
-export interface ToyAction {
+interface ToyAction {
   readonly card: number;
 }
 
-export type ToyRecord =
+type ToyRecord =
   | {
       readonly kind: "played";
       readonly seat: Seat;
@@ -47,7 +47,7 @@ export type ToyRecord =
     }
   | { readonly kind: "left"; readonly seat: Seat; readonly reason: string };
 
-export interface ToyView {
+interface ToyView {
   readonly hand: readonly number[] | null;
   readonly handSizes: readonly number[];
   readonly scores: readonly number[];
