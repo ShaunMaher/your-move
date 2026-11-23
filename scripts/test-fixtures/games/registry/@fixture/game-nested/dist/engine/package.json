@@ -1,0 +1,1 @@
+{"type": "module", "imports": {"#rules": {"workerd": "./other.js", "browser": "./other.js", "import": "./rules.js"}}}

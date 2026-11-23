@@ -6,10 +6,12 @@
  * must be exactly what bundlers and Node load: every `exports` entry is `{ types, import }` and
  * nothing else (no other conditions a bundler might prefer, no nesting, no string shorthand), no
  * `imports` or `browser` remapping, ESM only, and every target resolves (symlinks included) to a
- * file inside the package.
+ * file inside the package. Nothing inside the package may change how its files are read either: no
+ * other `package.json` (whose `imports`, `browser` and `type` Node and bundlers honour), no
+ * `node_modules` (bundled dependencies) and no CommonJS.
  */
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
 
 import { z } from "zod";
 
@@ -67,6 +69,52 @@ function containedFile(dir: string, target: string): string | null {
   return real.startsWith(`${dir}${sep}`) ? real : null;
 }
 
+/** What an `exports` target must end with: ESM JavaScript, and its declarations. */
+const TARGET_EXTENSIONS = {
+  import: [".js", ".mjs"],
+  types: [".d.ts", ".d.mts"],
+} as const;
+
+/**
+ * Problems with the files inside a game package (02 §7.1.1): another `package.json`, a
+ * `node_modules` directory, a CommonJS file, or a symlink out of the package. A workspace package's
+ * own top-level `node_modules` is where pnpm links its development dependencies, and is skipped;
+ * a published package never has one, so for anything installed from a registry it is refused.
+ */
+export function packageFileProblems(name: string, dir: string, workspace: boolean): string[] {
+  const problems: string[] = [];
+  const walk = (current: string): void => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const path = join(current, entry.name);
+      const rel = relative(dir, path);
+      if (entry.name === "node_modules") {
+        if (!(workspace && current === dir)) {
+          problems.push(`${name}: must not contain a node_modules directory (${rel}) (02 §7.1.1)`);
+        }
+        continue;
+      }
+      if (entry.isSymbolicLink()) {
+        if (existsSync(path) && !realpathSync(path).startsWith(`${dir}${sep}`)) {
+          problems.push(`${name}: ${rel} links outside the package`);
+        }
+        // A link inside the package is checked where it points.
+        continue;
+      }
+      if (entry.isDirectory()) {
+        walk(path);
+      } else if (entry.name === "package.json" && current !== dir) {
+        problems.push(
+          `${name}: must not contain another package.json (${rel}): Node and bundlers would read its "imports", "browser" and "type" (02 §7.1.1)`,
+        );
+      } else if (/\.c[jt]s$/u.test(entry.name)) {
+        problems.push(`${name}: must not contain CommonJS (${rel}) (02 §7.1.1)`);
+      }
+    }
+  };
+  walk(dir);
+  return problems;
+}
+
 /** Reads a game package and checks its `package.json` contract and three entry points. */
 export function readGamePackage(name: string, resolvePackage: PackageResolver): ReadResult {
   const dir = resolvePackage(name);
@@ -103,7 +151,13 @@ export function readGamePackage(name: string, resolvePackage: PackageResolver): 
         );
         continue;
       }
-      for (const target of [entry.data.types, entry.data.import]) {
+      for (const [condition, extensions] of Object.entries(TARGET_EXTENSIONS)) {
+        const target = entry.data[condition as keyof typeof TARGET_EXTENSIONS];
+        if (!extensions.some((extension) => target.endsWith(extension))) {
+          problems.push(
+            `${name}: exports["${subpath}"].${condition} is "${target}"; it must end with ${extensions.join(" or ")} (02 §7.1.1)`,
+          );
+        }
         if (containedFile(dir, target) === null) {
           problems.push(
             `${name}: exports["${subpath}"] points at "${target}", which is not a file inside the package`,

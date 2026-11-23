@@ -3,6 +3,8 @@
  * installed game package must pass. This is the M0 subset (10 M0): type ids, the SDK peer range,
  * licences, the dependency rules of 02 §7.1.1 and the import ruleset. The test kit, the
  * manifest-versus-engine check, icon sanitisation and the built-output ESLint rules arrive in M1.
+ * The package contract itself (02 §7.1.1) is checked when the package is read (./packages.ts) and,
+ * for the files inside it, here.
  */
 import { relative } from "node:path";
 
@@ -13,6 +15,7 @@ import { satisfies, validRange } from "semver";
 
 import { isAllowedExpression } from "../licences/policy.js";
 import type { LoadedGame } from "./load.js";
+import { packageFileProblems } from "./packages.js";
 
 /** The instance supplies these; a game names them only as peers (02 §7.1.1). */
 const ALLOWED_PEERS: ReadonlySet<string> = new Set(["@your-move/sdk", "react", "zod"]);
@@ -25,6 +28,8 @@ export interface VerifyOptions {
   readonly sdkVersion: string;
   /** The SDK package's directory as installed here (symlinks resolved). */
   readonly sdkDir: string;
+  /** This repository's workspace packages (real paths): see ./workspace.ts. */
+  readonly workspaceDirs: ReadonlySet<string>;
 }
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&");
@@ -57,7 +62,7 @@ export function checkIdentity(games: readonly LoadedGame[]): string[] {
  * Resolves pnpm's `workspace:` protocol the way publishing does, so a first-party game in this
  * repository is checked exactly like its published package: `workspace:^` and `workspace:~`
  * become `^`/`~` of the workspace version, `workspace:*` the version itself, and
- * `workspace:<range>` the range.
+ * `workspace:<range>` the range. Only for workspace packages: see `checkWorkspaceRanges`.
  */
 export function resolveWorkspaceRange(range: string, workspaceVersion: string): string {
   if (!range.startsWith("workspace:")) return range;
@@ -67,11 +72,26 @@ export function resolveWorkspaceRange(range: string, workspaceVersion: string): 
   return spec;
 }
 
+/**
+ * A package installed from a registry was published, and publishing replaces every `workspace:`
+ * range; one that still has them didn't come through `pnpm publish` and can't be checked.
+ */
+function checkWorkspaceRanges(game: LoadedGame): string[] {
+  const { dependencies, peerDependencies } = game.pkg;
+  return Object.entries({ ...dependencies, ...peerDependencies })
+    .filter(([, range]) => range.startsWith("workspace:"))
+    .map(
+      ([dependency, range]) =>
+        `${game.packageName}: ${dependency} "${range}" uses the workspace: protocol, but the package isn't in this workspace; a published package can't have it`,
+    );
+}
+
 /** The package's `@your-move/sdk` peer range must include this instance's SDK (02 §7.4). */
-function checkSdk(game: LoadedGame, sdkVersion: string): string[] {
+function checkSdk(game: LoadedGame, sdkVersion: string, workspace: boolean): string[] {
   const declared = game.pkg.peerDependencies["@your-move/sdk"];
   // In this repository the workspace SDK is the instance's SDK.
-  const range = declared === undefined ? undefined : resolveWorkspaceRange(declared, sdkVersion);
+  const range =
+    declared !== undefined && workspace ? resolveWorkspaceRange(declared, sdkVersion) : declared;
   if (range === undefined) {
     return [`${game.packageName}: must declare @your-move/sdk as a peer dependency (02 §7.1.1)`];
   }
@@ -167,8 +187,11 @@ async function checkImports(game: LoadedGame, rootDir: string, sdkDir: string): 
 export async function verifyGames(options: VerifyOptions): Promise<string[]> {
   const problems = checkIdentity(options.games);
   for (const game of options.games) {
+    const workspace = options.workspaceDirs.has(game.pkg.dir);
     problems.push(
-      ...checkSdk(game, options.sdkVersion),
+      ...(workspace ? [] : checkWorkspaceRanges(game)),
+      ...packageFileProblems(game.packageName, game.pkg.dir, workspace),
+      ...checkSdk(game, options.sdkVersion, workspace),
       ...checkLicence(game),
       ...checkDependencies(game),
       ...(await checkImports(game, options.rootDir, options.sdkDir)),

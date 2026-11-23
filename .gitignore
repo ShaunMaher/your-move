@@ -7,9 +7,11 @@ build/
 coverage/
 reports/
 *.tsbuildinfo
-# Fixture packages for games:verify are laid out as a registry would install them.
+# Fixture packages for games:verify, with their built dist/ files: the games in registry/ (outside
+# any node_modules directory, so gitleaks scans them), the stub dependencies in node_modules/.
 !scripts/test-fixtures/games/node_modules/
 !scripts/test-fixtures/games/node_modules/**/dist/
+!scripts/test-fixtures/games/registry/**/dist/
 
 # CI caches and outputs kept inside the project directory (GitLab caches only paths there).
 /.pnpm-store/

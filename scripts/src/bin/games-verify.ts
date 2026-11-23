@@ -13,6 +13,7 @@ import { parseArgs } from "node:util";
 import { loadGames, loadInstanceConfig } from "../games/load.js";
 import { nodeModulesResolver } from "../games/packages.js";
 import { verifyGames } from "../games/verify.js";
+import { workspacePackageDirs } from "../games/workspace.js";
 import { fail, ROOT_DIR, run } from "./cli.js";
 
 run("games:verify", async () => {
@@ -32,6 +33,7 @@ run("games:verify", async () => {
     games: loaded.games,
     sdkVersion,
     sdkDir,
+    workspaceDirs: workspacePackageDirs(ROOT_DIR),
   });
   if (problems.length > 0) fail("games:verify", problems);
   console.log(
