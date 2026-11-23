@@ -18,7 +18,7 @@
     "format:check": "prettier --check .",
     "lint": "pnpm games:generate && eslint . --max-warnings 0",
     "lint:arch": "pnpm games:generate && depcruise --config .dependency-cruiser.mjs apps packages games scripts tests generated",
-    "lint:unused": "pnpm games:generate && knip",
+    "lint:unused": "pnpm games:generate && knip --treat-config-hints-as-errors",
     "lint:licences": "tsx scripts/src/bin/licences-check.ts",
     "lint:vulns": "tsx scripts/src/bin/vulns-check.ts",
     "typecheck": "pnpm games:generate && tsc --build",
