@@ -66,6 +66,7 @@ Toolchain: `mise install` (Node, pnpm and the scanners pinned in `mise.toml` and
   `pnpm typecheck` · `pnpm test` ·
   `pnpm test:e2e` (after `pnpm build`) · `pnpm gates:prove`
 - Games: `pnpm games:generate` (also runs on `prepare`) · `pnpm games:verify` (`--fast` in builds; never in deploy jobs) ·
+  `pnpm games:check-inputs` (after the builds; `--only web,node` in the Docker build) ·
   `pnpm games:check-db` (deploy; reads only `generated/installed.json`)
 - API: `pnpm api:generate` (OpenAPI document + `@your-move/api-client`) · `pnpm api:surface`
   (the SDK's API Extractor reports)
