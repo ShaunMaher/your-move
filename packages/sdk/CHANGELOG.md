@@ -8,7 +8,7 @@
   `GameDefinition`, `GameManifest` and `GameClientModule` contracts, the recording and replaying
   `RandomSource` with `shuffle`, `Resources`, the reserved error codes, the kit's test hooks
   (`GameTestHooks`, including the required `optionInputs` and the optional `context` and
-  `resources`), and the client-facing API
+  `resources`, and `hiddenFromEveryone`), and the client-facing API
   types as Zod schemas (`GameEnvelope`, `SubmitResult`, `Text`). `@your-move/sdk/schema` re-exports
   Zod; `@your-move/sdk/client` holds the client contract and the React helpers (`formatText`,
   `TextView`).

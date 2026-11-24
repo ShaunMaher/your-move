@@ -21,8 +21,9 @@ const DEFAULT_CPU_BUDGET_MS = 5;
  * single garbage-collection pause doesn't fail a correct module, and timing stops as soon as more
  * runs than that are over budget, so a slow module fails quickly.
  *
- * A worst case must be a real move: its seat in `toAct` and its action valid, and a playable seat
- * count must have at least one, or the check would be vacuous.
+ * A worst case must be a real move of its combination: a game with that many seats, its seat in
+ * `toAct` and its action valid; and a playable seat count must have at least one, or the check
+ * would be vacuous.
  */
 export function checkCpu(
   report: Reporter,
@@ -61,6 +62,11 @@ export function checkCpu(
   for (const [index, { state, seat, action }] of cases.entries()) {
     const at = `worstCase input ${String(index)}`;
     try {
+      const status = def.seatStatus(state) as readonly unknown[];
+      if (!Array.isArray(status) || status.length !== seats) {
+        report.fail("cpu", `${at}: its state isn't a ${String(seats)}-seat game`, where);
+        continue;
+      }
       if (!def.toAct(state).includes(seat)) {
         report.fail("cpu", `${at}: seat ${String(seat)} isn't in toAct`, where);
         continue;

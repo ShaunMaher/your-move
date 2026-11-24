@@ -38,6 +38,15 @@ describe("runKit on the broken fixtures (02 §6)", () => {
   });
 });
 
+describe("runKit without stopping at the first failure", () => {
+  it("reports isolation on the module-level cache fixture", () => {
+    const fixture =
+      brokenFixtures()["keeps hidden state in a module-level cache shared between games"];
+    const report = runKit(fixture?.engines() ?? {}, { ...fast, games: 10 });
+    expect(report.failures.map((f) => f.property)).toContain("isolation");
+  });
+});
+
 describe("runKit's static checks", () => {
   it("reports a manifest that disagrees with the engine", () => {
     const report = runKit(asEngines(toyGame()), {
@@ -187,16 +196,23 @@ describe("runKit's static checks", () => {
   it("fails worst cases that aren't real moves, and reports ones that throw", () => {
     const toy = toyGame();
     const worstCase =
-      (marker: number, card?: number, seat = 0) =>
-      () => {
-        const state = toy.setup({ options: {}, seats: 2, rng: { nextInt: () => 0 } });
+      (marker: number, card?: number, seat = 0, wrongSeats = false) =>
+      (_options: unknown, seats: number) => {
+        const state = toy.setup({
+          options: {},
+          seats: wrongSeats ? seats + 1 : seats,
+          rng: { nextInt: () => 0 },
+        });
         return [
           { state: { ...state, marker }, seat, action: { card: card ?? state.hands[0]?.[0] ?? 1 } },
         ];
       };
-    const messages = (marker: number, card?: number, seat?: number): string[] =>
+    const messages = (marker: number, card?: number, seat?: number, wrong?: boolean): string[] =>
       runKit(
-        asEngines({ ...toy, test: { ...toy.test, worstCase: worstCase(marker, card, seat) } }),
+        asEngines({
+          ...toy,
+          test: { ...toy.test, worstCase: worstCase(marker, card, seat, wrong) },
+        }),
         {
           mode: "fast",
           games: 1,
@@ -207,6 +223,10 @@ describe("runKit's static checks", () => {
       "worstCase input 0: the action doesn't validate (NOT_IN_HAND)",
     );
     expect(messages(0, undefined, 1)).toContain("worstCase input 0: seat 1 isn't in toAct");
+    // P2-3: a worst case belongs to its combination's seat count.
+    expect(messages(0, undefined, 0, true)).toContain(
+      "worstCase input 0: its state isn't a 2-seat game",
+    );
     const throwing = runKit(
       asEngines({
         ...toy,
@@ -284,23 +304,48 @@ describe("runKit's static checks", () => {
       games: 30,
     });
     expect(report.failures.map((f) => f.message).join("\n")).toMatch(
-      /changed the state in only 0 of \d+ samples/u,
+      /changed another viewer's view in only 0 of \d+ samples/u,
     );
   });
 
-  it("counts a perturbation that only reorders a deck no viewer sees, when no view ever changes", () => {
+  it("counts a deck-only perturbation by the state only when the module says no seat sees its hidden information", () => {
     const toy = toyGame();
-    const deckOnly = {
+    // Every hand is public, so the deck order is the only hidden information.
+    const deckOnly = (hiddenFromEveryone?: boolean) => ({
       ...toy,
+      view: (s: Parameters<typeof toy.view>[0], v: number | null) => ({
+        ...toy.view(s, v),
+        peek: s.hands,
+      }),
       test: {
         ...toy.test,
         perturbHidden: (s: Parameters<typeof toy.view>[0]) => ({
           ...s,
           deck: [...s.deck].reverse(),
         }),
+        ...(hiddenFromEveryone === undefined ? {} : { hiddenFromEveryone }),
       },
-    };
-    expect(runKit(asEngines(deckOnly), { mode: "fast", games: 20 }).failures).toEqual([]);
+    });
+    expect(runKit(asEngines(deckOnly(true)), { mode: "fast", games: 20 }).failures).toEqual([]);
+    expect(
+      runKit(asEngines(deckOnly()), { mode: "fast", games: 20 })
+        .failures.map((f) => f.message)
+        .join("\n"),
+    ).toMatch(/changed another viewer's view in only 0 of/u);
+  });
+
+  it("refuses hiddenFromEveryone without hiddenInformation", () => {
+    const toy = toyGame();
+    const report = runKit(
+      asEngines({
+        ...toy,
+        test: { ...toy.test, hiddenInformation: false, hiddenFromEveryone: true },
+      }),
+      { mode: "fast", games: 1 },
+    );
+    expect(report.failures.map((f) => f.message)).toContain(
+      "hiddenFromEveryone is set but hiddenInformation isn't",
+    );
   });
 
   it("counts a perturbation only when it changes another viewer's view, once any view can change", () => {
