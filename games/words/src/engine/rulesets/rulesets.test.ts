@@ -9,9 +9,12 @@ import {
   closestWordPremiums,
   isQuarterTurnSymmetric,
   MAX_BOARD_SIZE,
+  MAX_OPENING_MULTIPLIER,
   maxWordMultiplier,
   MIN_WORD_PREMIUM_DISTANCE,
-  WORD_MULTIPLIER_CAPS,
+  openingMultiplierLimit,
+  openingWordMultiplier,
+  WORD_MULTIPLIER_CAP,
   premiumCounts,
   rotatePremiums,
   rulesetSchema,
@@ -45,6 +48,21 @@ function ruleset(id: string): Ruleset {
   return found;
 }
 
+/**
+ * How many times two premium squares sit one square apart (`X.X`) in a row or column: a design
+ * limit on the MVP layouts (M1b review P2-1), not a schema rule.
+ */
+function gapOnePairs(premiums: readonly string[]): number {
+  const columns = premiums.map((_, col) => premiums.map((line) => line[col] ?? ".").join(""));
+  let pairs = 0;
+  for (const line of [...premiums, ...columns]) {
+    for (let i = 0; i + 2 < line.length; i += 1) {
+      if (line[i] !== "." && line[i + 2] !== ".") pairs += 1;
+    }
+  }
+  return pairs;
+}
+
 /** words §8.3: every field of each MVP ruleset. */
 const MVP = [
   {
@@ -54,6 +72,8 @@ const MVP = [
     total: 100,
     startPremium: "D",
     premiums: { TW: 8, DW: 17, TL: 12, DL: 24 },
+    maxUpTo7: 4,
+    opening: 2,
     bingoBonus: 50,
     swapOrder: "drawThenReturn",
   },
@@ -64,6 +84,8 @@ const MVP = [
     total: 104,
     startPremium: ".",
     premiums: { TW: 8, DW: 12, TL: 16, DL: 24 },
+    maxUpTo7: 3,
+    opening: 1,
     bingoBonus: 35,
     swapOrder: "returnThenDraw",
   },
@@ -109,17 +131,28 @@ describe.each(MVP)("ruleset $id (words §8.3)", (expected) => {
     expect(adjacentPremiums(r.premiums)).toStrictEqual([]);
   });
 
-  it("never lets a short word stack word multipliers (M1b review P2-1)", () => {
+  it("is not symmetric under a mirror, as the reference boards are (words §8.3, Q15)", () => {
+    // Under quarter-turn symmetry one mirror symmetry implies all four, so one check covers them.
+    const mirrored = r.premiums.map((row) =>
+      Array.from({ length: row.length }, (_, col) => row.charAt(row.length - 1 - col)).join(""),
+    );
+    expect(mirrored).not.toStrictEqual(r.premiums);
+  });
+
+  it("never lets a short word stack word multipliers (M1b review P2-1, issue #10 R-2)", () => {
     expect(closestWordPremiums(r.premiums)).toBeGreaterThanOrEqual(MIN_WORD_PREMIUM_DISTANCE);
-    // The caps are the reference boards' own limits: ×4 up to 6 letters, ×6 at 7.
-    expect(WORD_MULTIPLIER_CAPS).toStrictEqual([
-      { maxLength: 6, max: 4 },
-      { maxLength: 7, max: 6 },
-    ]);
-    for (let length = 2; length <= 6; length += 1) {
-      expect(maxWordMultiplier(r.premiums, length)).toBeLessThanOrEqual(4);
-    }
-    expect(maxWordMultiplier(r.premiums, 7)).toBeLessThanOrEqual(6);
+    // The cap is the reference boards' own limit: ×4 up to 7 letters.
+    expect(WORD_MULTIPLIER_CAP).toStrictEqual({ maxLength: 7, max: 4 });
+    expect(maxWordMultiplier(r.premiums, 7)).toBe(expected.maxUpTo7);
+  });
+
+  it("gives an opening word no more than the start square's own multiplier (issue #10 R-1)", () => {
+    expect(openingMultiplierLimit(r.premiums, r.start)).toBe(expected.opening);
+    expect(openingWordMultiplier(r.premiums, r.start, r.rackSize)).toBe(expected.opening);
+  });
+
+  it("keeps letter premiums from clustering: at most 12 X.X patterns (M1b review P2-1)", () => {
+    expect(gapOnePairs(r.premiums)).toBeLessThanOrEqual(12);
   });
 
   it("is deep-frozen, so no game can change the shared copy", () => {
@@ -215,6 +248,40 @@ describe("premium helpers", () => {
     { line: "T.T", length: 9, max: 9 },
   ])("$line: a word of $length letters covers at most ×$max", ({ line, length, max }) => {
     expect(maxWordMultiplier([line], length)).toBe(max);
+  });
+
+  it.each<{ premiums: string[]; start: [number, number]; length: number; max: number }>([
+    { premiums: ["D...D...D"], start: [0, 4], length: 4, max: 2 },
+    { premiums: ["D...D...D"], start: [0, 4], length: 5, max: 4 },
+    { premiums: ["D..D"], start: [0, 0], length: 3, max: 2 },
+    { premiums: ["D..D"], start: [0, 0], length: 4, max: 4 },
+    { premiums: ["D..D"], start: [0, 3], length: 4, max: 4 },
+    { premiums: ["T", ".", ".", "D"], start: [3, 0], length: 3, max: 2 },
+    { premiums: ["T", ".", ".", "D"], start: [3, 0], length: 4, max: 6 },
+    // Only the start square's own row and column count: the TW is on neither.
+    { premiums: ["T..", "...", "..D"], start: [2, 2], length: 3, max: 2 },
+    { premiums: ["d.t.d"], start: [0, 2], length: 5, max: 1 },
+  ])(
+    "$premiums: an opening of up to $length letters through $start covers at most ×$max",
+    ({ premiums, start, length, max }) => {
+      expect(openingWordMultiplier(premiums, start, length)).toBe(max);
+    },
+  );
+
+  it.each([
+    { start: "D", limit: 2 },
+    { start: "T", limit: MAX_OPENING_MULTIPLIER },
+    { start: "d", limit: 1 },
+    { start: "t", limit: 1 },
+    { start: ".", limit: 1 },
+  ])("lets an opening through a start square of $start cover ×$limit", ({ start, limit }) => {
+    expect(openingMultiplierLimit([`.${start}.`], [0, 1])).toBe(limit);
+  });
+
+  it("counts X.X patterns in rows and columns", () => {
+    expect(gapOnePairs(["d.d", "...", "d.D"])).toBe(4);
+    expect(gapOnePairs(["d..d", "....", "....", "d..d"])).toBe(0);
+    expect(gapOnePairs(["d.t.d"])).toBe(2);
   });
 
   it("counts each premium code", () => {
@@ -338,19 +405,110 @@ describe("ruleset schema (words §8.2)", () => {
       "a 5-letter word covering two TWs",
       5,
       ["T...T", ".....", ".....", ".....", "T...T"],
-      /6 letters or fewer may cover at most ×4/u,
+      /7 letters or fewer may cover at most ×4/u,
     ],
     [
       "a 7-letter word covering two TWs",
       7,
       ["T.....T", ".......", ".......", ".......", ".......", ".......", "T.....T"],
-      /7 letters or fewer may cover at most ×6/u,
+      /7 letters or fewer may cover at most ×4/u,
     ],
   ])("rejects %s (M1b review P2-1)", (_name, boardSize, premiums, message) => {
     const result = rulesetSchema.safeParse({ ...small(), boardSize, start: [2, 2], premiums });
     expect(result.success).toBe(false);
     const messages = result.error?.issues.map((issue) => issue.message) ?? [];
     expect(messages.some((text) => message.test(text))).toBe(true);
+  });
+
+  /** A 9×9 ruleset with a full rack of `rackSize`, valid but for what `premiums` breaks. */
+  function nine(premiums: string[], rackSize: number): RulesetData {
+    return {
+      ...small(),
+      boardSize: 9,
+      start: [4, 4],
+      rackSize,
+      swapMinBag: rackSize,
+      tiles: { a: { count: 2 * rackSize, points: 1 } },
+      premiums,
+    };
+  }
+
+  // A TW and a DW six squares apart in rows 0 and 8 and columns 0 and 8.
+  const TW_DW_SIX_APART = [
+    ".T.....D.",
+    "D.......T",
+    ".........",
+    ".........",
+    ".........",
+    ".........",
+    ".........",
+    "T.......D",
+    ".D.....T.",
+  ];
+  // DWs at the ends of row 4 and column 4, four squares from the start square.
+  const DW_FOUR_FROM_START = (start: string): string[] => [
+    "....D....",
+    ".........",
+    ".........",
+    ".........",
+    `D...${start}...D`,
+    ".........",
+    ".........",
+    ".........",
+    "....D....",
+  ];
+  // DWs in row 4 and column 4, three squares from a plain start square.
+  const DW_THREE_FROM_START = [
+    ".........",
+    "....D....",
+    ".........",
+    ".........",
+    ".D.....D.",
+    ".........",
+    ".........",
+    "....D....",
+    ".........",
+  ];
+
+  it.each<[string, RulesetData, string]>([
+    [
+      "a TW and a DW in one 7-letter word (×6)",
+      nine(TW_DW_SIX_APART, 2),
+      "a word of 7 letters or fewer may cover at most ×4",
+    ],
+    [
+      "an opening covering a second DW with the start square's (×4)",
+      nine(DW_FOUR_FROM_START("D"), 7),
+      "a word through the start square of 7 letters or fewer may cover at most ×2",
+    ],
+    [
+      "an opening covering a DW from a plain start square (×2)",
+      nine(DW_THREE_FROM_START, 7),
+      "a word through the start square of 7 letters or fewer may cover at most ×1",
+    ],
+    [
+      "an opening covering a DW from a letter-premium start square (×2)",
+      nine(DW_FOUR_FROM_START("d"), 5),
+      "a word through the start square of 5 letters or fewer may cover at most ×1",
+    ],
+    [
+      "a TW start square (×3)",
+      { ...small(), premiums: ["d.d", ".T.", "d.d"] },
+      "a word through the start square of 2 letters or fewer may cover at most ×2",
+    ],
+  ])("rejects %s, and only for that (issue #10)", (_name, data, message) => {
+    const result = rulesetSchema.safeParse(data);
+    expect(result.error?.issues.map((issue) => [issue.path, issue.message])).toStrictEqual([
+      [["premiums"], message],
+    ]);
+  });
+
+  it.each<[string, RulesetData]>([
+    ["two DWs six apart, ×4 in 7 letters", nine(DW_THREE_FROM_START, 2)],
+    ["a second DW just beyond a full rack's reach", nine(DW_FOUR_FROM_START("D"), 4)],
+    ["a DW just beyond a full rack's reach of a plain start", nine(DW_FOUR_FROM_START("."), 4)],
+  ])("accepts %s (issue #10)", (_name, data) => {
+    expect(rulesetSchema.safeParse(data).success).toBe(true);
   });
 
   it("keeps a valid board whose word premiums are 4 apart and cover ×4 at most", () => {
