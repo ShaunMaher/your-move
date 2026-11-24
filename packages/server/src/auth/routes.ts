@@ -163,7 +163,9 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
       return token === null ? fail(c, 401, "UNAUTHENTICATED") : fail(c, 400, "BAD_REQUEST");
     }
     if (token === null) return fail(c, 401, "UNAUTHENTICATED");
-    const active = await loadSession(repos, token, now());
+    const active = await loadSession(repos, token, now(), (task) => {
+      background(c, platform, task);
+    });
     if (active === null) {
       clearCookie(c);
       return fail(c, 401, "UNAUTHENTICATED");

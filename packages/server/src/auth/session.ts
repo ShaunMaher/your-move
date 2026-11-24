@@ -80,6 +80,8 @@ export async function loadSession(
   repos: Repositories,
   token: string,
   now: number,
+  /** Runs the `last_seen_at` refresh in the background (`waitUntil`, 03 §11). */
+  defer: (task: () => Promise<unknown>) => void,
 ): Promise<ActiveSession | null> {
   const found = await repos.sessions.findByTokenHash(await hashSessionToken(token));
   if (found === null) return null;
@@ -90,7 +92,7 @@ export async function loadSession(
   }
   if (now - session.lastSeenAt >= TOUCH_INTERVAL_MS) {
     const expiresAt = slidingExpiry(session.createdAt, now);
-    await repos.sessions.touch(session.id, now, expiresAt);
+    defer(() => repos.sessions.touch(session.id, now, expiresAt));
     return { session: { ...session, lastSeenAt: now, expiresAt }, user };
   }
   return found;

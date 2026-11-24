@@ -421,26 +421,37 @@ describe("sessions (06 §4)", () => {
     expect(me.isAdmin).toBe(true);
   });
 
+  /** GET /me, then waits for the background `last_seen_at` refresh. */
+  const meStatus = async (cookie: string): Promise<number> => {
+    const response = await h.request("GET", "/api/v1/me", undefined, { cookie });
+    await h.emails();
+    return response.status;
+  };
+
   it("sliding expiry: valid for 180 days since last use", async () => {
     const cookie = await h.signIn(fresh());
+    h.advance(100 * DAY);
+    expect(await meStatus(cookie)).toBe(200);
+    // 279 days after sign-in, 179 after last use: still valid because use slid the expiry.
     h.advance(179 * DAY);
-    expect((await h.request("GET", "/api/v1/me", undefined, { cookie })).status).toBe(200);
-    h.advance(179 * DAY);
-    expect((await h.request("GET", "/api/v1/me", undefined, { cookie })).status).toBe(200);
-    h.advance(181 * DAY);
-    expect((await h.request("GET", "/api/v1/me", undefined, { cookie })).status).toBe(401);
+    expect(await meStatus(cookie)).toBe(200);
+    // 180 days without use (well inside the 400-day cap): expired.
+    const idle = await h.signIn(fresh());
+    h.advance(180 * DAY - 1);
+    expect(await meStatus(idle)).toBe(200);
+    h.advance(180 * DAY);
+    expect(await meStatus(idle)).toBe(401);
   });
 
   it("absolute cap: 400 days after sign-in, even with regular use", async () => {
     const cookie = await h.signIn(fresh());
-    for (let day = 0; day < 399; day += 30) {
+    for (let day = 30; day <= 390; day += 30) {
       h.advance(30 * DAY);
-      if (day + 30 < 400) {
-        expect((await h.request("GET", "/api/v1/me", undefined, { cookie })).status).toBe(200);
-      }
+      expect(await meStatus(cookie)).toBe(200);
     }
-    h.advance(30 * DAY);
-    expect((await h.request("GET", "/api/v1/me", undefined, { cookie })).status).toBe(401);
+    // Last used at day 390, so the sliding expiry alone would allow it until day 570.
+    h.advance(10 * DAY);
+    expect(await meStatus(cookie)).toBe(401);
   });
 
   it("last_seen_at is refreshed at most once an hour", async () => {
@@ -457,9 +468,11 @@ describe("sessions (06 §4)", () => {
     const first = await seen();
     h.advance(30 * MINUTE);
     await h.request("GET", "/api/v1/me", undefined, { cookie });
+    await h.emails();
     expect(await seen()).toBe(first);
     h.advance(31 * MINUTE);
     await h.request("GET", "/api/v1/me", undefined, { cookie });
+    await h.emails();
     expect(await seen()).toBe((first ?? 0) + 61 * MINUTE);
   });
 
