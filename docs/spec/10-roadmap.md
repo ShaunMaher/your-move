@@ -177,6 +177,9 @@ The project's foundation, built to 11 (engineering standards) from the first com
 - Words client module: board UI — drag & drop + tap-to-place, zoom, blank picker, live preview, shuffle/recall,
   swap/pass/resign dialogs.
 - Realtime: `UserChannel` DO + Node hub; refetch on visibility.
+- Built-in dictionaries served through `DictionaryProvider` (03 §10): the asset-fetch `loadText`
+  reads the whole body inside the load, has a timeout, and its failures are negatively cached
+  briefly (M1b review S-5).
 - **Accept:** transition race tests (03 §5.2 list: exactly one wins and no partial writes, both
   drivers); framework tests run with both `words` and the reference module (proves no game-specific
   code leaked into the framework), covering with the reference module: start below max, decline in
@@ -283,7 +286,13 @@ The project's foundation, built to 11 (engineering standards) from the first com
   upload in a new game returns the same `400 INVALID_OPTIONS` (`detail.code = UNKNOWN_DICTIONARY`) as a nonexistent id; an off-rack
   play never yields `INVALID_WORDS`; zip-bomb and oversized uploads rejected while streaming;
   orphaned blobs swept; quota counts deleted-but-unpurged uploads; delete-while-in-use keeps
-  existing games working and the sweep purges afterwards; upload CPU measured on Workers.
+  existing games working and the sweep purges afterwards; upload CPU measured on Workers;
+  the global removals (`removals-global.txt`, from the dictionary build's index) are applied to
+  uploaded and operator lists, and each stored list's word count, alphabet, hash and size are
+  recomputed from the cleaned text (M1b review S-2); validation streams with the 16 MB
+  decompressed cap, stops early at the 500,000-word cap (`checkWordList`'s `maxWords`),
+  short-circuits on an over-long line, and runs outside a Workers Free request if a request
+  can't afford it (M1b review S-3).
 
 ## M7 — Accounts for children (pending Q20)
 - Scope decided by Q20 (e.g. adult-managed profiles without email, device sign-in codes issued by the

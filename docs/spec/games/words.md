@@ -196,6 +196,9 @@ client can render any game and preview any play.
   the swapped tiles go back, §3.2). A dictionary letter has a tile only if its count is at least 1
   (§9.3).
 - Each premium layout MUST be symmetric under 90° rotation (validated by a test).
+- No two premium squares are orthogonally adjacent, the start square included (a DW start
+  square never touches a DL), so premiums don't stack in one short word (checked by the
+  schema).
 - Premium layouts are **original arrangements** designed by us, keeping the reference game's
   premium counts and overall density so the game feels familiar. They MUST NOT copy any commercial
   board square-for-square (see open question Q15). The coding agent documents the counts in the
@@ -213,7 +216,7 @@ Display names "Classic" and "Casual" (Q16) live only in the ruleset files.
 | Modelled on | the traditional board game | the popular mobile game |
 | Board | 15×15, start (7,7) | 15×15, start (7,7) |
 | Start square premium | DW | none |
-| Premium counts (original layout) | 8 TW · 17 DW (incl. start) · 12 TL · 24 DL | approximately the reference game's counts; coder documents them |
+| Premium counts (original layout) | 8 TW · 17 DW (incl. start) · 12 TL · 24 DL | 8 TW · 12 DW · 16 TL · 24 DL (approximately the reference game's counts) |
 | Tiles | 100 incl. 2 blanks (table A) | 104 incl. 2 blanks (table B) |
 | Rack | 7 | 7 |
 | Bingo bonus | 50 | 35 |
@@ -269,18 +272,22 @@ rulesets.
 ### 9.1 Registry and data
 
 - Each dictionary lives in `packages/dictionary/dictionaries/<id>/`:
-  - `meta.json`: `{ id, version, name, description, language, licence, sourceUrl, sha256 }`
+  - `meta.json`: `{ id, version, name, description, language, licence, sourceUrl, sha256 }`,
+    where `sha256` is the hash of `source.txt`
   - `source.txt`: the upstream list, unmodified, checked against `sha256` at build time
   - `additions.txt`, `removals.txt`: our edits, applied at build time: one word per line, sorted,
     no duplicates or comments; an addition must not already be in the source and a removal must be
     in it. Any change to the source or the edits is a new `version`.
 - Build output per dictionary (`packages/dictionary/generated/<id>/`, never committed): sorted,
   newline-delimited, lower-case `a`–`z` words of length 2..15 (`words.txt`), plus brotli/gzip
-  versions for the client, and a manifest (the `meta.json` fields plus `wordCount`, `alphabet`,
-  the SHA-256 and size of `words.txt`, and how many upstream lines were dropped). Upstream lines
-  with any character outside `a`–`z` are dropped, never lower-cased (they are proper nouns or
-  abbreviations). Longer words can't fit any MVP board and are dropped. (When a ruleset with a
-  larger board exists, the length cap becomes the largest `boardSize`.)
+  versions for the client, and a manifest (the `meta.json` fields, `sha256` still the source's
+  hash, plus `wordCount`, `alphabet`, `wordsSha256` and `bytes` of `words.txt`, and how many
+  upstream lines were dropped). The server checks `words.txt` against `bytes` and `wordsSha256`
+  once per load, before first use. The build's index also carries the global removals, for the
+  upload and operator paths (§9.5). Upstream lines with any character outside `a`–`z` are
+  dropped, never lower-cased (they are proper nouns or abbreviations). Longer words can't fit
+  any MVP board and are dropped. The word-length cap (15) and the ruleset schema's `boardSize`
+  cap (§8.2) are one limit: raising it means raising both together, and a test ties the two.
 - **Licensing gate**: only public-domain or permissively licensed lists may be added, with the
   licence recorded in `meta.json` and `packages/dictionary/README.md`. The official tournament
   lists (the North American NWL/TWL family and the Commonwealth Collins list) are **not** freely
@@ -289,7 +296,8 @@ rulesets.
 - `removals.txt` ships with a list of slurs so they can't be played (Q7). The same words are also
   kept in a shared `packages/dictionary/removals-global.txt`, which is applied to every operator
   and uploaded dictionary (§9.5) and, as a safeguard, to the built-in ones too; a test checks that
-  each built-in `removals.txt` contains every global removal.
+  each built-in `removals.txt` contains every global removal present in that dictionary's
+  source (a removal must be in the source, so one the source lacks isn't listed).
 
 ### 9.2 MVP dictionary
 
