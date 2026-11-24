@@ -17,7 +17,6 @@ import { d1Repositories } from "@your-move/worker/d1";
 import { describe, expect, it } from "vitest";
 import { getPlatformProxy } from "wrangler";
 
-
 const CONFIG = fileURLToPath(new URL("../wrangler.d1.toml", import.meta.url));
 const WRANGLER = fileURLToPath(new URL("../node_modules/.bin/wrangler", import.meta.url));
 

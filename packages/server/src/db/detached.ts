@@ -13,25 +13,37 @@ export class DetachedStorageError extends Error {
   }
 }
 
-function detached<T extends object>(name: string, methods: readonly (keyof T & string)[]): T {
+/**
+ * Every method of each repository. `satisfies` makes the compiler demand an entry for each one,
+ * so a method added to an interface can't be left undefined here.
+ */
+const METHODS = {
+  users: { create: true, findById: true, findByEmail: true } satisfies Record<keyof UserRepo, true>,
+  games: {
+    create: true,
+    get: true,
+    players: true,
+    actions: true,
+    applyTransition: true,
+    liveGames: true,
+  } satisfies Record<keyof GameRepo, true>,
+} as const satisfies Record<keyof Repositories, object>;
+
+function detached<K extends string>(
+  name: string,
+  methods: Record<K, true>,
+): Record<K, () => Promise<never>> {
   return Object.fromEntries(
-    methods.map((method) => [
+    Object.keys(methods).map((method) => [
       method,
       () => Promise.reject(new DetachedStorageError(`${name}.${method}`)),
     ]),
-  ) as T;
+  ) as Record<K, () => Promise<never>>;
 }
 
 export function detachedRepositories(): Repositories {
   return {
-    users: detached<UserRepo>("users", ["create", "findById", "findByEmail"]),
-    games: detached<GameRepo>("games", [
-      "create",
-      "get",
-      "players",
-      "actions",
-      "applyTransition",
-      "liveGames",
-    ]),
+    users: detached("users", METHODS.users),
+    games: detached("games", METHODS.games),
   };
 }

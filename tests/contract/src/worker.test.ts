@@ -61,6 +61,8 @@ beforeAll(async () => {
     }
     throw known === null ? error : new Error(known, { cause: error });
   }
+  // The Worker runs against the same schema a deployment has (M2a review P-9).
+  await harness.getWorker().applyD1Migrations("DB");
 }, 60_000);
 
 afterAll(async () => {
@@ -126,5 +128,17 @@ describe("Worker static assets (generated _headers)", () => {
       expect(response.status).toBe(404);
       expect(response.headers.get("Content-Type")).toMatch(/^application\/json/u);
     }
+  });
+});
+
+describe("Worker storage", () => {
+  it("runs on a D1 database with the shared migrations applied", async () => {
+    const env = await harness
+      .getWorker<{ DB: { prepare(sql: string): { first<T>(): Promise<T | null> } } }>()
+      .getEnv();
+    const row = await env.DB.prepare(
+      "SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table' AND name IN ('users', 'games', 'game_players')",
+    ).first<{ n: number }>();
+    expect(row?.n).toBe(3);
   });
 });

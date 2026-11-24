@@ -311,7 +311,9 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         expect(result).toBe("stale");
       });
 
-      it("of concurrent transitions from one version exactly one wins, and the database matches it exactly", async () => {
+      // On Node the four calls interleave only at await points (one connection); on D1 they are
+      // real concurrent requests. Either way the version check and token guard decide the race.
+      it("of transitions started together from one version, exactly one wins, and the database matches it exactly", async () => {
         for (let round = 0; round < 10; round++) {
           const ids = await activeGame(repos);
           const contenders = [0, 1, 2, 3].map((n) => move(ids, 1, 0, `contender-${String(n)}`));

@@ -70,6 +70,10 @@ export default defineConfig({
         // The D1 adapter: exercised by the D1 repository contract suite (tests/contract), which
         // runs workerd and so runs in CI's arm64 test:worker job, outside the coverage run.
         "apps/worker/src/d1.ts",
+        // The shared repository contract suite and its entry point: test code that ships in src/
+        // so both adapters' tests can import it (@your-move/server/testing).
+        "packages/server/src/db/repository-contract.ts",
+        "packages/server/src/db/testing.ts",
         "apps/web/src/main.tsx",
         "packages/dictionary/src/builder/bench.ts",
         "packages/dictionary/src/builder/cli.ts",

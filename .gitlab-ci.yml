@@ -256,9 +256,8 @@ test:
 # The Worker half of the contract suite and the D1 repository contract suite (workerd), on the
 # arm64 runner. It is a separate job only because the amd64 shared runner's VM CPU lacks SSE4.2
 # (x86-64-v2), which workerd's linux-64 build needs (M0 review CI-1; docs/deploy.md). Once that
-# runner offers x86-64-v2, delete this job
-# and the --excludes in `test`. Coverage stays with `test`, which excludes the D1 adapter
-# (apps/worker/src/d1.ts) that only this job exercises.
+# runner offers x86-64-v2, delete this job and the --excludes in `test`. Coverage stays with
+# `test`, which excludes the D1 adapter (apps/worker/src/d1.ts) that only this job exercises.
 test:worker:
   stage: test
   extends: [.pnpm, .every-pipeline]

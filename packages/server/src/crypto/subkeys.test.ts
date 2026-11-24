@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { NormalisedEmail } from "../accounts/email.js";
 import {
   deriveSubkeyBytes,
   deriveSubkeys,
@@ -58,12 +59,12 @@ describe("HKDF subkeys (09 §1.1)", () => {
 
   it("computes emailId as HMAC-SHA256 under email-id/v1", async () => {
     const keys = await deriveSubkeys(SECRET);
-    expect(await emailId(keys, "alex@example.org")).toBe(
+    expect(await emailId(keys, "alex@example.org" as NormalisedEmail)).toBe(
       "23166a32736ea9a694bf81440f6f26376a16e97eb5932f70b16853f6b8ef7bf6",
     );
     // Not the same MAC under another subkey.
     expect(await hmacHex(keys.otp, "alex@example.org")).not.toBe(
-      await emailId(keys, "alex@example.org"),
+      await emailId(keys, "alex@example.org" as NormalisedEmail),
     );
   });
 

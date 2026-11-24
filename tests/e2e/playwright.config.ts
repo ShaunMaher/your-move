@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -32,11 +32,15 @@ import { LAUNCH_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./src/budgets.js";
 const PORT = 4173;
 // Built by `pnpm build` (CI: the build:app artifact). Without it the web server fails to start.
 const SERVER = new URL("../../apps/node/dist/main.js", import.meta.url);
-// A fresh database per run, migrated by the server at startup.
-const DATABASE_PATH = join(mkdtempSync(join(tmpdir(), "e2e-db-")), "app.sqlite");
+// A fresh database per run, created and migrated by the server at startup. Only the name is chosen
+// here, once: Playwright loads this file again in each worker, which inherit the variable, and
+// src/global-teardown.ts removes the directory.
+process.env["E2E_DATA_DIR"] ??= join(tmpdir(), `your-move-e2e-${randomUUID()}`);
+const DATABASE_PATH = join(process.env["E2E_DATA_DIR"], "app.sqlite");
 
 export default defineConfig({
   testDir: "src",
+  globalTeardown: "./src/global-teardown.ts",
   forbidOnly: Boolean(process.env["CI"]),
   // A flaky test is a bug (11 §4): no silent retries.
   retries: 0,

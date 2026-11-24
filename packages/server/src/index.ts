@@ -13,6 +13,7 @@ export {
   type OpenApiDocument,
   type Platform,
 } from "./app.js";
+export type { NormalisedEmail } from "./accounts/email.js";
 export { DEFAULT_APP_NAME } from "./config/defaults.js";
 export { isLocalDev, isLocalDevUrl } from "./config/local-dev.js";
 export {

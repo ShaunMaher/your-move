@@ -6,6 +6,7 @@
  * Changing a label or the derivation changes every value hashed with it (09 §1.1 lists what
  * breaks), so both are fixed by known-answer tests.
  */
+import type { NormalisedEmail } from "../accounts/email.js";
 
 /** Every subkey label (09 §1.1). Bump the version to rotate one, never edit it. */
 export const SUBKEY_LABELS = {
@@ -97,6 +98,6 @@ export async function verifyHmacHex(
 }
 
 /** `emailId` (09 §1.1): the HMAC of an already normalised address under `email-id/v1`. */
-export function emailId(keys: Subkeys, normalisedEmail: string): Promise<string> {
+export function emailId(keys: Subkeys, normalisedEmail: NormalisedEmail): Promise<string> {
   return hmacHex(keys.emailId, normalisedEmail);
 }
