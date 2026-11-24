@@ -2,7 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createJsonLogger, parseConfig, securityHeaders } from "@your-move/server";
+import {
+  createJsonLogger,
+  detachedRepositories,
+  parseConfig,
+  securityHeaders,
+} from "@your-move/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createNodeApp } from "./server.js";
@@ -36,6 +41,7 @@ function app() {
   );
   return createNodeApp({
     platform: {
+      repos: detachedRepositories(),
       config,
       now,
       log: createJsonLogger({ level: "error", now, sink: () => undefined }),

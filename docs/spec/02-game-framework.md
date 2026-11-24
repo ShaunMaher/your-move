@@ -689,12 +689,15 @@ games still use is caught at **deploy and run time**:
   `game_version` isn't exported by the installed package. It reads **only** `generated/installed.json`
   (the build stage's artifact) and runs one fixed query; it never imports game package code. The
   Cloudflare deploy job (09 §6) runs it against D1 before `wrangler deploy` and stops on any hit.
-  The Node server runs the same check at startup, in this order: migrations → orphan check against
-  `installed.json` → read and scrub secrets (§7.5) → dynamic `import()` of the server registry →
-  assert the registry's types and versions equal `installed.json` (else refuse to start) → serve. On
-  an orphan hit it refuses to start. The operator may override with `--allow-orphans` on the deploy
-  step (or `ALLOW_ORPHAN_GAMES=true` for one Node start), which accepts that those games become
-  orphaned.
+  The Node server runs the same check at startup, in this order: read and validate the whole
+  configuration, secrets (`*_FILE`) included, so a bad configuration refuses before anything
+  touches the database → single-instance lock (03 §5.3) → migrations (04 §Migrations) → orphan
+  check against `installed.json` → scrub secrets (§7.5) → dynamic `import()` of the server
+  registry → assert the registry's types and versions equal `installed.json` (else refuse to
+  start) → serve. On an orphan hit it refuses to start and prints a short digest of the orphaned
+  games' ids. The operator may override with `--allow-orphans` on the deploy step, or on Node by
+  setting `ALLOW_ORPHAN_GAMES` to that digest, which accepts exactly that set of games becoming
+  orphaned (a value left set matches no other set).
 - At runtime an **orphaned** game (no engine for its type or version) answers every write with
   `409 GAME_UNAVAILABLE`, displays from the envelope only ("This game is no longer available"),
   and is cancelled by the sweep (operator cancel semantics, §4, with `final_views` NULL). Finished

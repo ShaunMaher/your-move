@@ -8,6 +8,11 @@
     "tsBuildInfoFile": "node_modules/.cache/tsc-config/.tsbuildinfo",
     "emitDeclarationOnly": true
   },
-  "include": ["vitest.config.ts", "instance.config.ts", "knip.config.ts"],
+  "include": [
+    "vitest.config.ts",
+    "instance.config.ts",
+    "knip.config.ts",
+    "packages/server/drizzle.config.ts"
+  ],
   "references": [{ "path": "scripts" }]
 }

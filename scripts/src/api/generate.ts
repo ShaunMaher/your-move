@@ -3,7 +3,13 @@
  * and the typed client's types from the server's route schemas. Both outputs are committed; CI
  * regenerates them and fails on any difference.
  */
-import { createApp, createJsonLogger, DEFAULT_APP_NAME, parseConfig } from "@your-move/server";
+import {
+  createApp,
+  createJsonLogger,
+  DEFAULT_APP_NAME,
+  detachedRepositories,
+  parseConfig,
+} from "@your-move/server";
 import openapiTS, { astToString } from "openapi-typescript";
 
 /** A throwaway local-dev configuration: the document depends only on the app name. */
@@ -22,6 +28,7 @@ export async function buildOpenApiDocument(): Promise<unknown> {
   const now = (): Date => new Date(0);
   const app = createApp({
     platform: {
+      repos: detachedRepositories(),
       config,
       now,
       log: createJsonLogger({ level: "error", now, sink: () => undefined }),

@@ -14,6 +14,7 @@ import {
 
 import installedJson from "../../../generated/installed.json" with { type: "json" };
 import { installedGames as games } from "../../../generated/server-registry.js";
+import { d1Repositories } from "./d1.js";
 
 type App = ReturnType<typeof createApp>;
 
@@ -22,8 +23,12 @@ class StartupError extends Error {
   override readonly name = "StartupError";
 }
 
-/** Builds the app once per isolate from the Worker's vars and secrets. */
+/** Builds the app once per isolate from the Worker's vars, secrets and bindings. */
 function build(env: Readonly<Record<string, unknown>>): App {
+  const db = env["DB"];
+  if (db === undefined || db === null || typeof db !== "object") {
+    throw new StartupError("The D1 binding DB is missing (09 §3).");
+  }
   const strings = Object.fromEntries(
     Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
   );
@@ -49,7 +54,10 @@ function build(env: Readonly<Record<string, unknown>>): App {
       console.log(line);
     },
   });
-  return createApp({ platform: { config, log, now }, games });
+  return createApp({
+    platform: { repos: d1Repositories(db as D1Database), config, log, now },
+    games,
+  });
 }
 
 let app: App | null = null;

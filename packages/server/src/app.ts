@@ -6,15 +6,18 @@ import { HTTPException } from "hono/http-exception";
 import { matchedRoutes } from "hono/route";
 
 import type { AppConfig } from "./config/parse.js";
+import type { Repositories } from "./db/repositories.js";
 import { API_CACHE_CONTROL, securityHeadersMiddleware } from "./http/security-headers.js";
 import type { Logger } from "./log.js";
 
 /**
- * What the runtime provides to the core (docs/spec/03-architecture.md §4). M0 needs only the
- * configuration, the logger and the clock; storage, realtime, email, push, blobs and `waitUntil`
- * join as the milestones that use them arrive.
+ * What the runtime provides to the core (docs/spec/03-architecture.md §4). Storage arrived in M2a;
+ * email and `waitUntil` join with their first users in M2b, realtime and push in M3/M4, blobs in
+ * M6.
  */
 export interface Platform {
+  /** Async repository interfaces, never a Drizzle object (03 §4). */
+  readonly repos: Repositories;
   readonly config: AppConfig;
   readonly log: Logger;
   /** Injectable clock: tests control time through it. */

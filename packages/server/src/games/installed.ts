@@ -8,6 +8,7 @@ import { isGameType } from "@your-move/sdk";
 import { z } from "zod";
 
 import type { InstalledGame } from "../app.js";
+import type { GameRepo } from "../db/repositories.js";
 
 export const installedSchema = z.record(
   z.string().refine(isGameType, { error: "not a game type id" }),
@@ -55,6 +56,21 @@ export function findOrphans(games: readonly LiveGame[], installed: Installed): O
     }
   }
   return orphans;
+}
+
+/**
+ * The orphan check through the repositories (the Node startup check, 02 §7.3): the same logic as
+ * `pnpm games:check-db`, over the same live-game rows.
+ */
+export async function findLiveOrphans(
+  repo: Pick<GameRepo, "liveGames">,
+  installed: Installed,
+): Promise<Orphan[]> {
+  const live = await repo.liveGames();
+  return findOrphans(
+    live.map((game) => ({ id: game.id, game_type: game.gameType, game_version: game.gameVersion })),
+    installed,
+  );
 }
 
 /**

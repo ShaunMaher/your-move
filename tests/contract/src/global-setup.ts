@@ -69,6 +69,8 @@ export default async function setup(project: TestProject): Promise<() => void> {
   }
 
   const port = await freePort();
+  // A fresh database, migrated by the Node build at startup.
+  const data = mkdtempSync(join(tmpdir(), "contract-db-"));
   const child = spawn(process.execPath, ["--disallow-code-generation-from-strings", NODE_MAIN], {
     env: {
       ...process.env,
@@ -76,6 +78,7 @@ export default async function setup(project: TestProject): Promise<() => void> {
       ...CONTRACT_SECRETS,
       PORT: String(port),
       LOG_LEVEL: "warn",
+      DATABASE_PATH: join(data, "app.sqlite"),
     },
     stdio: ["ignore", "inherit", "inherit"],
   });
@@ -85,10 +88,12 @@ export default async function setup(project: TestProject): Promise<() => void> {
   } catch (error) {
     // Don't leave the server running when the suite can't start.
     child.kill("SIGTERM");
+    rmSync(data, { recursive: true, force: true });
     throw error;
   }
   project.provide("nodeUrl", url);
   return () => {
     child.kill("SIGTERM");
+    rmSync(data, { recursive: true, force: true });
   };
 }

@@ -33,12 +33,12 @@ equal.
 | `TRUST_PROXY_HOPS` | no | `1` | Node only, with `TRUST_PROXY=xff`; number of trusted proxies in front of the app |
 | `TRUST_PROXY_PEERS` | no | private ranges + loopback (fallback; the compose files set the pinned `front` subnet + loopback, §4) | Node only, with `xff`/`cloudflare`: CIDR list the socket peer must be in, else `400` (08 §4.1) |
 | `PORT` | no | `8080` | Node only |
-| `DATABASE_PATH` | Node | `/data/app.sqlite` | |
+| `DATABASE_PATH` | Node | `/data/app.sqlite` | An absolute file path; `:memory:` and relative paths are refused outside local-dev mode. The file is created 0600 in a 0700 directory, with its single-instance lock beside it (`<DATABASE_PATH>.lock`, 03 §5.3) |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | no | | Enables Turnstile on OTP request (manually or via the circuit breaker). On Cloudflare the web build also needs `TURNSTILE_ENABLED=true` for the static CSP (03 §9). |
 | `LIMIT_*` | no | see 08 §4 | Overrides for rate limits / instance-wide caps, as positive whole numbers. Each `LIMIT_<NAME>` is listed in this table; an unknown name refuses to start. Today only `LIMIT_DICT_TOTAL_BYTES`; the rate limiter (M2) adds the names of the 08 §4 limits here |
 | `ENABLED_GAMES` | no | every installed package not marked `enabled: false` in `instance.config.ts` | Comma-separated game types offered for **new** games (02 §7.3). Must name installed types only (refuse to start otherwise). Type ids match `^[a-z][a-z0-9]{1,31}$` |
 | `ADMIN_EMAILS` | no | (none) | Comma-separated addresses of admins (05 §Admin API). Matched against the normalised email of the human an admin token belongs to, on every admin request (admin access is by admin token only); an empty list disables the Admin API |
-| `ALLOW_ORPHAN_GAMES` | no | `false` | Node only: set for **one** start to accept orphaning `lobby`/`active` games of removed game types or rules versions (02 §7.3); otherwise the server refuses to start while any exist |
+| `ALLOW_ORPHAN_GAMES` | no | (none) | Node only: the 12-character digest the refusal to start printed for the `lobby`/`active` games of removed game types or rules versions; it accepts orphaning exactly that set (02 §7.3) and matches no other. Otherwise the server refuses to start while any exist |
 | `DICTIONARIES_ENABLED` | no | all bundled | Comma-separated built-in dictionary ids offered for new games (words §9.3); framework resource config (02 §2.1 rule 7) |
 | `DICTIONARY_UPLOADS` | no | `true` | `false` disables user uploads (Q18) |
 | `DICTIONARIES_EXTRA` | no | (none) | Operator dictionaries: comma-separated ids, each added through the Admin API (`POST /api/v1/admin/dictionaries`, or `pnpm admin:dict:add <id> <file> --name … --language …`, §1.2), which validates (id format per words §9.5), stores the file in `BlobStore` under a generated key and inserts the `dictionaries` row (always `serverOnly`) |
@@ -57,8 +57,8 @@ equal.
 
 ### 1.1 Secret derivation and rotation
 
-Subkeys are derived from `APP_SECRET` with HKDF-SHA256, each with a distinct, versioned `info`
-label:
+Subkeys are derived from `APP_SECRET` with HKDF-SHA256 (empty salt, 32-byte output used as an
+HMAC-SHA256 key), each with a distinct, versioned `info` label:
 
 | Label | Used for | Effect of changing it |
 |---|---|---|
@@ -93,7 +93,7 @@ in fast mode; CI runs the full kit), and deploy. To **remove** a game type or up
 major that drops a rules version, first let its live games finish or cancel them (Admin API): the
 deploy job's `pnpm games:check-db` (Cloudflare) and the Node server's startup check refuse to go
 ahead while `lobby`/`active` games would be orphaned, unless you pass `--allow-orphans` to the
-deploy step or start Node once with `ALLOW_ORPHAN_GAMES=true` (02 §7.3). **Also remove the
+deploy step or start Node with `ALLOW_ORPHAN_GAMES` set to the digest its refusal printed (02 §7.3). **Also remove the
 removed game's `GAMES_<TYPE>_*` variables**: left behind, they block startup (§1).
 
 Before installing, read 02 §7.5: **a game package is fully trusted** — it runs inside your server
@@ -186,10 +186,10 @@ that work on both runtimes, plus SMTP for Node only.
 - Multi-stage `apps/node/Dockerfile`: build with pnpm, runtime on a slim Node LTS image pinned by
   digest; runs as non-root UID; read-only root filesystem except `/data`; `EXPOSE 8080`;
   `HEALTHCHECK` on `/api/health` (which needs no `CF-Connecting-IP`, 08 §4.1). The server starts
-  with `node --disallow-code-generation-from-strings` and then, in order (02 §7.3): applies
-  migrations (with a lock); checks for orphaned games using only `generated/installed.json`;
-  reads config and secrets (`*_FILE`) and scrubs them from `process.env`; loads the generated game
-  registry with a dynamic `import()` (02 §7.5) and refuses to start if it doesn't match
+  with `node --disallow-code-generation-from-strings` and then, in order (02 §7.3): reads and
+  validates config and secrets (`*_FILE`); takes the single-instance lock; applies migrations (04
+  §Migrations); checks for orphaned games using only `generated/installed.json`; scrubs secrets
+  from `process.env`; loads the generated game registry with a dynamic `import()` (02 §7.5) and refuses to start if it doesn't match
   `installed.json`; then serves.
 - Deployments pull the image **by digest** (`image: registry…/your-move@sha256:…`), taken from the
   release notes (from M1; until then from the `publish:image` job's output); tags are for humans

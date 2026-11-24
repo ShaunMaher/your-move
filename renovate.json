@@ -38,6 +38,13 @@
     },
     { "matchPackageNames": ["vitest", "@vitest/**"], "groupName": "Vitest" },
     {
+      "description": "pnpm-workspace.yaml's allowBuilds names esbuild by exact version (M2a review S-5).",
+      "matchPackageNames": ["esbuild"],
+      "prBodyNotes": [
+        "Edit the `esbuild@<version>: true` key under `allowBuilds` in pnpm-workspace.yaml to the new version, or esbuild's install script stops running."
+      ]
+    },
+    {
       "matchPackageNames": ["@playwright/test", "playwright", "mcr.microsoft.com/playwright"],
       "groupName": "Playwright"
     },

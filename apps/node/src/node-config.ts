@@ -3,6 +3,7 @@
  * alongside the framework schema; messages name the variable and rule, never a value.
  */
 import { isIP } from "node:net";
+import { isAbsolute } from "node:path";
 
 import { ConfigError, type Env } from "@your-move/server";
 import { z } from "zod";
@@ -26,7 +27,11 @@ export interface NodeConfig {
   readonly trustProxyPeers: readonly string[];
   /** True when `TRUST_PROXY_PEERS` was not set and the broad default applies (startup warns). */
   readonly trustProxyPeersDefaulted: boolean;
-  readonly allowOrphanGames: boolean;
+  /**
+   * `ALLOW_ORPHAN_GAMES`: the digest of the one set of orphaned games the operator accepts
+   * (02 §7.3), or null. It matches only the set it was printed for.
+   */
+  readonly allowOrphanGames: string | null;
 }
 
 /** Whether `value` is an IPv4 or IPv6 CIDR block such as `172.30.99.0/28` or `fc00::/7`. */
@@ -60,11 +65,23 @@ const nodeSchema = z.looseObject({
       error: "must be a comma-separated list of CIDR blocks",
     })
     .optional(),
-  ALLOW_ORPHAN_GAMES: z.enum(["true", "false"], { error: "must be true or false" }).optional(),
+  ALLOW_ORPHAN_GAMES: z
+    .string()
+    .regex(/^[0-9a-f]{12}$/u, {
+      error: "must be the 12-character digest the refusal to start printed for the orphaned games",
+    })
+    .optional(),
 });
 
-/** Parses the Node-only variables. Empty values count as unset. */
-export function parseNodeConfig(env: Env): NodeConfig {
+/**
+ * Parses the Node-only variables. Empty values count as unset. Outside local-dev mode
+ * (`isLocalDev`, 06 §4) `DATABASE_PATH` must be an absolute file path: no `:memory:` database
+ * (every restart would lose all data) and nothing relative to wherever the process started.
+ */
+export function parseNodeConfig(
+  env: Env,
+  options: { readonly localDev?: boolean } = {},
+): NodeConfig {
   const present = Object.fromEntries(
     Object.entries(env).filter(([, value]) => value !== undefined && value !== ""),
   );
@@ -77,9 +94,13 @@ export function parseNodeConfig(env: Env): NodeConfig {
     );
   }
   const raw = result.data;
+  const databasePath = raw.DATABASE_PATH ?? "/data/app.sqlite";
+  if (options.localDev !== true && !isAbsolute(databasePath)) {
+    throw new ConfigError(["DATABASE_PATH: must be an absolute file path outside local-dev mode"]);
+  }
   return {
     port: raw.PORT ?? 8080,
-    databasePath: raw.DATABASE_PATH ?? "/data/app.sqlite",
+    databasePath,
     blobDir: raw.BLOB_DIR ?? "/data/blobs",
     trustProxy: raw.TRUST_PROXY ?? "false",
     trustProxyHops: raw.TRUST_PROXY_HOPS ?? 1,
@@ -87,6 +108,6 @@ export function parseNodeConfig(env: Env): NodeConfig {
       ...DEFAULT_TRUST_PROXY_PEERS,
     ],
     trustProxyPeersDefaulted: raw.TRUST_PROXY_PEERS === undefined,
-    allowOrphanGames: raw.ALLOW_ORPHAN_GAMES === "true",
+    allowOrphanGames: raw.ALLOW_ORPHAN_GAMES ?? null,
   };
 }

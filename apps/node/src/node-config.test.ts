@@ -13,7 +13,7 @@ describe("parseNodeConfig", () => {
       trustProxyHops: 1,
       trustProxyPeers: [...DEFAULT_TRUST_PROXY_PEERS],
       trustProxyPeersDefaulted: true,
-      allowOrphanGames: false,
+      allowOrphanGames: null,
     });
   });
 
@@ -26,7 +26,7 @@ describe("parseNodeConfig", () => {
         TRUST_PROXY: "xff",
         TRUST_PROXY_HOPS: "2",
         TRUST_PROXY_PEERS: "172.30.99.0/28, 127.0.0.1/32",
-        ALLOW_ORPHAN_GAMES: "true",
+        ALLOW_ORPHAN_GAMES: "0123456789ab",
       }),
     ).toEqual({
       port: 3000,
@@ -36,7 +36,7 @@ describe("parseNodeConfig", () => {
       trustProxyHops: 2,
       trustProxyPeers: ["172.30.99.0/28", "127.0.0.1/32"],
       trustProxyPeersDefaulted: false,
-      allowOrphanGames: true,
+      allowOrphanGames: "0123456789ab",
     });
   });
 
@@ -47,10 +47,22 @@ describe("parseNodeConfig", () => {
     [{ TRUST_PROXY: "true" }, "TRUST_PROXY: must be false, xff or cloudflare"],
     [{ TRUST_PROXY_HOPS: "0" }, "TRUST_PROXY_HOPS: must be a whole number"],
     [{ TRUST_PROXY_PEERS: "10.0.0.0" }, "TRUST_PROXY_PEERS: must be a comma-separated list"],
-    [{ ALLOW_ORPHAN_GAMES: "yes" }, "ALLOW_ORPHAN_GAMES: must be true or false"],
+    [{ ALLOW_ORPHAN_GAMES: "true" }, "ALLOW_ORPHAN_GAMES: must be the 12-character digest"],
+    [{ ALLOW_ORPHAN_GAMES: "0123456789AB" }, "ALLOW_ORPHAN_GAMES: must be the 12-character digest"],
+    [{ DATABASE_PATH: ":memory:" }, "DATABASE_PATH: must be an absolute file path"],
+    [{ DATABASE_PATH: "data/app.sqlite" }, "DATABASE_PATH: must be an absolute file path"],
   ])("rejects %j", (env, expected) => {
     expect(() => parseNodeConfig(env)).toThrow(ConfigError);
     expect(() => parseNodeConfig(env)).toThrow(expected);
+  });
+
+  it("accepts a relative or in-memory DATABASE_PATH in local-dev mode only", () => {
+    expect(parseNodeConfig({ DATABASE_PATH: ":memory:" }, { localDev: true }).databasePath).toBe(
+      ":memory:",
+    );
+    expect(
+      parseNodeConfig({ DATABASE_PATH: "data/dev.sqlite" }, { localDev: true }).databasePath,
+    ).toBe("data/dev.sqlite");
   });
 });
 

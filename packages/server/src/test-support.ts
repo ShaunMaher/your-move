@@ -2,6 +2,7 @@
 import type { Platform } from "./app.js";
 import { LOCAL_DEV_APP_SECRET } from "./config/local-dev.js";
 import { parseConfig, type Env } from "./config/parse.js";
+import { detachedRepositories } from "./db/detached.js";
 import { createJsonLogger } from "./log.js";
 
 /** A minimal valid local-dev environment. */
@@ -32,6 +33,7 @@ export function testPlatform(env: Env = LOCAL_ENV): TestPlatform {
   const lines: Record<string, unknown>[] = [];
   const now = (): Date => new Date(Date.UTC(2026, 0, 1));
   return {
+    repos: detachedRepositories(),
     config: parseConfig(env, { runtime: "node", installedGames: [] }),
     log: createJsonLogger({
       level: "debug",
