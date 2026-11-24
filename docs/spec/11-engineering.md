@@ -91,7 +91,9 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
   the job; lowering one needs an ADR.
 - Tests are deterministic: injected clock (`Platform.now`), seeded `RandomSource`, no network
   (outbound calls are faked at the `Platform` boundary), no sleeps. A flaky test is a bug and is
-  quarantined with an issue, never retried silently.
+  quarantined with an issue, never retried silently. Slow test infrastructure gets deliberate time
+  budgets instead, sized from measurements and documented where they are set: in e2e, a browser's
+  launch and its first page each have their own budget, so neither is charged to a test's timeout.
 - Every bug fix lands with a test that failed before the fix.
 
 ## 5. Architecture rules
