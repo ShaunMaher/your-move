@@ -1,6 +1,7 @@
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 import { schema } from "@your-move/server/testing";
@@ -59,9 +60,19 @@ function tables(path: string): string[] {
   }
 }
 
-/** A copy of the migrations folder with one more migration, `millis` after the first. */
-function withExtraMigration(sql: string, millis: number): string {
-  const folder = join(dir, "migrations");
+let copies = 0;
+
+/**
+ * A fresh copy of the migrations folder with one more migration, `millis` after the first, and
+ * optionally others (in journal order before it).
+ */
+function withExtraMigration(
+  sql: string,
+  millis: number,
+  others: readonly { sql: string; millis: number }[] = [],
+): string {
+  copies += 1;
+  const folder = join(dir, `migrations-${String(copies)}`);
   cpSync(MIGRATIONS, folder, { recursive: true });
   const journalPath = join(folder, "meta", "_journal.json");
   const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
@@ -69,9 +80,13 @@ function withExtraMigration(sql: string, millis: number): string {
   };
   const first = journal.entries[0];
   if (first === undefined) throw new Error("no migrations");
-  journal.entries.push({ ...first, idx: 1, when: first.when + millis, tag: "0001_extra" });
+  for (const extra of [...others, { sql, millis }]) {
+    const idx = journal.entries.length;
+    const tag = `000${String(idx)}_extra`;
+    journal.entries.push({ ...first, idx, when: first.when + extra.millis, tag });
+    writeFileSync(join(folder, `${tag}.sql`), extra.sql);
+  }
   writeFileSync(journalPath, JSON.stringify(journal));
-  writeFileSync(join(folder, "0001_extra.sql"), sql);
   return folder;
 }
 
@@ -160,4 +175,89 @@ describe("migrate", () => {
     expect(() => migrate(sqlite, MIGRATIONS)).toThrow(MigrationError);
     sqlite.close();
   });
+
+  it("refuses a migration edited after it was applied", () => {
+    const sqlite = openSqlite(join(dir, "app.sqlite"));
+    migrate(sqlite, withExtraMigration("CREATE TABLE `extra` (`id` text);", 1000));
+    const edited = withExtraMigration("CREATE TABLE `extra` (`id` text, `more` text);", 1000);
+    expect(() => migrate(sqlite, edited)).toThrow(/doesn't know/u);
+    sqlite.close();
+  });
+
+  it("applies a migration it hasn't recorded even when a later one is applied", () => {
+    // Two branches each add a migration; the one merged second has the earlier timestamp.
+    const sqlite = openSqlite(join(dir, "app.sqlite"));
+    migrate(sqlite, withExtraMigration("CREATE TABLE `late` (`id` text);", 2000));
+    const both = withExtraMigration("CREATE TABLE `late` (`id` text);", 2000, [
+      { sql: "CREATE TABLE `early` (`id` text);", millis: 1000 },
+    ]);
+    expect(migrate(sqlite, both)).toEqual({ applied: 1, known: 3 });
+    expect(sqlite.prepare("SELECT count(*) AS n FROM early").get()).toEqual({ n: 0 });
+    sqlite.close();
+  });
+
+  it("keeps every child row when a migration rebuilds a parent table (M2a review P-1)", () => {
+    const sqlite = openSqlite(join(dir, "app.sqlite"));
+    migrate(sqlite, MIGRATIONS);
+    seedFamily(sqlite);
+    const before = familyCounts(sqlite);
+    expect(before).toEqual({ users: 1, sessions: 1, gamesByCreator: 1, seatsOfUser: 1 });
+    expect(migrate(sqlite, withExtraMigration(rebuildUsers(sqlite), 1000)).applied).toBe(1);
+    expect(familyCounts(sqlite)).toEqual(before);
+    expect(sqlite.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
+    sqlite.close();
+  });
+
+  it("rolls back a migration that would leave a broken foreign key", () => {
+    const sqlite = openSqlite(join(dir, "app.sqlite"));
+    migrate(sqlite, MIGRATIONS);
+    const folder = withExtraMigration(
+      "INSERT INTO `sessions` VALUES ('s2', 'nobody', 'h2', 0, 0, 0, NULL);",
+      1000,
+    );
+    expect(() => migrate(sqlite, folder)).toThrow(/breaking a foreign key/u);
+    expect(sqlite.prepare("SELECT count(*) AS n FROM sessions").get()).toEqual({ n: 0 });
+    expect(sqlite.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
+    sqlite.close();
+  });
 });
+
+/** One user with a session, a game they created and a seat in it. */
+function seedFamily(sqlite: DatabaseSync): void {
+  sqlite.exec(`
+    INSERT INTO users (id, email, created_at, updated_at) VALUES ('u1', 'a@example.org', 0, 0);
+    INSERT INTO sessions VALUES ('s1', 'u1', 'h1', 0, 0, 0, NULL);
+    INSERT INTO games (id, game_type, game_version, options, status, created_by, seats,
+      turn_timeout_days, seat_order, ai_assistance, last_action_at, created_at, updated_at)
+      VALUES ('g1', 'words', 1, '{}', 'lobby', 'u1', 2, 3, 'join', 'off', 0, 0, 0);
+    INSERT INTO game_players (id, game_id, user_id, state) VALUES ('p1', 'g1', 'u1', 'joined');
+  `);
+}
+
+function familyCounts(sqlite: DatabaseSync): Record<string, unknown> {
+  const count = (sql: string): unknown => (sqlite.prepare(sql).get() as { n: number }).n;
+  return {
+    users: count("SELECT count(*) AS n FROM users"),
+    sessions: count("SELECT count(*) AS n FROM sessions WHERE user_id = 'u1'"),
+    gamesByCreator: count("SELECT count(*) AS n FROM games WHERE created_by = 'u1'"),
+    seatsOfUser: count("SELECT count(*) AS n FROM game_players WHERE user_id = 'u1'"),
+  };
+}
+
+/**
+ * A test-only migration shaped like drizzle-kit's table rebuild of `users` (the table every
+ * cascade hangs off): copy into `__new_users`, drop `users`, rename.
+ */
+function rebuildUsers(sqlite: DatabaseSync): string {
+  const { sql } = sqlite
+    .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'users'")
+    .get() as { sql: string };
+  return [
+    "PRAGMA foreign_keys=OFF;",
+    `${sql.replace("CREATE TABLE `users`", "CREATE TABLE `__new_users`")};`,
+    "INSERT INTO `__new_users` SELECT * FROM `users`;",
+    "DROP TABLE `users`;",
+    "ALTER TABLE `__new_users` RENAME TO `users`;",
+    "PRAGMA foreign_keys=ON;",
+  ].join("\n--> statement-breakpoint\n");
+}
