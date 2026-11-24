@@ -75,7 +75,8 @@ Attempt counting, consumption and rate limiting must be race-free under parallel
 
 ### 3.3 Email and input
 
-- Email: subject `"<code> is your <APP_NAME> sign-in code"`; body repeats the code, says it expires
+- Email: subject `"<code> is your <APP_NAME> sign-in code"` with the 8 digits ungrouped (one-time-code
+  autofill reads the subject); body repeats the code in two groups, says it expires
   in 10 minutes, "We will never ask you for this code — don't share it with anyone", "If you didn't
   request this, ignore this email", and the approximate request time. A link to the app is fine;
   it must not carry the code.

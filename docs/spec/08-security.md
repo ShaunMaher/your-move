@@ -90,7 +90,7 @@ generated `_headers` file for static assets (03 §9). One shared definition gene
 | Invite emails per inviter (addresses without an account) | 5 / day, 20 / 30 days (2 / day for new accounts, 06 §6.6) | silent (seat created, no email) |
 | Invite emails per target address (by email HMAC) | 3 / 30 days | silent (seat created, no email) |
 | **Invite emails instance-wide** | 100 / day | silent; alert |
-| New accounts per IP (bucketed) | 10 / day | silent on `/otp/request` for unknown emails from that bucket (a never-emailed challenge is still inserted, for verify parity, 06 §3.2) |
+| New accounts per IP (bucketed) | 10 / day | silent on `/otp/request` for unknown emails from that bucket (a never-emailed challenge is still inserted, for verify parity, 06 §3.2). Counted when a sign-in creates an account; `/otp/request` only reads it, on every path |
 | WebSocket upgrades per IP | 30 / min | `429` |
 | Moves per user | 120 / min | `429` |
 | Preview per user | 300 / min | `429` |
@@ -123,12 +123,14 @@ whatever notification the operator uses.
 
 - **Source of the client IP**: Cloudflare Workers → `CF-Connecting-IP`. Node → by `TRUST_PROXY`:
   `false` → the socket address; `xff` → the entry `TRUST_PROXY_HOPS` positions from the **right** of
-  `X-Forwarded-For` (the leftmost entries are attacker-controlled; if the header has fewer entries
-  than hops, use the socket address); `cloudflare` (Cloudflare Tunnel) → `CF-Connecting-IP`.
+  `X-Forwarded-For` (the leftmost entries are attacker-controlled; a header with fewer entries than
+  hops gets `400`, below, never the socket address, which is the proxy's and would put every such
+  request in one bucket); `cloudflare` (Cloudflare Tunnel) → `CF-Connecting-IP`.
 - In `xff` and `cloudflare` modes the **socket peer must be in `TRUST_PROXY_PEERS`** (CIDR list,
   default the private ranges `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`, loopback,
   as a fallback only — the compose files pin the `front` subnet and set `TRUST_PROXY_PEERS` to it
-  plus loopback, 09 §4); a request from any other peer gets `400`, and startup logs a warning naming
+  plus loopback, 09 §4); a request from any other peer gets `400` on every route that uses the
+  client IP (the next bullet), and startup logs a warning naming
   the mode, and another when the broad default is in use. This stops
   header spoofing if the app port is ever reachable some other way; the deployment must still keep
   the port unpublished (09 §4).
