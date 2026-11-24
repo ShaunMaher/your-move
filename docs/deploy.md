@@ -107,6 +107,14 @@ with the same name, role and scopes, update both variables, then revoke the old 
 deploy token holds only `read_package_registry` and `write_package_registry`; rotate it the same
 way.
 
+`publish:packages` adds only the `@your-move` registry to the repository's `.npmrc`. pnpm ignores
+credentials in a repository-controlled `.npmrc` that name an environment variable, so the job
+writes the deploy token to a user-level npm config in the job container's `/tmp` (outside the
+checkout, so no artifact or cache can include it) with the `printf` builtin and mode 0600, points
+pnpm at it with `NPM_CONFIG_USERCONFIG`, and deletes it in `after_script`. A test
+(`scripts/src/ci/npm-credentials.test.ts`) fails if any job writes a credential into the
+repository's `.npmrc`.
+
 The nightly OSV scan is a schedule with `SCHEDULE_TASK=nightly`. Every merge request pipeline runs
 one job per environment that declares that environment, prints whether each of these variables is
 set, and fails if any is. Its list of variables and environments is kept equal to this table by a
