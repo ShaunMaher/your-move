@@ -6,5 +6,11 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src"],
-  "references": [{ "path": "../../packages/sdk" }, { "path": "../../packages/testkit" }]
+  "references": [
+    { "path": "../../packages/sdk" },
+    { "path": "../../packages/testkit" },
+    // The built-in word list for the property tests (test-support.ts only; never the engine).
+    { "path": "../../packages/dictionary/tsconfig.runtime.json" },
+    { "path": "../../packages/dictionary/tsconfig.build.json" }
+  ]
 }

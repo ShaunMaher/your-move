@@ -23,6 +23,7 @@
   "files": [
     "dist",
     "!dist/**/*.test.*",
+    "!dist/test-support.*",
     "!dist/.tsbuildinfo"
   ],
   "scripts": {
@@ -33,6 +34,8 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
+    "@your-move/dictionary": "workspace:*",
     "@your-move/sdk": "workspace:*",
     "@your-move/testkit": "workspace:*",
     "vitest": "catalog:",

@@ -1,13 +1,17 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { parseIndex } from "../manifest.js";
 import { sha256Hex } from "./build.js";
-import { buildAll } from "./files.js";
+import { buildAll, buildBuiltin } from "./files.js";
+
+/** This package's directory, with the committed dictionaries. */
+const PACKAGE_DIR = fileURLToPath(new URL("../..", import.meta.url));
 
 let dir: string;
 
@@ -104,5 +108,20 @@ describe("buildAll", () => {
     await addDictionary("one", "aa\n", { sha256: "0".repeat(64) });
     await expect(buildAll(dir, out)).rejects.toThrow(/sha256/u);
     expect(readFileSync(join(out, "keep.txt"), "utf8")).toBe("x");
+  });
+});
+
+describe("buildBuiltin", () => {
+  it("builds one committed dictionary in memory, exactly as buildAll writes it", async () => {
+    const out = join(dir, "generated");
+    const [report] = await buildAll(PACKAGE_DIR, out);
+    if (report === undefined) throw new Error("no built-in dictionary");
+    const built = await buildBuiltin(report.id);
+    expect(built.text).toBe(readFileSync(join(out, report.id, "words.txt"), "utf8"));
+    expect(built.manifest.wordCount).toBe(report.words);
+  }, 30_000);
+
+  it("names the dictionary when there is no such directory", async () => {
+    await expect(buildBuiltin("missing")).rejects.toThrow(/dictionaries\/missing: /u);
   });
 });
