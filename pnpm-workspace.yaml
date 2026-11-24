@@ -47,6 +47,8 @@ catalog:
   "@vitejs/plugin-react": 6.3.0
   "@vitest/coverage-v8": 5.1.1
   dependency-cruiser: 18.8.0
+  drizzle-kit: 0.31.11
+  drizzle-orm: 0.45.4
   esbuild: 0.28.2
   eslint: 9.39.5
   eslint-import-resolver-typescript: 4.4.5

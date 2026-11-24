@@ -11,13 +11,15 @@
     "build": "tsx scripts/prepare-assets.ts && wrangler deploy --dry-run --config wrangler.example.toml --outdir dist/worker --metafile dist/bundle-meta.json && tsx scripts/record-inputs.ts"
   },
   "dependencies": {
-    "@your-move/server": "workspace:*"
+    "@your-move/server": "workspace:*",
+    "drizzle-orm": "catalog:"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
     "@types/node": "catalog:",
     "@your-move/web": "workspace:*",
     "tsx": "catalog:",
+    "vitest": "catalog:",
     "wrangler": "catalog:"
   }
 }

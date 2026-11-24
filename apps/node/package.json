@@ -9,13 +9,14 @@
     ".": "./src/server.ts"
   },
   "scripts": {
-    "dev": "pnpm --filter @your-move/web build && node --disallow-code-generation-from-strings --env-file=../../config/local-dev.env --import tsx src/main.ts --static ../web/dist",
+    "dev": "pnpm --filter @your-move/web build && node --disallow-code-generation-from-strings --env-file=../../config/local-dev.env --import tsx src/main.ts --static ../web/dist --migrations ../../packages/server/migrations",
     "build": "tsx scripts/build.ts",
     "start": "node --disallow-code-generation-from-strings dist/main.js"
   },
   "dependencies": {
     "@hono/node-server": "catalog:",
     "@your-move/server": "workspace:*",
+    "drizzle-orm": "catalog:",
     "hono": "catalog:",
     "zod": "catalog:"
   },

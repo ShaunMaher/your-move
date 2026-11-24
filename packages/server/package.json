@@ -7,16 +7,22 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/db/testing.ts"
+  },
+  "scripts": {
+    "db:generate": "drizzle-kit generate --name"
   },
   "dependencies": {
     "@hono/zod-openapi": "catalog:",
     "@your-move/sdk": "workspace:*",
     "@your-move/shared": "workspace:*",
+    "drizzle-orm": "catalog:",
     "hono": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "drizzle-kit": "catalog:",
     "fast-check": "catalog:",
     "vitest": "catalog:"
   }
