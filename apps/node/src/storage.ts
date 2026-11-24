@@ -8,6 +8,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { findLiveOrphans, type Installed, type Orphan, type Repositories } from "@your-move/server";
 
+import { acquireInstanceLock, type InstanceLock } from "./db/instance-lock.js";
 import { migrate, type MigrationOutcome } from "./db/migrate.js";
 import { nodeRepositories, openSqlite } from "./db/sqlite.js";
 
@@ -29,16 +30,23 @@ export interface Storage {
   readonly migrations: MigrationOutcome;
   /** Orphaned live games accepted with `ALLOW_ORPHAN_GAMES`; empty otherwise. */
   readonly acceptedOrphans: readonly Orphan[];
+  /** Closes the database and releases the instance lock. */
+  close(): void;
 }
 
 function describeOrphan(orphan: Orphan): string {
   return `game ${orphan.id} (${orphan.gameType} v${String(orphan.gameVersion)}): ${orphan.reason}`;
 }
 
-/** Opens and migrates the database and runs the orphan check; throws to refuse the start. */
+/**
+ * Opens the database, takes the single-instance lock (03 §5.3), migrates and runs the orphan
+ * check; throws to refuse the start.
+ */
 export async function openStorage(options: StorageOptions): Promise<Storage> {
   const sqlite = openSqlite(options.databasePath);
+  let lock: InstanceLock | null = null;
   try {
+    lock = acquireInstanceLock(options.databasePath);
     const migrations = migrate(sqlite, options.migrationsFolder);
     const repos = nodeRepositories(sqlite);
     const orphans = await findLiveOrphans(repos.games, options.installed);
@@ -52,9 +60,15 @@ export async function openStorage(options: StorageOptions): Promise<Storage> {
         ].join("\n"),
       );
     }
-    return { sqlite, repos, migrations, acceptedOrphans: orphans };
+    const held = lock;
+    const close = (): void => {
+      sqlite.close();
+      held.release();
+    };
+    return { sqlite, repos, migrations, acceptedOrphans: orphans, close };
   } catch (error) {
     sqlite.close();
+    lock?.release();
     throw error;
   }
 }

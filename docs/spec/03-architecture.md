@@ -218,6 +218,10 @@ Single SQLite file on a mounted volume (`/data/app.sqlite`), WAL mode, `busy_tim
 `foreign_keys=ON`. Backups: documented `sqlite3 .backup` / Litestream recipe in 09.
 The Node runtime is **single-instance** by design; running two containers against one file is
 unsupported and the app SHOULD refuse to start if it detects another live instance (lock file).
+M2a: the lock is SQLite's own exclusive lock on `<DATABASE_PATH>.lock`, held by an open
+transaction for the life of the process and taken before migrations; the operating system drops
+it however the process exits, so a crash leaves no stale lock (on a local filesystem; network
+filesystems are unsupported for the database anyway).
 
 ## 6. Realtime
 

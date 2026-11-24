@@ -48,7 +48,9 @@ every start the server first applies any new migrations (all in one transaction)
 start if a `lobby` or `active` game needs a game type or rules version this image doesn't install
 (02 §7.3); finish or cancel those games first, or start **once** with `ALLOW_ORPHAN_GAMES=true` to
 accept that the sweep cancels them. It also refuses a database that a newer image has migrated:
-roll forward, or restore a backup. Run one container per database file.
+roll forward, or restore a backup. Run one container per database file: a second one on the same
+file refuses to start (it finds the first one's lock on `<DATABASE_PATH>.lock`, which the
+operating system releases when that process exits, even after a crash).
 
 To build and try it locally:
 

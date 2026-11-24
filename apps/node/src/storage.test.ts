@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { Installed } from "@your-move/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { InstanceLockedError } from "./db/instance-lock.js";
 import { MigrationError } from "./db/migrate.js";
 import { openStorage, StartupRefusal } from "./storage.js";
 
@@ -54,7 +55,7 @@ async function seed(type: string, status: "lobby" | "active" | "finished"): Prom
     },
     [],
   );
-  storage.sqlite.close();
+  storage.close();
 }
 
 describe("openStorage", () => {
@@ -67,7 +68,7 @@ describe("openStorage", () => {
     });
     expect(storage.migrations).toEqual({ applied: 1, known: 1 });
     expect(storage.acceptedOrphans).toEqual([]);
-    storage.sqlite.close();
+    storage.close();
   });
 
   it("refuses to start while a live game's type isn't installed", async () => {
@@ -92,7 +93,7 @@ describe("openStorage", () => {
     });
     expect(storage.migrations.applied).toBe(0);
     expect(storage.acceptedOrphans).toEqual([]);
-    storage.sqlite.close();
+    storage.close();
   });
 
   it("accepts the orphans with ALLOW_ORPHAN_GAMES", async () => {
@@ -106,7 +107,20 @@ describe("openStorage", () => {
     expect(storage.acceptedOrphans).toEqual([
       { id: "gone-lobby", gameType: "gone", gameVersion: 1, reason: "type not installed" },
     ]);
-    storage.sqlite.close();
+    storage.close();
+  });
+
+  it("refuses a second server on the same database, and admits one after the first closes", async () => {
+    const options = {
+      databasePath,
+      migrationsFolder: MIGRATIONS,
+      installed: INSTALLED,
+      allowOrphanGames: false,
+    };
+    const first = await openStorage(options);
+    await expect(openStorage(options)).rejects.toThrow(InstanceLockedError);
+    first.close();
+    (await openStorage(options)).close();
   });
 
   it("closes the database when the migrations can't be read", async () => {

@@ -2,8 +2,9 @@
  * The Node entry point (docs/spec/09-operations.md §4). Run with
  * `node --disallow-code-generation-from-strings`. Startup order (02 §7.3, §7.5):
  *
- * 1. open the database, apply migrations, and refuse to start while live games would be
- *    orphaned, judged against `installed.json` only (no game code is loaded yet);
+ * 1. open the database, take the single-instance lock (03 §5.3), apply migrations, and refuse to
+ *    start while live games would be orphaned, judged against `installed.json` only (no game code
+ *    is loaded yet);
  * 2. read configuration and secrets (`*_FILE`), then scrub secrets from `process.env`;
  * 3. check code generation from strings is really off, then load the generated game registry with
  *    a dynamic `import()`, and refuse to start unless it matches `installed.json`;
@@ -24,6 +25,7 @@ import {
 
 import installedJson from "../../../generated/installed.json" with { type: "json" };
 import { codeGenerationFromStringsAllowed } from "./code-generation.js";
+import { InstanceLockedError } from "./db/instance-lock.js";
 import { MigrationError } from "./db/migrate.js";
 import { resolveSecretFiles, scrubSecrets, SecretFileError } from "./env.js";
 import { parseNodeConfig } from "./node-config.js";
@@ -66,6 +68,7 @@ try {
   if (
     error instanceof ConfigError ||
     error instanceof StartupRefusal ||
+    error instanceof InstanceLockedError ||
     error instanceof MigrationError
   ) {
     exitWith(error.message);
@@ -135,7 +138,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     log.info("shutting down", { signal });
     server.close(() => {
-      storage.sqlite.close();
+      storage.close();
       process.exit(0);
     });
   });
