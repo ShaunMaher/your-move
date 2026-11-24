@@ -31,8 +31,20 @@ repositoryContract("D1", async () => {
     configPath: CONFIG,
     persist: { path: join(state, "v3") },
   });
+  const db = proxy.env.DB as unknown as {
+    prepare(sql: string): {
+      bind(...values: unknown[]): { all<T>(): Promise<{ results: T[] }> };
+    };
+  };
   return {
     repos: d1Repositories(proxy.env.DB),
+    sql: async (statement: string, ...params: (string | number | null)[]) =>
+      (
+        await db
+          .prepare(statement)
+          .bind(...params)
+          .all<Record<string, unknown>>()
+      ).results,
     close: async () => {
       await proxy.dispose();
       rmSync(state, { recursive: true, force: true });

@@ -7,6 +7,10 @@
 import { describe, expect, it } from "vitest";
 
 import { type NormalisedEmail, normaliseAddress } from "../accounts/email.js";
+import { verifyCode } from "../auth/otp.js";
+import { parseConfig } from "../config/parse.js";
+import { deriveSubkeys, hmacHex } from "../crypto/subkeys.js";
+import { createJsonLogger } from "../log.js";
 import type { NewOtpChallenge, Repositories } from "./repositories.js";
 
 const T0 = Date.UTC(2026, 0, 1);
@@ -41,7 +45,31 @@ async function newUser(repos: Repositories): Promise<{ id: string; email: Normal
   return { id, email };
 }
 
-export function authRepositoryContract(repos: () => Repositories): void {
+/** What these tests need of a contract target: the repositories and raw SQL for arranging rows. */
+interface AuthTarget {
+  readonly repos: Repositories;
+  sql(statement: string, ...params: (string | number | null)[]): Promise<Record<string, unknown>[]>;
+}
+
+/** An API token row (no repository writes them until M3). */
+async function seedToken(target: AuthTarget, userId: string, createdBy: string): Promise<string> {
+  const id = crypto.randomUUID();
+  await target.sql(
+    "INSERT INTO api_tokens (id, user_id, created_by, name, token_hash, scopes, created_at, expires_at) VALUES (?, ?, ?, 'test', ?, '[\"read\"]', ?, ?)",
+    id,
+    userId,
+    createdBy,
+    crypto.randomUUID(),
+    T0,
+    T0 + 86_400_000,
+  );
+  return id;
+}
+
+export function authRepositoryContract(target: () => AuthTarget): void {
+  const repos = (): Repositories => target().repos;
+  const sql = (statement: string, ...params: (string | number | null)[]) =>
+    target().sql(statement, ...params);
   describe("users (sign-in)", () => {
     it("createOrGetByEmail creates once and then returns the same row", async () => {
       const email = address();
@@ -88,14 +116,71 @@ export function authRepositoryContract(repos: () => Repositories): void {
       const event = {
         userId: user.id,
         type: "account_deleted",
-        ipHash: null,
+        ipHash: `marker-${user.id}`,
         createdAt: T0,
       } as const;
+      // Rows in every table the deletion touches, both directions, plus a bystander's.
+      const other = await newUser(repos());
+      const agent = crypto.randomUUID();
+      await repos().users.create({
+        id: agent,
+        kind: "agent",
+        ownerUserId: user.id,
+        createdAt: T0,
+        updatedAt: T0,
+      });
+      const ownToken = await seedToken(target(), user.id, user.id);
+      const agentToken = await seedToken(target(), agent, user.id);
+      const otherToken = await seedToken(target(), other.id, other.id);
+      for (const [a, b] of [
+        [user.id, other.id],
+        [other.id, user.id],
+      ] as const) {
+        await sql(
+          "INSERT INTO blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)",
+          a,
+          b,
+          T0,
+        );
+        await sql(
+          "INSERT INTO past_opponents (user_id, other_id, last_finished_at) VALUES (?, ?, ?)",
+          a,
+          b,
+          T0,
+        );
+      }
       await repos().users.deleteAccount(user, event);
       await repos().users.deleteAccount(user, event);
       expect(await repos().users.findById(user.id)).toBeNull();
+      expect(await repos().users.findById(agent)).toBeNull();
+      expect(await repos().users.findById(other.id)).not.toBeNull();
       expect(await repos().sessions.findByTokenHash(tokenHash)).toBeNull();
       expect(await repos().otp.live(user.email, "signin", T0, 5)).toEqual([]);
+      const tokens = await sql(
+        "SELECT id FROM api_tokens WHERE id IN (?, ?, ?)",
+        ownToken,
+        agentToken,
+        otherToken,
+      );
+      expect(tokens.map((row) => row["id"])).toEqual([otherToken]);
+      for (const table of ["blocks", "past_opponents"]) {
+        const column = table === "blocks" ? "blocker_id" : "user_id";
+        const otherColumn = table === "blocks" ? "blocked_id" : "other_id";
+        const rows = await sql(
+          `SELECT 1 FROM ${table} WHERE ${column} = ? OR ${otherColumn} = ?`,
+          user.id,
+          user.id,
+        );
+        expect(rows, table).toHaveLength(0);
+      }
+      // Exactly one account_deleted event survives, with its user nulled by the foreign key.
+      const events = await sql(
+        "SELECT user_id FROM auth_events WHERE type = 'account_deleted' AND ip_hash = ?",
+        `marker-${user.id}`,
+      );
+      expect(events).toEqual([{ user_id: null }]);
+      const mine = await sql("SELECT 1 FROM auth_events WHERE user_id = ?", user.id);
+      expect(mine).toHaveLength(0);
     });
   });
 
@@ -263,15 +348,98 @@ export function authRepositoryContract(repos: () => Repositories): void {
   });
 
   describe("auth events and tokens", () => {
-    it("records an event and revokes tokens", async () => {
+    it("records an event", async () => {
       const user = await newUser(repos());
+      const marker = `ip-${user.id}`;
       await repos().authEvents.record({
         userId: user.id,
         type: "signed_in",
-        ipHash: "ip",
+        ipHash: marker,
         createdAt: T0,
       });
-      await expect(repos().apiTokens.revokeAll(user.id, T0)).resolves.toBeUndefined();
+      expect(await sql("SELECT user_id, type FROM auth_events WHERE ip_hash = ?", marker)).toEqual([
+        { user_id: user.id, type: "signed_in" },
+      ]);
+    });
+
+    it("revokeAll revokes the user's and their agents' tokens, and nobody else's", async () => {
+      const user = await newUser(repos());
+      const other = await newUser(repos());
+      const agent = crypto.randomUUID();
+      await repos().users.create({
+        id: agent,
+        kind: "agent",
+        ownerUserId: user.id,
+        createdAt: T0,
+        updatedAt: T0,
+      });
+      const own = await seedToken(target(), user.id, user.id);
+      const agents = await seedToken(target(), agent, user.id);
+      const others = await seedToken(target(), other.id, other.id);
+      await repos().apiTokens.revokeAll(user.id, T0 + 5);
+      const rows = await sql(
+        "SELECT id, revoked_at FROM api_tokens WHERE id IN (?, ?, ?)",
+        own,
+        agents,
+        others,
+      );
+      const revoked = Object.fromEntries(rows.map((row) => [row["id"], row["revoked_at"]]));
+      expect(revoked).toEqual({ [own]: T0 + 5, [agents]: T0 + 5, [others]: null });
+    });
+  });
+
+  describe("verifyCode through the core (06 §3.1, 10 M2)", () => {
+    it("50 parallel verifies of the right code: at most 5 evaluated, exactly 1 ok", async () => {
+      const config = parseConfig(
+        {
+          PUBLIC_URL: "https://play.example.org",
+          APP_SECRET: btoa("contract-race-only-0123456789abcdef"),
+          EMAIL_PROVIDER: "resend",
+          EMAIL_API_KEY: "unused",
+          EMAIL_FROM: "no-reply@example.org",
+          OPERATOR_CONTACT: "ops@example.org",
+        },
+        { runtime: "node", installedGames: [] },
+      );
+      const keys = await deriveSubkeys(config.appSecret);
+      let evaluated = 0;
+      const counting: Repositories = {
+        ...repos(),
+        otp: {
+          ...repos().otp,
+          attempt: async (...args) => {
+            const result = await repos().otp.attempt(...args);
+            if (result !== null) evaluated++;
+            return result;
+          },
+        },
+      };
+      const email = address();
+      const id = crypto.randomUUID();
+      const code = "12345678";
+      await repos().otp.issue(
+        challenge(email, { id, codeHash: await hmacHex(keys.otp, `${id}${code}`) }),
+        ISSUE,
+      );
+      const now = (): Date => new Date(T0);
+      const deps = {
+        repos: counting,
+        config,
+        keys,
+        log: createJsonLogger({ level: "error", now, sink: () => undefined }),
+        now: T0,
+      };
+      const outcomes = await Promise.all(
+        Array.from({ length: 50 }, (_, i) =>
+          verifyCode(deps, email, "signin", code, {
+            ipBuckets: [{ hash: `race-${id}-${String(i)}`, multiplier: 1 }],
+          }),
+        ),
+      );
+      expect(outcomes.filter((outcome) => outcome === "ok")).toHaveLength(1);
+      expect(outcomes.filter((outcome) => outcome !== "ok" && outcome !== "invalid")).toEqual([]);
+      expect(evaluated).toBeGreaterThanOrEqual(1);
+      expect(evaluated).toBeLessThanOrEqual(5);
     });
   });
 }

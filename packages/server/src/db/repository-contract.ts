@@ -19,6 +19,11 @@ import type {
 
 export interface ContractTarget {
   readonly repos: Repositories;
+  /**
+   * Runs one SQL statement on the same database and returns its rows: for arranging and checking
+   * rows that no repository writes yet (API tokens, blocks) in tests only.
+   */
+  sql(statement: string, ...params: (string | number | null)[]): Promise<Record<string, unknown>[]>;
   /** Releases the database after the suite. */
   close(): Promise<void>;
 }
@@ -112,7 +117,7 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
       await target.close();
     });
 
-    authRepositoryContract(() => repos);
+    authRepositoryContract(() => target);
 
     describe("users", () => {
       it("creates and finds a user by id and by email", async () => {
