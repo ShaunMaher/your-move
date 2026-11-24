@@ -48,9 +48,10 @@ export interface RequestRuleOptions {
 export function requestRules(options: RequestRuleOptions): MiddlewareHandler {
   return async (c, next) => {
     const path = c.req.path;
-    if (STATE_CHANGING.has(c.req.method) && !ORIGIN_EXEMPT.has(path)) {
+    const cookie = options.hasSessionCookie(c.req.header("Cookie"));
+    const bearerOnly = !cookie && c.req.header("Authorization") !== undefined;
+    if (STATE_CHANGING.has(c.req.method) && !ORIGIN_EXEMPT.has(path) && !bearerOnly) {
       const origin = c.req.header("Origin");
-      const cookie = options.hasSessionCookie(c.req.header("Cookie"));
       if (
         (cookie && origin !== options.origin) ||
         (origin !== undefined && origin !== options.origin)

@@ -548,6 +548,16 @@ describe("Origin and JSON rules (05 §Conventions, 08 T6)", () => {
     expect(await errorCode(response)).toBe("BAD_ORIGIN");
   });
 
+  it("a bearer request without a cookie is exempt from the Origin rule (tokens arrive in M3)", async () => {
+    const response = await h.request(
+      "POST",
+      "/api/v1/auth/logout",
+      {},
+      { origin: "https://elsewhere.example", headers: { Authorization: "Bearer ym_pat_x_y" } },
+    );
+    expect(response.status).toBe(401);
+  });
+
   it("a body that isn't JSON gets 415 UNSUPPORTED_MEDIA_TYPE", async () => {
     for (const type of ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data"]) {
       const response = await h.request(
