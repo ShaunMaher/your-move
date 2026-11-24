@@ -35,6 +35,37 @@ export {
   type SecurityHeaderOptions,
 } from "./http/security-headers.js";
 export {
+  deriveSubkeys,
+  emailId,
+  hmacHex,
+  SUBKEY_LABELS,
+  verifyHmacHex,
+  type SubkeyName,
+  type Subkeys,
+} from "./crypto/subkeys.js";
+export type { Database } from "./db/database.js";
+export { DetachedStorageError, detachedRepositories } from "./db/detached.js";
+export { createRepositories } from "./db/repos.js";
+export type {
+  GameActionRecord,
+  GamePlayerRecord,
+  GamePlayerUpdate,
+  GameRecord,
+  GameRepo,
+  GameUpdate,
+  GameWriteSet,
+  LiveGameRow,
+  NewGame,
+  NewGameAction,
+  NewGamePlayer,
+  NewUser,
+  Repositories,
+  TransitionResult,
+  UserRecord,
+  UserRepo,
+} from "./db/repositories.js";
+export {
+  findLiveOrphans,
   findOrphans,
   installedSchema,
   LIVE_GAMES_QUERY,

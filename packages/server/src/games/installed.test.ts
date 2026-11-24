@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { InstalledGame } from "../app.js";
-import { findOrphans, installedSchema, registryMismatches, type Installed } from "./installed.js";
+import {
+  findLiveOrphans,
+  findOrphans,
+  installedSchema,
+  registryMismatches,
+  type Installed,
+} from "./installed.js";
 
 const INSTALLED: Installed = {
   words: {
@@ -49,6 +55,23 @@ describe("findOrphans", () => {
 
   it("finds nothing when every live game has an engine", () => {
     expect(findOrphans([{ id: "a", game_type: "words", game_version: 1 }], INSTALLED)).toEqual([]);
+  });
+});
+
+describe("findLiveOrphans", () => {
+  it("checks the repository's live games", async () => {
+    const repo = {
+      liveGames: () =>
+        Promise.resolve([
+          { id: "a", gameType: "words", gameVersion: 1 },
+          { id: "b", gameType: "words", gameVersion: 9 },
+          { id: "c", gameType: "gone", gameVersion: 1 },
+        ]),
+    };
+    expect(await findLiveOrphans(repo, INSTALLED)).toEqual([
+      { id: "b", gameType: "words", gameVersion: 9, reason: "rules version not exported" },
+      { id: "c", gameType: "gone", gameVersion: 1, reason: "type not installed" },
+    ]);
   });
 });
 

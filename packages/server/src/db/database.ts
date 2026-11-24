@@ -1,0 +1,35 @@
+/**
+ * The database boundary (docs/spec/03-architecture.md §4). Each runtime adapter hands the core's
+ * repository implementations an async Drizzle database over its driver: D1 on Cloudflare
+ * (`apps/worker`), `node:sqlite` on Node (`apps/node`). Repositories use only `batch()` for
+ * multi-statement writes — never interactive transactions, which D1 lacks — and the Node adapter
+ * runs each batch inside one synchronous SQLite transaction, so a batch is atomic on both.
+ *
+ * Nothing outside `src/db/` sees this type: the rest of the core depends on {@link Repositories}.
+ */
+import type { BatchItem, BatchResponse } from "drizzle-orm/batch";
+import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
+
+/**
+ * An async Drizzle SQLite database with `batch()`, whatever the driver (both the D1 and the proxy
+ * driver have it). Repositories build their queries from the shared schema's tables
+ * (`schema.ts`); relational queries (`db.query`) aren't used.
+ */
+export type Database = BaseSQLiteDatabase<"async", unknown> & {
+  batch<U extends BatchItem<"sqlite">, T extends Readonly<[U, ...U[]]>>(
+    batch: T,
+  ): Promise<BatchResponse<T>>;
+};
+
+/** One statement of an atomic batch. */
+export type Statement = BatchItem<"sqlite">;
+
+/**
+ * Runs statements as one atomic batch: all of them take effect or none do. Results come back in
+ * the statements' order.
+ */
+export async function runBatch(db: Database, statements: readonly Statement[]): Promise<unknown[]> {
+  const [first, ...rest] = statements;
+  if (first === undefined) return [];
+  return (await db.batch([first, ...rest])) as unknown[];
+}
