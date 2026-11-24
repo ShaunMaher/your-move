@@ -2,35 +2,26 @@
  * The Node entry point (docs/spec/09-operations.md §4). Run with
  * `node --disallow-code-generation-from-strings`. Startup order (02 §7.3, §7.5):
  *
- * 1. open the database, take the single-instance lock (03 §5.3), apply migrations, and refuse to
- *    start while live games would be orphaned, judged against `installed.json` only (no game code
- *    is loaded yet);
- * 2. read configuration and secrets (`*_FILE`), then scrub secrets from `process.env`;
- * 3. check code generation from strings is really off, then load the generated game registry with
+ * 1. read configuration and secrets (`*_FILE`) and validate them all;
+ * 2. take the single-instance lock (03 §5.3), apply migrations, and refuse to start while live
+ *    games would be orphaned, judged against `installed.json` only (no game code is loaded yet);
+ * 3. scrub secrets from `process.env`;
+ * 4. check code generation from strings is really off, then load the generated game registry with
  *    a dynamic `import()`, and refuse to start unless it matches `installed.json`;
- * 4. serve.
+ * 5. serve.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import { serve } from "@hono/node-server";
-import {
-  ConfigError,
-  createJsonLogger,
-  installedSchema,
-  parseConfig,
-  registryMismatches,
-} from "@your-move/server";
+import { createJsonLogger, installedSchema, registryMismatches } from "@your-move/server";
 
 import installedJson from "../../../generated/installed.json" with { type: "json" };
 import { codeGenerationFromStringsAllowed } from "./code-generation.js";
-import { InstanceLockedError } from "./db/instance-lock.js";
-import { MigrationError } from "./db/migrate.js";
-import { resolveSecretFiles, scrubSecrets, SecretFileError } from "./env.js";
-import { parseNodeConfig } from "./node-config.js";
+import { scrubSecrets } from "./env.js";
 import { createNodeApp } from "./server.js";
-import { openStorage, StartupRefusal, type Storage } from "./storage.js";
+import { isRefusal, startup, type Started } from "./startup.js";
 
 function exitWith(message: string): never {
   console.error(message);
@@ -48,46 +39,25 @@ const { values: args } = parseArgs({
 });
 
 const installed = installedSchema.parse(installedJson);
-const installedGames = Object.entries(installed).map(([type, entry]) => ({
-  type,
-  enabledByDefault: entry.enabledByDefault,
-}));
 
-// 1. Storage. The Node-only variables hold no secrets, so they are read before the secret files.
-let nodeConfig: ReturnType<typeof parseNodeConfig>;
-let storage: Storage;
+// 1–2. Configuration, then storage.
+let started: Started;
 try {
-  nodeConfig = parseNodeConfig(process.env);
-  storage = await openStorage({
-    databasePath: nodeConfig.databasePath,
-    migrationsFolder: args.migrations,
+  started = await startup({
+    env: process.env,
+    readFile: (path) => readFileSync(path, "utf8"),
     installed,
-    allowOrphanGames: nodeConfig.allowOrphanGames,
+    migrationsFolder: args.migrations,
   });
 } catch (error) {
-  if (
-    error instanceof ConfigError ||
-    error instanceof StartupRefusal ||
-    error instanceof InstanceLockedError ||
-    error instanceof MigrationError
-  ) {
-    exitWith(error.message);
-  }
+  if (isRefusal(error)) exitWith(error.message);
   throw error;
 }
+const { config, nodeConfig, storage } = started;
 
-// 2. Configuration and secrets.
-let env: Record<string, string | undefined>;
-let config: ReturnType<typeof parseConfig>;
-try {
-  env = resolveSecretFiles(process.env, (path) => readFileSync(path, "utf8"));
-  config = parseConfig(env, { runtime: "node", installedGames });
-} catch (error) {
-  if (error instanceof ConfigError || error instanceof SecretFileError) exitWith(error.message);
-  throw error;
-}
+// 3. No secret survives in the environment once game code can run (02 §7.5).
 scrubSecrets(process.env);
-scrubSecrets(env);
+scrubSecrets(started.env);
 
 const now = (): Date => new Date();
 const log = createJsonLogger({
@@ -101,8 +71,9 @@ log.info("database ready", {
   migrationsKnown: storage.migrations.known,
 });
 if (storage.acceptedOrphans.length > 0) {
-  log.warn("ALLOW_ORPHAN_GAMES: live games are orphaned and will be cancelled by the sweep", {
-    orphanedGames: storage.acceptedOrphans.length,
+  // Until M3 nothing cancels them: they keep their state and must not be played (10 M3).
+  log.warn("ALLOW_ORPHAN_GAMES: these live games are orphaned", {
+    orphanedGames: storage.acceptedOrphans.map((orphan) => orphan.id).join(","),
   });
 }
 
@@ -113,7 +84,7 @@ if (nodeConfig.trustProxy !== "false") {
   }
 }
 
-// 3. Game code never runs in a process that can compile strings (02 §7.5).
+// 4. Game code never runs in a process that can compile strings (02 §7.5).
 if (codeGenerationFromStringsAllowed()) {
   exitWith("Refusing to start: run node with --disallow-code-generation-from-strings (02 §7.5).");
 }
@@ -124,7 +95,7 @@ if (mismatches.length > 0) {
   exitWith(`The game registry does not match installed.json:\n  - ${mismatches.join("\n  - ")}`);
 }
 
-// 4. Serve.
+// 5. Serve.
 const app = createNodeApp({
   platform: { repos: storage.repos, config, log, now },
   games,

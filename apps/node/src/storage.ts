@@ -1,9 +1,15 @@
 /**
- * The storage half of Node startup (docs/spec/02-game-framework.md §7.3, 09 §4): open the
- * database, apply migrations, then refuse to start while any `lobby`/`active` game would be
- * orphaned by this build's games — checked against `installed.json` only, before any game code is
- * loaded. `ALLOW_ORPHAN_GAMES=true` accepts the orphans for this start; the sweep cancels them.
+ * The storage half of Node startup (docs/spec/02-game-framework.md §7.3, 09 §4): take the
+ * single-instance lock, open the database, apply migrations, then refuse to start while any
+ * `lobby`/`active` game would be orphaned by this build's games — checked against
+ * `installed.json` only, before any game code is loaded.
+ *
+ * The override is bound to one set of orphans: `ALLOW_ORPHAN_GAMES` must equal the digest the
+ * refusal printed for exactly those games, so a value left set can never wave through a later,
+ * different set. Until M3 nothing cancels an accepted orphan: it stays in its state, and M3 adds
+ * `409 GAME_UNAVAILABLE` and the sweep that cancels it (10 M3).
  */
+import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
 import { findLiveOrphans, type Installed, type Orphan, type Repositories } from "@your-move/server";
@@ -21,7 +27,8 @@ export interface StorageOptions {
   readonly databasePath: string;
   readonly migrationsFolder: string;
   readonly installed: Installed;
-  readonly allowOrphanGames: boolean;
+  /** `ALLOW_ORPHAN_GAMES`: the digest of the accepted orphan set, or null. */
+  readonly allowOrphanGames: string | null;
 }
 
 export interface Storage {
@@ -34,41 +41,52 @@ export interface Storage {
   close(): void;
 }
 
+/** The digest naming one set of orphaned games: 12 hex characters of SHA-256 over sorted ids. */
+export function orphanDigest(orphans: readonly Orphan[]): string {
+  const ids = orphans.map((orphan) => orphan.id).sort();
+  return createHash("sha256").update(ids.join("\n")).digest("hex").slice(0, 12);
+}
+
 function describeOrphan(orphan: Orphan): string {
   return `game ${orphan.id} (${orphan.gameType} v${String(orphan.gameVersion)}): ${orphan.reason}`;
 }
 
+function refusal(orphans: readonly Orphan[], digest: string): StartupRefusal {
+  return new StartupRefusal(
+    [
+      `Refusing to start: ${String(orphans.length)} live game(s) need a game type or rules version this build doesn't install (02 §7.3).`,
+      "Reinstall it, or let the games finish or cancel them first. To accept that exactly these",
+      `games become orphaned, start with ALLOW_ORPHAN_GAMES=${digest} (it accepts only this set).`,
+      ...orphans.map((orphan) => `  - ${describeOrphan(orphan)}`),
+    ].join("\n"),
+  );
+}
+
 /**
- * Opens the database, takes the single-instance lock (03 §5.3), migrates and runs the orphan
+ * Takes the single-instance lock (03 §5.3), opens and migrates the database and runs the orphan
  * check; throws to refuse the start.
  */
 export async function openStorage(options: StorageOptions): Promise<Storage> {
-  const sqlite = openSqlite(options.databasePath);
-  let lock: InstanceLock | null = null;
+  const lock: InstanceLock = acquireInstanceLock(options.databasePath);
+  let sqlite: DatabaseSync | null = null;
   try {
-    lock = acquireInstanceLock(options.databasePath);
+    sqlite = openSqlite(options.databasePath);
     const migrations = migrate(sqlite, options.migrationsFolder);
     const repos = nodeRepositories(sqlite);
     const orphans = await findLiveOrphans(repos.games, options.installed);
-    if (orphans.length > 0 && !options.allowOrphanGames) {
-      throw new StartupRefusal(
-        [
-          `Refusing to start: ${String(orphans.length)} live game(s) need a game type or rules version this build doesn't install (02 §7.3).`,
-          "Reinstall it, or let the games finish or cancel them first. To accept that they become",
-          "orphaned (the sweep cancels them), start once with ALLOW_ORPHAN_GAMES=true.",
-          ...orphans.map((orphan) => `  - ${describeOrphan(orphan)}`),
-        ].join("\n"),
-      );
+    if (orphans.length > 0) {
+      const digest = orphanDigest(orphans);
+      if (options.allowOrphanGames !== digest) throw refusal(orphans, digest);
     }
-    const held = lock;
+    const open = sqlite;
     const close = (): void => {
-      sqlite.close();
-      held.release();
+      open.close();
+      lock.release();
     };
     return { sqlite, repos, migrations, acceptedOrphans: orphans, close };
   } catch (error) {
-    sqlite.close();
-    lock?.release();
+    sqlite?.close();
+    lock.release();
     throw error;
   }
 }
