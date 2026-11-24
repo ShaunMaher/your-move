@@ -1,7 +1,8 @@
 /**
  * The example game's board (docs/spec/02-game-framework.md §3): the players, the last revealed
  * round and the viewer's hand. It talks to the server only through the shell's `submit` and
- * `preview`, and renders only what the view contains.
+ * `preview`, and renders only what the view contains. Either call can reject (the network is
+ * down, say); the board then tells the player in its alert region instead of failing silently.
  */
 import { isGameError } from "@your-move/sdk";
 import type { BoardProps } from "@your-move/sdk/client";
@@ -11,6 +12,10 @@ import type { Action, LastRound, PreviewResult, View } from "../engine/index.js"
 import { plural, seatNames } from "./names.js";
 
 type Props = BoardProps<Action, View, PreviewResult>;
+
+/** Shown when `preview` or `submit` rejects instead of answering. */
+const PREVIEW_FAILED = "Couldn't check that card. Try again.";
+const SUBMIT_FAILED = "Couldn't send your play. Check your connection and try again.";
 
 /** What each end reason means, for people. */
 const END_TEXT = {
@@ -38,18 +43,26 @@ export function Board(props: Props): ReactElement {
     setKept(null);
     setError(null);
     latest.current = card;
-    void props.preview({ card }).then((answer) => {
-      // Only the latest choice's preview is shown.
-      if (latest.current === card) setKept(isGameError(answer) ? null : answer.handAfter);
-    });
+    props.preview({ card }).then(
+      (answer) => {
+        // Only the latest choice's preview is shown.
+        if (latest.current === card) setKept(isGameError(answer) ? null : answer.handAfter);
+      },
+      () => {
+        if (latest.current === card) setError(PREVIEW_FAILED);
+      },
+    );
   }
 
   async function play(card: number): Promise<void> {
     setBusy(true);
+    setError(null);
     try {
       const outcome = await props.submit({ card });
       if (outcome.ok) setSelected(null);
       else setError(`That card couldn't be played (${outcome.error.code}).`);
+    } catch {
+      setError(SUBMIT_FAILED);
     } finally {
       setBusy(false);
     }

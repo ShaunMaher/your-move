@@ -121,6 +121,80 @@ describe("Board", () => {
     );
   });
 
+  it("tells the player when a preview fails, and keeps the choice", async () => {
+    render(
+      <Board
+        game={envelope(NAMES, 0)}
+        view={game.view(fresh, 0)}
+        submit={vi.fn()}
+        preview={() => Promise.reject(new Error("offline"))}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "5" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Couldn't check that card. Try again.",
+    );
+    expect(screen.getByRole("button", { name: "Play 5" })).toBeTruthy();
+    expect(screen.queryByText(/You will keep/u)).toBeNull();
+  });
+
+  it("ignores a failed preview for a card the player has moved on from", async () => {
+    let failFirst: (reason: Error) => void = () => undefined;
+    const preview = vi
+      .fn<(action: { card: number }) => Promise<PreviewResult | GameError>>()
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            failFirst = reject;
+          }),
+      )
+      .mockResolvedValueOnce({ handAfter: [5, 9] });
+    render(
+      <Board
+        game={envelope(NAMES, 0)}
+        view={game.view(fresh, 0)}
+        submit={vi.fn()}
+        preview={preview}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "1" }));
+    fireEvent.click(screen.getByRole("button", { name: "9" }));
+    expect(await screen.findByText("You will keep 5, 9.")).toBeTruthy();
+    failFirst(new Error("offline"));
+    await vi.waitFor(() => {
+      expect(preview).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("tells the player when sending a play fails, and lets them try again", async () => {
+    const submit = vi
+      .fn<(action: { card: number }) => Promise<SubmitResult>>()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ ok: true, game: envelope(NAMES, 0), view: null });
+    render(
+      <Board
+        game={envelope(NAMES, 0)}
+        view={game.view(fresh, 0)}
+        submit={submit}
+        preview={() => Promise.resolve({ handAfter: [1, 5] })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "9" }));
+    fireEvent.click(screen.getByRole("button", { name: "Play 9" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Couldn't send your play. Check your connection and try again.",
+    );
+    const retry = screen.getByRole("button", { name: "Play 9" });
+    expect(retry.hasAttribute("disabled")).toBe(false);
+
+    fireEvent.click(retry);
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+    expect(submit).toHaveBeenCalledTimes(2);
+  });
+
   it("waits for the others once the viewer has played", () => {
     renderBoard(game.apply(fresh, 0, { card: 5 }, noRandom).state, 0);
     expect(screen.getByText("You played 5. Waiting for the others to play.")).toBeTruthy();
