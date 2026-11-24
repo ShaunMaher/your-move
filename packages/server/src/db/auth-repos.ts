@@ -14,6 +14,7 @@ import type {
   RateLimitCount,
   RateLimitRepo,
   SessionRepo,
+  UserRecord,
   UserRepo,
 } from "./repositories.js";
 import {
@@ -27,6 +28,14 @@ import {
   users,
 } from "./schema.js";
 
+/**
+ * A stored row as a {@link UserRecord}: addresses are written only as `NormalisedEmail` (the
+ * repository takes nothing else), so a stored one carries the brand.
+ */
+function asUser(row: typeof users.$inferSelect | undefined): UserRecord | null {
+  return (row as UserRecord | undefined) ?? null;
+}
+
 export function userRepo(db: Database): UserRepo {
   return {
     async create(user) {
@@ -37,15 +46,15 @@ export function userRepo(db: Database): UserRepo {
         db.insert(users).values(user).onConflictDoNothing({ target: users.email }),
         db.select().from(users).where(eq(users.email, user.email)),
       ]);
-      const row = (found as (typeof users.$inferSelect)[])[0];
+      const row = (found as UserRecord[])[0];
       if (row === undefined) throw new Error("users.createOrGetByEmail: no row after insert");
       return row;
     },
     async findById(id) {
-      return (await db.select().from(users).where(eq(users.id, id)).get()) ?? null;
+      return asUser(await db.select().from(users).where(eq(users.id, id)).get());
     },
     async findByEmail(email) {
-      return (await db.select().from(users).where(eq(users.email, email)).get()) ?? null;
+      return asUser(await db.select().from(users).where(eq(users.email, email)).get());
     },
     async update(id, set) {
       await db.update(users).set(set).where(eq(users.id, id));
@@ -93,6 +102,8 @@ export function otpRepo(db: Database): OtpRepo {
     async issue(challenge, { create, maxLive, maxAttempts }) {
       const now = challenge.createdAt;
       const enabled = sql`${create ? 1 : 0}`;
+      // A never-emailed challenge (06 §3.2) burns nothing: the statement still runs, matching no row.
+      const burns = sql`${create && challenge.emailed === 1 ? 1 : 0}`;
       const beyondNewest = db
         .select({ id: otpChallenges.id })
         .from(otpChallenges)
@@ -101,9 +112,13 @@ export function otpRepo(db: Database): OtpRepo {
             eq(otpChallenges.email, challenge.email),
             eq(otpChallenges.purpose, challenge.purpose),
             liveChallenge(now, maxAttempts),
+            // Only emailed challenges hold or lose a place among the newest: a never-emailed one
+            // can't verify, so it must not push a real code out.
+            eq(otpChallenges.emailed, 1),
           ),
         )
         .orderBy(...NEWEST_FIRST)
+        // Drizzle emits no LIMIT for -1, and SQLite needs one before OFFSET.
         .limit(Number.MAX_SAFE_INTEGER)
         .offset(maxLive);
       await runBatch(db, [
@@ -111,7 +126,7 @@ export function otpRepo(db: Database): OtpRepo {
         db
           .update(otpChallenges)
           .set({ consumedAt: now })
-          .where(and(sql`${enabled}`, inArray(otpChallenges.id, beyondNewest))),
+          .where(and(burns, inArray(otpChallenges.id, beyondNewest))),
       ]);
     },
     async live(email, purpose, now, maxAttempts) {
@@ -160,7 +175,7 @@ export function sessionRepo(db: Database): SessionRepo {
         .innerJoin(users, eq(sessions.userId, users.id))
         .where(eq(sessions.tokenHash, tokenHash))
         .get();
-      return row ?? null;
+      return row === undefined ? null : { session: row.session, user: row.user as UserRecord };
     },
     async touch(id, lastSeenAt, expiresAt) {
       await db.update(sessions).set({ lastSeenAt, expiresAt }).where(eq(sessions.id, id));

@@ -13,12 +13,12 @@ export const MAX_EMAIL_LENGTH = 254;
 
 /**
  * The pragmatic address shape (04): a local part and a domain of at least two dot-separated labels,
- * with no whitespace, control characters, or the characters that delimit or quote addresses in
+ * with no whitespace, control or format characters (bidi overrides, zero-width), or the characters that delimit or quote addresses in
  * headers (`<>()[]\,;:"`), and exactly one `@`. Quoted local parts and IP-literal domains are not
  * accepted. Anything that could end a header line (CR, LF) is whitespace and so excluded (08 T14).
  */
-const LOCAL = String.raw`[^\s\p{Cc}@<>()[\]\\,;:"]{1,64}`;
-const LABEL = String.raw`[^\s\p{Cc}@<>()[\]\\,;:".]+`;
+const LOCAL = String.raw`[^\s\p{Cc}\p{Cf}@<>()[\]\\,;:"]{1,64}`;
+const LABEL = String.raw`[^\s\p{Cc}\p{Cf}@<>()[\]\\,;:".]+`;
 const ADDRESS = new RegExp(String.raw`^${LOCAL}@${LABEL}(?:\.${LABEL})+$`, "u");
 
 /**

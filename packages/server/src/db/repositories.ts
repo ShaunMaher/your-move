@@ -20,7 +20,10 @@ import type {
   users,
 } from "./schema.js";
 
-export type UserRecord = InferSelectModel<typeof users>;
+/** A user row; a stored address is always normalised (04), so it carries the brand. */
+export type UserRecord = Omit<InferSelectModel<typeof users>, "email"> & {
+  email: NormalisedEmail | null;
+};
 /** A new human or agent; a human's `email` is a {@link NormalisedEmail} (M2a review S2-3). */
 export type NewUser = Omit<InferInsertModel<typeof users>, "email"> & {
   email?: NormalisedEmail | null;

@@ -32,8 +32,6 @@ describe("GET /api/v1/config", () => {
       VAPID_PUBLIC_KEY: "vapid-public",
       VAPID_PRIVATE_KEY: "vapid-private-secret",
       VAPID_SUBJECT: "mailto:ops@example.org",
-      TURNSTILE_SITE_KEY: "site-key",
-      TURNSTILE_SECRET: "turnstile-secret",
     });
     const res = await app.request("/api/v1/config");
     expect(res.status).toBe(200);
@@ -44,10 +42,10 @@ describe("GET /api/v1/config", () => {
       operatorContact: "ops@example.org",
       minAge: 13,
       vapidPublicKey: "vapid-public",
-      turnstileSiteKey: "site-key",
+
       uploadsEnabled: true,
     });
-    expect(body).not.toMatch(/vapid-private-secret|turnstile-secret|smtp:\/\//u);
+    expect(body).not.toMatch(/vapid-private-secret|smtp:\/\//u);
   });
 
   it("omits optional keys that are not configured", async () => {
@@ -126,11 +124,9 @@ describe("headers", () => {
     expect(res.headers.get("Content-Security-Policy")).toContain("default-src 'self'");
   });
 
-  it("adds the Turnstile origin to the CSP when Turnstile is configured", async () => {
-    const { app } = setup({ ...PROD_ENV, TURNSTILE_SITE_KEY: "k", TURNSTILE_SECRET: "s" });
-    const res = await app.request("/api/health");
-    expect(res.headers.get("Content-Security-Policy")).toContain(
-      "https://challenges.cloudflare.com",
+  it("refuses Turnstile keys until enforcement exists, so no CSP is widened (M2b review S-3)", () => {
+    expect(() => setup({ ...PROD_ENV, TURNSTILE_SITE_KEY: "k", TURNSTILE_SECRET: "s" })).toThrow(
+      /Turnstile enforcement is not built yet/u,
     );
   });
 });

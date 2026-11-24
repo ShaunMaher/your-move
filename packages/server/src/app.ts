@@ -78,6 +78,34 @@ function stackFrames(error: Error): string {
     .join("\n");
 }
 
+/**
+ * What a server fault's log entry may say (09 §5). Errors that wrap another — a database driver's
+ * query error carries the SQL and its parameters (addresses, token hashes) in its message — and
+ * parse errors, whose message quotes the parsed text, are logged by class, stack frames and the
+ * cause's class or code only. Other errors keep their message.
+ */
+function faultFields(error: Error): Record<string, string | undefined> {
+  const cause: unknown = error.cause;
+  if (cause !== undefined || error instanceof SyntaxError) {
+    const causeCode =
+      typeof cause === "object" && cause !== null && "code" in cause ? cause.code : undefined;
+    return {
+      // The constructor name tells a wrapped driver error (`DrizzleQueryError`) apart.
+      errorClass: error.constructor.name,
+      stack: stackFrames(error),
+      ...(cause instanceof Error ? { causeClass: cause.name } : {}),
+      ...(typeof causeCode === "string" ? { causeCode } : {}),
+    };
+  }
+  return { errorClass: error.name, errorMessage: error.message, stack: error.stack };
+}
+
+const REQUEST_RULE_MESSAGES = {
+  BAD_REQUEST: "Send a session cookie or a bearer token, not both.",
+  BAD_ORIGIN: "Cross-origin request refused.",
+  UNSUPPORTED_MEDIA_TYPE: "Send JSON.",
+} as const;
+
 /** The route pattern that answered, never the raw path (09 §5). */
 function respondedRoute(c: Context): string {
   return matchedRoutes(c)[c.req.routeIndex]?.path ?? "(unmatched)";
@@ -133,12 +161,10 @@ export function createApp(options: AppOptions): App {
       origin: new URL(config.publicUrl).origin,
       hasSessionCookie: (header) => readSessionCookie(header, localDev) !== null,
       reject: (status, code) =>
-        new Response(
-          JSON.stringify(
-            errorBody(code, code === "BAD_ORIGIN" ? "Cross-origin request refused." : "Send JSON."),
-          ),
-          { status, headers: { "Content-Type": "application/json" } },
-        ),
+        new Response(JSON.stringify(errorBody(code, REQUEST_RULE_MESSAGES[code])), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        }),
     }),
   );
 
@@ -200,13 +226,7 @@ export function createApp(options: AppOptions): App {
     // and a SyntaxError from parsing something other than the request (stored JSON, an engine).
     // V8's JSON.parse messages quote the text being parsed, which may be input or game secrets, so
     // a SyntaxError is logged by class and stack frames only (09 §5).
-    log.error("unhandled error", {
-      ...context,
-      errorClass: error.name,
-      ...(error instanceof SyntaxError
-        ? { stack: stackFrames(error) }
-        : { errorMessage: error.message, stack: error.stack }),
-    });
+    log.error("unhandled error", { ...context, ...faultFields(error) });
     return c.json(errorBody("INTERNAL", "Something went wrong."), 500);
   });
 

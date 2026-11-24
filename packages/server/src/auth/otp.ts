@@ -10,9 +10,9 @@
 import type { NormalisedEmail } from "../accounts/email.js";
 import type { AppConfig } from "../config/parse.js";
 import { emailId, hmacHex, type Subkeys, verifyHmacHex } from "../crypto/subkeys.js";
-import type { OtpPurpose, Repositories, UserRecord } from "../db/repositories.js";
+import type { OtpPurpose, Repositories } from "../db/repositories.js";
 import type { Logger } from "../log.js";
-import { checkLimits, type LimitCheck } from "./limits.js";
+import { checkLimits, type LimitCheck, type LimitResult } from "./limits.js";
 
 const CODE_TTL_MS = 10 * 60_000;
 const MAX_ATTEMPTS = 5;
@@ -44,9 +44,8 @@ export function cleanCode(input: string): string {
   return input.replace(/[\s-]/gu, "");
 }
 
-/** What the caller knows about one request: the client's IP-bucket hashes. */
-export interface RequestOrigin {
-  /** HMACs (`ip/v1`) of the client's buckets, with each bucket's limit multiplier. */
+/** The client's IP buckets for one request: `ip/v1` HMACs with each bucket's limit multiplier. */
+export interface ClientBuckets {
   readonly ipBuckets: readonly { readonly hash: string; readonly multiplier: number }[];
 }
 
@@ -64,57 +63,57 @@ export interface IssueOutcome {
   /** The code to email, or the suspended notice; null when nothing may be sent. */
   readonly send:
     { readonly type: "code"; readonly code: string } | { readonly type: "suspended" } | null;
-  readonly user: UserRecord | null;
-}
-
-/** Logs an instance-wide cap being exceeded: an alert (08 §4). */
-function alertIfExceeded(
-  log: Logger,
-  results: readonly { name: string; exceeded: boolean }[],
-): void {
-  for (const result of results) {
-    if (result.exceeded) log.error("instance-wide limit exceeded", { alert: result.name });
-  }
 }
 
 /**
- * Handles `POST /auth/otp/request` (06 §3, §3.2). The steps and statements are the same on every
- * path; the flags decide whether a challenge is created, whether it can ever verify (`emailed`),
- * and what is sent.
+ * Logs an instance-wide limit as an alert (08 §4) once, on the request that first crosses it, so
+ * a sustained flood doesn't also flood the logs.
+ */
+function alertOnCrossing(log: Logger, results: readonly LimitResult[]): void {
+  for (const result of results) {
+    if (result.exceeded && result.estimate - 1 <= result.limit) {
+      log.error("instance-wide limit exceeded", { alert: result.name });
+    }
+  }
+}
+
+/** The per-bucket checks of one limit. */
+function bucketChecks(
+  buckets: ClientBuckets,
+  name: LimitCheck["name"],
+  amount: 0 | 1,
+): LimitCheck[] {
+  return buckets.ipBuckets.map((bucket) => ({
+    name,
+    key: bucket.hash,
+    amount,
+    multiplier: bucket.multiplier,
+  }));
+}
+
+/**
+ * Handles `POST /auth/otp/request` (06 §3, §3.2). The client IP is checked first, on its own: a
+ * refused request answers `429` and charges nothing else, so it can't use up anyone's per-email
+ * allowance. Past that, the steps and statements are the same on every path; the flags decide
+ * whether a challenge is created, whether it can ever verify (`emailed`), and what is sent.
  */
 export async function issueSignInCode(
   deps: OtpDeps,
   email: NormalisedEmail,
-  origin: RequestOrigin,
+  buckets: ClientBuckets,
 ): Promise<IssueOutcome> {
   const { repos, config, keys, now } = deps;
-  const [id, user] = await Promise.all([emailId(keys, email), repos.users.findByEmail(email)]);
+  const ip = await checkLimits(repos, config, now, bucketChecks(buckets, "OTP_REQUEST_IP_HOUR", 1));
+  if (ip.some((result) => result.exceeded)) return { kind: "ip-limited", send: null };
 
-  const ipChecks: LimitCheck[] = origin.ipBuckets.map((bucket) => ({
-    name: "OTP_REQUEST_IP_HOUR",
-    key: bucket.hash,
-    amount: 1,
-    multiplier: bucket.multiplier,
-  }));
-  const newAccountChecks: LimitCheck[] = origin.ipBuckets.map((bucket) => ({
-    name: "NEW_ACCOUNTS_IP_DAY",
-    key: bucket.hash,
-    amount: 0,
-    multiplier: bucket.multiplier,
-  }));
+  const [id, user] = await Promise.all([emailId(keys, email), repos.users.findByEmail(email)]);
   const results = await checkLimits(repos, config, now, [
-    ...ipChecks,
     { name: "OTP_REQUEST_EMAIL_HOUR", key: id, amount: 1 },
     { name: "OTP_REQUEST_EMAIL_DAY", key: id, amount: 1 },
-    ...newAccountChecks,
+    ...bucketChecks(buckets, "NEW_ACCOUNTS_IP_DAY", 0),
   ]);
-  const ipLimited = results.slice(0, ipChecks.length).some((result) => result.exceeded);
-  if (ipLimited) return { kind: "ip-limited", send: null, user };
-  const emailLimited = results
-    .slice(ipChecks.length, ipChecks.length + 2)
-    .some((result) => result.exceeded);
-  const newAccountLimited =
-    user === null && results.slice(ipChecks.length + 2).some((result) => result.exceeded);
+  const emailLimited = results.slice(0, 2).some((result) => result.exceeded);
+  const newAccountLimited = user === null && results.slice(2).some((result) => result.exceeded);
   const suspended = user?.suspendedAt != null;
 
   // Per-email limit: no challenge, nothing touched, nothing sent (06 §3). Unknown address from a
@@ -126,7 +125,7 @@ export async function issueSignInCode(
     { name: "OTP_EMAIL_GLOBAL_DAY", key: "all", amount: wouldSend ? 1 : 0 },
   ]);
   const globalCapped = wouldSend && global.some((result) => result.exceeded);
-  if (wouldSend) alertIfExceeded(deps.log, global);
+  if (wouldSend) alertOnCrossing(deps.log, global);
   const sends = wouldSend && !globalCapped;
 
   const challengeId = crypto.randomUUID();
@@ -147,7 +146,7 @@ export async function issueSignInCode(
   await repos.authEvents.record({
     userId: user?.id ?? null,
     type: "otp_requested",
-    ipHash: origin.ipBuckets[0]?.hash ?? null,
+    ipHash: buckets.ipBuckets[0]?.hash ?? null,
     createdAt: now,
   });
   const send = !sends
@@ -155,7 +154,7 @@ export async function issueSignInCode(
     : suspended
       ? { type: "suspended" as const }
       : { type: "code" as const, code };
-  return { kind: "accepted", send, user };
+  return { kind: "accepted", send };
 }
 
 /**
@@ -179,7 +178,7 @@ export async function issueStepUpCode(
     { name: "OTP_EMAIL_GLOBAL_HOUR", key: "all", amount: 1 },
     { name: "OTP_EMAIL_GLOBAL_DAY", key: "all", amount: 1 },
   ]);
-  alertIfExceeded(deps.log, global);
+  alertOnCrossing(deps.log, global);
   const sends = !global.some((result) => result.exceeded);
   const challengeId = crypto.randomUUID();
   const code = generateCode();
@@ -213,17 +212,12 @@ export async function verifyCode(
   email: NormalisedEmail,
   purpose: OtpPurpose,
   input: string,
-  origin: RequestOrigin,
+  buckets: ClientBuckets,
 ): Promise<VerifyOutcome> {
   const { repos, config, keys, now } = deps;
   const id = await emailId(keys, email);
   const gate = await checkLimits(repos, config, now, [
-    ...origin.ipBuckets.map((bucket): LimitCheck => ({
-      name: "OTP_VERIFY_IP_HOUR",
-      key: bucket.hash,
-      amount: 1,
-      multiplier: bucket.multiplier,
-    })),
+    ...bucketChecks(buckets, "OTP_VERIFY_IP_HOUR", 1),
     { name: "OTP_VERIFY_FAIL_EMAIL_HOUR", key: id, amount: 0 },
   ]);
   if (gate.some((result) => result.exceeded)) return "limited";
@@ -250,6 +244,31 @@ export async function verifyCode(
     { name: "OTP_VERIFY_FAIL_EMAIL_HOUR", key: id, amount: 1 },
     { name: "OTP_VERIFY_FAIL_GLOBAL_HOUR", key: "all", amount: 1 },
   ]);
-  alertIfExceeded(deps.log, failures.slice(1));
+  alertOnCrossing(deps.log, failures.slice(1));
   return "invalid";
+}
+
+/**
+ * New accounts per client IP (08 §4), checked where an account is created, at verify: an unknown
+ * address whose verify comes from a bucket over the limit gets no account (the caller answers
+ * `INVALID_CODE`). `/otp/request` reads the same counter so it can stay silent early.
+ */
+export async function newAccountAllowed(deps: OtpDeps, buckets: ClientBuckets): Promise<boolean> {
+  const results = await checkLimits(
+    deps.repos,
+    deps.config,
+    deps.now,
+    bucketChecks(buckets, "NEW_ACCOUNTS_IP_DAY", 0),
+  );
+  return !results.some((result) => result.exceeded);
+}
+
+/** Counts one created account against the client's buckets (only when a row was inserted). */
+export async function chargeNewAccount(deps: OtpDeps, buckets: ClientBuckets): Promise<void> {
+  await checkLimits(
+    deps.repos,
+    deps.config,
+    deps.now,
+    bucketChecks(buckets, "NEW_ACCOUNTS_IP_DAY", 1),
+  );
 }

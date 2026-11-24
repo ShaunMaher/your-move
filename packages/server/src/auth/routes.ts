@@ -10,16 +10,17 @@ import {
   getMeRoute,
   logoutAllRoute,
   logoutRoute,
+  type ErrorCode,
   type Me,
   otpRequestRoute,
   otpVerifyRoute,
   patchMeRoute,
+  UserSettingsSchema,
 } from "@your-move/shared";
 import type { Context, MiddlewareHandler } from "hono";
-import { z } from "zod";
 
 import { validateDisplayName } from "../accounts/display-name.js";
-import { type NormalisedEmail, normaliseAddress } from "../accounts/email.js";
+import { normaliseAddress } from "../accounts/email.js";
 import { isLocalDev } from "../config/local-dev.js";
 import { hmacHex, type Subkeys } from "../crypto/subkeys.js";
 import type { UserRecord } from "../db/repositories.js";
@@ -39,7 +40,9 @@ import {
   issueSignInCode,
   issueStepUpCode,
   type OtpDeps,
-  type RequestOrigin,
+  type ClientBuckets,
+  chargeNewAccount,
+  newAccountAllowed,
   verifyCode,
 } from "./otp.js";
 import {
@@ -51,7 +54,10 @@ import {
 } from "./session.js";
 
 type ErrorStatus = 400 | 401 | 403 | 429;
-type Code = "BAD_REQUEST" | "INVALID_CODE" | "UNAUTHENTICATED" | "SUSPENDED" | "RATE_LIMITED";
+type Code = Extract<
+  ErrorCode,
+  "BAD_REQUEST" | "INVALID_CODE" | "UNAUTHENTICATED" | "SUSPENDED" | "RATE_LIMITED"
+>;
 
 const MESSAGES: Readonly<Record<Code, string>> = {
   BAD_REQUEST: "The request was rejected.",
@@ -65,16 +71,18 @@ function fail<S extends ErrorStatus, C extends Code>(c: Context, status: S, code
   return c.json({ error: { code, message: MESSAGES[code] } }, status);
 }
 
-const storedSettings = z.object({ whoCanAddMe: z.enum(["pastOpponents", "nobody"]).optional() });
+/** Stored settings: known keys only, anything unreadable treated as unset. */
+const storedSettings = UserSettingsSchema.partial().catch({});
 
 /** The `Me` view of a user (05 §Auth & account). */
 function toMe(user: UserRecord, adminEmails: readonly string[], minAge: number): Me {
-  let settings: z.infer<typeof storedSettings> = {};
+  let parsed: unknown = {};
   try {
-    settings = storedSettings.catch({}).parse(JSON.parse(user.settings));
+    parsed = JSON.parse(user.settings);
   } catch {
-    settings = {};
+    // Unreadable settings count as unset.
   }
+  const settings = storedSettings.parse(parsed);
   return {
     id: user.id,
     kind: user.kind,
@@ -138,7 +146,7 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
   };
 
   /** The client's IP buckets, hashed (08 §4.1), or null when the address is missing. */
-  const requestOrigin = async (c: Context, keys: Subkeys): Promise<RequestOrigin | null> => {
+  const clientBuckets = async (c: Context, keys: Subkeys): Promise<ClientBuckets | null> => {
     const ip = platform.clientIp(c.req.raw, c.env);
     if (!ip.ok) return null;
     const buckets = await Promise.all(
@@ -189,9 +197,9 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     const email = normaliseAddress(c.req.valid("json").email);
     if (email === null) return fail(c, 400, "BAD_REQUEST");
     const context = await deps();
-    const origin = await requestOrigin(c, context.keys);
-    if (origin === null) return fail(c, 400, "BAD_REQUEST");
-    const outcome = await issueSignInCode(context, email, origin);
+    const buckets = await clientBuckets(c, context.keys);
+    if (buckets === null) return fail(c, 400, "BAD_REQUEST");
+    const outcome = await issueSignInCode(context, email, buckets);
     if (outcome.kind === "ip-limited") return fail(c, 429, "RATE_LIMITED");
     if (outcome.send?.type === "code") {
       send(c, signInCodeEmail(email, outcome.send.code, templateContext()));
@@ -206,12 +214,12 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     const email = normaliseAddress(body.email);
     if (email === null) return fail(c, 400, "BAD_REQUEST");
     const context = await deps();
-    const origin = await requestOrigin(c, context.keys);
-    if (origin === null) return fail(c, 400, "BAD_REQUEST");
+    const buckets = await clientBuckets(c, context.keys);
+    if (buckets === null) return fail(c, 400, "BAD_REQUEST");
     const existing = await repos.users.findByEmail(email);
-    const outcome = await verifyCode(context, email, "signin", body.code, origin);
+    const outcome = await verifyCode(context, email, "signin", body.code, buckets);
     if (outcome === "limited") return fail(c, 429, "RATE_LIMITED");
-    const ipHash = origin.ipBuckets[0]?.hash ?? null;
+    const ipHash = buckets.ipBuckets[0]?.hash ?? null;
     if (outcome === "invalid" || existing?.suspendedAt != null) {
       await repos.authEvents.record({
         userId: existing?.id ?? null,
@@ -223,24 +231,33 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     }
     let user = existing;
     if (user === null) {
+      // New accounts per IP (08 §4): judged and counted where the account is created, against
+      // this request's buckets, so asking for the code from one address and verifying from
+      // another can't get round it.
+      if (!(await newAccountAllowed(context, buckets))) {
+        await repos.authEvents.record({
+          userId: null,
+          type: "otp_failed",
+          ipHash,
+          createdAt: context.now,
+        });
+        return fail(c, 400, "INVALID_CODE");
+      }
+      const id = crypto.randomUUID();
       user = await repos.users.createOrGetByEmail({
-        id: crypto.randomUUID(),
+        id,
         email,
         createdAt: context.now,
         updatedAt: context.now,
       });
-      // New accounts per IP bucket (08 §4): counted when an account is created.
-      await checkLimits(
-        repos,
-        config,
-        context.now,
-        origin.ipBuckets.map((bucket) => ({
-          name: "NEW_ACCOUNTS_IP_DAY",
-          key: bucket.hash,
-          amount: 1,
-          multiplier: bucket.multiplier,
-        })),
-      );
+      // Counted only when this request inserted the row, not when a racing verify did.
+      if (user.id === id) await chargeNewAccount(context, buckets);
+    }
+    // Rotated on sign-in (06 §4): a session this browser presents is replaced, not left behind.
+    const presented = readSessionCookie(c.req.header("Cookie"), localDev);
+    if (presented !== null) {
+      const previous = await loadSession(repos, presented, context.now, () => undefined);
+      if (previous !== null) await repos.sessions.delete(previous.user.id, previous.session.id);
     }
     const token = await createSession(repos, user.id, context.now, c.req.header("User-Agent"));
     await repos.authEvents.record({
@@ -318,7 +335,7 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
 
   app.openapi(deleteOtpRoute, async (c) => {
     const active = c.get("session");
-    const email = active.user.email as NormalisedEmail | null;
+    const email = active.user.email;
     if (email === null) return fail(c, 400, "BAD_REQUEST");
     const issued = await issueStepUpCode(
       await deps(),
@@ -333,17 +350,17 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
 
   app.openapi(deleteMeRoute, async (c) => {
     const active = c.get("session");
-    const email = active.user.email as NormalisedEmail | null;
+    const email = active.user.email;
     if (email === null) return fail(c, 400, "BAD_REQUEST");
     const context = await deps();
-    const origin = await requestOrigin(c, context.keys);
-    if (origin === null) return fail(c, 400, "BAD_REQUEST");
+    const buckets = await clientBuckets(c, context.keys);
+    if (buckets === null) return fail(c, 400, "BAD_REQUEST");
     const outcome = await verifyCode(
       context,
       email,
       "delete_account",
       c.req.valid("json").code,
-      origin,
+      buckets,
     );
     if (outcome === "limited") return fail(c, 429, "RATE_LIMITED");
     if (outcome === "invalid") return fail(c, 400, "INVALID_CODE");
@@ -354,7 +371,7 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
       {
         userId: active.user.id,
         type: "account_deleted",
-        ipHash: origin.ipBuckets[0]?.hash ?? null,
+        ipHash: buckets.ipBuckets[0]?.hash ?? null,
         createdAt: context.now,
       },
     );

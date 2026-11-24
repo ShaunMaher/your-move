@@ -22,18 +22,16 @@ function isJson(contentType: string | undefined): boolean {
   return contentType?.split(";")[0]?.trim().toLowerCase() === "application/json";
 }
 
-function hasBody(headers: Headers): boolean {
-  const length = headers.get("Content-Length");
-  return (length !== null && length !== "0") || headers.has("Transfer-Encoding");
-}
-
 export interface RequestRuleOptions {
   /** `PUBLIC_URL`'s origin. */
   readonly origin: string;
   /** Whether the request carries the session cookie. */
   readonly hasSessionCookie: (cookieHeader: string | undefined) => boolean;
   /** Answers an error with the framework's JSON error body. */
-  readonly reject: (status: 403 | 415, code: "BAD_ORIGIN" | "UNSUPPORTED_MEDIA_TYPE") => Response;
+  readonly reject: (
+    status: 400 | 403 | 415,
+    code: "BAD_REQUEST" | "BAD_ORIGIN" | "UNSUPPORTED_MEDIA_TYPE",
+  ) => Response;
 }
 
 /**
@@ -49,7 +47,10 @@ export function requestRules(options: RequestRuleOptions): MiddlewareHandler {
   return async (c, next) => {
     const path = c.req.path;
     const cookie = options.hasSessionCookie(c.req.header("Cookie"));
-    const bearerOnly = !cookie && c.req.header("Authorization") !== undefined;
+    const bearer = c.req.header("Authorization") !== undefined;
+    // A cookie and a bearer token on one request are refused everywhere (05 §Conventions).
+    if (cookie && bearer) return options.reject(400, "BAD_REQUEST");
+    const bearerOnly = !cookie && bearer;
     if (STATE_CHANGING.has(c.req.method) && !ORIGIN_EXEMPT.has(path) && !bearerOnly) {
       const origin = c.req.header("Origin");
       if (
@@ -59,12 +60,22 @@ export function requestRules(options: RequestRuleOptions): MiddlewareHandler {
         return options.reject(403, "BAD_ORIGIN");
       }
     }
-    if (
-      hasBody(c.req.raw.headers) &&
-      !JSON_EXEMPT.has(path) &&
-      !isJson(c.req.header("Content-Type"))
-    ) {
-      return options.reject(415, "UNSUPPORTED_MEDIA_TYPE");
+    if (!JSON_EXEMPT.has(path)) {
+      // Whether there is a body is read from the body itself (at most 16 kB: the body limit runs
+      // first), not from framing headers, which in-process and HTTP/2 requests may lack; the Node
+      // adapter gives every non-GET request a stream, empty or not. Hono caches the text, so the
+      // route's validator parses the same bytes.
+      const text = c.req.raw.body === null ? "" : await c.req.text();
+      if (text.length > 0 && !isJson(c.req.header("Content-Type"))) {
+        return options.reject(415, "UNSUPPORTED_MEDIA_TYPE");
+      }
+      if (text.length === 0 && c.req.header("Content-Type") !== undefined) {
+        // An empty body with a content type is no input: drop the type, so endpoints that take
+        // none accept it (05 §Conventions) instead of failing to parse "" as JSON.
+        const headers = new Headers(c.req.raw.headers);
+        headers.delete("Content-Type");
+        c.req.raw = new Request(c.req.raw.url, { method: c.req.method, headers });
+      }
     }
     await next();
     return undefined;
