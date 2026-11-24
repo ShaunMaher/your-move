@@ -11,6 +11,7 @@
  * 5. serve.
  */
 import { readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -70,6 +71,14 @@ log.info("database ready", {
   migrationsApplied: storage.migrations.applied,
   migrationsKnown: storage.migrations.known,
 });
+if (storage.exposedDirectoryMode !== null) {
+  // The files themselves are 0600 (08, M2a review S-3), but others can list or enter the
+  // directory; an existing directory isn't changed behind the operator's back (S2-4).
+  log.warn("the database directory is open to group or others: chmod 0700 it", {
+    databaseDirectory: dirname(nodeConfig.databasePath),
+    mode: storage.exposedDirectoryMode,
+  });
+}
 if (storage.acceptedOrphans.length > 0) {
   // Until M3 nothing cancels them: they keep their state and must not be played (10 M3).
   log.warn("ALLOW_ORPHAN_GAMES: these live games are orphaned", {
