@@ -115,6 +115,10 @@ pnpm at it with `NPM_CONFIG_USERCONFIG`, and deletes it in `after_script`. A tes
 (`scripts/src/ci/npm-credentials.test.ts`) fails if any job writes a credential into the
 repository's `.npmrc`.
 
+**`publish:packages` is manual for now** (issue #12). GitLab's protected npm packages refuse the
+deploy token (`Package protected`): deploy tokens have no role, and project access tokens can't be
+scoped to the package registry. Nothing is published until the release-path decision in M1.
+
 The nightly OSV scan is a schedule with `SCHEDULE_TASK=nightly`. Every merge request pipeline runs
 one job per environment that declares that environment, prints whether each of these variables is
 set, and fails if any is. Its list of variables and environments is kept equal to this table by a

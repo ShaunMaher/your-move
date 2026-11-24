@@ -481,6 +481,18 @@ security:no-secrets-on-mr:
 publish:packages:
   extends: [.release, .caches]
   image: $NODE_IMAGE
+  # Manual until the release-path decision in M1c (issue #12): GitLab's protected npm packages
+  # refuse the release deploy token ("Package protected"), and project access tokens can't be
+  # scoped to the package registry. Nothing is published until then; main stays green.
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+      allow_failure: true
+    - if: $CI_COMMIT_TAG =~ /^v/
+      when: manual
+      allow_failure: true
   needs: [validate, test, test:worker, build:app, e2e, security:secrets, security:dependencies]
   variables:
     # A fresh clone, never a checkout left on the runner by another pipeline.
