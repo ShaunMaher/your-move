@@ -321,6 +321,53 @@ export function brokenFixtures(): Record<string, { property: string; engines: ()
         },
       })),
     },
+    "perturbs only the deck while hands are hidden": {
+      // The view leaks the next seat's hand, but reordering the deck never shows it (P2-1).
+      property: "secrecy",
+      engines: variant((toy) => ({
+        ...toy,
+        view: (s, v) => ({ ...toy.view(s, v), peek: otherHand(s, v) }),
+        test: {
+          ...toy.test,
+          perturbHidden: (s) => ({ ...s, deck: [...s.deck].reverse() }),
+        },
+      })),
+    },
+    "records a rare secret choice": {
+      // A rare exchange (a tenth of random actions): a negative card -c puts card c under the deck
+      // and draws the top card, unseen by the others; its record names the card (S2-1).
+      property: "secrecy",
+      engines: variant((toy) => ({
+        ...toy,
+        validate: (s, seat, a, res) =>
+          a.card < 0
+            ? s.hands[seat]?.includes(-a.card) === true && s.deck.length > 0
+              ? OK
+              : { code: "NOT_IN_HAND" }
+            : toy.validate(s, seat, a, res),
+        apply: (s, seat, a, rng) => {
+          if (a.card >= 0) return toy.apply(s, seat, a, rng);
+          const [drew = 0, ...rest] = s.deck;
+          const hand = [...(s.hands[seat] ?? []).filter((c) => c !== -a.card), drew];
+          return {
+            state: {
+              ...s,
+              deck: [...rest, -a.card],
+              hands: s.hands.map((h, i) => (i === seat ? hand : h)),
+            },
+            record: { kind: "played", seat, card: a.card },
+          };
+        },
+        test: {
+          ...toy.test,
+          randomAction: (s, seat, rng, res) =>
+            s.deck.length > 0 && rng.nextInt(10) === 0
+              ? { card: -pick(s.hands[seat] ?? [0], rng) }
+              : toy.test.randomAction(s, seat, rng, res),
+          maxActions: () => 500,
+        },
+      })),
+    },
     "never terminates, with a large maxActions": {
       property: "termination",
       engines: variant((toy) => ({

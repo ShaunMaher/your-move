@@ -290,6 +290,7 @@ export const gameStatusSchema: z.ZodEnum<{
 // @public
 export interface GameTestHooks<Options, State, Action> {
     context?(): OptionsContext;
+    readonly hiddenFromEveryone?: boolean;
     readonly hiddenInformation: boolean;
     maxActions(options: Options, seats: number): number;
     optionInputs(ctx: OptionsContext): readonly unknown[];

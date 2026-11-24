@@ -1,7 +1,8 @@
 # M1a review — resolutions
 
 Picky review (P), security review (S) and the CI run (CI) of M1a, the SDK, the generic test kit and
-the reference game (MR !5), round 1, with the owner's decision on each. One line per finding:
+the reference game (MR !5), with the owner's decision on each: round 1, and round 2 (IDs P2- and
+S2-). One line per finding:
 ID → outcome (where). Commits are on `m1a-sdk-kit`; spec changes stay in v0.9.8 (README history
 line).
 
@@ -15,14 +16,14 @@ line).
 
 | ID | Outcome | Where |
 |---|---|---|
-| P-1 | Fixed: half the games run with no seat leaving, and in the rest the exit chance is about 1 / `maxActions`; fixture: a game that never ends with `maxActions` 2000 | 18ac7f0, 02 §6.4 (10f773c) |
-| P-2 | Fixed with S-3: the SDK's test hooks gain the required `optionInputs(ctx)` and optional `context()` and `resources(options)`; the kit and `games:verify` play them; a missing or empty `optionInputs` fails, so supplying only the defaults is impossible; fixture: a leak only under a non-default option | 18ac7f0, 02 §2, §6, §7.3 (10f773c) |
+| P-1 | Fixed: half the games run with no seat leaving, and in the rest a seat leaves with a chance of 1 / `max(40, maxActions)` per transition; fixture: a game that never ends with `maxActions` 2000 | 18ac7f0, 02 §6.4 (10f773c) |
+| P-2 | Fixed with S-3: the SDK's test hooks gain the required `optionInputs(ctx)` and optional `context()` and `resources(options)`; the kit and `games:verify` play them; a missing or empty `optionInputs` fails, so leaving it out can't pass a module on its defaults alone, while covering the option space stays the author's job (`[{}]` is accepted, P2-2); fixture: a leak only under a non-default option | 18ac7f0, 02 §2, §6, §7.3 (10f773c) |
 | P-3 | Fixed: `worstCase` fails when it is empty for a playable seat count, when a case's seat isn't in `toAct`, or when its action doesn't validate; the test that accepted an illegal worst case now asserts the failure | 18ac7f0, 02 §6.6 (10f773c) |
 | P-4 | Fixed with S-4 and S-8: records are checked per role (Node and Worker inputs only from the engine + manifest set, web inputs from either), must contain the expected entry points (Node and Worker: every package's engine and manifest; web: every client entry behind `WEB_BUNDLES_GAME_CLIENTS`, set in M3), every installed package must be verified, `pnpm build` deletes `generated/bundles/` first; packed `.ts`/`.mts`/`.tsx`/`.jsx` sources and relative imports that don't name a `.js`/`.mjs` file are refused; `realpathSync.native`; only module inputs are covered (noted in code and spec) | 023d7a7, 02 §7.3, 10 M3 (10f773c) |
 | P-5 | Fixed: an unacted seat declines only when at least `min` playing seats would remain, otherwise (and sometimes anyway) it resigns; only seats that have acted time out; the secrecy record check follows the same rule | 18ac7f0, 02 §6.5 (10f773c) |
 | P-6 | Fixed: `maxActions` must be a positive safe integer of at most 1 000 000 | 18ac7f0, 02 §6.4 (10f773c) |
 | P-7 | Fixed: at every step every seat in `toAct` has its `randomAction` validated; fixture: a multi-seat `toAct` with a seat that can't act | 18ac7f0, 02 §6.5 (10f773c) |
-| P-8 | Fixed: non-vacuity counts a perturbation only if some other viewer's view (another seat's or the public one) changes; only a module whose perturbations never change any view is counted by the state diff | 18ac7f0, 02 §6.3 (10f773c) |
+| P-8 | Fixed in round 2 (P2-1): non-vacuity counts a perturbation only if some other viewer's view (another seat's or the public one) changes; the state diff counts only for a module that declares `test.hiddenFromEveryone` (round 1's undeclared fallback was a hole) | 18ac7f0, 02 §6.3 (10f773c) |
 | P-9 | Fixed: 10 warm-up runs, 100 timed runs in fast mode (300 full), the slowest 1 % dropped so one pause can't fail a correct module; documented as measured on the host running the kit; `games:verify --cpu-budget-ms <n>` overrides, and an unusable budget fails | 18ac7f0, 023d7a7, 02 §6.6, 08 T25 (10f773c) |
 | P-10 | Fixed: the example reshuffles the face-down discards into a deck too small to refill every hand, so transitions draw, replay covers per-transition draws, and records stay draw-free | 18ac7f0 |
 | P-11 | Fixed: the example's tests use the testkit's `seededRandom`; its own generator is gone | 18ac7f0 |
@@ -51,3 +52,23 @@ line).
 | S-7 | Accepted (owner) for this MR: F-8 and F-9 record that the first `@your-move/sdk`/`testkit` publish (0.1.0) precedes the M1 job-token and per-job environment checks; the M1 release-path work closes or records it | 10f773c |
 | S-8 | Fixed with P-4 | 023d7a7 |
 | S-9 | Fixed with P-16 | 5b744ec |
+
+## Round 2: picky review (P2)
+
+| ID | Outcome | Where |
+|---|---|---|
+| P2-1 | Fixed: the state-diff path of non-vacuity is opt-in through `test.hiddenFromEveryone` (which requires `hiddenInformation`); otherwise at least half the samples must change another viewer's view; fixture: perturbs only the deck while hands are hidden; the deck-only test now declares the hook and fails without it; 02 §6.3 and the guide updated | e357cfe, d74cee5 |
+| P2-2 | Fixed: 02 §6 and the P-2 row say leaving out `optionInputs` can't pass a module on its defaults alone, but covering the option space is the author's job (`[{}]` is accepted) | d74cee5, this record |
+| P2-3 | Fixed: a worst case must be a game of its combination's seat count (`seatStatus(state).length === seats`) | e357cfe, d74cee5 |
+| P2-4 | Fixed with S2-2: a member chain rooted at a built-in is a write target (assignment, update, `delete`, destructuring, for-in/of); `Object`/`Reflect` mutators (now with `freeze`, `seal`, `preventExtensions`) on a built-in or such a chain are refused; a built-in's `.prototype` and methods are refused as values unless reached through or called (primitive constants such as `Math.PI` allowed); tests added; F-5 names only the residual | aa4b241 |
+| P2-5 | Fixed: a test asserts `isolation` on the module-level cache fixture without `stopAtFirstFailure` | e357cfe |
+| P2-6 | Deferred (owner, issue to be filed): exit odds based on observed game length | — |
+| P2-7 | Fixed: P-1 row gives `max(40, maxActions)`; `URL_ATTRIBUTES` removed from `icon.ts` (unreachable: `href` and `xlink:href` aren't allowed attributes); the guide says the CPU budget is host-measured, drops "what passes for you passes there", says `--cpu-budget-ms` raises or lowers it, and that `perturbHidden` keeps key order; the contract tests' builds record their inputs in a temporary directory (`BUNDLE_INPUTS_DIR`), so `pnpm test` no longer overwrites `generated/bundles/` | aa4b241, e8281e2, d74cee5, this record |
+
+## Round 2: security review (S2)
+
+| ID | Outcome | Where |
+|---|---|---|
+| S2-1 | Fixed: at each sample the secret-choice check draws 8 legal actions per seat in `toAct`, applies them with the same draws, groups them by every other viewer's view and compares records and `describe` text within each group; 02 §6.3 and the guide require `randomAction` to produce every legal action kind about a tenth of the time; fixture: a rare exchange whose record names the card | e357cfe, d74cee5 |
+| S2-2 | Fixed with P2-4 | aa4b241 |
+| S2-3 | Deferred (owner, lands with M3): identify copies of installed packages by the nearest `package.json` name | — |

@@ -110,6 +110,27 @@ describe("engineEslintConfig", () => {
     ["Object.assign(Number, { x: 1 })", /must not write to built-in objects/u],
     ["Error.prototype.x = 1", /must not write to prototypes/u],
     ["Error.captureStackTrace = () => 1", /must not write to built-in objects/u],
+    // Member chains rooted at a built-in (M1a round 2, P2-4 / S2-2).
+    ["Array.prototype.push.x = 1", /must not write to built-in objects/u],
+    ["JSON.parse.cache = {}", /must not write to built-in objects/u],
+    ["Math.max.calls++", /must not write to built-in objects/u],
+    ["delete Array.prototype.push", /must not write to built-in objects/u],
+    ["delete JSON.parse.cache", /must not write to built-in objects/u],
+    ["[Math.x] = [1]", /must not write to built-in objects/u],
+    ["({ a: JSON.y } = { a: 1 })", /must not write to built-in objects/u],
+    ["{ for (Math.x of [1]); }", /must not write to built-in objects/u],
+    ["Object.freeze(Array.prototype)", /must not write to built-in objects/u],
+    ["Object.seal(Math)", /must not write to built-in objects/u],
+    ["Object.preventExtensions(JSON.parse)", /must not write to built-in objects/u],
+    ["Object.defineProperty(Array.prototype.push, 'x', {})", /must not write to built-in objects/u],
+    ["Reflect.preventExtensions(Math)", /must not write to built-in objects/u],
+    ["Array.prototype", /Use Array's members by name/u],
+    ["[Object.prototype][0].x = 1", /Use Object's members by name/u],
+    ["((p) => p)(Array.prototype)", /Use Array's members by name/u],
+    ["JSON.parse", /Use JSON's members by name/u],
+    ["Array.prototype.push", /Use Array's members by name/u],
+    ["[1].map(Math.abs)", /Use Math's members by name/u],
+    ["Math?.max", /Use Math's members by name/u],
   ])("rejects %s", (code, expected) => {
     const found = messages(`export const x = () => ${code};`);
     expect(
@@ -222,6 +243,13 @@ describe("engineEslintConfig", () => {
         export const max = Math.max(...board.cells);
         export const keys = Reflect.ownKeys(board);
         export const proto = Object.create(null);
+        export const slice = Array.prototype.slice.call([1, 2], 1);
+        export const tau = Math.PI * 2 + Number.MAX_SAFE_INTEGER + Math.max.length;
+        export const iterator = [][Symbol.iterator];
+        export const raw = String.raw\`a\`;
+        export const kind = typeof Math.max;
+        export const frozen = Object.freeze({ a: 1 });
+        export const optional = Math?.max(1, 2);
         export const getters = { lookupGetter: 1, defineSetter: 2, getPrototype: 3 };
         export const lookup = getters.lookupGetter + getters.getPrototype;
       `),

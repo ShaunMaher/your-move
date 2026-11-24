@@ -51,8 +51,12 @@ const SAMPLES = { fast: 2, full: 3 } as const;
 const MIN_EXIT_ODDS = 40;
 /** Possibly-illegal actions tried per step and per secrecy sample. */
 const ANY_ACTIONS = 2;
-/** Tries at finding a second legal action that differs from the first (02 §6.3). */
-const OTHER_ACTION_TRIES = 4;
+/**
+ * Legal actions drawn per seat and secrecy sample for the secret-choice record check (02 §6.3): with
+ * `randomAction` producing every action kind at least a tenth of the time, two of a rare kind are
+ * often among them.
+ */
+const CHOICE_ACTIONS = 8;
 /** The largest `maxActions` the kit accepts: beyond it, random play can't show termination. */
 const MAX_ACTIONS_CAP = 1_000_000;
 
@@ -673,9 +677,9 @@ class Kit extends Reporter {
   }
 
   /**
-   * A record mustn't show a seat's own secret choice (02 §6.3): two legal actions by `seat` on the
-   * same state that leave every other viewer's view identical must give the same record and
-   * `describe` text.
+   * A record mustn't show a seat's own secret choice (02 §6.3): several legal actions by `seat` on
+   * the same state, applied with the same draws, are grouped by every other viewer's view after
+   * them; within a group the records and `describe` text must be identical.
    */
   private choiceInRecords(
     def: AnyGameDefinition,
@@ -685,38 +689,41 @@ class Kit extends Reporter {
     rng: RandomSource,
     where: Where,
   ): void {
-    const pick = (): unknown =>
-      this.call("secrecy", "randomAction", where, () =>
+    const actions = new Map<string, unknown>();
+    for (let i = 0; i < CHOICE_ACTIONS; i += 1) {
+      const action = this.call("secrecy", "randomAction", where, () =>
         def.test.randomAction(state, seat, rng, this.resources),
       );
-    const first = pick();
-    let second: unknown = first;
-    for (let i = 0; i < OTHER_ACTION_TRIES && sameJson(first, second); i += 1) second = pick();
-    if (sameJson(first, second)) return;
+      actions.set(canonical(action), action);
+    }
+    if (actions.size < 2) return;
     const draws = recordRandom(seededRandom(rng.nextInt(2 ** 32)));
     const fallback = seededRandom(rng.nextInt(2 ** 32));
-    const a = this.call("schema", "apply", where, () =>
-      def.apply(jsonClone(state), seat, first, draws.rng),
-    );
-    const b = this.call("schema", "apply", where, () =>
-      def.apply(jsonClone(state), seat, second, scriptedRandom(draws.draws, fallback)),
-    );
     const others = viewers(seats).filter((other) => other !== seat);
-    const lookSame = others.every((other) =>
-      sameJson(
-        this.call("schema", "view", where, () => def.view(a.state, other)),
-        this.call("schema", "view", where, () => def.view(b.state, other)),
-      ),
-    );
-    if (!lookSame) return;
-    const textA = this.call("schema", "describe", where, () => def.describe(a.record));
-    const textB = this.call("schema", "describe", where, () => def.describe(b.record));
-    this.check(
-      sameJson(a.record, b.record) && sameJson(textA, textB),
-      "secrecy",
-      `the record of an action by seat ${String(seat)} shows a choice no other seat can see: two actions that look the same to everyone else give different records`,
-      where,
-    );
+    /** Other viewers' views after the action → the first record and text seen with them. */
+    const groups = new Map<string, string>();
+    // The first action records its draws; the others replay them.
+    for (const [index, action] of [...actions.values()].entries()) {
+      const random = index === 0 ? draws.rng : scriptedRandom(draws.draws, fallback);
+      const after = this.call("schema", "apply", where, () =>
+        def.apply(jsonClone(state), seat, action, random),
+      );
+      const seen = canonical(
+        others.map((other) =>
+          this.call("schema", "view", where, () => def.view(after.state, other)),
+        ),
+      );
+      const text = this.call("schema", "describe", where, () => def.describe(after.record));
+      const told = `${canonical(after.record)} ${canonical(text)}`;
+      const earlier = groups.get(seen);
+      if (earlier === undefined) groups.set(seen, told);
+      this.check(
+        earlier === undefined || earlier === told,
+        "secrecy",
+        `the record of an action by seat ${String(seat)} shows a choice no other seat can see: two actions that look the same to everyone else give different records`,
+        where,
+      );
+    }
   }
 
   /** Whether the perturbation samples were vacuous (02 §6.3). */
@@ -725,10 +732,19 @@ class Kit extends Reporter {
     this.samples = 0;
     this.viewPerturbed = 0;
     this.statePerturbed = 0;
+    if (def.test.hiddenFromEveryone === true && !def.test.hiddenInformation) {
+      this.fail("secrecy", "hiddenFromEveryone is set but hiddenInformation isn't", {
+        version: def.version,
+      });
+    }
     if (!def.test.hiddenInformation || samples === 0) return;
-    // Views count when any viewer ever sees hidden information; otherwise only the state can.
+    // A perturbation counts when it changes what another viewer sees. Only a module that declares
+    // its hidden information is seen by no seat at all (e.g. deck order alone) is counted by
+    // whether the state changed: otherwise reordering a deck while hands leak would pass.
     const [counted, what] =
-      viewPerturbed > 0 ? [viewPerturbed, "another viewer's view"] : [statePerturbed, "the state"];
+      def.test.hiddenFromEveryone === true
+        ? [statePerturbed, "the state"]
+        : [viewPerturbed, "another viewer's view"];
     if (counted * 2 < samples) {
       this.fail(
         "secrecy",

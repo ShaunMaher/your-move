@@ -218,6 +218,12 @@ export interface GameTestHooks<Options, State, Action> {
   /** Whether records legitimately show random draws (e.g. dice). */
   readonly publicRandomness?: boolean;
   /**
+   * True if no seat ever sees the hidden information (e.g. only the deck order is hidden): the
+   * kit's non-vacuity check then counts perturbations that change the state, rather than ones that
+   * change another viewer's view (02 §6.3). Never set it for a game with hidden hands.
+   */
+  readonly hiddenFromEveryone?: boolean;
+  /**
    * The option inputs the kit plays, each with every seat count `players` and `validateStart`
    * allow (02 §6). Required and non-empty: list the defaults (`{}`) and enough other inputs to
    * reach every rule an option changes (rulesets, variants, the corners of each range).
