@@ -7,6 +7,8 @@
  * Premium layout: our own arrangement (Q15), symmetric under a quarter turn (but not a mirror),
  * with no two premium squares side by side, keeping the reference game's counts and density:
  *   8 TW · 17 DW (including the start square) · 12 TL · 24 DL = 61 premium squares.
+ * An opening word of up to 7 letters covers only the start square's DW (×2), and no word of up to
+ * 7 letters covers more than ×4 (words §8.2).
  */
 import type { RulesetData } from "../schema.js";
 
@@ -57,19 +59,19 @@ export const classicV1 = {
   // . normal · d DL · t TL · D DW · T TW
   premiums: [
     "..T..d...T..d..",
-    "...D..d.t.D....",
-    "d...t..D...d..T",
+    "...D..t.t.D....",
+    "d...D..d...d..T",
     "..d..d...t...D.",
-    ".D....D.....t..",
+    ".D....D.....D..",
     "T..t....d..d..d",
-    ".t...d....D..d.",
-    "..D....D....D..",
-    ".d..D....d...t.",
+    ".t...d....D..t.",
+    "..d....D....d..",
+    ".t..D....d...t.",
     "d..d..d....t..T",
-    "..t.....D....D.",
+    "..D.....D....D.",
     ".D...t...d..d..",
-    "T..d...D..t...d",
-    "....D.t.d..D...",
+    "T..d...d..D...d",
+    "....D.t.t..D...",
     "..d..T...d..T..",
   ],
 } satisfies RulesetData;

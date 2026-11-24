@@ -9,6 +9,8 @@
  * with no two premium squares side by side and approximately the reference game's counts; the
  * start square carries no premium:
  *   8 TW · 12 DW · 16 TL · 24 DL = 60 premium squares.
+ * An opening word of up to 7 letters covers no word premium (×1), and no word of up to 7 letters
+ * covers more than ×3 (words §8.2).
  */
 import type { RulesetData } from "../schema.js";
 
@@ -59,20 +61,20 @@ export const casualV1 = {
   },
   // . normal · d DL · t TL · D DW · T TW
   premiums: [
-    "..T..d...d..T..",
-    "....t..D...d...",
-    "T..d..D...t...T",
-    ".d..t...d...d..",
-    "..t..t...D.t.t.",
-    "d...D.....t...d",
-    "...d...d....D..",
-    ".D....d.d....D.",
-    "..D....d...d...",
-    "d...t.....D...d",
-    ".t.t.D...t..t..",
-    "..d...d...t..d.",
-    "T...t...D..d..T",
-    "...d...D..t....",
-    "..T..d...d..T..",
+    "..T..t...T..t..",
+    "....D..d...d...",
+    "t..d..D...t...T",
+    ".d...d..D...d..",
+    "..t....d.d...D.",
+    "T...d...t..d..t",
+    "...D.t......D..",
+    ".d..d.....d..d.",
+    "..D......t.D...",
+    "t..d..t...d...T",
+    ".D...d.d....t..",
+    "..d...D..d...d.",
+    "T...t...D..d..t",
+    "...d...d..D....",
+    "..t..T...t..T..",
   ],
 } satisfies RulesetData;

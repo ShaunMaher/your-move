@@ -125,13 +125,24 @@ export const MIN_WORD_PREMIUM_DISTANCE = 4;
 
 /**
  * The most a word of up to `maxLength` letters may be multiplied by the word premiums it covers
- * (words §8.2): ×4 up to 6 letters, ×6 up to 7, the limits both reference boards keep.
+ * (words §8.2): ×4 up to 7 letters, the limit both reference boards keep, so no TW+DW, two TWs or
+ * three DWs within one rack's reach.
  */
-export const WORD_MULTIPLIER_CAPS: readonly { readonly maxLength: number; readonly max: number }[] =
-  [
-    { maxLength: 6, max: 4 },
-    { maxLength: 7, max: 6 },
-  ];
+export const WORD_MULTIPLIER_CAP = { maxLength: 7, max: 4 } as const;
+
+/**
+ * The most an opening word (through the start square, at most `rackSize` letters) may be
+ * multiplied by (words §8.2): the start square's own word multiplier (×1 if it has none) and
+ * never more than this, so the layout gives the first player nothing beyond the start square.
+ */
+export const MAX_OPENING_MULTIPLIER = 2;
+
+/** The product of the word premiums on `line` from `from` up to, not including, `to`. */
+function lineMultiplier(line: string, from: number, to: number): number {
+  let product = 1;
+  for (const code of line.slice(from, to)) product *= WORD_MULTIPLIERS[code] ?? 1;
+  return product;
+}
 
 /** The closest two word-premium squares come in any row or column; Infinity if never. */
 export function closestWordPremiums(premiums: readonly string[]): number {
@@ -153,12 +164,44 @@ export function maxWordMultiplier(premiums: readonly string[], length: number): 
   for (const line of premiumLines(premiums)) {
     const span = Math.min(length, line.length);
     for (let start = 0; start + span <= line.length; start += 1) {
-      let product = 1;
-      for (const code of line.slice(start, start + span)) product *= WORD_MULTIPLIERS[code] ?? 1;
-      best = Math.max(best, product);
+      best = Math.max(best, lineMultiplier(line, start, start + span));
     }
   }
   return best;
+}
+
+/**
+ * The largest word multiplier a word of up to `maxLength` letters through the square `start` can
+ * cover, along its row or its column: what an opening move can score (words §3.1, §8.2).
+ */
+export function openingWordMultiplier(
+  premiums: readonly string[],
+  [row, col]: readonly [number, number],
+  maxLength: number,
+): number {
+  const column = premiums.map((line) => line[col] ?? ".").join("");
+  let best = 1;
+  for (const [line, at] of [
+    [premiums[row] ?? "", col],
+    [column, row],
+  ] as const) {
+    for (let length = 1; length <= Math.min(maxLength, line.length); length += 1) {
+      const last = Math.min(at, line.length - length);
+      for (let from = Math.max(0, at - length + 1); from <= last; from += 1) {
+        best = Math.max(best, lineMultiplier(line, from, from + length));
+      }
+    }
+  }
+  return best;
+}
+
+/** The most an opening word may be multiplied by: the start square's own word multiplier, to ×2. */
+export function openingMultiplierLimit(
+  premiums: readonly string[],
+  [row, col]: readonly [number, number],
+): number {
+  const own = WORD_MULTIPLIERS[premiums[row]?.charAt(col) ?? "."] ?? 1;
+  return Math.min(own, MAX_OPENING_MULTIPLIER);
 }
 
 /** How many squares of each premium a layout has, the start square included. */
@@ -202,16 +245,26 @@ export const rulesetSchema = rulesetObject.superRefine((ruleset, ctx) => {
       ["premiums"],
     );
   }
-  for (const cap of WORD_MULTIPLIER_CAPS) {
-    if (maxWordMultiplier(ruleset.premiums, cap.maxLength) > cap.max) {
+  const cap = WORD_MULTIPLIER_CAP;
+  if (maxWordMultiplier(ruleset.premiums, cap.maxLength) > cap.max) {
+    issue(
+      `a word of ${String(cap.maxLength)} letters or fewer may cover at most ×${String(cap.max)}`,
+      ["premiums"],
+    );
+  }
+  const [row, col] = ruleset.start;
+  if (row >= size || col >= size) {
+    issue("the start square must be on the board", ["start"]);
+  } else {
+    // The layout gives the first player nothing beyond the start square itself (words §8.2).
+    const limit = openingMultiplierLimit(ruleset.premiums, ruleset.start);
+    if (openingWordMultiplier(ruleset.premiums, ruleset.start, ruleset.rackSize) > limit) {
       issue(
-        `a word of ${String(cap.maxLength)} letters or fewer may cover at most ×${String(cap.max)}`,
+        `a word through the start square of ${String(ruleset.rackSize)} letters or fewer may cover at most ×${String(limit)}`,
         ["premiums"],
       );
     }
   }
-  const [row, col] = ruleset.start;
-  if (row >= size || col >= size) issue("the start square must be on the board", ["start"]);
   if (ruleset.maxPlayers < ruleset.minPlayers) {
     issue("maxPlayers must be at least minPlayers", ["maxPlayers"]);
   }
