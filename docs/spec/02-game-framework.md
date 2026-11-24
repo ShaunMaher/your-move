@@ -514,7 +514,8 @@ plays exactly these hooks, so a game that needs a dictionary supplies one throug
 6. **CPU budget**: per-call CPU for `validate` + `apply` (and `preview`) on the `worstCase` inputs
    stays within the budget in 08 T25 at the 99th percentile, timed after warm-up runs (100 timed
    runs per input in fast mode, 300 in full). The budget is measured **on the host running the
-   kit**; `pnpm games:verify --cpu-budget-ms <n>` sets it (raising it for a host slower than the
+   kit**; `pnpm games:verify --cpu-budget-ms <n>` (or the `KIT_CPU_BUDGET_MS` variable, which CI
+   sets to its calibrated value, 08 T25) sets it (raising it for a host slower than the
    reference hardware, or lowering it). `worstCase` must not be vacuous: it returns at least one
    input for every playable seat count, each input is a game of that seat count (`seatStatus`
    has one entry per seat), its seat is in `toAct` and its action validates.

@@ -79,6 +79,17 @@ least an x86-64-v2 model. Until the shared amd64 runner offers it, the Worker co
 in the `test:worker` job on the arm64 runner (`arch-arm64`); when it does, delete that job and the
 `--exclude` in `test`. Caches are kept per architecture (`CACHE_ARCH`).
 
+The game kit's CPU budget (08 T25) is measured on the host running the kit, and the shared amd64
+runner (a `qemu64` VM, 2–3× slower than a developer laptop, often running several pipelines at
+once) can't hold the 5 ms reference budget reliably. CI therefore sets one calibrated budget,
+`KIT_CPU_BUDGET_MS` (20 ms, 4× the reference), in `.gitlab-ci.yml`'s global variables: every
+`games:verify` run in CI reads it (`pnpm build` in `build:app`, the full kit in `test`), and the
+image build receives it as a `--build-arg`. Developer machines, local Docker builds and each game
+package's own kit test keep the real 5 ms budget, so a slow engine still fails there. Measured on a
+developer laptop (2026-11-24), the words engine's worst cases take 0.02 ms median and under 0.1 ms
+at the 99th percentile; budget failures on the runner are pauses (garbage collection, a busy
+host), not engine cost. Revisit the value when the runner changes.
+
 ## CI settings and secrets
 
 Our GitLab is Community Edition (no protected environments), so each secret is a variable that is

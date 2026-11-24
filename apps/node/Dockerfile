@@ -19,7 +19,9 @@ COPY scripts/ci/ scripts/ci/
 RUN scripts/ci/install-mise.sh pnpm
 COPY . .
 RUN pnpm install --frozen-lockfile
-# The fast game kit and import rules run in every image build (02 §7.3).
+# The fast game kit and import rules run in every image build (02 §7.3). CI passes its calibrated
+# CPU budget for the kit as a build argument (08 T25); unset, the kit's own 5 ms applies.
+ARG KIT_CPU_BUDGET_MS=""
 RUN pnpm games:generate \
  && pnpm games:verify --fast \
  && pnpm --filter @your-move/web build \
