@@ -1,10 +1,20 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, onTestFinished } from "vitest";
 
+import type { CheckedPackage } from "./inputs.js";
 import { loadGames, type LoadedGame } from "./load.js";
 import { nodeModulesResolver, packageFileProblems } from "./packages.js";
 import { resolveWorkspaceRange, verifyGames } from "./verify.js";
@@ -297,6 +307,32 @@ describe("packageFileProblems", () => {
     ]);
   });
 
+  it("refuses TypeScript and JSX sources, which bundlers would compile and Node wouldn't", () => {
+    const dir = packageWith({
+      "package.json": "{}",
+      "dist/engine/index.js": "",
+      "dist/engine/index.d.ts": "",
+      "dist/engine/index.d.mts": "",
+      "dist/engine/rules.ts": "",
+      "dist/engine/rules.MTS": "",
+      "dist/client/board.tsx": "",
+      "dist/engine/rules.jsx": "",
+    });
+    expect(new Set(packageFileProblems("@x/game", dir, false))).toEqual(
+      new Set(
+        [
+          "dist/engine/rules.ts",
+          "dist/engine/rules.MTS",
+          "dist/client/board.tsx",
+          "dist/engine/rules.jsx",
+        ].map(
+          (file) =>
+            `@x/game: must not contain TypeScript or JSX sources (${file}): bundlers would compile them, Node wouldn't (02 §7.1.1)`,
+        ),
+      ),
+    );
+  });
+
   it("compares names case-insensitively, as case-insensitive file systems do", () => {
     const dir = packageWith({
       "package.json": "{}",
@@ -335,7 +371,7 @@ describe("packageFileProblems", () => {
 
 describe("games:verify with the test kit", () => {
   it("runs the kit and the engine ESLint rules on a package that passes them", async () => {
-    const checked = new Set<string>();
+    const checked: CheckedPackage[] = [];
     const problems = await verifyGames({
       rootDir: FIXTURES,
       games: await load("@fixture/game-kit"),
@@ -346,10 +382,26 @@ describe("games:verify with the test kit", () => {
       checked,
     });
     expect(problems).toEqual([]);
-    expect([...checked].map((file) => file.slice(file.indexOf("game-kit/"))).sort()).toEqual([
-      "game-kit/dist/client/index.js",
-      "game-kit/dist/engine/index.js",
-      "game-kit/dist/manifest.js",
+    const short = (file: string) => file.slice(file.indexOf("game-kit/"));
+    expect(
+      checked.map((pkg) => ({
+        name: pkg.name,
+        engine: pkg.engine.map(short),
+        client: pkg.client.map(short),
+        entries: Object.values(pkg.entries).map(short),
+      })),
+    ).toEqual([
+      {
+        name: "@fixture/game-kit",
+        engine: ["game-kit/dist/engine/index.js", "game-kit/dist/manifest.js"],
+        // The client reaches its own engine too (02 §3).
+        client: ["game-kit/dist/client/index.js", "game-kit/dist/engine/index.js"],
+        entries: [
+          "game-kit/dist/engine/index.js",
+          "game-kit/dist/client/index.js",
+          "game-kit/dist/manifest.js",
+        ],
+      },
     ]);
   });
 
@@ -377,6 +429,110 @@ describe("games:verify with the test kit", () => {
       kit: "fast",
     });
     expect(problems.join("\n")).toMatch(/@fixture\/game-good: (the test kit couldn't run|kit )/u);
+  });
+});
+
+/**
+ * A fresh instance root whose node_modules holds real copies (no links) of the fixture SDK, Zod,
+ * React and the named fixture game packages, as a registry install would. `edit` may change a
+ * package's files before it is read. Removed after the test.
+ */
+function installedCopies(
+  names: readonly string[],
+  edit: (dir: string) => void = () => undefined,
+): { root: string; dirs: string[] } {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "installed-")));
+  onTestFinished(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  for (const shared of ["@your-move/sdk", "zod", "react"]) {
+    cpSync(join(FIXTURES, "node_modules", shared), join(root, "node_modules", shared), {
+      recursive: true,
+      dereference: true,
+    });
+  }
+  const dirs = names.map((name) => {
+    const dir = join(root, "node_modules", name);
+    cpSync(join(FIXTURES, "registry", name), dir, { recursive: true, dereference: true });
+    edit(dir);
+    return dir;
+  });
+  return { root, dirs };
+}
+
+/**
+ * Verifies the named packages of an instance made by `installedCopies`. `afterLoad` runs once the
+ * engines are imported, to change files only the static checks read.
+ */
+async function verifyInstalled(
+  root: string,
+  names: readonly string[],
+  extra: Partial<Parameters<typeof verifyGames>[0]> = {},
+  afterLoad: () => void = () => undefined,
+): Promise<string[]> {
+  const loaded = await loadGames(
+    { games: names.map((name) => ({ package: name })) },
+    nodeModulesResolver(root),
+  );
+  if (!loaded.ok) throw new Error(loaded.problems.join("\n"));
+  afterLoad();
+  return verifyGames({
+    rootDir: root,
+    games: loaded.games,
+    sdkVersion: "1.2.0",
+    sdkDir: realpathSync(join(root, "node_modules/@your-move/sdk")),
+    workspaceDirs: new Set(),
+    ...extra,
+  });
+}
+
+describe("games:verify on packages that really sit under node_modules", () => {
+  it("runs the engine ESLint rules on them (ESLint skips node_modules by default)", async () => {
+    const { root } = installedCopies(["@fixture/game-kit", "@fixture/game-kitbad"]);
+    expect(await verifyInstalled(root, ["@fixture/game-kit"])).toEqual([]);
+    expect((await verifyInstalled(root, ["@fixture/game-kitbad"])).join("\n")).toMatch(
+      /node_modules\/@fixture\/game-kitbad\/dist\/engine\/index\.js:\d+: .*Date/u,
+    );
+  });
+
+  it("fails a package whose files ESLint ignored instead of linting", async () => {
+    // ESLint always ignores .git/: a package resolved there must fail, not pass unlinted.
+    const { root, dirs } = installedCopies(["@fixture/game-kitbad"]);
+    const hidden = join(root, ".git/game-kitbad");
+    mkdirSync(join(root, ".git"));
+    cpSync(dirs[0] ?? "", hidden, { recursive: true });
+    rmSync(dirs[0] ?? "", { recursive: true });
+    symlinkSync(hidden, dirs[0] ?? "");
+    expect((await verifyInstalled(root, ["@fixture/game-kitbad"])).join("\n")).toMatch(
+      /\.git\/game-kitbad\/dist\/engine\/index\.js: ESLint ignored the file, so the engine rules didn't run on it/u,
+    );
+  });
+
+  it("refuses relative imports that don't name the file", async () => {
+    // `./rules` could resolve to rules.jsx, rules.ts or rules/index.js, depending on who resolves it.
+    const { root, dirs } = installedCopies(["@fixture/game-good"]);
+    const engine = join(dirs[0] ?? "", "dist/engine/index.js");
+    const unspecified = () => {
+      writeFileSync(engine, readFileSync(engine, "utf8").replace('"./rules.js"', '"./rules"'));
+    };
+    expect(
+      (await verifyInstalled(root, ["@fixture/game-good"], {}, unspecified)).join("\n"),
+    ).toMatch(
+      /dist\/engine\/index\.js imports "\.\/rules"; relative imports must name the file, ending in \.js or \.mjs/u,
+    );
+  });
+
+  it("refuses a workspace package whose entry points reach a file pnpm pack wouldn't publish", async () => {
+    const { root, dirs } = installedCopies(["@fixture/game-good"], (dir) => {
+      const json = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as object;
+      const files = ["dist/engine/index.*", "dist/client", "dist/manifest.*"];
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ ...json, files }));
+    });
+    expect(
+      await verifyInstalled(root, ["@fixture/game-good"], { workspaceDirs: new Set(dirs) }),
+    ).toEqual([
+      `@fixture/game-good: dist/engine/rules.js is reachable from an entry point but pnpm pack wouldn't publish it ("files" in package.json)`,
+    ]);
   });
 });
 

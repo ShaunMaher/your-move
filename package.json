@@ -13,7 +13,7 @@
     "prepare": "tsx scripts/src/bin/hooks-install.ts && pnpm games:generate",
     "dev:node": "pnpm games:generate && pnpm --filter @your-move/node dev",
     "dev:worker": "pnpm games:generate && pnpm --filter @your-move/worker dev",
-    "build": "pnpm games:generate && pnpm games:verify --fast && pnpm --recursive --filter=!@your-move/root build && pnpm games:check-inputs",
+    "build": "pnpm games:check-inputs --reset && pnpm games:generate && pnpm games:verify --fast && pnpm --recursive --filter=!@your-move/root build && pnpm games:check-inputs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "pnpm games:generate && eslint . --max-warnings 0",

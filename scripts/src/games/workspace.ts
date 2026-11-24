@@ -27,7 +27,7 @@ export function workspacePackageDirs(rootDir: string): ReadonlySet<string> {
     globs.map((glob) => `${glob}/package.json`),
     { cwd: rootDir },
   );
-  return new Set(manifests.map((file) => realpathSync(join(rootDir, dirname(file)))));
+  return new Set(manifests.map((file) => realpathSync.native(join(rootDir, dirname(file)))));
 }
 
 /**

@@ -39,7 +39,7 @@ export type PackageResolver = (name: string) => string | null;
 export function nodeModulesResolver(rootDir: string): PackageResolver {
   return (name) => {
     const dir = join(rootDir, "node_modules", name);
-    return existsSync(join(dir, "package.json")) ? realpathSync(dir) : null;
+    return existsSync(join(dir, "package.json")) ? realpathSync.native(dir) : null;
   };
 }
 
@@ -66,7 +66,7 @@ export type ReadResult =
 function containedFile(dir: string, target: string): string | null {
   const file = resolve(dir, target);
   if (!existsSync(file)) return null;
-  const real = realpathSync(file);
+  const real = realpathSync.native(file);
   return real.startsWith(`${dir}${sep}`) ? real : null;
 }
 
@@ -123,12 +123,16 @@ export function packageFileProblems(
         );
       } else if (/\.c[jt]s$/iu.test(entry.name)) {
         problems.push(`${name}: must not contain CommonJS (${rel}) (02 §7.1.1)`);
+      } else if (isSource(lower)) {
+        problems.push(
+          `${name}: must not contain TypeScript or JSX sources (${rel}): bundlers would compile them, Node wouldn't (02 §7.1.1)`,
+        );
       }
       if (entry.isSymbolicLink()) {
         if (!workspace) {
           // A published tarball can't carry symlinks, so one here didn't come from a registry.
           problems.push(`${name}: must not contain a symlink (${rel}) (02 §7.1.1)`);
-        } else if (existsSync(path) && !realpathSync(path).startsWith(`${dir}${sep}`)) {
+        } else if (existsSync(path) && !realpathSync.native(path).startsWith(`${dir}${sep}`)) {
           problems.push(`${name}: ${rel} links outside the package`);
         }
         // A link inside a workspace package is checked where it points.
@@ -139,6 +143,16 @@ export function packageFileProblems(
   };
   walk(dir);
   return problems;
+}
+
+/**
+ * Whether a (lower-case) file name is TypeScript or JSX source: `.ts`, `.mts`, `.tsx`, `.jsx`.
+ * Declaration files (`.d.ts`, `.d.mts`) are what `types` targets are, and are allowed; a package
+ * ships built JavaScript only (02 §7.1.1), and the import check refuses any relative import that
+ * doesn't end in `.js` or `.mjs`, so a declaration file is never loaded as code.
+ */
+function isSource(lower: string): boolean {
+  return /\.(m?ts|tsx|jsx)$/u.test(lower) && !/\.d\.m?ts$/u.test(lower);
 }
 
 /** `files` plus every directory above them, as `/`-separated paths relative to the package. */
