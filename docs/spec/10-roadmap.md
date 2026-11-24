@@ -156,7 +156,9 @@ The project's foundation, built to 11 (engineering standards) from the first com
   generated registry and client import map, `ENABLED_GAMES` filtering, `pnpm games:check-db` and
   the Node startup check, orphaned-game runtime behaviour (`409 GAME_UNAVAILABLE`), the rules
   endpoint; **a game package built outside this repo (the M1 scratch package) installs into a
-  local instance** and plays.
+  local instance** and plays. `games:verify` supplies the instance's installed dictionaries to the
+  kit as resources, so the instance gate exercises the real word lists (until then the words
+  engine's `test.resources` carries its kit word list, words §10.6).
 - API tokens (06 §8): creation with per-purpose step-up codes, scopes (`read`, `play`,
   `games:create`, `join`; exclusive `admin`), the consolidated route-scope table enforced from
   `x-scope` with a deny-by-default route-enumeration test, `ym_pat_` format, HMAC storage, bearer
