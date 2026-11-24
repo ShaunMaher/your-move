@@ -485,6 +485,10 @@ publish:packages:
   variables:
     # A fresh clone, never a checkout left on the runner by another pipeline.
     GIT_STRATEGY: clone
+    # The deploy token's user-level npm config: in the job container's own /tmp, outside
+    # CI_PROJECT_DIR, so no artifact or cache can include it. pnpm ignores credentials in the
+    # repository's .npmrc that name an environment variable, so the token is written literally.
+    PUBLISH_NPMRC: /tmp/publish-packages.npmrc
   before_script:
     - *require-release-token
     - scripts/ci/install-mise.sh pnpm
@@ -494,13 +498,18 @@ publish:packages:
     - pnpm install --frozen-lockfile --ignore-scripts
   script:
     # The project's own package registry, with the deploy token; never CI_JOB_TOKEN (08 §6). The
-    # token stays in the environment: .npmrc names the variable, not its value.
+    # repository's .npmrc gets only the scope's registry; the credential goes in PUBLISH_NPMRC,
+    # written by the printf builtin (no command line carries the token) with mode 0600, and
+    # deleted in after_script.
     - REGISTRY="${CI_API_V4_URL#https:}/projects/${CI_PROJECT_ID}/packages/npm/"
     - echo "@your-move:registry=https:${REGISTRY}" >> .npmrc
-    - echo "${REGISTRY}:_authToken=\${RELEASE_DEPLOY_TOKEN}" >> .npmrc
+    - (umask 077 && printf '%s:_authToken=%s\n' "$REGISTRY" "$RELEASE_DEPLOY_TOKEN" > "$PUBLISH_NPMRC")
+    - export NPM_CONFIG_USERCONFIG="$PUBLISH_NPMRC"
     # Publishes every non-private package whose version isn't in the registry yet. Until the first
     # packages leave "private": true (M1), there is nothing to publish.
     - pnpm exec changeset publish
+  after_script:
+    - rm -f "$PUBLISH_NPMRC"
 
 publish:image:
   extends: .release
