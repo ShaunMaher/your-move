@@ -283,14 +283,20 @@ back.
 
 The `test` object drives the generic kit (02 §6):
 
-- `randomAction(state, seat, rng, res)`: a legal action (the kit checks that it validates).
+- `randomAction(state, seat, rng, res)`: a legal action (the kit checks that it validates). It
+  must produce **every kind of action legal at that state at least about a tenth of the time**
+  (play, pass, exchange, …): the kit compares the records of several of them to catch a record
+  that repeats a secret choice, and a rare kind it never draws twice is never checked.
 - `randomAnyAction(state, seat, rng)`: schema-valid, often illegal, biased to near-legal (the
   example mostly picks a card in hand, sometimes any card or one already played).
 - `perturbHidden(state, viewer, rng)`: re-deals at random everything `viewer` can't see while
   keeping the state consistent — same cards overall, same hand sizes, same "has played" flags.
-  For `null`, everything hidden from the public. It must actually change the state most of the
-  time. The kit counts a perturbation only if it changes what some _other_ viewer sees (another seat's
-  hand, say), unless no perturbation ever changes any view (hidden deck order only).
+  For `null`, everything hidden from the public. Keep the state's key order (build the new state
+  from the old one, as `{ ...state, deck }` does): views are compared key order included. The kit
+  counts a perturbation only if it changes what some _other_ viewer sees (another seat's hand,
+  say), and at least half of them must. If no seat ever sees your hidden information (only the deck
+  order is hidden), set `hiddenFromEveryone: true`, and the kit counts perturbations that change
+  the state instead.
 - `hiddenInformation`: whether anything is ever hidden (must match the manifest).
 - `maxActions(options, seats)`: an upper bound on transitions in a game, for the termination
   check: a whole number from 1 to 1 000 000, as tight as you can prove it.
@@ -299,7 +305,8 @@ The `test` object drives the generic kit (02 §6):
   playable seat count needs at least one.
 - `optionInputs(ctx)` (required): the option inputs the kit plays, each with every seat count your
   options allow. List the defaults (`{}`) and enough others to reach every rule an option changes:
-  each ruleset or variant and the corners of each range. The example lists six.
+  each ruleset or variant and the corners of each range. The kit can't tell whether you covered
+  your options (`[{}]` passes), so this is on you. The example lists six.
 - `context()` (optional): the configuration and resource catalog `resolveOptions`, `catalog` and
   `checkConfig` see in the kit; by default your `configSchema` parsed from `{}`, and no resources.
 - `resources(options)` (optional): the resources `validate` and `preview` get in the kit's games,
@@ -329,16 +336,16 @@ Use `mode: "fast"` while developing (300 games per rules version, spread over yo
 and seat counts) and `mode: "full"` in CI (1000 games per option input and seat count, a tenth of
 them checked for secrecy at every step). The kit plays the option inputs your `test.optionInputs`
 lists, with your `test.context` and `test.resources`, at every seat count `players(options)`
-allows and `validateStart` accepts; the operator's `games:verify` plays exactly the same hooks, so
-what passes for you passes there. Secrecy is checked at points spread evenly over each game, early
+allows and `validateStart` accepts; the operator's `games:verify` plays exactly the same hooks. Secrecy is checked at points spread evenly over each game, early
 and late alike. A failure names the property and the seed, so you can replay it. The kit also
 checks that the manifest agrees with the engine: the type, `hiddenInformation`, player bounds
 (exactly the union of the engine's bounds over your option inputs), rules text for every exported
 version, and the resource kinds.
 
-The CPU budget (5 ms per call at the 99th percentile) is measured on the machine running the kit.
-If a slow CI host fails a game that is within budget elsewhere, `games:verify --cpu-budget-ms <n>`
-raises it there; don't raise it to hide a slow engine.
+The CPU budget (5 ms per call at the 99th percentile) is the one check whose result depends on the
+host: it is measured on the machine running the kit, so a game within budget on your machine can
+fail on a slower one. `games:verify --cpu-budget-ms <n>` sets the budget for a run, raising it for
+a slow host or lowering it to keep headroom; don't raise it to hide a slow engine.
 
 ### The built-output rules
 

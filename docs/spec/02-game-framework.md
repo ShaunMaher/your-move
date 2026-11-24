@@ -123,6 +123,7 @@ interface GameDefinition<Options, State, Action, View, PublicRecord, PreviewResu
     maxActions(options: Options, seats: number): number;  // termination bound
     worstCase(options: Options, seats: number, rng: RandomSource): { state: State; seat: Seat; action: Action }[]; // CPU budget
     publicRandomness?: boolean;                            // true if records legitimately show random draws (e.g. dice)
+    hiddenFromEveryone?: boolean;                          // true if no seat ever sees the hidden information (e.g. deck order only), §6.3
     optionInputs(ctx: OptionsContext): unknown[];          // the option inputs the kit plays (§6); required, non-empty
     context?(): OptionsContext;                            // what resolveOptions, catalog and checkConfig see in the kit; default: configSchema.parse({}), no resources
     resources?(options: Options): Resources;               // what validate and preview get in the kit's games; default: none
@@ -454,9 +455,11 @@ start, remove, join, accept or cancel simply makes the guard fail.
 Every game module MUST pass the kit, which plays many random games per rules version, with seeded
 randomness (counts below). It plays every option input the module's **`test.optionInputs(ctx)`**
 lists, each with every seat count that `players(options)` allows and `validateStart` accepts. The
-hook is **required and must return at least one input**, so a module can't pass by being played
-with its defaults alone: a module with options lists the defaults (`{}`) and enough other inputs to
-reach every rule an option changes (each ruleset, each variant, the corners of each range). The
+hook is **required and must return at least one input**, so a module can't pass by leaving it out
+and being played on its defaults. Covering the option space is the author's job, which the kit
+can't check (`[{}]` is accepted): a module with options lists the defaults (`{}`) and enough other
+inputs to reach every rule an option changes (each ruleset, each variant, the corners of each
+range). The
 optional `test.context()` gives what `resolveOptions`, `catalog` and `checkConfig` see (default:
 `configSchema` parsed from `{}`, no resources) and `test.resources(options)` what `validate` and
 `preview` get in those games (default: none; replay always gets none, rule 6). `pnpm games:verify`
@@ -475,21 +478,24 @@ plays exactly these hooks, so a game that needs a dictionary supplies one throug
      (it survives JSON and Zod, so a key order that follows hidden state is a leak);
    - the perturbation isn't vacuous: for a module with `hiddenInformation: true`, at least half of
      the samples taken while `result()` is null must change **some other viewer's view** (seat
-     `w ≠ v`, or the public view). Only a module whose perturbations never change any view — its
-     hidden information is something no viewer ever sees, such as deck order — is counted by
-     whether `s'` differs from `s` instead;
+     `w ≠ v`, or the public view), so reordering a deck while hands are hidden doesn't count. Only
+     a module that declares **`test.hiddenFromEveryone: true`** — no seat ever sees its hidden
+     information, e.g. only the deck order is hidden — is counted by whether `s'` differs from `s`
+     instead (it requires `hiddenInformation: true`);
    - `validate` and `preview` results, including `detail`, are identical for `s` and `s'`, for
      legal actions from `randomAction` **and** for possibly-illegal ones from `randomAnyAction`;
    - the `record` from `apply`/`onResign`/`onTimeout` by any seat is identical for `s` and `s'`
      (whenever the action still validates on `s'`), both with the same recorded draws and, unless
      `publicRandomness` is set, with different draws. This catches drawn tiles leaking into history;
-   - **a record doesn't repeat a secret choice**: for two different legal actions `a` and `a'`
-     from `randomAction` by the same seat on the same state, applied with the same draws, if every
-     other seat's view and the public view are identical after both, then the records and their
-     `describe` text are identical too. (The comparison on `s'` can't see this: it replays the
-     same action, so a record that repeats `action.card` is the same both times.) A module whose
-     public moves leave no trace in any view must therefore show them in `view` (e.g. a last-move
-     field), not only in the record.
+   - **a record doesn't repeat a secret choice**: at each sample the kit draws 8 legal actions from
+     `randomAction` for each seat in `toAct`, applies each on the same state with the same draws,
+     and groups them by every other seat's view and the public view afterwards; within a group the
+     records and their `describe` text are identical. (The comparison on `s'` can't see this: it
+     replays the same action, so a record that repeats `action.card` is the same both times.) So
+     that a rare kind of action (an exchange, say) is drawn twice often enough, **`randomAction`
+     MUST produce every kind of action that is legal at a state at least about a tenth of the
+     time**. A module whose public moves leave no trace in any view must show them in `view` (e.g. a
+     last-move field), not only in the record.
 
    Points are sampled **uniformly over each game's length** (the game is played first and its
    samples kept by reservoir sampling), so a leak that appears only late, e.g. once the deck is
@@ -508,9 +514,10 @@ plays exactly these hooks, so a game that needs a dictionary supplies one throug
 6. **CPU budget**: per-call CPU for `validate` + `apply` (and `preview`) on the `worstCase` inputs
    stays within the budget in 08 T25 at the 99th percentile, timed after warm-up runs (100 timed
    runs per input in fast mode, 300 in full). The budget is measured **on the host running the
-   kit**; `pnpm games:verify --cpu-budget-ms <n>` raises it for a host slower than the reference
-   hardware. `worstCase` must not be vacuous: it returns at least one input for every playable seat
-   count, each input's seat is in `toAct` and its action validates.
+   kit**; `pnpm games:verify --cpu-budget-ms <n>` sets it (raising it for a host slower than the
+   reference hardware, or lowering it). `worstCase` must not be vacuous: it returns at least one
+   input for every playable seat count, each input is a game of that seat count (`seatStatus`
+   has one entry per seat), its seat is in `toAct` and its action validates.
 7. **Isolation between games**: two random games are played interleaved through the same loaded
    engine module and compared with the same games played alone; every view, record, `validate` and
    `preview` result must be identical. This catches module-level state (e.g. a wrongly keyed cache)
@@ -525,7 +532,8 @@ package's own CI.
 The kit itself is tested against deliberately **broken fixture modules** (one leaks hidden state
 into a view, one into an error detail, one into a record, one into the public view; one leaks only
 late in the game; one only under a non-default option; one orders a view's keys by hidden state;
-one repeats a secret choice in its record; one has a no-op `perturbHidden`; one reads resources in
+one repeats a secret choice in its record, and one a rare secret choice; one has a no-op
+`perturbHidden`, and one perturbs only the deck while hands are hidden; one reads resources in
 `setup`; one is nondeterministic; one never terminates, with a small and with a large
 `maxActions`; one leaves `toAct` non-empty after the end; one keeps hidden state in a module-level
 variable shared between games; one has an empty and one an illegal `worstCase`): the kit MUST fail
