@@ -28,6 +28,12 @@ const files = await bundleServer(outdir, (inputs) => {
   );
 });
 cpSync(webDist, new URL("../dist/public/", import.meta.url), { recursive: true });
+// The shared SQL migrations, applied at startup (dist/main.js reads dist/migrations by default).
+cpSync(
+  new URL("../../../packages/server/migrations/", import.meta.url),
+  new URL("../dist/migrations/", import.meta.url),
+  { recursive: true },
+);
 console.log(
-  `build: ${String(files.length)} files in apps/node/dist, plus the web app in dist/public`,
+  `build: ${String(files.length)} files in apps/node/dist, plus the web app in dist/public and the migrations in dist/migrations`,
 );

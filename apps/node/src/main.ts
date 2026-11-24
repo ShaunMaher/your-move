@@ -2,7 +2,8 @@
  * The Node entry point (docs/spec/09-operations.md §4). Run with
  * `node --disallow-code-generation-from-strings`. Startup order (02 §7.3, §7.5):
  *
- * 1. migrations and the orphan check against `installed.json` — from M2, when there is a database;
+ * 1. open the database, apply migrations, and refuse to start while live games would be
+ *    orphaned, judged against `installed.json` only (no game code is loaded yet);
  * 2. read configuration and secrets (`*_FILE`), then scrub secrets from `process.env`;
  * 3. check code generation from strings is really off, then load the generated game registry with
  *    a dynamic `import()`, and refuse to start unless it matches `installed.json`;
@@ -23,9 +24,11 @@ import {
 
 import installedJson from "../../../generated/installed.json" with { type: "json" };
 import { codeGenerationFromStringsAllowed } from "./code-generation.js";
+import { MigrationError } from "./db/migrate.js";
 import { resolveSecretFiles, scrubSecrets, SecretFileError } from "./env.js";
 import { parseNodeConfig } from "./node-config.js";
 import { createNodeApp } from "./server.js";
+import { openStorage, StartupRefusal, type Storage } from "./storage.js";
 
 function exitWith(message: string): never {
   console.error(message);
@@ -35,6 +38,10 @@ function exitWith(message: string): never {
 const { values: args } = parseArgs({
   options: {
     static: { type: "string", default: fileURLToPath(new URL("public", import.meta.url)) },
+    migrations: {
+      type: "string",
+      default: fileURLToPath(new URL("migrations", import.meta.url)),
+    },
   },
 });
 
@@ -44,13 +51,34 @@ const installedGames = Object.entries(installed).map(([type, entry]) => ({
   enabledByDefault: entry.enabledByDefault,
 }));
 
+// 1. Storage. The Node-only variables hold no secrets, so they are read before the secret files.
+let nodeConfig: ReturnType<typeof parseNodeConfig>;
+let storage: Storage;
+try {
+  nodeConfig = parseNodeConfig(process.env);
+  storage = await openStorage({
+    databasePath: nodeConfig.databasePath,
+    migrationsFolder: args.migrations,
+    installed,
+    allowOrphanGames: nodeConfig.allowOrphanGames,
+  });
+} catch (error) {
+  if (
+    error instanceof ConfigError ||
+    error instanceof StartupRefusal ||
+    error instanceof MigrationError
+  ) {
+    exitWith(error.message);
+  }
+  throw error;
+}
+
+// 2. Configuration and secrets.
 let env: Record<string, string | undefined>;
 let config: ReturnType<typeof parseConfig>;
-let nodeConfig: ReturnType<typeof parseNodeConfig>;
 try {
   env = resolveSecretFiles(process.env, (path) => readFileSync(path, "utf8"));
   config = parseConfig(env, { runtime: "node", installedGames });
-  nodeConfig = parseNodeConfig(env);
 } catch (error) {
   if (error instanceof ConfigError || error instanceof SecretFileError) exitWith(error.message);
   throw error;
@@ -65,6 +93,16 @@ const log = createJsonLogger({
   sink: (line) => process.stdout.write(`${line}\n`),
 });
 
+log.info("database ready", {
+  migrationsApplied: storage.migrations.applied,
+  migrationsKnown: storage.migrations.known,
+});
+if (storage.acceptedOrphans.length > 0) {
+  log.warn("ALLOW_ORPHAN_GAMES: live games are orphaned and will be cancelled by the sweep", {
+    orphanedGames: storage.acceptedOrphans.length,
+  });
+}
+
 if (nodeConfig.trustProxy !== "false") {
   log.warn("client IPs come from a proxy header", { trustProxy: nodeConfig.trustProxy });
   if (nodeConfig.trustProxyPeersDefaulted) {
@@ -72,7 +110,7 @@ if (nodeConfig.trustProxy !== "false") {
   }
 }
 
-// Game code never runs in a process that can compile strings (02 §7.5).
+// 3. Game code never runs in a process that can compile strings (02 §7.5).
 if (codeGenerationFromStringsAllowed()) {
   exitWith("Refusing to start: run node with --disallow-code-generation-from-strings (02 §7.5).");
 }
@@ -83,7 +121,12 @@ if (mismatches.length > 0) {
   exitWith(`The game registry does not match installed.json:\n  - ${mismatches.join("\n  - ")}`);
 }
 
-const app = createNodeApp({ platform: { config, log, now }, games, staticRoot: args.static });
+// 4. Serve.
+const app = createNodeApp({
+  platform: { repos: storage.repos, config, log, now },
+  games,
+  staticRoot: args.static,
+});
 const server = serve({ fetch: app.fetch, port: nodeConfig.port }, (info) => {
   log.info("listening", { port: info.port, games: games.length });
 });
@@ -91,6 +134,9 @@ const server = serve({ fetch: app.fetch, port: nodeConfig.port }, (info) => {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     log.info("shutting down", { signal });
-    server.close(() => process.exit(0));
+    server.close(() => {
+      storage.sqlite.close();
+      process.exit(0);
+    });
   });
 }

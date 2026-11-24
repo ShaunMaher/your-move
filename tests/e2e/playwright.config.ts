@@ -1,3 +1,7 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { defineConfig, devices } from "@playwright/test";
 
 /**
@@ -7,6 +11,8 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = 4173;
 // Built by `pnpm build` (CI: the build:app artifact). Without it the web server fails to start.
 const SERVER = new URL("../../apps/node/dist/main.js", import.meta.url);
+// A fresh database per run, migrated by the server at startup.
+const DATABASE_PATH = join(mkdtempSync(join(tmpdir(), "e2e-db-")), "app.sqlite");
 
 export default defineConfig({
   testDir: "src",
@@ -38,6 +44,7 @@ export default defineConfig({
       EMAIL_PROVIDER: "console",
       EMAIL_FROM: "no-reply@localhost",
       OPERATOR_CONTACT: "ops@localhost",
+      DATABASE_PATH,
     },
   },
 });
