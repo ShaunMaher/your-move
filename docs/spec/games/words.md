@@ -192,8 +192,9 @@ client can render any game and preview any play.
   non-negative integers; total tiles ≥ `rackSize × maxPlayers`; `premiums` has exactly `boardSize`
   rows of `boardSize` characters; `start` is in bounds. Also: `boardSize` ≤ 15 (the dictionaries'
   longest word, §9.1); `rackSize` ≤ `boardSize`; blanks are worth 0; `2 ≤ minPlayers ≤
-  maxPlayers ≤ 2` (more seats wait until multi-player resignation is specified, §3.4); with `drawThenReturn`, `swapMinBag` ≥ `rackSize` (the replacements are drawn before
-  the swapped tiles go back, §3.2). A dictionary letter has a tile only if its count is at least 1
+  maxPlayers ≤ 2` (more seats wait until multi-player resignation is specified, §3.4); with
+  `drawThenReturn`, `swapMinBag` ≥ `rackSize` (the replacements are drawn before the swapped
+  tiles go back, §3.2). A dictionary letter has a tile only if its count is at least 1
   (§9.3).
 - Each premium layout MUST be symmetric under 90° rotation (validated by a test).
 - No two premium squares are orthogonally adjacent, the start square included (a DW start
@@ -529,7 +530,7 @@ debounced (§9.5).
 - `summary()`: `{ headline: [{seat:0}, " 212 – 187 ", {seat:1}], scores }`, rendered as
   "You 212 – 187 Sam"; `describe()`: `[{seat:1}, " played QUIZ for 64"]`, naming the main word of
   a multi-tile play, and for a single tile (which has no play line) the longest word it formed,
-  the higher-scoring one on a tie; a bingo adds ", using every tile".
+  the higher-scoring one on a tie, then the across word; a bingo adds ", using every tile".
 - `test.maxActions`: bounded by the scoreless-streak rule. Every play puts at least one tile on
   the board for good, so there are at most `P = min(total tiles, boardSize²)` plays, at most
   `scorelessTurnLimit − 1` passes and swaps in a row around each of them, and one exit:
