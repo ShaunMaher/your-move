@@ -109,6 +109,8 @@ export default config(
       "apps/node/src/main.ts",
       "apps/worker/src/index.ts",
       "apps/*/scripts/**",
+      "packages/dictionary/src/builder/bench.ts",
+      "packages/dictionary/src/builder/cli.ts",
       "scripts/src/bin/**",
       "tests/**",
     ],

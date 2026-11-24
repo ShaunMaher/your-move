@@ -29,10 +29,14 @@
     "build": "tsc --build"
   },
   "peerDependencies": {
-    "@your-move/sdk": "workspace:^"
+    "@your-move/sdk": "workspace:^",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@your-move/dictionary": "workspace:*",
     "@your-move/sdk": "workspace:*",
-    "vitest": "catalog:"
+    "@your-move/testkit": "workspace:*",
+    "vitest": "catalog:",
+    "zod": "catalog:"
   }
 }

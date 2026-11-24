@@ -6,5 +6,10 @@
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src"],
-  "references": [{ "path": "../../packages/sdk" }]
+  "references": [
+    { "path": "../../packages/sdk" },
+    { "path": "../../packages/testkit" },
+    // Tests only: the board-size cap is tied to the dictionaries' word-length cap (words §9.1).
+    { "path": "../../packages/dictionary/tsconfig.runtime.json" }
+  ]
 }

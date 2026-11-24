@@ -1,0 +1,240 @@
+/**
+ * The words ruleset schema (docs/spec/games/words.md §8.1, §8.2): every number the engine uses and
+ * the named behaviour variants it supports. A ruleset is data; the engine reads every value from
+ * it, never from constants. Each registered ruleset is parsed with this schema when the engine
+ * loads, so an invalid ruleset fails the package's tests and `pnpm games:verify` (build time).
+ */
+import { z } from "@your-move/sdk/schema";
+
+/**
+ * The largest board a ruleset may have: the longest word the dictionaries keep (words §9.1), or
+ * words that fit the board would be missing from every dictionary. Raising it means raising the
+ * dictionaries' `MAX_WORD_LENGTH` with it; a test ties the two.
+ */
+export const MAX_BOARD_SIZE = 15;
+
+/** The blank's tile code (words §3.1). */
+const BLANK = "?";
+
+/** Tile codes: lower-case `a`–`z`, and `?` for the blank (words §3.1). */
+const TILE_CODE = /^[a-z?]$/u;
+
+/** Premium square codes in a ruleset's `premiums` picture (words §8.1). */
+const PREMIUM_CODES = {
+  ".": "none",
+  d: "DL",
+  t: "TL",
+  D: "DW",
+  T: "TW",
+} as const;
+type PremiumCode = keyof typeof PREMIUM_CODES;
+export type Premium = Exclude<(typeof PREMIUM_CODES)[PremiumCode], "none">;
+
+/** The swap behaviour variants the engine supports (words §3.2). */
+export const SWAP_ORDERS = ["drawThenReturn", "returnThenDraw"] as const;
+export type SwapOrder = (typeof SWAP_ORDERS)[number];
+
+const PREMIUM_ROW = /^[.dtDT]+$/u;
+
+const count = z.number().int().min(0);
+const positive = z.number().int().min(1);
+
+const tileSchema = z.object({ count, points: count }).strict();
+
+const rulesetObject = z
+  .object({
+    /** Stable and neutral, never a trademark; also the operator's config value (09 §1). */
+    id: z.string().regex(/^[a-z][a-z0-9-]{1,31}$/u),
+    version: positive,
+    /** Neutral display name (words §8.3, Q16). */
+    name: z.string().min(1).max(40),
+    description: z.string().min(1).max(200),
+    /** Must match the dictionary's language (words §9.3). */
+    language: z.string().regex(/^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/u),
+    boardSize: z.number().int().min(2).max(MAX_BOARD_SIZE),
+    /** `[row, col]` of the start square. */
+    start: z.tuple([count, count]),
+    rackSize: positive,
+    bingoBonus: count,
+    swapMinBag: count,
+    swapOrder: z.enum(SWAP_ORDERS),
+    scorelessTurnLimit: positive,
+    minPlayers: z.number().int().min(2),
+    maxPlayers: z.number().int().min(2),
+    tiles: z.record(z.string().regex(TILE_CODE), tileSchema),
+    /** `boardSize` rows of `boardSize` characters: `.` normal, `d` DL, `t` TL, `D` DW, `T` TW. */
+    premiums: z.array(z.string().regex(PREMIUM_ROW)),
+  })
+  .strict();
+
+/** A ruleset as written in its data file. */
+export type RulesetData = z.input<typeof rulesetObject>;
+
+/** The total number of tiles in a ruleset's bag (words §8.2). */
+export function totalTiles(ruleset: Pick<RulesetData, "tiles">): number {
+  return Object.values(ruleset.tiles).reduce((sum, tile) => sum + tile.count, 0);
+}
+
+/** The premium picture rotated a quarter turn clockwise. */
+export function rotatePremiums(premiums: readonly string[]): string[] {
+  const size = premiums.length;
+  return premiums.map((_, row) =>
+    Array.from({ length: size }, (_unused, col) => premiums[size - 1 - col]?.[row] ?? "").join(""),
+  );
+}
+
+/** Whether a premium layout looks the same after a quarter turn (words §8.2). */
+export function isQuarterTurnSymmetric(premiums: readonly string[]): boolean {
+  const rotated = rotatePremiums(premiums);
+  return premiums.every((row, index) => row === rotated[index]);
+}
+
+/** The premium squares that have another premium square directly beside or below them. */
+export function adjacentPremiums(premiums: readonly string[]): [number, number][] {
+  const premium = (row: number, col: number): boolean => {
+    const code = premiums[row]?.[col];
+    return code !== undefined && code !== ".";
+  };
+  const found: [number, number][] = [];
+  premiums.forEach((line, row) => {
+    for (let col = 0; col < line.length; col += 1) {
+      if (premium(row, col) && (premium(row, col + 1) || premium(row + 1, col))) {
+        found.push([row, col]);
+      }
+    }
+  });
+  return found;
+}
+
+/** Every row and every column of a premium picture, as strings. */
+function premiumLines(premiums: readonly string[]): string[] {
+  const columns = Array.from({ length: premiums[0]?.length ?? 0 }, (_, col) =>
+    premiums.map((line) => line[col] ?? ".").join(""),
+  );
+  return [...premiums, ...columns];
+}
+
+const WORD_MULTIPLIERS: Readonly<Record<string, number>> = { D: 2, T: 3 };
+
+/**
+ * The closest two word-premium squares (DW, TW) may be in one row or column: their positions
+ * differ by at least this much, so no word shorter than 5 letters covers two (words §8.2).
+ */
+export const MIN_WORD_PREMIUM_DISTANCE = 4;
+
+/**
+ * The most a word of up to `maxLength` letters may be multiplied by the word premiums it covers
+ * (words §8.2): ×4 up to 6 letters, ×6 up to 7, the limits both reference boards keep.
+ */
+export const WORD_MULTIPLIER_CAPS: readonly { readonly maxLength: number; readonly max: number }[] =
+  [
+    { maxLength: 6, max: 4 },
+    { maxLength: 7, max: 6 },
+  ];
+
+/** The closest two word-premium squares come in any row or column; Infinity if never. */
+export function closestWordPremiums(premiums: readonly string[]): number {
+  let closest = Number.POSITIVE_INFINITY;
+  for (const line of premiumLines(premiums)) {
+    let previous = -1;
+    for (let index = 0; index < line.length; index += 1) {
+      if (WORD_MULTIPLIERS[line.charAt(index)] === undefined) continue;
+      if (previous >= 0) closest = Math.min(closest, index - previous);
+      previous = index;
+    }
+  }
+  return closest;
+}
+
+/** The largest word multiplier a word of `length` letters can cover anywhere on the board. */
+export function maxWordMultiplier(premiums: readonly string[], length: number): number {
+  let best = 1;
+  for (const line of premiumLines(premiums)) {
+    const span = Math.min(length, line.length);
+    for (let start = 0; start + span <= line.length; start += 1) {
+      let product = 1;
+      for (const code of line.slice(start, start + span)) product *= WORD_MULTIPLIERS[code] ?? 1;
+      best = Math.max(best, product);
+    }
+  }
+  return best;
+}
+
+/** How many squares of each premium a layout has, the start square included. */
+export function premiumCounts(premiums: readonly string[]): Record<Premium, number> {
+  const counts: Record<Premium, number> = { DL: 0, TL: 0, DW: 0, TW: 0 };
+  for (const code of premiums.join("")) {
+    const premium = PREMIUM_CODES[code as PremiumCode];
+    if (premium !== "none") counts[premium] += 1;
+  }
+  return counts;
+}
+
+/** The rules of words §8.2 that one field's type can't express. */
+export const rulesetSchema = rulesetObject.superRefine((ruleset, ctx) => {
+  const issue = (message: string, path: (string | number)[]): void => {
+    ctx.addIssue({ code: "custom", message, path });
+  };
+  const size = ruleset.boardSize;
+  if (ruleset.premiums.length !== size) {
+    issue(`premiums must have exactly ${String(size)} rows`, ["premiums"]);
+  }
+  ruleset.premiums.forEach((row, index) => {
+    if (row.length !== size) {
+      issue(`premium row must have exactly ${String(size)} squares`, ["premiums", index]);
+    }
+  });
+  if (
+    ruleset.premiums.length === size &&
+    ruleset.premiums.every((row) => row.length === size) &&
+    !isQuarterTurnSymmetric(ruleset.premiums)
+  ) {
+    issue("the premium layout must be symmetric under a quarter turn", ["premiums"]);
+  }
+  if (adjacentPremiums(ruleset.premiums).length > 0) {
+    // Premiums never stack in one short word (words §8.2), the start square's included.
+    issue("no two premium squares may be orthogonally adjacent", ["premiums"]);
+  }
+  if (closestWordPremiums(ruleset.premiums) < MIN_WORD_PREMIUM_DISTANCE) {
+    issue(
+      `word premiums in one row or column must be at least ${String(MIN_WORD_PREMIUM_DISTANCE)} squares apart`,
+      ["premiums"],
+    );
+  }
+  for (const cap of WORD_MULTIPLIER_CAPS) {
+    if (maxWordMultiplier(ruleset.premiums, cap.maxLength) > cap.max) {
+      issue(
+        `a word of ${String(cap.maxLength)} letters or fewer may cover at most ×${String(cap.max)}`,
+        ["premiums"],
+      );
+    }
+  }
+  const [row, col] = ruleset.start;
+  if (row >= size || col >= size) issue("the start square must be on the board", ["start"]);
+  if (ruleset.maxPlayers < ruleset.minPlayers) {
+    issue("maxPlayers must be at least minPlayers", ["maxPlayers"]);
+  }
+  if (ruleset.rackSize > size) {
+    issue("a full rack must fit in one line of the board", ["rackSize"]);
+  }
+  if (ruleset.swapOrder === "drawThenReturn" && ruleset.swapMinBag < ruleset.rackSize) {
+    // Replacements are drawn before the swapped tiles go back, so a full-rack swap needs a full
+    // rack's worth of tiles in the bag (words §3.2).
+    issue("drawThenReturn needs swapMinBag of at least rackSize", ["swapMinBag"]);
+  }
+  if (totalTiles(ruleset) < ruleset.rackSize * ruleset.maxPlayers) {
+    issue("there must be enough tiles to fill every rack", ["tiles"]);
+  }
+  const blank = ruleset.tiles[BLANK];
+  if (blank !== undefined && blank.points !== 0) {
+    issue("blanks are worth 0 points", ["tiles", BLANK, "points"]);
+  }
+});
+
+/** `T` with every nested property and element read-only. */
+export type DeepReadonly<T> = T extends object
+  ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+  : T;
+
+/** A validated ruleset (words §8.1); the registry deep-freezes it, and the type says so. */
+export type Ruleset = DeepReadonly<z.output<typeof rulesetSchema>>;

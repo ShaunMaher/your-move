@@ -548,12 +548,21 @@ importers:
 
   games/words:
     devDependencies:
+      '@your-move/dictionary':
+        specifier: workspace:*
+        version: link:../../packages/dictionary
       '@your-move/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
+      '@your-move/testkit':
+        specifier: workspace:*
+        version: link:../../packages/testkit
       vitest:
         specifier: 'catalog:'
         version: 5.1.1(@types/node@26.6.6)(@vitest/coverage-v8@5.1.1)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
 
   packages/api-client:
     dependencies:
@@ -566,7 +575,23 @@ importers:
         version: 5.1.1(@types/node@26.6.6)(@vitest/coverage-v8@5.1.1)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/dictionary:
+    dependencies:
+      '@your-move/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
     devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      fast-check:
+        specifier: 'catalog:'
+        version: 4.10.3
+      tsx:
+        specifier: 'catalog:'
+        version: 4.23.15
       vitest:
         specifier: 'catalog:'
         version: 5.1.1(@types/node@26.6.6)(@vitest/coverage-v8@5.1.1)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))

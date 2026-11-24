@@ -5,6 +5,11 @@
 *.ico binary
 *.woff2 binary
 
+# Upstream word lists, kept byte for byte: the build checks them against meta.json's SHA-256
+# (words §9.1), so git must never convert their line endings. Diffs stay on, so a reviewer sees
+# every word a source change adds or removes.
+packages/dictionary/dictionaries/*/source.txt -text linguist-vendored
+
 # Generated: collapsed in diffs and excluded from language statistics.
 pnpm-lock.yaml linguist-generated=true -diff
 packages/api-client/openapi/v1.json linguist-generated=true
