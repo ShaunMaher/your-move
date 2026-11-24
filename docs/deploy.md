@@ -60,7 +60,7 @@ exits, even after a crash).
 
 The database, its `-wal`/`-shm` files and the lock file are created readable by the server's user
 only (0600), and the image makes `/data` 0700. A named Docker volume inherits that. With a **bind
-mount** the host directory's own permissions apply: make it owned by the image's `node` user (UID 1000) and mode 0700, and don't put it where other host users can read it.
+mount** the host directory's own permissions apply: make it owned by the image's `node` user (UID 1000) and mode 0700, and don't put it where other host users can read it. The server logs a warning at startup while the database directory has any group or other permission bits.
 
 To build and try it locally:
 
