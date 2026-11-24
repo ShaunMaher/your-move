@@ -313,7 +313,12 @@ describe("parseConfig: invalid configurations", () => {
     [
       "ADMIN_EMAILS malformed",
       { ...PROD_ENV, ADMIN_EMAILS: "admin" },
-      "ADMIN_EMAILS: each entry must be a plain email address",
+      "ADMIN_EMAILS: each entry must be an email address sign-in accepts",
+    ],
+    [
+      "ADMIN_EMAILS an address sign-in would refuse (M2b review P-15)",
+      { ...PROD_ENV, ADMIN_EMAILS: "admin@localhost" },
+      "ADMIN_EMAILS: each entry must be an email address sign-in accepts",
     ],
     [
       "DICTIONARIES_EXTRA bad id",

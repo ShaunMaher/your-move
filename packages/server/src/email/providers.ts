@@ -24,7 +24,7 @@ export function coreEmailSender(
 ): EmailSender & { captured?: () => readonly CapturedEmail[] } {
   if (config.email.provider === "console") return createConsoleEmailSender(log, now);
   if (runtimeSender !== undefined) return runtimeSender;
-  log.warn("email provider not available in this build: no email will be sent", {
+  log.error("email provider not available in this build: no email will be sent", {
     alert: "email_provider_unavailable",
     provider: config.email.provider,
   });

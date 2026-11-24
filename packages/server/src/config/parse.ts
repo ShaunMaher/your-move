@@ -1,6 +1,7 @@
 import { isGameType } from "@your-move/sdk";
 import { z } from "zod";
 
+import { normaliseAddress, type NormalisedEmail } from "../accounts/email.js";
 import { RATE_LIMIT_NAMES } from "../auth/limits.js";
 import { DEFAULT_APP_NAME } from "./defaults.js";
 import { isEmailAddress, normaliseEmail, parseMailbox } from "./email.js";
@@ -77,7 +78,7 @@ export interface AppConfig {
   /** Game types offered for new games (`ENABLED_GAMES`, or the instance default). */
   readonly enabledGames: readonly string[];
   /** Normalised admin addresses; empty disables the Admin API. */
-  readonly adminEmails: readonly string[];
+  readonly adminEmails: readonly NormalisedEmail[];
   /** Built-in dictionary ids offered for new games; `null` means all bundled ones. */
   readonly dictionariesEnabled: readonly string[] | null;
   readonly dictionaryUploads: boolean;
@@ -302,8 +303,8 @@ function crossFieldIssues(raw: RawEnv, options: ParseConfigOptions): string[] {
   }
 
   for (const address of list(raw.ADMIN_EMAILS) ?? []) {
-    if (!isEmailAddress(address)) {
-      issues.push("ADMIN_EMAILS: each entry must be a plain email address");
+    if (normaliseAddress(address) === null) {
+      issues.push("ADMIN_EMAILS: each entry must be an email address sign-in accepts (04)");
     }
   }
 
@@ -417,7 +418,13 @@ function toConfig(raw: RawEnv, options: ParseConfigOptions): AppConfig {
         : null,
     limits,
     enabledGames: [...new Set(enabledGames)],
-    adminEmails: [...new Set((list(raw.ADMIN_EMAILS) ?? []).map(normaliseEmail))],
+    adminEmails: [
+      ...new Set(
+        (list(raw.ADMIN_EMAILS) ?? [])
+          .map(normaliseAddress)
+          .filter((address): address is NormalisedEmail => address !== null),
+      ),
+    ],
     dictionariesEnabled: list(raw.DICTIONARIES_ENABLED),
     dictionaryUploads: raw.DICTIONARY_UPLOADS !== "false",
     dictionariesExtra: list(raw.DICTIONARIES_EXTRA) ?? [],

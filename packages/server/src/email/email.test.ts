@@ -127,10 +127,15 @@ describe("console provider (local-dev only)", () => {
 });
 
 describe("unavailable provider", () => {
-  it("fails every send with an alert in the log", async () => {
+  it("drops every send with one error-level alert in the log", async () => {
     const { log, lines } = logger();
     const sender = createUnavailableEmailSender("resend", log);
-    await expect(sender.send(accountDeletedEmail(to, context))).rejects.toThrow(/resend/u);
-    expect(lines.at(-1)).toMatchObject({ alert: "email_provider_unavailable", provider: "resend" });
+    await expect(sender.send(accountDeletedEmail(to, context))).resolves.toBeUndefined();
+    expect(lines).toHaveLength(1);
+    expect(lines.at(-1)).toMatchObject({
+      level: "error",
+      alert: "email_provider_unavailable",
+      provider: "resend",
+    });
   });
 });

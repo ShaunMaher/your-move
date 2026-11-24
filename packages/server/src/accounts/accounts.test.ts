@@ -42,23 +42,33 @@ describe("normaliseAddress (04 conventions)", () => {
 
 describe("display names (06 §5.1)", () => {
   it("normalises: NFC, trimmed, whitespace collapsed", () => {
-    expect(normaliseDisplayName("  Sam \t  Smith ")).toBe("Sam Smith");
+    expect(normaliseDisplayName("  Sam \u{A0} \u{2003}Smith ")).toBe("Sam Smith");
     expect(normaliseDisplayName("Cafe\u{301}")).toBe("Caf\u{E9}");
   });
 
-  it.each(["Sam", "Zoë", "李小龙", "🇦🇺 Aussie", "a".repeat(24), "R2-D2", "Mum 123456"])(
-    "accepts %j",
-    (name) => {
-      expect(validateDisplayName(name, "Family Games").ok).toBe(true);
-    },
-  );
+  it.each([
+    "Sam",
+    "Zoë",
+    "李小龙",
+    "🇦🇺 Aussie",
+    "a".repeat(24),
+    "R2-D2",
+    "Mum 123456",
+    "Mum \u{1F469}\u{200D}\u{1F467}",
+    "Pride \u{1F3F3}\u{FE0F}\u{200D}\u{1F308}",
+    "\u{1F469}\u{1F3FD}\u{200D}\u{1F4BB} coder",
+  ])("accepts %j", (name) => {
+    expect(validateDisplayName(name, "Family Games").ok).toBe(true);
+  });
 
   it.each([
     ["", "length"],
     ["   ", "length"],
     ["a".repeat(25), "length"],
     ["q\u{301}\u{302}\u{303}", "combining"],
-    ["Mum \u{1F469}\u{200D}\u{1F467}", "characters"],
+    ["a\u{200D}b", "characters"],
+    ["Mum \u{200D}\u{1F467}", "characters"],
+    ["Sam\tSmith", "characters"],
     ["Sam\u{202E}x", "characters"],
     ["Sam\u{2066}x", "characters"],
     ["Sam\u{200B}x", "characters"],

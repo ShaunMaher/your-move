@@ -197,7 +197,14 @@ export function createApp(options: AppOptions): App {
   // Dev only (06 §4, 09 §2, 08 T19): registered only in local-dev mode, so a production config
   // answers 404 from the catch-all below.
   if (localDev) {
-    app.get("/__dev/emails", (c) => c.json({ emails: platform.email.captured?.() ?? [] }, 200));
+    // Only for requests addressed to PUBLIC_URL's own host, so a page on another name that
+    // resolves here (DNS rebinding) can't read codes (M2b review S-8).
+    const devHost = new URL(config.publicUrl).host;
+    app.get("/__dev/emails", (c) =>
+      (c.req.header("Host") ?? devHost) === devHost
+        ? c.json({ emails: platform.email.captured?.() ?? [] }, 200)
+        : c.json(errorBody("NOT_FOUND", "Not found."), 404),
+    );
   }
 
   const document = openApiDocument(app, config.appName);

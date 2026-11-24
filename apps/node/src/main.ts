@@ -15,7 +15,12 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import { serve } from "@hono/node-server";
-import { createJsonLogger, installedSchema, registryMismatches } from "@your-move/server";
+import {
+  createJsonLogger,
+  installedSchema,
+  isLocalDev,
+  registryMismatches,
+} from "@your-move/server";
 
 import installedJson from "../../../generated/installed.json" with { type: "json" };
 import { codeGenerationFromStringsAllowed } from "./code-generation.js";
@@ -108,6 +113,8 @@ const server = serve(
   {
     fetch: (request, env) => app.fetch(request, env, background.context()),
     port: nodeConfig.port,
+    // Local-dev mode serves /__dev/emails (sign-in codes): reachable from this machine only.
+    ...(isLocalDev(config) ? { hostname: "127.0.0.1" } : {}),
   },
   (info) => {
     log.info("listening", { port: info.port, games: games.length });

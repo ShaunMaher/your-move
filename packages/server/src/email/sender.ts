@@ -70,7 +70,7 @@ export function createConsoleEmailSender(log: Logger, now: () => Date): ConsoleE
 
 /**
  * Stands in for a provider whose implementation hasn't landed yet (`gmail` in M4; `resend`,
- * `postmark`, `ses`, `cloudflare` later): every send fails with an alert in the log, so the
+ * `postmark`, `ses`, `cloudflare` later): every send is dropped with an alert in the log, so the
  * operator sees at once that no mail goes out, while the API keeps its normal responses.
  */
 export function createUnavailableEmailSender(provider: string, log: Logger): EmailSender {
@@ -80,7 +80,8 @@ export function createUnavailableEmailSender(provider: string, log: Logger): Ema
         alert: "email_provider_unavailable",
         provider,
       });
-      return Promise.reject(new Error(`email provider ${provider} is not available in this build`));
+      // Resolves: the alert above is the one log entry, not a second "background task failed".
+      return Promise.resolve();
     },
   };
 }
