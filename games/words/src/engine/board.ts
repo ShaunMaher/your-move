@@ -60,6 +60,16 @@ export function premiumAt(ruleset: Ruleset, row: number, col: number): Premium |
   return code !== undefined && Object.hasOwn(PREMIUMS, code) ? (PREMIUMS[code] ?? null) : null;
 }
 
+/**
+ * Placements in board order (by row, then column): along the line for a legal play, so records,
+ * the order of cross-words and every answer are the same whatever order the client sent them in.
+ */
+export function inLineOrder<T extends { readonly row: number; readonly col: number }>(
+  placements: readonly T[],
+): T[] {
+  return [...placements].sort((a, b) => a.row - b.row || a.col - b.col);
+}
+
 function placementError(detail: PlacementError): GameError {
   return { code: ERROR_CODES.invalidPlacement, detail };
 }
@@ -81,8 +91,9 @@ export function analysePlay(
   ruleset: Ruleset,
   board: Board,
   rack: readonly string[],
-  placements: readonly Placement[],
+  given: readonly Placement[],
 ): PlayAnalysis | GameError {
+  const placements = inLineOrder(given);
   const size = ruleset.boardSize;
   if (placements.length > ruleset.rackSize) return placementError("TOO_MANY_TILES");
   if (placements.some((p) => p.row >= size || p.col >= size)) {
@@ -163,6 +174,10 @@ export function analysePlay(
           ...placements.map((p) => run(p.row, p.col, line[1], line[0])),
         ];
   const words = runs.filter((squares) => squares.length >= 2).map((w) => scoreWord(ruleset, w));
+  // A guard only: the checks above leave no way to form no word (an opening has 2+ tiles in a
+  // line, a later single tile touches a tile, and 2+ tiles in a line are a word), but if a
+  // rule ever changes, refusing is the safe answer (words §3.1 rule 6).
+  /* v8 ignore next */
   if (words.length === 0) return placementError("NO_WORD_FORMED");
   const bingo = placements.length === ruleset.rackSize;
   const score = words.reduce((sum, word) => sum + word.score, bingo ? ruleset.bingoBonus : 0);

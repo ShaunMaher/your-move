@@ -91,35 +91,86 @@ describe("summary (words §10.6)", () => {
 });
 
 describe("describe (words §10.6, 02 §2.1 rule 9)", () => {
-  const base = { seat: 1, score: 0, bingo: false };
+  const base = { seat: 1, score: 0, bingo: false } as const;
+  const tiles = (count: number) =>
+    Array.from({ length: count }, (_, col) => ({ row: 0, col, tile: "a", letter: "a" }));
   it.each<[PublicRecord, (string | { seat: number })[]]>([
+    [
+      // A multi-tile play names its main word, listed first, even when a cross-word is longer.
+      {
+        ...base,
+        type: "play",
+        placements: tiles(2),
+        words: [
+          { word: "qi", score: 11 },
+          { word: "quiz", score: 60 },
+        ],
+        score: 71,
+      },
+      [{ seat: 1 }, " played QI for 71"],
+    ],
+    [
+      // A single tile names the longest word it formed.
+      {
+        ...base,
+        type: "play",
+        placements: tiles(1),
+        words: [
+          { word: "qi", score: 11 },
+          { word: "quiz", score: 60 },
+        ],
+        score: 71,
+      },
+      [{ seat: 1 }, " played QUIZ for 71"],
+    ],
+    [
+      // ... and the higher-scoring one of two as long.
+      {
+        ...base,
+        type: "play",
+        placements: tiles(1),
+        words: [
+          { word: "at", score: 2 },
+          { word: "ax", score: 9 },
+        ],
+        score: 11,
+      },
+      [{ seat: 1 }, " played AX for 11"],
+    ],
     [
       {
         ...base,
         type: "play",
-        placements: [{ row: 0, col: 0, tile: "q", letter: "q" }],
-        words: [
-          { word: "quiz", score: 60 },
-          { word: "qi", score: 4 },
-        ],
-        score: 64,
+        placements: tiles(7),
+        words: [{ word: "aerosol", score: 9 }],
+        score: 59,
+        bingo: true,
       },
-      [{ seat: 1 }, " played QUIZ for 64"],
-    ],
-    [
-      { ...base, type: "play", words: [{ word: "aerosol", score: 9 }], score: 59, bingo: true },
       [{ seat: 1 }, " played AEROSOL for 59, using every tile"],
     ],
-    [{ ...base, type: "play", score: 0 }, [{ seat: 1 }, " played  for 0"]],
     [{ ...base, type: "swap", swapCount: 3 }, [{ seat: 1 }, " swapped 3 tiles"]],
     [{ ...base, type: "swap", swapCount: 1 }, [{ seat: 1 }, " swapped 1 tile"]],
-    [{ ...base, type: "swap" }, [{ seat: 1 }, " swapped 0 tiles"]],
     [{ ...base, type: "pass" }, [{ seat: 1 }, " passed"]],
     [{ ...base, type: "resign" }, [{ seat: 1 }, " resigned"]],
     [{ ...base, type: "timeout" }, [{ seat: 1 }, " ran out of time"]],
     [{ ...base, type: "decline" }, [{ seat: 1 }, " declined the game"]],
   ])("describes %j", (record, text) => {
+    expect(words.recordSchema.safeParse(record).success).toBe(true);
     expect(describeRecord(record)).toEqual(text);
+  });
+
+  it("refuses malformed records: a play without words or tiles, a swap of no tiles", () => {
+    for (const record of [
+      { ...base, type: "play", placements: tiles(1), words: [] },
+      { ...base, type: "play", placements: [], words: [{ word: "at", score: 2 }] },
+      { ...base, type: "play", words: [{ word: "at", score: 2 }] },
+      { ...base, type: "swap" },
+      { ...base, type: "swap", swapCount: 0 },
+      { ...base, type: "pass", swapCount: 1 },
+      { ...base, type: "pass", score: 5 },
+    ]) {
+      expect(words.recordSchema.safeParse(record).success).toBe(false);
+    }
   });
 
   it("never names the tiles of a swap: two swaps of as many tiles give the same record", () => {

@@ -132,6 +132,10 @@ describe("resolveOptions (words §10.1)", () => {
       { boardSize: 11 },
       { code: "UNKNOWN_OPTION", detail: { option: "boardSize" } },
     ],
+    // Keys that don't look like option names are never echoed back (words §10.3).
+    ["an unknown key with markup", { "<b>x</b>": 1 }, { code: "UNKNOWN_OPTION" }],
+    ["an unknown key of 65 characters", { ["k".repeat(65)]: 1 }, { code: "UNKNOWN_OPTION" }],
+    ["an empty key", { "": 1 }, { code: "UNKNOWN_OPTION" }],
     ["an unknown ruleset", { rulesetId: "nope" }, { code: "UNKNOWN_RULESET" }],
     ["a ruleset id that isn't a string", { rulesetId: 1 }, { code: "UNKNOWN_RULESET" }],
     ["an inherited name", { rulesetId: "constructor" }, { code: "UNKNOWN_RULESET" }],

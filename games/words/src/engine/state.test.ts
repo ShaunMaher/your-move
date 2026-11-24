@@ -5,25 +5,32 @@
 import { seededRandom } from "@your-move/testkit";
 import { describe, expect, it } from "vitest";
 
-import {
-  board,
-  conserved,
-  dictionary,
-  options,
-  play,
-  rack,
-  ruleset,
-  state,
-} from "../test-support.js";
-import { premiumAt } from "./board.js";
+import { board, conserved, options, play, rack, ruleset, state } from "../test-support.js";
 import { wordsV1 as words } from "./definition.js";
-import { preview } from "./rules.js";
+import type { Ruleset } from "./rulesets/schema.js";
 import { allTiles, rackOf, rackValue, setup, type State } from "./state.js";
 
 const CLASSIC = ruleset("classic");
 const CASUAL = ruleset("casual");
 const [SR, SC] = CLASSIC.start;
 const CAT = { row: SR, col: SC - 1, word: "cat" };
+
+/**
+ * A word's score worked out by hand from the ruleset's own premium picture and tile table
+ * (words §4), independently of the engine: the word is laid across from (row, col), and its new
+ * tiles are at the indices in `fresh`; only they count their premiums.
+ */
+function byHand(rules: Ruleset, word: string, row: number, col: number, fresh: number[]): number {
+  let sum = 0;
+  let times = 1;
+  word.split("").forEach((tile, i) => {
+    const code = fresh.includes(i) ? rules.premiums[row]?.[col + i] : ".";
+    const points = rules.tiles[tile]?.points ?? Number.NaN;
+    sum += points * (code === "d" ? 2 : code === "t" ? 3 : 1);
+    times *= code === "D" ? 2 : code === "T" ? 3 : 1;
+  });
+  return sum * times;
+}
 
 /** A source that must never be drawn from: proves a transition uses no randomness. */
 const noRandom = {
@@ -78,13 +85,14 @@ describe("playing tiles (words §3.1, §4)", () => {
   it("places the tiles, scores the play, draws back up and passes the turn, with no randomness", () => {
     const s = state({ racks: [rack("sabcdeq"), rack("eeeeeee")], board: board(CLASSIC, [CAT]) });
     const action = play([{ row: SR, col: SC + 2, word: "s" }]);
-    const expected = preview(s, 0, action, dictionary("cats"));
+    // C A T already there, S new: only the S's square can carry a premium.
+    const expected = { score: byHand(CLASSIC, "cats", SR, SC - 1, [3]) };
     const { state: next, record } = words.apply(s, 0, action, noRandom);
     expect(next.board[SR]?.[SC + 2]).toEqual({ tile: "s", letter: "s" });
     expect(next.racks[0]).toHaveLength(CLASSIC.rackSize);
     expect(next.racks[0]?.slice(0, 6)).toEqual(rack("abcdeq"));
     expect(next.bag).toHaveLength(s.bag.length - 1);
-    expect(next.scores).toEqual([(expected as { score: number }).score, 0]);
+    expect(next.scores).toEqual([expected.score, 0]);
     expect(next.turn).toBe(1);
     expect(next.scorelessStreak).toBe(0);
     expect(conserved(next, CLASSIC)).toBe(true);
@@ -92,8 +100,8 @@ describe("playing tiles (words §3.1, §4)", () => {
       seat: 0,
       type: "play",
       placements: [{ row: SR, col: SC + 2, tile: "s", letter: "s" }],
-      words: [{ word: "cats", score: (expected as { score: number }).score }],
-      score: (expected as { score: number }).score,
+      words: [{ word: "cats", score: expected.score }],
+      score: expected.score,
       bingo: false,
     });
     expect(next.lastMove).toEqual(record);
@@ -118,6 +126,16 @@ describe("playing tiles (words §3.1, §4)", () => {
     expect(short.state.finished).toBeNull();
   });
 
+  it("records the placements in board order, whatever order they were sent in", () => {
+    const s = state({ racks: [rack("oxabcde"), rack("eeeeeee")], board: board(CLASSIC, [CAT]) });
+    const sent = play([{ row: SR + 1, col: SC, word: "ox" }]);
+    const reversed = { ...sent, placements: [...sent.placements].reverse() };
+    const a = words.apply(s, 0, sent, noRandom);
+    const b = words.apply(s, 0, reversed, noRandom);
+    expect(b).toEqual(a);
+    expect(a.record.type === "play" && a.record.placements.map((p) => p.col)).toEqual([SC, SC + 1]);
+  });
+
   it("writes a blank's letter on the board and records it", () => {
     const s = state({ racks: [rack("?abcdeq"), rack("eeeeeee")], board: board(CLASSIC, [CAT]) });
     const { state: next, record } = words.apply(
@@ -127,7 +145,9 @@ describe("playing tiles (words §3.1, §4)", () => {
       noRandom,
     );
     expect(next.board[SR]?.[SC + 2]).toEqual({ tile: "?", letter: "s" });
-    expect(record.placements).toEqual([{ row: SR, col: SC + 2, tile: "?", letter: "s" }]);
+    expect(record).toMatchObject({
+      placements: [{ row: SR, col: SC + 2, tile: "?", letter: "s" }],
+    });
   });
 
   it("counts a play that scores nothing (only blanks) as scoreless", () => {
@@ -149,10 +169,16 @@ describe("playing tiles (words §3.1, §4)", () => {
     const s = state({ racks: [rack("atbcdeq"), rack("eeeeeee")] });
     const action = play([{ row: SR, col: SC, word: "at" }]);
     const { record } = words.apply(s, 0, action, noRandom);
-    expect(record.score).toBe((preview(s, 0, action, dictionary("at")) as { score: number }).score);
-    // Classic's start square is a double word (words §8.3), so the play scores at least 4.
-    expect(premiumAt(CLASSIC, SR, SC)).toBe("DW");
-    expect(record.score).toBeGreaterThanOrEqual(4);
+    // Classic's start square is a double word (words §8.3).
+    expect(CLASSIC.premiums[SR]?.[SC]).toBe("D");
+    expect(record.score).toBe(byHand(CLASSIC, "at", SR, SC, [0, 1]));
+  });
+
+  it("scores the casual opening, whose start square has no premium (words §8.3)", () => {
+    const s = state({ rulesetId: "casual", racks: [rack("atbcdeq"), rack("eeeeeee")] });
+    const { record } = words.apply(s, 0, play([{ row: SR, col: SC, word: "at" }]), noRandom);
+    expect(CASUAL.premiums[SR]?.[SC]).toBe(".");
+    expect(record.score).toBe(byHand(CASUAL, "at", SR, SC, [0, 1]));
   });
 });
 
@@ -262,7 +288,7 @@ describe("going out (words §5 rule 1, §6)", () => {
       play([{ row: SR, col: SC + 2, word: "s" }]),
       noRandom,
     );
-    const played = next.lastMove?.score ?? 0;
+    const played = byHand(CLASSIC, "cats", SR, SC - 1, [3]);
     expect(next.finished).toEqual({ reason: "out", adjustments: [20, -20], leaver: null });
     expect(next.scores).toEqual([50 + played + 20, 40]);
     expect(words.result(next)?.endReason).toBe("out");
@@ -312,9 +338,16 @@ describe("leaving (words §3.4, §5 rules 3–4, §6, §10.6)", () => {
     ]);
   });
 
-  it("changes nothing once the game is over", () => {
+  it("throws once the game is over: the framework never calls it then (02 §2.1 rule 3)", () => {
     const over = words.onResign(s, 0, noRandom, "resign").state;
-    expect(words.onTimeout(over, 1, noRandom).state).toBe(over);
+    expect(() => words.onTimeout(over, 1, noRandom)).toThrow(RangeError);
+    expect(() => words.onResign(over, 1, noRandom, "resign")).toThrow(RangeError);
+  });
+
+  it("throws for a game of more than two seats, whose resignation isn't specified (§3.4)", () => {
+    const three = state({ racks: [rack("qabcdef"), rack("zeeeeee"), rack("ooooooo")] });
+    expect(() => words.onResign(three, 2, noRandom, "decline")).toThrow(RangeError);
+    expect(() => words.onTimeout(three, 0, noRandom)).toThrow(RangeError);
   });
 });
 

@@ -19,7 +19,7 @@ import {
 } from "@your-move/sdk";
 
 import { at } from "./at.js";
-import { analysePlay, emptyBoard, tilePoints, type BoardTile } from "./board.js";
+import { analysePlay, emptyBoard, inLineOrder, tilePoints, type BoardTile } from "./board.js";
 import { findRuleset } from "./rulesets/index.js";
 import type { Ruleset } from "./rulesets/schema.js";
 import type { EndReason, Options, PlayAction, PublicRecord, SwapAction } from "./schemas.js";
@@ -140,7 +140,7 @@ export function playTiles(
   const analysis = analysePlay(ruleset, state.board, rack, action.placements);
   if (isGameError(analysis)) throw new RangeError("apply precondition: the play isn't legal");
   const board = state.board.map((row) => [...row]);
-  const placements = action.placements.map((p) => ({
+  const placements = inLineOrder(action.placements).map((p) => ({
     row: p.row,
     col: p.col,
     tile: p.tile,
@@ -207,17 +207,19 @@ export function pass(state: State, seat: Seat): { state: State; record: PublicRe
 }
 
 /**
- * A seat leaves (words §3.4, §5, §10.6): the game ends at once with scores frozen. In a
- * 2-player game, the only kind in v1, the other player wins; with more seats the game still ends
- * (multi-player resignation is deferred until 3–4 player games are specified, words §3.4).
+ * A seat leaves (words §3.4, §5, §10.6): the game ends at once with scores frozen and the other
+ * player wins. Rulesets allow two seats only (words §8.2), because multi-player resignation isn't
+ * specified yet; a game with more seats, or one already over, is a precondition failure (the
+ * framework never calls a finished game's `onResign`/`onTimeout`), so it throws (02 §2.1 rule 3).
  */
 export function leave(
   state: State,
   seat: Seat,
   how: ExitReason | "timeout",
 ): { state: State; record: PublicRecord } {
+  if (state.racks.length !== 2) throw new RangeError("leave: only 2-seat games are specified");
+  if (state.finished !== null) throw new RangeError("leave: the game is already over");
   const record: PublicRecord = { seat, type: how, score: 0, bingo: false };
-  if (state.finished !== null) return { state, record };
   const finished: Finished = {
     reason: how,
     adjustments: state.scores.map(() => 0),

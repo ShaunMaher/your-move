@@ -19,7 +19,7 @@ import {
 } from "../test-support.js";
 import { anchors, candidatePlay, findPlay, lineSquares } from "./bot.js";
 import { wordsV1 as words } from "./definition.js";
-import { KIT_DICTIONARY_ID, kitHas } from "./kit-hooks.js";
+import { KIT_DICTIONARY_ID } from "./kit-hooks.js";
 import { KIT_WORDS } from "./kit-words.js";
 import { configSchema, type Action } from "./schemas.js";
 import { rackOf, setup, type State } from "./state.js";
@@ -54,8 +54,9 @@ describe("the kit dictionary", () => {
     const words = KIT_WORDS.flatMap((line) => line.split(" "));
     expect(words.length).toBeGreaterThan(1000);
     expect(words.filter((word) => real.dictionary?.has(word) !== true)).toEqual([]);
-    expect(words.every((word) => kitHas(word))).toBe(true);
-    expect(kitHas("zzz")).toBe(false);
+    const kit = hooks.resources?.(options("classic", KIT_DICTIONARY_ID)).dictionary;
+    expect(words.every((word) => kit?.has(word) === true)).toBe(true);
+    expect(kit?.has("zzz")).toBe(false);
   });
 
   it("is what the kit's context and resources offer", () => {
@@ -249,23 +250,30 @@ describe("perturbHidden", () => {
 
 describe("worstCase", () => {
   it.each(["classic", "casual"])(
-    "gives full-rack plays of eight words and a full swap, all legal, under %s",
+    "gives full-rack plays of eight words and of a 15-letter word, and a full swap, under %s",
     (id) => {
       const opts = options(id, KIT_DICTIONARY_ID);
       const cases = hooks.worstCase(opts, 2, seededRandom(5));
-      expect(cases).toHaveLength(3);
+      expect(cases.map((c) => c.action.type)).toEqual(["play", "play", "swap", "play"]);
+      const shapes: string[] = [];
       for (const { state: s, seat, action } of cases) {
         expect(words.toAct(s)).toContain(seat);
         expect(conserved(s, ruleset(id))).toBe(true);
         for (const res of [hooks.resources?.(opts) ?? {}, real]) {
           expect(words.validate(s, seat, action, res)).toEqual({ ok: true });
         }
-        const result = words.preview?.(s, seat, action, real);
+        const result = words.preview?.(s, seat, action, real) as {
+          words: { word: string }[];
+          bingo: boolean;
+        };
         if (action.type === "play") {
-          expect(result).toMatchObject({ bingo: true });
-          expect((result as { words: unknown[] }).words).toHaveLength(8);
+          expect(result.bingo).toBe(true);
+          shapes.push(result.words.map((w) => w.word.length).join(","));
         }
       }
+      // Eight words (one 7-letter main word and seven 3-letter cross-words), twice, and one
+      // 15-letter word.
+      expect(shapes).toEqual(["7,3,3,3,3,3,3,3", "15", "7,3,3,3,3,3,3,3"]);
     },
   );
 });

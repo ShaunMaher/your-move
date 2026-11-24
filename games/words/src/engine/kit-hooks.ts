@@ -28,12 +28,12 @@ import { allTiles, rackOf, rulesetOf, setup, type State } from "./state.js";
 /** The id of the kit dictionary (`kit-words.ts`) in the kit's resource catalog. */
 export const KIT_DICTIONARY_ID = "kit";
 
-/** The kit dictionary's words, as a set: about a thousand short words, built once and never changed. */
-const KIT_SET: ReadonlySet<string> = new Set(KIT_WORDS.flatMap((line) => line.split(" ")));
-
-/** Whether `word` is in the kit dictionary. */
-export function kitHas(word: string): boolean {
-  return KIT_SET.has(word);
+/**
+ * The kit dictionary's words as a set. Built when a kit hook asks for it, never when the engine
+ * loads: the hooks ship in the engine, but the framework and runtimes never call them (02 §6).
+ */
+function kitWords(): ReadonlySet<string> {
+  return new Set(KIT_WORDS.flatMap((line) => line.split(" ")));
 }
 
 /** The kit dictionary's metadata (02 §2 `ResourceMeta`). */
@@ -64,8 +64,13 @@ function context(): OptionsContext {
 
 /** The kit dictionary, as `validate` and `preview` receive it. */
 function resources(options: Options): Resources {
+  const words = kitWords();
   return {
-    dictionary: { id: options.dictionaryId, version: options.dictionaryVersion, has: kitHas },
+    dictionary: {
+      id: options.dictionaryId,
+      version: options.dictionaryVersion,
+      has: (word) => words.has(word),
+    },
   };
 }
 
@@ -207,9 +212,62 @@ const PLAYED = "aerosol";
 const BELOW = "letters";
 
 /**
+ * The longest word a board can hold (words §9.1): played as its seven odd letters into the gaps
+ * between its eight even letters, already on the board, so one full-rack play forms a 15-letter
+ * main word, the longest dictionary lookup there is.
+ */
+const LONGEST = "acknowledgments";
+
+/** Words already on the board, a rack, and where the rack's tiles go, in order. */
+interface Layout {
+  readonly laid: readonly { readonly row: number; readonly col: number; readonly word: string }[];
+  readonly rack: string;
+  readonly squares: readonly (readonly [number, number])[];
+}
+
+/**
+ * A game position from `start` with `layout` arranged in it: the laid words on the board, the
+ * rack in seat 0's hand, and every other tile dealt to the other racks and the bag, so the
+ * tiles are still exactly the ruleset's. Null if the layout's tiles or squares don't fit.
+ */
+function arrange(start: State, layout: Layout): State | null {
+  const ruleset = rulesetOf(start.options);
+  const pool = [...start.bag, ...start.racks.flat()];
+  const take = (word: string): string[] | null => {
+    const taken: string[] = [];
+    for (const tile of word.split("")) {
+      const index = pool.indexOf(tile);
+      if (index === -1) return null;
+      taken.push(...pool.splice(index, 1));
+    }
+    return taken;
+  };
+  const size = ruleset.boardSize;
+  const onBoard = ([row, col]: readonly [number, number]): boolean =>
+    row >= 0 && col >= 0 && row < size && col < size;
+  const laidSquares = layout.laid.flatMap(({ row, col, word }) =>
+    word.split("").map((_, i) => [row, col + i] as const),
+  );
+  if (layout.rack.length !== ruleset.rackSize) return null;
+  if (![...laidSquares, ...layout.squares].every(onBoard)) return null;
+  const board: (BoardTile | null)[][] = emptyBoard(ruleset);
+  for (const { row, col, word } of layout.laid) {
+    const tiles = take(word);
+    if (tiles === null) return null;
+    tiles.forEach((tile, i) => {
+      at(board, row)[col + i] = { tile, letter: tile };
+    });
+  }
+  const rack = take(layout.rack);
+  if (rack === null) return null;
+  const others = start.racks.slice(1).map(() => pool.splice(0, ruleset.rackSize));
+  return { ...start, board, bag: pool, racks: [rack, ...others] };
+}
+
+/**
  * The most expensive inputs for the CPU budget (02 §6.6, words §10.6): a full-rack play that
- * forms eight words on a crowded centre, the same with a blank, and a swap of the whole rack
- * (which shuffles the whole bag).
+ * forms eight words on a crowded centre, the same with a blank, a full-rack play that forms a
+ * 15-letter word, and a swap of the whole rack (which shuffles the whole bag).
  */
 function worstCase(
   options: Options,
@@ -217,70 +275,60 @@ function worstCase(
   rng: RandomSource,
 ): readonly WorstCase<State, Action>[] {
   const start = setup({ options, seats, rng });
-  const ruleset = rulesetOf(options);
-  const [row, col] = ruleset.start;
+  const [row, col] = rulesetOf(options).start;
   const first = col - 3;
-  const pool = [...start.bag, ...start.racks.flat()];
-  /** Takes these tiles out of the pool; null if one isn't there. */
-  const take = (tiles: readonly string[]): string[] | null => {
-    const taken: string[] = [];
-    for (const tile of tiles) {
-      const index = pool.indexOf(tile);
-      if (index === -1) return null;
-      taken.push(...pool.splice(index, 1));
-    }
-    return taken;
+  const crowded: Layout = {
+    laid: [
+      { row: row - 1, col: first, word: ABOVE },
+      { row: row + 1, col: first, word: BELOW },
+    ],
+    rack: PLAYED,
+    squares: PLAYED.split("").map((_, i) => [row, first + i] as const),
   };
-  const fits =
-    ruleset.rackSize === PLAYED.length &&
-    row >= 1 &&
-    row + 1 < ruleset.boardSize &&
-    first >= 0 &&
-    first + PLAYED.length <= ruleset.boardSize;
-  const above = fits ? take(ABOVE.split("")) : null;
-  const below = above === null ? null : take(BELOW.split(""));
-  const rack = below === null ? null : take(PLAYED.split(""));
+  const long: Layout = {
+    laid: LONGEST.split("").flatMap((letter, i) =>
+      i % 2 === 0 ? [{ row, col: i, word: letter }] : [],
+    ),
+    rack: LONGEST.split("")
+      .filter((_, i) => i % 2 === 1)
+      .join(""),
+    squares: LONGEST.split("").flatMap((_, i) => (i % 2 === 1 ? [[row, i] as const] : [])),
+  };
   const cases: WorstCase<State, Action>[] = [];
-  if (above !== null && below !== null && rack !== null) {
-    const board: (BoardTile | null)[][] = emptyBoard(ruleset);
-    const lay = (r: number, tiles: readonly string[]): void => {
-      tiles.forEach((tile, i) => {
-        at(board, r)[first + i] = { tile, letter: tile };
-      });
-    };
-    lay(row - 1, above);
-    lay(row + 1, below);
-    const others = Array.from({ length: seats - 1 }, () => pool.splice(0, ruleset.rackSize));
-    const plain: State = { ...start, board, bag: [...pool], racks: [rack, ...others] };
-    const squares = PLAYED.split("").map((_, i) => [row, first + i] as const);
-    cases.push(
-      {
-        state: plain,
-        seat: 0,
-        action: { type: "play", placements: placeTiles(squares, rack, rng) },
-      },
-      { state: plain, seat: 0, action: { type: "swap", tiles: [...rack] } },
-    );
-    // The same play with a blank standing for its last letter.
-    const blankAt = pool.indexOf("?");
+  const play = (state: State | null, layout: Layout): void => {
+    if (state === null) return;
+    const rack = rackOf(state, 0);
+    cases.push({
+      state,
+      seat: 0,
+      action: { type: "play", placements: placeTiles(layout.squares, rack, rng) },
+    });
+  };
+  const plain = arrange(start, crowded);
+  play(plain, crowded);
+  play(arrange(start, long), long);
+  if (plain !== null) {
+    cases.push({ state: plain, seat: 0, action: { type: "swap", tiles: rackOf(plain, 0) } });
+    // The crowded play with a blank from the bag standing for its last letter.
+    const blankAt = plain.bag.indexOf("?");
     if (blankAt !== -1) {
-      const bag = [...pool];
+      const rack = rackOf(plain, 0);
+      const bag = [...plain.bag];
       bag[blankAt] = at(rack, rack.length - 1);
       const own = [...rack.slice(0, -1), "?"];
-      const placements = placeTiles(squares, own, rng).map((p, i) =>
+      const placements = placeTiles(crowded.squares, own, rng).map((p, i) =>
         p.tile === "?" ? { ...p, letter: at(PLAYED.split(""), i) } : p,
       );
       cases.push({
-        state: { ...plain, bag, racks: [own, ...others] },
+        state: { ...plain, bag, racks: [own, ...plain.racks.slice(1)] },
         seat: 0,
         action: { type: "play", placements },
       });
     }
   }
-  // Without the layout (a ruleset it doesn't fit), the opening position is the only input.
-  const legal = cases.filter(
-    (c) => !isGameError(check(c.state, c.seat, c.action, resources(options))),
-  );
+  // Without the layouts (a ruleset they don't fit), the opening position is the only input.
+  const res = resources(options);
+  const legal = cases.filter((c) => !isGameError(check(c.state, c.seat, c.action, res)));
   return legal.length > 0 ? legal : [{ state: start, seat: 0, action: { type: "pass" } }];
 }
 

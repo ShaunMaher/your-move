@@ -11,7 +11,7 @@ import type { ListSummary, Seat, Text } from "@your-move/sdk";
 
 import { at } from "./at.js";
 import { BLANK } from "./rulesets/schema.js";
-import type { PublicRecord, View } from "./schemas.js";
+import type { PublicRecord, ScoredWord, View } from "./schemas.js";
 import type { State } from "./state.js";
 
 /** A rack in display order: letters a–z, then blanks. */
@@ -74,17 +74,30 @@ export function summary(state: State): ListSummary {
   return { headline, scores };
 }
 
+/**
+ * The word a play's history text names: the main word of a multi-tile play (always listed
+ * first); for a single tile, which has no play line (words §3.1 rule 6), the longest word it
+ * formed, the higher-scoring one on a tie, then the first.
+ */
+function namedWord(words: readonly ScoredWord[], tiles: number): string {
+  const ranked =
+    tiles === 1
+      ? [...words].sort((a, b) => b.word.length - a.word.length || b.score - a.score)
+      : words;
+  return at(ranked, 0).word;
+}
+
 /** History and notification text, from the record alone (02 §5, §2.1 rule 9; words §10.6). */
 export function describe(record: PublicRecord): Text {
   const who = { seat: record.seat };
   switch (record.type) {
     case "play": {
-      const main = record.words?.[0]?.word.toUpperCase() ?? "";
+      const main = namedWord(record.words, record.placements.length).toUpperCase();
       const bingo = record.bingo ? ", using every tile" : "";
       return [who, ` played ${main} for ${String(record.score)}${bingo}`];
     }
     case "swap": {
-      const count = record.swapCount ?? 0;
+      const count = record.swapCount;
       return [who, ` swapped ${String(count)} ${count === 1 ? "tile" : "tiles"}`];
     }
     case "pass":

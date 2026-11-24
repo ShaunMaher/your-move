@@ -288,6 +288,17 @@ describe("word finding (words §3.1 rule 6)", () => {
     expect(through.words.map((w) => w.word)).toEqual(["raer"]);
   });
 
+  it("gives the same words in the same order whatever order the tiles are sent in", () => {
+    const forward = placed([{ row: SR + 1, col: SC, word: "ox" }]);
+    const backward = [...forward].reverse();
+    expect(analyse(CLASSIC, [CAT], "ox", backward)).toEqual(analyse(CLASSIC, [CAT], "ox", forward));
+    expect(analyse(CLASSIC, [CAT], "ox", backward).words.map((w) => w.word)).toEqual([
+      "ox",
+      "ao",
+      "tx",
+    ]);
+  });
+
   it("reads a blank as the letter it stands for", () => {
     const result = analyse(CLASSIC, [], "a?", placed([{ row: SR, col: SC, word: "aT" }]));
     expect(result.words).toEqual([{ word: "at", score: 1 }]);

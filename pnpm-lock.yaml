@@ -551,6 +551,9 @@ importers:
 
   games/words:
     devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
       '@your-move/dictionary':
         specifier: workspace:*
         version: link:../../packages/dictionary

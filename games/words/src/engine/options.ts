@@ -80,6 +80,9 @@ export function checkConfig(config: ModuleConfig, catalog: ResourceCatalog): Ok 
 
 const INPUT_KEYS: ReadonlySet<string> = new Set(["rulesetId", "dictionaryId"]);
 
+/** The unknown keys `UNKNOWN_OPTION` may name in its detail (words §10.3). */
+const SAFE_KEY = /^[A-Za-z0-9_]{1,64}$/u;
+
 /**
  * Resolves a creator's input `{ rulesetId?, dictionaryId? }` (words §10.1): missing fields take
  * the instance defaults; an unknown or disabled ruleset, a dictionary the creator may not use, or
@@ -93,7 +96,12 @@ export function resolveOptions(input: unknown, ctx: OptionsContext): Options | G
   }
   const fields = new Map<string, unknown>(Object.entries(given as Record<string, unknown>));
   for (const key of fields.keys()) {
-    if (!INPUT_KEYS.has(key)) return { code: ERROR_CODES.unknownOption, detail: { option: key } };
+    if (!INPUT_KEYS.has(key)) {
+      // The key is echoed only if it looks like an option name, never arbitrary input.
+      return SAFE_KEY.test(key)
+        ? { code: ERROR_CODES.unknownOption, detail: { option: key } }
+        : { code: ERROR_CODES.unknownOption };
+    }
   }
   const { enabledRulesets, defaultRuleset, defaultDictionary } = settings(ctx.config);
   const rulesetId = fields.get("rulesetId") ?? defaultRuleset;

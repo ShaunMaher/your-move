@@ -3,7 +3,11 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    "tsBuildInfoFile": "dist/.tsbuildinfo"
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    // Node types for the tests (kit-words.test.ts reads and writes its generated file). The
+    // engine stays off Node through the engine lint and the import rules (02 §7.5), as the
+    // example game keeps its engine off the DOM.
+    "types": ["node"]
   },
   "include": ["src"],
   "references": [

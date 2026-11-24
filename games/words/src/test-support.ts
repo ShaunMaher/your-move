@@ -15,7 +15,7 @@ import type { Options, Placement, PlayAction } from "./engine/schemas.js";
 import { allTiles, type State } from "./engine/state.js";
 
 /** The id of the built-in dictionary the MVP ships (words §9.2). */
-export const BUILTIN_ID = ["en", "able"].join("");
+export const BUILTIN_ID = "enable";
 
 /** The latest version of a bundled ruleset. */
 export function ruleset(id = "classic"): Ruleset {
@@ -156,13 +156,25 @@ export function state(
   };
 }
 
-let builtin: Promise<{ meta: ResourceMeta; resources: Resources }> | undefined;
+let built: ReturnType<typeof buildBuiltin> | undefined;
 
-/** The real built-in dictionary (built in memory from its sources) as metadata and resources. */
-export function realDictionary(): Promise<{ meta: ResourceMeta; resources: Resources }> {
-  builtin ??= buildBuiltin(BUILTIN_ID).then(({ manifest, text }) => ({
+/** The built-in dictionary, built in memory from its sources once per test file. */
+function builtList(): ReturnType<typeof buildBuiltin> {
+  built ??= buildBuiltin(BUILTIN_ID);
+  return built;
+}
+
+/** The real built-in dictionary as metadata and resources. */
+export async function realDictionary(): Promise<{ meta: ResourceMeta; resources: Resources }> {
+  const { manifest, text } = await builtList();
+  return {
     meta: toResourceMeta(manifest),
     resources: { dictionary: createWordList(manifest.id, manifest.version, text) },
-  }));
-  return builtin;
+  };
+}
+
+/** Every word of the real built-in dictionary, sorted. */
+export async function realWordList(): Promise<string[]> {
+  const { text } = await builtList();
+  return text.split("\n").filter((word) => word !== "");
 }

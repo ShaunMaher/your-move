@@ -77,19 +77,38 @@ export type ScoredWord = z.infer<typeof scoredWordSchema>;
  * Public records (words §10.4, 02 §2.1 rule 5): the placed tiles and the words they formed are
  * public (they are on the board); a swap shows only how many tiles were swapped, never which.
  */
-export const recordSchema = z
-  .object({
-    seat,
-    type: z.enum(["play", "swap", "pass", "resign", "timeout", "decline"]),
-    placements: z
-      .array(z.object({ row: square, col: square, tile: tileCode, letter }).strict())
-      .optional(),
-    words: z.array(scoredWordSchema).optional(),
-    score: count,
-    bingo: z.boolean(),
-    swapCount: count.optional(),
-  })
-  .strict();
+export const recordSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      seat,
+      type: z.literal("play"),
+      placements: z
+        .array(z.object({ row: square, col: square, tile: tileCode, letter }).strict())
+        .min(1),
+      /** Main word first; at least one (words §3.1 rule 6). */
+      words: z.array(scoredWordSchema).min(1),
+      score: count,
+      bingo: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      seat,
+      type: z.literal("swap"),
+      score: z.literal(0),
+      bingo: z.literal(false),
+      swapCount: z.number().int().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      seat,
+      type: z.enum(["pass", "resign", "timeout", "decline"]),
+      score: z.literal(0),
+      bingo: z.literal(false),
+    })
+    .strict(),
+]);
 export type PublicRecord = z.infer<typeof recordSchema>;
 
 /** One square of the board as a view shows it: a blank shows the letter it stands for. */
