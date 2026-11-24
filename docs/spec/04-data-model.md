@@ -299,7 +299,9 @@ The schema (`schema.ts`) also makes these choices, which the tables above leave 
     aside, since `ALTER TABLE ADD COLUMN` always appends) and `foreign_key_list`, every index's
     `index_list` entry, `index_xinfo` and SQL in `sqlite_schema` (which carries a partial index's
     `WHERE`), and the SQL of any view or trigger. A hand edit to a committed `.sql` file (an FK
-    action, a default, an index's columns or predicate) therefore fails;
+    action, a default, an index's columns or predicate) therefore fails. Table-level clauses are
+    **not** compared — `CHECK`, `COLLATE`, generated columns, `STRICT`, `WITHOUT ROWID` and
+    `DEFERRABLE` — so a hand edit to those passes and is the reviewer's to catch (issue #13);
   - drizzle-kit, generating over a copy of the committed folder, writes or changes any file there
     (a `schema.ts` change without its migration and snapshot), or doesn't report "No schema
     changes".
