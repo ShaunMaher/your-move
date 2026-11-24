@@ -14,9 +14,9 @@ import type { OtpPurpose, Repositories, UserRecord } from "../db/repositories.js
 import type { Logger } from "../log.js";
 import { checkLimits, type LimitCheck } from "./limits.js";
 
-export const CODE_TTL_MS = 10 * 60_000;
-export const MAX_ATTEMPTS = 5;
-export const MAX_LIVE_CHALLENGES = 3;
+const CODE_TTL_MS = 10 * 60_000;
+const MAX_ATTEMPTS = 5;
+const MAX_LIVE_CHALLENGES = 3;
 
 const CODE_SPACE = 100_000_000;
 /** The largest multiple of 10^8 below 2^32: values at or above it are redrawn (no modulo bias). */
@@ -35,7 +35,7 @@ export function generateCode(
 }
 
 /** `HMAC-SHA256(K_otp, challengeId ‖ code)` (06 §3). */
-export function hashCode(keys: Subkeys, challengeId: string, code: string): Promise<string> {
+function hashCode(keys: Subkeys, challengeId: string, code: string): Promise<string> {
   return hmacHex(keys.otp, `${challengeId}${code}`);
 }
 

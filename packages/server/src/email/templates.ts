@@ -23,7 +23,7 @@ export function escapeHtml(value: string): string {
 }
 
 /** `12345678` → `1234 5678` (06 §3). */
-export function groupCode(code: string): string {
+function groupCode(code: string): string {
   return `${code.slice(0, 4)} ${code.slice(4)}`;
 }
 

@@ -5,20 +5,24 @@
  *
  * Each limit has a `LIMIT_<NAME>` override (09 §1); the names below are the known ones.
  */
-import type { AppConfig } from "../config/parse.js";
 import type { RateLimitCount, RateLimitHit, Repositories } from "../db/repositories.js";
+
+/** The part of the configuration the limits read (`LIMIT_*` overrides, 09 §1). */
+interface LimitConfig {
+  readonly limits: Readonly<Record<string, number>>;
+}
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
-export interface LimitRule {
+interface LimitRule {
   /** Default allowance per window; `LIMIT_<NAME>` overrides it. */
   readonly limit: number;
   readonly windowMs: number;
 }
 
 /** The sign-in limits of 08 §4, by their `LIMIT_*` name. */
-export const AUTH_LIMITS = {
+const AUTH_LIMITS = {
   OTP_REQUEST_EMAIL_HOUR: { limit: 5, windowMs: HOUR },
   OTP_REQUEST_EMAIL_DAY: { limit: 10, windowMs: DAY },
   OTP_REQUEST_IP_HOUR: { limit: 20, windowMs: HOUR },
@@ -33,7 +37,7 @@ export const AUTH_LIMITS = {
   STEP_UP_USER_DAY: { limit: 10, windowMs: DAY },
 } as const satisfies Record<string, LimitRule>;
 
-export type LimitName = keyof typeof AUTH_LIMITS;
+type LimitName = keyof typeof AUTH_LIMITS;
 
 /** Every `LIMIT_*` name the rate limiter reads (the config parser refuses unknown ones). */
 export const RATE_LIMIT_NAMES: readonly string[] = Object.keys(AUTH_LIMITS);
@@ -58,7 +62,7 @@ export interface LimitResult {
 }
 
 /** The effective allowance for a limit (`LIMIT_<NAME>` or the default). */
-export function limitOf(config: AppConfig, name: LimitName): number {
+function limitOf(config: LimitConfig, name: LimitName): number {
   return config.limits[name] ?? AUTH_LIMITS[name].limit;
 }
 
@@ -67,7 +71,7 @@ export function limitOf(config: AppConfig, name: LimitName): number {
  */
 export async function checkLimits(
   repos: Repositories,
-  config: AppConfig,
+  config: LimitConfig,
   now: number,
   checks: readonly LimitCheck[],
 ): Promise<LimitResult[]> {

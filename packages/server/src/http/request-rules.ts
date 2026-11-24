@@ -15,7 +15,7 @@ const ORIGIN_EXEMPT: ReadonlySet<string> = new Set<string>([]);
 const JSON_EXEMPT: ReadonlySet<string> = new Set<string>([]);
 
 const STATE_CHANGING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-export const BODY_LIMIT_BYTES = 16 * 1024;
+const BODY_LIMIT_BYTES = 16 * 1024;
 
 /** `application/json`, with or without parameters such as `charset`. */
 function isJson(contentType: string | undefined): boolean {

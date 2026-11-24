@@ -17,7 +17,7 @@ import {
 import type { NodeConfig } from "./node-config.js";
 
 /** Hono's execution context, as `app.fetch` takes it. */
-export interface ExecutionContextLike {
+interface ExecutionContextLike {
   waitUntil(promise: Promise<unknown>): void;
   passThroughOnException(): void;
   props: unknown;

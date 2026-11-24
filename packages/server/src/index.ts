@@ -64,6 +64,23 @@ export type { Database } from "./db/database.js";
 export { DetachedStorageError, detachedRepositories } from "./db/detached.js";
 export { createRepositories } from "./db/repos.js";
 export type {
+  ApiTokenRepo,
+  AuthEventRepo,
+  AuthEventType,
+  NewAuthEvent,
+  NewOtpChallenge,
+  NewSession,
+  OtpAttempt,
+  OtpPurpose,
+  OtpRepo,
+  RateLimitCount,
+  RateLimitHit,
+  RateLimitRepo,
+  SessionRecord,
+  SessionRepo,
+  UserUpdate,
+} from "./db/repositories.js";
+export type {
   GameActionRecord,
   GamePlayerRecord,
   GamePlayerUpdate,

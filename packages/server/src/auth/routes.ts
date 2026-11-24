@@ -20,7 +20,6 @@ import { z } from "zod";
 
 import { validateDisplayName } from "../accounts/display-name.js";
 import { type NormalisedEmail, normaliseAddress } from "../accounts/email.js";
-import type { AppEnv, Platform } from "../app.js";
 import { isLocalDev } from "../config/local-dev.js";
 import { hmacHex, type Subkeys } from "../crypto/subkeys.js";
 import type { UserRecord } from "../db/repositories.js";
@@ -33,6 +32,7 @@ import {
   suspendedNoticeEmail,
   type TemplateContext,
 } from "../email/templates.js";
+import type { AppEnv, Platform } from "../platform.js";
 import { ipBuckets } from "./client-ip.js";
 import { checkLimits } from "./limits.js";
 import {

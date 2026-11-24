@@ -50,7 +50,7 @@ export const LOCAL_ENV: Env = {
   OPERATOR_CONTACT: "ops@localhost",
 };
 
-export interface SendOptions {
+interface SendOptions {
   /** The client address (the rightmost `X-Forwarded-For` entry). Default `203.0.113.1`. */
   readonly ip?: string | null;
   /** A raw `X-Forwarded-For` value, overriding `ip`. */

@@ -5,42 +5,15 @@ import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { matchedRoutes } from "hono/route";
 
-import type { ClientIp } from "./auth/client-ip.js";
 import { registerAuthRoutes } from "./auth/routes.js";
-import { readSessionCookie, type ActiveSession } from "./auth/session.js";
+import { readSessionCookie } from "./auth/session.js";
 import { isLocalDev } from "./config/local-dev.js";
-import type { AppConfig } from "./config/parse.js";
 import { deriveSubkeys, type Subkeys } from "./crypto/subkeys.js";
-import type { Repositories } from "./db/repositories.js";
-import type { CapturedEmail, EmailSender } from "./email/sender.js";
 import { apiBodyLimit, requestRules } from "./http/request-rules.js";
 import { API_CACHE_CONTROL, securityHeadersMiddleware } from "./http/security-headers.js";
-import type { Logger } from "./log.js";
+import type { AppEnv, Platform } from "./platform.js";
 
-/**
- * What the runtime provides to the core (docs/spec/03-architecture.md §4). Storage arrived in M2a,
- * email and the client address in M2b; realtime and push join in M3/M4, blobs in M6.
- *
- * Background work (`waitUntil`) is per request, not per isolate: on Workers it is the request's
- * `ctx.waitUntil`, which the runtime hands to `app.fetch(request, env, ctx)`; Node passes an
- * execution context of its own that tracks the work until shutdown. The core reaches it through
- * Hono's `c.executionCtx`.
- */
-export interface Platform {
-  /** Async repository interfaces, never a Drizzle object (03 §4). */
-  readonly repos: Repositories;
-  readonly config: AppConfig;
-  readonly log: Logger;
-  /** Sends email (09 §2); called only in the background (06 §3.2). */
-  readonly email: EmailSender & { captured?: () => readonly CapturedEmail[] };
-  /**
-   * The client address of a request (08 §4.1): `CF-Connecting-IP` on Workers; on Node by
-   * `TRUST_PROXY`. `env` is what the runtime passed to `app.fetch`.
-   */
-  clientIp(request: Request, env: unknown): ClientIp;
-  /** Injectable clock: tests control time through it. */
-  now(): Date;
-}
+export type { AppEnv, Platform } from "./platform.js";
 
 /**
  * One installed game package, as the generated server registry lists it (02 §7.3). `engines` maps
@@ -56,15 +29,6 @@ export interface AppOptions {
   readonly platform: Platform;
   /** The generated registry, injected by the runtime; the core never imports it (02 §7.3). */
   readonly games: readonly InstalledGame[];
-}
-
-/** Hono environment of the app: per-request variables. */
-export interface AppEnv {
-  Variables: {
-    requestId: string;
-    /** Set by the session middleware on session-only routes. */
-    session: ActiveSession;
-  };
 }
 
 /** The HTTP application `createApp` returns. */

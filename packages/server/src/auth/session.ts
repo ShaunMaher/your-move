@@ -6,13 +6,13 @@
 import type { SessionRecord, UserRecord, Repositories } from "../db/repositories.js";
 
 const DAY = 86_400_000;
-export const SLIDING_EXPIRY_MS = 180 * DAY;
-export const ABSOLUTE_EXPIRY_MS = 400 * DAY;
-export const TOUCH_INTERVAL_MS = 3_600_000;
+const SLIDING_EXPIRY_MS = 180 * DAY;
+const ABSOLUTE_EXPIRY_MS = 400 * DAY;
+const TOUCH_INTERVAL_MS = 3_600_000;
 /** 400 days, the browser maximum (06 §4). */
 const COOKIE_MAX_AGE_S = 34_560_000;
 
-export function cookieName(localDev: boolean): string {
+function cookieName(localDev: boolean): string {
   return localDev ? "sid" : "__Host-sid";
 }
 
@@ -24,12 +24,12 @@ function base64url(bytes: Uint8Array): string {
 }
 
 /** A fresh 256-bit session token. */
-export function newSessionToken(): string {
+function newSessionToken(): string {
   return base64url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
 /** SHA-256 of the token, hex: the only form stored (06 §4). */
-export async function hashSessionToken(token: string): Promise<string> {
+async function hashSessionToken(token: string): Promise<string> {
   const digest = new Uint8Array(
     await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)),
   );
@@ -63,7 +63,7 @@ export function readSessionCookie(header: string | undefined, localDev: boolean)
 }
 
 /** The sliding expiry after use at `now`, never past the absolute cap. */
-export function slidingExpiry(createdAt: number, now: number): number {
+function slidingExpiry(createdAt: number, now: number): number {
   return Math.min(now + SLIDING_EXPIRY_MS, createdAt + ABSOLUTE_EXPIRY_MS);
 }
 

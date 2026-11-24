@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { normaliseAddress, type NormalisedEmail } from "../accounts/email.js";
+import { normaliseAddress } from "../accounts/email.js";
 import { createJsonLogger } from "../log.js";
 import {
   assertSafeHeaders,
@@ -16,7 +16,9 @@ import {
   suspendedNoticeEmail,
 } from "./templates.js";
 
-const to = normaliseAddress("sam@example.org") as NormalisedEmail;
+const address = normaliseAddress("sam@example.org");
+if (address === null) throw new Error("test address is invalid");
+const to = address;
 const context = {
   appName: 'Games <b>&</b> "Co"',
   publicUrl: "https://play.example.org",
