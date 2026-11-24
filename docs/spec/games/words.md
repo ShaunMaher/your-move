@@ -199,6 +199,10 @@ client can render any game and preview any play.
 - No two premium squares are orthogonally adjacent, the start square included (a DW start
   square never touches a DL), so premiums don't stack in one short word (checked by the
   schema).
+- Word multipliers don't stack in short words either (checked by the schema; both reference
+  boards meet these): two word-premium squares (DW, TW) in one row or column are at least 4
+  squares apart, and the word premiums a word can cover multiply to at most ×4 for words of up
+  to 6 letters and at most ×6 for words of 7 letters (so no ×8, ×9 or ×12 below 8 letters).
 - Premium layouts are **original arrangements** designed by us, keeping the reference game's
   premium counts and overall density so the game feels familiar. They MUST NOT copy any commercial
   board square-for-square (see open question Q15). The coding agent documents the counts in the
