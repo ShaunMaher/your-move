@@ -12,10 +12,11 @@ import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 
 /**
  * An async Drizzle SQLite database with `batch()`, whatever the driver (both the D1 and the proxy
- * driver have it). Repositories build their queries from the shared schema's tables
+ * driver have it), and without `transaction()`: D1 has no interactive transactions, so no
+ * repository may use one (03 §4). Repositories build their queries from the shared schema's tables
  * (`schema.ts`); relational queries (`db.query`) aren't used.
  */
-export type Database = BaseSQLiteDatabase<"async", unknown> & {
+export type Database = Omit<BaseSQLiteDatabase<"async", unknown>, "transaction"> & {
   batch<U extends BatchItem<"sqlite">, T extends Readonly<[U, ...U[]]>>(
     batch: T,
   ): Promise<BatchResponse<T>>;

@@ -7,6 +7,8 @@
  */
 import { DatabaseSync } from "node:sqlite";
 
+import { ensurePrivateFile } from "./files.js";
+
 export class InstanceLockedError extends Error {
   override readonly name = "InstanceLockedError";
 
@@ -33,6 +35,7 @@ export function lockPath(databasePath: string): string {
  */
 export function acquireInstanceLock(databasePath: string): InstanceLock {
   if (databasePath === ":memory:") return { release: () => undefined };
+  ensurePrivateFile(lockPath(databasePath));
   const lock = new DatabaseSync(lockPath(databasePath), { timeout: 0 });
   try {
     lock.exec("PRAGMA journal_mode = DELETE");

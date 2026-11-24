@@ -4,10 +4,17 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { repositoryContract } from "@your-move/server/testing";
+import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { migrate } from "./migrate.js";
-import { inTransaction, nodeRepositories, openSqlite } from "./sqlite.js";
+import {
+  inTransaction,
+  nodeRepositories,
+  openSqlite,
+  testing,
+  TransactionControlError,
+} from "./sqlite.js";
 
 const MIGRATIONS = fileURLToPath(
   new URL("../../../../packages/server/migrations", import.meta.url),
@@ -55,7 +62,34 @@ describe("openSqlite", () => {
   });
 });
 
+describe("the proxy driver (M2a review S-7)", () => {
+  it.each(["BEGIN", "begin immediate", " COMMIT", "END", "ROLLBACK", "SAVEPOINT a", "RELEASE a"])(
+    "refuses %j: only the adapter's batch opens and ends transactions",
+    async (statement) => {
+      const sqlite = openSqlite(":memory:");
+      const db = testing.nodeDatabase(sqlite);
+      // Drizzle wraps the driver's error.
+      await expect(db.run(sql.raw(statement))).rejects.toMatchObject({
+        cause: expect.any(TransactionControlError) as unknown,
+      });
+      expect(sqlite.isTransaction).toBe(false);
+      sqlite.close();
+    },
+  );
+});
+
 describe("inTransaction", () => {
+  it("rethrows the original error when SQLite has already rolled back", () => {
+    const sqlite = openSqlite(":memory:");
+    expect(() =>
+      inTransaction(sqlite, () => {
+        sqlite.exec("ROLLBACK");
+        throw new Error("original");
+      }),
+    ).toThrow("original");
+    sqlite.close();
+  });
+
   it("commits what the work wrote, or rolls all of it back when it throws", () => {
     const sqlite = openSqlite(":memory:");
     sqlite.exec("CREATE TABLE t (v INTEGER)");

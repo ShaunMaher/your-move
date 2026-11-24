@@ -58,7 +58,8 @@ WORKDIR /app
 COPY --from=build /deploy/ /app/
 # Run as the image's unprivileged user. Everything but /data can be mounted read-only
 # (`docker run --read-only`, or `read_only: true` in compose).
-RUN mkdir -p /data/blobs && chown -R node:node /data
+# /data is the server user's alone (M2a review S-3); the database files inside are 0600.
+RUN mkdir -p /data/blobs && chown -R node:node /data && chmod 0700 /data
 USER node
 VOLUME ["/data"]
 EXPOSE 8080

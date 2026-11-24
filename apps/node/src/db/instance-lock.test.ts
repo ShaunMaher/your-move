@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -53,8 +53,10 @@ describe("acquireInstanceLock (03 §5.3)", () => {
   });
 
   it("passes on errors other than a held lock", () => {
-    expect(() => acquireInstanceLock(join(dir, "missing", "dir", "app.sqlite"))).toThrow(
-      /unable to open/iu,
+    // The lock file's directory can't be created: a file is in the way.
+    writeFileSync(join(dir, "blocked"), "");
+    expect(() => acquireInstanceLock(join(dir, "blocked", "app.sqlite"))).toThrow(
+      /ENOTDIR|EEXIST/u,
     );
   });
 });
