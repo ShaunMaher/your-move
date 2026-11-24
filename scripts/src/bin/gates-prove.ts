@@ -70,7 +70,7 @@ const proofs: Record<string, Proof> = {
     return null;
   },
 
-  "architecture: an engine importing node:fs, the core using node:http, the web app importing the server"() {
+  "architecture: an engine importing node:fs, the core using node:http and the schema, the web app importing the server"() {
     const result = exec(
       join(ROOT_DIR, "node_modules/.bin/depcruise"),
       ["--config", join(ROOT_DIR, ".dependency-cruiser.mjs"), "games", "packages", "apps"],
@@ -80,6 +80,7 @@ const proofs: Record<string, Proof> = {
     for (const rule of [
       "game-engine-imports",
       "server-web-standard-only",
+      "core-storage-through-repositories",
       "web-only-through-api-client",
     ]) {
       if (!result.output.includes(rule)) return `dependency-cruiser did not report ${rule}`;

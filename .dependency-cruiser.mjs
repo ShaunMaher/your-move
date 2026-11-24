@@ -82,6 +82,34 @@ export default {
       to: { path: "(^|/)node_modules/(@cloudflare/|wrangler/|@hono/node-server/|better-sqlite3/)" },
     },
     {
+      name: "core-storage-through-repositories",
+      comment:
+        "Core code never touches a Drizzle database object: outside src/db/ it uses only the repository interfaces (03 §4). index.ts re-exports the implementations for the runtime adapters.",
+      severity: "error",
+      from: { path: "^packages/server/src/", pathNot: "^packages/server/src/(db/|index[.]ts$)" },
+      to: {
+        path: [
+          "(^|/)node_modules/drizzle-orm/",
+          "^packages/server/src/db/(?!repositories[.]ts$|detached[.]ts$)",
+        ],
+      },
+    },
+    {
+      name: "drizzle-only-in-storage-adapters",
+      comment:
+        "Only the core's src/db/ and the runtime storage adapters use Drizzle (03 §4): apps/node/src/db/, apps/worker/src/d1.ts.",
+      severity: "error",
+      from: {
+        pathNot: [
+          "^packages/server/src/db/",
+          "^packages/server/drizzle[.]config[.]ts$",
+          "^apps/node/src/db/",
+          "^apps/worker/src/d1[.]ts$",
+        ],
+      },
+      to: { path: "(^|/)node_modules/drizzle-(orm|kit)/" },
+    },
+    {
       name: "server-no-games-apps-generated",
       comment:
         "packages/server knows games only through the registry injected into createApp (02 §7.3).",
