@@ -13,7 +13,23 @@ export {
   type OpenApiDocument,
   type Platform,
 } from "./app.js";
-export type { NormalisedEmail } from "./accounts/email.js";
+export { normaliseAddress, type NormalisedEmail } from "./accounts/email.js";
+export {
+  parseIp,
+  resolveClientIp,
+  type ClientIp,
+  type ClientIpSource,
+  type TrustProxy,
+} from "./auth/client-ip.js";
+export {
+  assertSafeHeaders,
+  createConsoleEmailSender,
+  createUnavailableEmailSender,
+  type CapturedEmail,
+  type EmailMessage,
+  type EmailSender,
+} from "./email/sender.js";
+export { coreEmailSender } from "./email/providers.js";
 export { DEFAULT_APP_NAME } from "./config/defaults.js";
 export { isLocalDev, isLocalDevUrl } from "./config/local-dev.js";
 export {

@@ -1,6 +1,7 @@
 import { isGameType } from "@your-move/sdk";
 import { z } from "zod";
 
+import { RATE_LIMIT_NAMES } from "../auth/limits.js";
 import { DEFAULT_APP_NAME } from "./defaults.js";
 import { isEmailAddress, normaliseEmail, parseMailbox } from "./email.js";
 import { isLocalDevUrl, LOCAL_DEV_APP_SECRET } from "./local-dev.js";
@@ -120,9 +121,9 @@ const LIMIT_NAME = /^LIMIT_([A-Z][A-Z0-9_]*)$/u;
 /**
  * The limits an operator may override (`LIMIT_<NAME>`, 09 §1). An unknown name refuses to start,
  * like an unknown `GAMES_<TYPE>_*`, so a typo never silently leaves a limit at its default. The
- * rate limits of 08 §4 add their names here with the rate limiter (M2).
+ * sign-in rate limits of 08 §4 come from the rate limiter (`auth/limits.ts`).
  */
-const KNOWN_LIMITS: ReadonlySet<string> = new Set(["DICT_TOTAL_BYTES"]);
+const KNOWN_LIMITS: ReadonlySet<string> = new Set(["DICT_TOTAL_BYTES", ...RATE_LIMIT_NAMES]);
 const GAMES_NAME = /^GAMES_([A-Z][A-Z0-9]*)_([A-Z0-9_]+)$/u;
 
 function required(message = "is required") {

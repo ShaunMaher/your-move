@@ -61,6 +61,126 @@
         },
         "required": ["appName", "appShortName", "operatorContact", "minAge", "uploadsEnabled"],
         "additionalProperties": false
+      },
+      "EmptyObject": { "type": "object", "properties": {}, "additionalProperties": false },
+      "OtpRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 320,
+            "description": "The address to sign in with. Normalised by the server.",
+            "example": "sam@example.org"
+          }
+        },
+        "required": ["email"],
+        "additionalProperties": false
+      },
+      "OtpVerifyResponse": {
+        "type": "object",
+        "properties": {
+          "user": { "$ref": "#/components/schemas/Me" },
+          "needsOnboarding": { "type": "boolean" }
+        },
+        "required": ["user", "needsOnboarding"],
+        "additionalProperties": false
+      },
+      "Me": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "kind": { "type": "string", "enum": ["human", "agent"] },
+          "email": { "type": ["string", "null"], "description": "Null for an AI account." },
+          "displayName": { "type": ["string", "null"], "description": "Null until onboarding." },
+          "settings": { "$ref": "#/components/schemas/UserSettings" },
+          "ageAttested": {
+            "type": "boolean",
+            "description": "Whether the age confirmation for the current MIN_AGE is given."
+          },
+          "needsOnboarding": {
+            "type": "boolean",
+            "description": "True until onboarding is complete (06 §5); gated endpoints answer 403 until then."
+          },
+          "isAdmin": {
+            "type": "boolean",
+            "description": "Lets the client show admin links; grants nothing."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "email",
+          "displayName",
+          "settings",
+          "ageAttested",
+          "needsOnboarding",
+          "isAdmin"
+        ],
+        "additionalProperties": false
+      },
+      "UserSettings": {
+        "type": "object",
+        "properties": {
+          "whoCanAddMe": {
+            "type": "string",
+            "enum": ["pastOpponents", "nobody"],
+            "description": "Who can add me to games (06 §6.2)."
+          }
+        },
+        "required": ["whoCanAddMe"]
+      },
+      "OtpVerify": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 320,
+            "description": "The address to sign in with. Normalised by the server.",
+            "example": "sam@example.org"
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 32,
+            "description": "The 8-digit code from the email; spaces and dashes are ignored.",
+            "example": "1234 5678"
+          }
+        },
+        "required": ["email", "code"],
+        "additionalProperties": false
+      },
+      "LogoutAll": {
+        "type": "object",
+        "properties": {
+          "revokeTokens": {
+            "type": "boolean",
+            "description": "Also revoke every API token of the user and their AI accounts (06 §4)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PatchMe": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "1–24 characters; no links, addresses, long digit runs or reserved words (06 §5.1). Setting it completes onboarding."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DeleteMe": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 32,
+            "description": "The 8-digit code from the email; spaces and dashes are ignored.",
+            "example": "1234 5678"
+          }
+        },
+        "required": ["code"],
+        "additionalProperties": false
       }
     },
     "parameters": {}
@@ -101,6 +221,448 @@
             "description": "The instance's client configuration.",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ClientConfig" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/otp/request": {
+      "post": {
+        "operationId": "requestOtp",
+        "x-scope": "public",
+        "tags": ["Auth"],
+        "summary": "Email a sign-in code",
+        "description": "Public. Always `202 {}`, whether or not the address has an account, is rate-limited or suspended (06 §3). Only a rate-limited client IP is reported (`429`).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/OtpRequest" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted; a code is emailed if the address may receive one.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request or address (`BAD_REQUEST`), or a client IP is required but missing.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "This client IP has made too many requests (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/otp/verify": {
+      "post": {
+        "operationId": "verifyOtp",
+        "x-scope": "public",
+        "tags": ["Auth"],
+        "summary": "Sign in with an emailed code",
+        "description": "Public. On success, creates the account if new, sets the session cookie and answers the user. A wrong, expired, consumed or unknown code is `400 INVALID_CODE`, indistinguishably (06 §3).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/OtpVerify" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in; the response sets the session cookie.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/OtpVerifyResponse" } }
+            }
+          },
+          "400": {
+            "description": "`INVALID_CODE` or `BAD_REQUEST`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many attempts for this address or client IP (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "x-scope": "session",
+        "tags": ["Auth"],
+        "summary": "Sign out this session",
+        "description": "Session only. Deletes this session and clears the cookie.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } }
+          }
+        },
+        "responses": {
+          "204": { "description": "Signed out." },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout-all": {
+      "post": {
+        "operationId": "logoutAll",
+        "x-scope": "session",
+        "tags": ["Auth"],
+        "summary": "Sign out everywhere",
+        "description": "Session only. Deletes every session of the user and clears the cookie.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/LogoutAll" } }
+          }
+        },
+        "responses": {
+          "204": { "description": "Signed out everywhere." },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "operationId": "getMe",
+        "x-scope": "read",
+        "tags": ["Account"],
+        "summary": "The signed-in user",
+        "responses": {
+          "200": {
+            "description": "The user.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Me" } } }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateMe",
+        "x-scope": "session",
+        "tags": ["Account"],
+        "summary": "Change the display name; completes onboarding",
+        "description": "Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/PatchMe" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated user.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Me" } } }
+          },
+          "400": {
+            "description": "A display name breaking the rules, or an invalid request (`BAD_REQUEST`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many display-name changes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteMe",
+        "x-scope": "session",
+        "tags": ["Account"],
+        "summary": "Delete the account",
+        "description": "Session only, with a fresh `delete_account` code (06 §7). Immediate and irreversible; clears the cookie and emails a confirmation.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/DeleteMe" } }
+          }
+        },
+        "responses": {
+          "204": { "description": "The account is deleted." },
+          "400": {
+            "description": "`INVALID_CODE` or `BAD_REQUEST`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many attempts (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/delete/otp": {
+      "post": {
+        "operationId": "requestDeleteAccountCode",
+        "x-scope": "session",
+        "tags": ["Account"],
+        "summary": "Email a code to delete the account",
+        "description": "Session only. Emails a `delete_account` step-up code (06 §7).",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted; the code is emailed.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many step-up codes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
             }
           },
           "500": {

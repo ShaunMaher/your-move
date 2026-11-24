@@ -5,21 +5,39 @@ import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { matchedRoutes } from "hono/route";
 
+import type { ClientIp } from "./auth/client-ip.js";
+import { registerAuthRoutes } from "./auth/routes.js";
+import { readSessionCookie, type ActiveSession } from "./auth/session.js";
+import { isLocalDev } from "./config/local-dev.js";
 import type { AppConfig } from "./config/parse.js";
+import { deriveSubkeys, type Subkeys } from "./crypto/subkeys.js";
 import type { Repositories } from "./db/repositories.js";
+import type { CapturedEmail, EmailSender } from "./email/sender.js";
+import { apiBodyLimit, requestRules } from "./http/request-rules.js";
 import { API_CACHE_CONTROL, securityHeadersMiddleware } from "./http/security-headers.js";
 import type { Logger } from "./log.js";
 
 /**
- * What the runtime provides to the core (docs/spec/03-architecture.md §4). Storage arrived in M2a;
- * email and `waitUntil` join with their first users in M2b, realtime and push in M3/M4, blobs in
- * M6.
+ * What the runtime provides to the core (docs/spec/03-architecture.md §4). Storage arrived in M2a,
+ * email and the client address in M2b; realtime and push join in M3/M4, blobs in M6.
+ *
+ * Background work (`waitUntil`) is per request, not per isolate: on Workers it is the request's
+ * `ctx.waitUntil`, which the runtime hands to `app.fetch(request, env, ctx)`; Node passes an
+ * execution context of its own that tracks the work until shutdown. The core reaches it through
+ * Hono's `c.executionCtx`.
  */
 export interface Platform {
   /** Async repository interfaces, never a Drizzle object (03 §4). */
   readonly repos: Repositories;
   readonly config: AppConfig;
   readonly log: Logger;
+  /** Sends email (09 §2); called only in the background (06 §3.2). */
+  readonly email: EmailSender & { captured?: () => readonly CapturedEmail[] };
+  /**
+   * The client address of a request (08 §4.1): `CF-Connecting-IP` on Workers; on Node by
+   * `TRUST_PROXY`. `env` is what the runtime passed to `app.fetch`.
+   */
+  clientIp(request: Request, env: unknown): ClientIp;
   /** Injectable clock: tests control time through it. */
   now(): Date;
 }
@@ -42,7 +60,11 @@ export interface AppOptions {
 
 /** Hono environment of the app: per-request variables. */
 export interface AppEnv {
-  Variables: { requestId: string };
+  Variables: {
+    requestId: string;
+    /** Set by the session middleware on session-only routes. */
+    session: ActiveSession;
+  };
 }
 
 /** The HTTP application `createApp` returns. */
@@ -139,6 +161,23 @@ export function createApp(options: AppOptions): App {
     c.res.headers.set("Cache-Control", API_CACHE_CONTROL);
   });
 
+  const localDev = isLocalDev(config);
+  app.use("/api/*", apiBodyLimit());
+  app.use(
+    "/api/*",
+    requestRules({
+      origin: new URL(config.publicUrl).origin,
+      hasSessionCookie: (header) => readSessionCookie(header, localDev) !== null,
+      reject: (status, code) =>
+        new Response(
+          JSON.stringify(
+            errorBody(code, code === "BAD_ORIGIN" ? "Cross-origin request refused." : "Send JSON."),
+          ),
+          { status, headers: { "Content-Type": "application/json" } },
+        ),
+    }),
+  );
+
   // Unversioned, for load balancers and container health checks (05 §Versioning).
   app.get("/api/health", (c) => c.json({ ok: true as const }, 200));
 
@@ -158,6 +197,18 @@ export function createApp(options: AppOptions): App {
       200,
     ),
   );
+
+  let subkeys: Promise<Subkeys> | null = null;
+  registerAuthRoutes(app, {
+    platform,
+    keys: () => (subkeys ??= deriveSubkeys(config.appSecret)),
+  });
+
+  // Dev only (06 §4, 09 §2, 08 T19): registered only in local-dev mode, so a production config
+  // answers 404 from the catch-all below.
+  if (localDev) {
+    app.get("/__dev/emails", (c) => c.json({ emails: platform.email.captured?.() ?? [] }, 200));
+  }
 
   const document = openApiDocument(app, config.appName);
   app.get("/api/v1/openapi.json", (c) => c.json(document, 200));

@@ -70,7 +70,16 @@ describe("GET /api/v1/openapi.json", () => {
     };
     expect(doc.openapi).toBe("3.1.0");
     expect(doc.info.title).toBe("Family Games API");
-    expect(Object.keys(doc.paths).sort()).toEqual(["/api/v1/config", "/api/v1/health"]);
+    expect(Object.keys(doc.paths).sort()).toEqual([
+      "/api/v1/auth/logout",
+      "/api/v1/auth/logout-all",
+      "/api/v1/auth/otp/request",
+      "/api/v1/auth/otp/verify",
+      "/api/v1/config",
+      "/api/v1/health",
+      "/api/v1/me",
+      "/api/v1/me/delete/otp",
+    ]);
   });
 });
 
