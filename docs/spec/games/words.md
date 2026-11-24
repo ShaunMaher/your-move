@@ -202,8 +202,14 @@ client can render any game and preview any play.
   schema).
 - Word multipliers don't stack in short words either (checked by the schema; both reference
   boards meet these): two word-premium squares (DW, TW) in one row or column are at least 4
-  squares apart, and the word premiums a word can cover multiply to at most ×4 for words of up
-  to 6 letters and at most ×6 for words of 7 letters (so no ×8, ×9 or ×12 below 8 letters).
+  squares apart, and the word premiums a word of up to 7 letters can cover multiply to at most
+  ×4 (so no TW+DW, two TWs or three DWs within a rack's reach: no ×6, ×8, ×9 or ×12 below 8
+  letters).
+- The layout gives the first player nothing beyond the start square (checked by the schema; the
+  traditional reference board meets it): a word through the start square of up to `rackSize`
+  letters, along its row or column, covers word premiums multiplying to at most the start
+  square's own word multiplier, and never more than ×2. So a DW start square allows ×2, and a
+  start square with no word premium (none, DL or TL) allows ×1; a TW start square is invalid.
 - Premium layouts are **original arrangements** designed by us, keeping the reference game's
   premium counts and overall density so the game feels familiar. They MUST NOT copy any commercial
   board square-for-square (see open question Q15). The coding agent documents the counts in the
@@ -228,6 +234,10 @@ Display names "Classic" and "Casual" (Q16) live only in the ruleset files.
 | `swapOrder` | `drawThenReturn` | `returnThenDraw` (Q17) |
 | `swapMinBag` | 7 | 7 (Q17) |
 | `scorelessTurnLimit` | 6 | 6 (Q17) |
+
+Beyond §8.2, neither MVP layout is symmetric under a mirror (the reference boards are), and each
+has at most 12 pairs of premium squares one square apart in a row or column (`X.X`; the reference
+boards have 8), so premiums don't cluster; tests check both.
 
 **Table A — `classic` tiles (100)**
 
