@@ -6,13 +6,17 @@
  * - Applied migrations are tracked by their hash in Drizzle's own `__drizzle_migrations` table.
  *   Every known migration whose hash isn't recorded is applied, in journal order; a recorded hash
  *   this build doesn't know (a newer build's migration, or an edited one) refuses the start.
- * - Pending migrations run in one transaction, so a failed one leaves the schema as it was.
+ * - Pending migrations run in one transaction, so a failed one leaves the schema as it was. A
+ *   migration may not begin, end or nest a transaction itself: an authorizer denies SQLite's
+ *   transaction and savepoint actions while its statements run (`pnpm db:check` refuses such a
+ *   migration before it is committed; M2a review P2-1).
  * - Foreign keys are off while they run (04 §Migrations): `PRAGMA foreign_keys` is a no-op inside
  *   a transaction, and with it on, the `DROP TABLE` of drizzle-kit's table rebuilds would fire
- *   every child table's `ON DELETE CASCADE` / `SET NULL`. Before committing,
- *   `PRAGMA foreign_key_check` must come back empty, or the whole migration rolls back.
+ *   every child table's `ON DELETE CASCADE` / `SET NULL`. When migrations are pending,
+ *   `PRAGMA foreign_key_check` must come back empty before they run (an existing violation is
+ *   reported as such) and again before committing, or the whole migration rolls back.
  */
-import type { DatabaseSync } from "node:sqlite";
+import { constants, type DatabaseSync } from "node:sqlite";
 
 import { readMigrationFiles } from "drizzle-orm/migrator";
 
@@ -41,6 +45,37 @@ function readMigrations(migrationsFolder: string): ReturnType<typeof readMigrati
   }
 }
 
+const foreignKeyViolations = (sqlite: DatabaseSync): number =>
+  sqlite.prepare("PRAGMA foreign_key_check").all().length;
+
+/**
+ * Runs one migration's statements with transaction control denied: `BEGIN`, `COMMIT`, `END`,
+ * `ROLLBACK`, `SAVEPOINT` and `RELEASE` fail to prepare, however they are written.
+ */
+function runStatements(sqlite: DatabaseSync, statements: readonly string[], index: number): void {
+  const denied = { transactionControl: false };
+  sqlite.setAuthorizer((action) => {
+    if (action === constants.SQLITE_TRANSACTION || action === constants.SQLITE_SAVEPOINT) {
+      denied.transactionControl = true;
+      return constants.SQLITE_DENY;
+    }
+    return constants.SQLITE_OK;
+  });
+  try {
+    for (const statement of statements) {
+      if (statement.trim() !== "") sqlite.exec(statement);
+    }
+  } catch (error) {
+    if (!denied.transactionControl) throw error;
+    throw new MigrationError(
+      `Migration ${String(index)} begins, ends or nests a transaction, which would break the one-transaction guarantee (04 §Migrations); nothing was applied.`,
+      { cause: error },
+    );
+  } finally {
+    sqlite.setAuthorizer(null);
+  }
+}
+
 /** Brings the database up to this build's schema. */
 export function migrate(sqlite: DatabaseSync, migrationsFolder: string): MigrationOutcome {
   const migrations = readMigrations(migrationsFolder);
@@ -62,17 +97,22 @@ export function migrate(sqlite: DatabaseSync, migrationsFolder: string): Migrati
         );
       }
       const pending = migrations.filter((migration) => !recorded.has(migration.hash));
+      if (pending.length === 0) return { applied: 0, known: migrations.length };
+      const existing = foreignKeyViolations(sqlite);
+      if (existing > 0) {
+        throw new MigrationError(
+          `The database already has ${String(existing)} row(s) breaking a foreign key, before any migration ran; nothing was applied. Repair them (PRAGMA foreign_key_check lists them), or restore a backup.`,
+        );
+      }
       const record = sqlite.prepare(`INSERT INTO "${TABLE}" (hash, created_at) VALUES (?, ?)`);
       for (const migration of pending) {
-        for (const statement of migration.sql) {
-          if (statement.trim() !== "") sqlite.exec(statement);
-        }
+        runStatements(sqlite, migration.sql, migrations.indexOf(migration));
         record.run(migration.hash, migration.folderMillis);
       }
-      const violations = sqlite.prepare("PRAGMA foreign_key_check").all();
-      if (violations.length > 0) {
+      const introduced = foreignKeyViolations(sqlite);
+      if (introduced > 0) {
         throw new MigrationError(
-          `The migrations would leave ${String(violations.length)} row(s) breaking a foreign key; nothing was applied.`,
+          `The migrations would leave ${String(introduced)} row(s) breaking a foreign key; nothing was applied.`,
         );
       }
       return { applied: pending.length, known: migrations.length };
