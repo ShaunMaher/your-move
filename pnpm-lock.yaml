@@ -328,6 +328,9 @@ importers:
       '@your-move/game-example':
         specifier: workspace:*
         version: link:games/example
+      '@your-move/game-words':
+        specifier: workspace:*
+        version: link:games/words
       '@your-move/sdk':
         specifier: workspace:*
         version: link:packages/sdk
@@ -548,9 +551,6 @@ importers:
 
   games/words:
     devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 26.6.6
       '@your-move/dictionary':
         specifier: workspace:*
         version: link:../../packages/dictionary

@@ -26,7 +26,7 @@ import type { EndReason, Options, PlayAction, PublicRecord, SwapAction } from ".
 import { draw, removeFromRack, swapTiles } from "./swap.js";
 
 /** How the game ended, and each seat's final-scoring adjustment (words §6). */
-export interface Finished {
+interface Finished {
   readonly reason: EndReason;
   readonly adjustments: number[];
   /** The seat that resigned, timed out or declined; null for `out` and `scoreless`. */

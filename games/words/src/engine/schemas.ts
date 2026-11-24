@@ -19,7 +19,7 @@ export const DEFAULT_RULESET = "classic";
 export const DEFAULT_DICTIONARY = "enable";
 
 /** How a finished game ended (words §5, §10.4, §10.6). */
-export const END_REASONS = ["out", "scoreless", "resign", "timeout", "decline"] as const;
+const END_REASONS = ["out", "scoreless", "resign", "timeout", "decline"] as const;
 export type EndReason = (typeof END_REASONS)[number];
 
 const count = z.number().int().min(0);
@@ -189,7 +189,6 @@ export const configSchema = z
     DEFAULT_DICTIONARY: z.string().optional(),
   })
   .strict();
-export type WordsConfig = z.infer<typeof configSchema>;
 
 /** Every code the module returns (words §10.3); none is reserved (02 §2.2). */
 export const ERROR_CODES = {
@@ -216,19 +215,17 @@ export const ERROR_CODES = {
 } as const;
 
 /** The `detail` of an `INVALID_PLACEMENT` error, in check order (words §10.3). */
-export const PLACEMENT_ERRORS = [
-  "TOO_MANY_TILES",
-  "OUT_OF_BOUNDS",
-  "DUPLICATE_SQUARE",
-  "SQUARE_OCCUPIED",
-  "BLANK_NEEDS_LETTER",
-  "LETTER_ON_NON_BLANK",
-  "TILE_NOT_IN_RACK",
-  "NOT_IN_LINE",
-  "GAP",
-  "TOO_FEW_TILES",
-  "START_NOT_COVERED",
-  "NOT_CONNECTED",
-  "NO_WORD_FORMED",
-] as const;
-export type PlacementError = (typeof PLACEMENT_ERRORS)[number];
+export type PlacementError =
+  | "TOO_MANY_TILES"
+  | "OUT_OF_BOUNDS"
+  | "DUPLICATE_SQUARE"
+  | "SQUARE_OCCUPIED"
+  | "BLANK_NEEDS_LETTER"
+  | "LETTER_ON_NON_BLANK"
+  | "TILE_NOT_IN_RACK"
+  | "NOT_IN_LINE"
+  | "GAP"
+  | "TOO_FEW_TILES"
+  | "START_NOT_COVERED"
+  | "NOT_CONNECTED"
+  | "NO_WORD_FORMED";

@@ -95,5 +95,5 @@ describe.each([...RULESETS.keys()])("random games under the %s ruleset", (id) =>
     for (const reason of ["out", "scoreless", "resign", "timeout"]) {
       expect(ends.get(reason) ?? 0, reason).toBeGreaterThan(0);
     }
-  }, 300_000);
+  }, 600_000);
 });

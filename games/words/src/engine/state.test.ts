@@ -187,9 +187,7 @@ describe("swapping (words §3.2)", () => {
       const { state: next } = words.apply(s, 0, { type: "swap", tiles: ["q"] }, seededRandom(seed));
       const drawn = next.racks[0]?.[6] ?? "";
       redrawn.add(drawn);
-      expect([...(next.racks[0] ?? []), ...next.bag].sort()).toEqual(
-        rack("abcdefoooooooq").sort(),
-      );
+      expect([...(next.racks[0] ?? []), ...next.bag].sort()).toEqual(rack("abcdefoooooooq").sort());
     }
     expect(redrawn).toEqual(new Set(["o", "q"]));
   });

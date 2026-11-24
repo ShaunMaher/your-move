@@ -18,7 +18,7 @@ const LETTERS = "abcdefghijklmnopqrstuvwxyz";
 
 /** Random candidate plays tried first, on an empty board and later. */
 const OPENING_TRIES = 200;
-const PLAY_TRIES = 20;
+const PLAY_TRIES = 8;
 /** Single-tile plays tried after them before the bot gives up and swaps or passes. */
 const SINGLE_TILE_CHECKS = 300;
 
