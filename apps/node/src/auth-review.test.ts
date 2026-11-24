@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 
-import { cookieOf, createHarness, type Harness, PROD_ENV } from "./test-harness.js";
+import { cookieOf, createHarness, type Harness, LOCAL_ENV, PROD_ENV } from "./test-harness.js";
 
 let h: Harness;
 let n = 0;
@@ -191,6 +191,20 @@ describe("addresses (S-7)", () => {
   ])("refuses an address with a format character: %j", async (email) => {
     h = createHarness();
     expect((await otpRequest(email)).status).toBe(400);
+  });
+});
+
+describe("local-dev mode (S-8)", () => {
+  it("/__dev/emails answers only requests addressed to PUBLIC_URL's host", async () => {
+    h = createHarness(LOCAL_ENV);
+    const own = await h.request("GET", "/__dev/emails", undefined, {
+      headers: { Host: "localhost:8080" },
+    });
+    expect(own.status).toBe(200);
+    const rebound = await h.request("GET", "/__dev/emails", undefined, {
+      headers: { Host: "attacker.example:8080" },
+    });
+    expect(rebound.status).toBe(404);
   });
 });
 

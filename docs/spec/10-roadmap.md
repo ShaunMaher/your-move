@@ -149,8 +149,6 @@ The project's foundation, built to 11 (engineering standards) from the first com
     caps alert instead (F-12).
   - Account deletion's game steps, `deletion_requested_at` and nulling `admin_audit.target_id`
     (04 §Account deletion): M3, with games and the Admin API.
-  - The Node warning when `TRUST_PROXY=false` and every recent peer is private or loopback
-    (08 §4.1): M2c.
 
 ## M3 — Framework + play words
 - Cookie plus bearer on one request is refused on every route (05 §Conventions): done in M2b, so
