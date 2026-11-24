@@ -8,7 +8,11 @@ packages:
 # Supply chain (docs/spec/08-security.md §6, 11-engineering.md §6).
 # Only these packages may run install scripts; every other build script is blocked.
 allowBuilds:
-  esbuild: true
+  # Scoped to the catalog's esbuild (edit this key with every esbuild bump; renovate.json says so).
+  # drizzle-kit's own esbuild copies don't need their install scripts: their bin stays the JS shim,
+  # which finds the platform binary through its optional dependency (M2a review S-5).
+  esbuild@0.28.2: true
+  esbuild@0.18.20 || 0.25.12: false
   workerd: true
   sharp: false
   lefthook: false
