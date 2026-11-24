@@ -423,6 +423,8 @@ export interface operations {
       /** @description Signed in; the response sets the session cookie. */
       200: {
         headers: {
+          /** @description `__Host-sid=…; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=34560000` (`sid` without `Secure` in local-dev mode, 06 §4). */
+          "Set-Cookie": string;
           [name: string]: unknown;
         };
         content: {
@@ -653,6 +655,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["Me"];
+        };
+      };
+      /** @description A session cookie and a bearer token together (`BAD_REQUEST`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
       /** @description No valid session (`UNAUTHENTICATED`). */

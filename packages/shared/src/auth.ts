@@ -9,6 +9,18 @@ import { API_V1 } from "./routes.js";
 
 const errorContent = { "application/json": { schema: ErrorResponseSchema } } as const;
 
+/** Routes that need the session cookie (the `sessionCookie` scheme the server registers). */
+const SESSION = [{ sessionCookie: [] }];
+
+/** The session cookie's security scheme (06 §4), registered once by the server. */
+export const SESSION_COOKIE_SCHEME = {
+  type: "apiKey",
+  in: "cookie",
+  name: "__Host-sid",
+  description:
+    "The session cookie set by `POST /api/v1/auth/otp/verify` (`sid` in local-dev mode, 06 §4).",
+} as const;
+
 /** Error responses by status, each with the shared error body (05 §Errors). */
 function errors<const T extends Readonly<Record<number, string>>>(
   descriptions: T,
@@ -133,6 +145,12 @@ export const otpVerifyRoute = createRoute({
   responses: {
     200: {
       description: "Signed in; the response sets the session cookie.",
+      headers: z.object({
+        "Set-Cookie": z.string().openapi({
+          description:
+            "`__Host-sid=…; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=34560000` (`sid` without `Secure` in local-dev mode, 06 §4).",
+        }),
+      }),
       content: { "application/json": { schema: OtpVerifyResponseSchema } },
     },
     ...errors({
@@ -147,6 +165,7 @@ export const otpVerifyRoute = createRoute({
 export const logoutRoute = createRoute({
   operationId: "logout",
   "x-scope": "session",
+  security: SESSION,
   method: "post",
   path: `${API_V1}/auth/logout`,
   tags: ["Auth"],
@@ -171,6 +190,7 @@ export const LogoutAllBodySchema = z
 export const logoutAllRoute = createRoute({
   operationId: "logoutAll",
   "x-scope": "session",
+  security: SESSION,
   method: "post",
   path: `${API_V1}/auth/logout-all`,
   tags: ["Auth"],
@@ -186,13 +206,19 @@ export const logoutAllRoute = createRoute({
 export const getMeRoute = createRoute({
   operationId: "getMe",
   "x-scope": "read",
+  security: SESSION,
   method: "get",
   path: `${API_V1}/me`,
   tags: ["Account"],
   summary: "The signed-in user",
   responses: {
     200: { description: "The user.", content: { "application/json": { schema: MeSchema } } },
-    ...errors({ 401: SESSION_ERRORS[401], 403: "`SUSPENDED`.", 500: "Unexpected error." }),
+    ...errors({
+      400: "A session cookie and a bearer token together (`BAD_REQUEST`).",
+      401: SESSION_ERRORS[401],
+      403: "`SUSPENDED`.",
+      500: "Unexpected error.",
+    }),
   },
 });
 
@@ -209,6 +235,7 @@ export const PatchMeBodySchema = z
 export const patchMeRoute = createRoute({
   operationId: "updateMe",
   "x-scope": "session",
+  security: SESSION,
   method: "patch",
   path: `${API_V1}/me`,
   tags: ["Account"],
@@ -232,6 +259,7 @@ export const patchMeRoute = createRoute({
 export const deleteOtpRoute = createRoute({
   operationId: "requestDeleteAccountCode",
   "x-scope": "session",
+  security: SESSION,
   method: "post",
   path: `${API_V1}/me/delete/otp`,
   tags: ["Account"],
@@ -252,6 +280,7 @@ export const DeleteMeBodySchema = z.object({ code: CodeInput }).strict().openapi
 export const deleteMeRoute = createRoute({
   operationId: "deleteMe",
   "x-scope": "session",
+  security: SESSION,
   method: "delete",
   path: `${API_V1}/me`,
   tags: ["Account"],

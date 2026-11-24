@@ -6,6 +6,14 @@
     "description": "The public HTTP API. Everything is under /api/v1; changes within v1 are additive only."
   },
   "components": {
+    "securitySchemes": {
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-sid",
+        "description": "The session cookie set by `POST /api/v1/auth/otp/verify` (`sid` in local-dev mode, 06 §4)."
+      }
+    },
     "schemas": {
       "HealthResponse": {
         "type": "object",
@@ -307,6 +315,16 @@
         "responses": {
           "200": {
             "description": "Signed in; the response sets the session cookie.",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string",
+                  "description": "`__Host-sid=…; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=34560000` (`sid` without `Secure` in local-dev mode, 06 §4)."
+                },
+                "required": true,
+                "description": "`__Host-sid=…; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=34560000` (`sid` without `Secure` in local-dev mode, 06 §4)."
+              }
+            },
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/OtpVerifyResponse" } }
             }
@@ -354,6 +372,7 @@
       "post": {
         "operationId": "logout",
         "x-scope": "session",
+        "security": [{ "sessionCookie": [] }],
         "tags": ["Auth"],
         "summary": "Sign out this session",
         "description": "Session only. Deletes this session and clears the cookie.",
@@ -408,6 +427,7 @@
       "post": {
         "operationId": "logoutAll",
         "x-scope": "session",
+        "security": [{ "sessionCookie": [] }],
         "tags": ["Auth"],
         "summary": "Sign out everywhere",
         "description": "Session only. Deletes every session of the user and clears the cookie.",
@@ -462,12 +482,19 @@
       "get": {
         "operationId": "getMe",
         "x-scope": "read",
+        "security": [{ "sessionCookie": [] }],
         "tags": ["Account"],
         "summary": "The signed-in user",
         "responses": {
           "200": {
             "description": "The user.",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Me" } } }
+          },
+          "400": {
+            "description": "A session cookie and a bearer token together (`BAD_REQUEST`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
           },
           "401": {
             "description": "No valid session (`UNAUTHENTICATED`).",
@@ -492,6 +519,7 @@
       "patch": {
         "operationId": "updateMe",
         "x-scope": "session",
+        "security": [{ "sessionCookie": [] }],
         "tags": ["Account"],
         "summary": "Change the display name; completes onboarding",
         "description": "Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`).",
@@ -553,6 +581,7 @@
       "delete": {
         "operationId": "deleteMe",
         "x-scope": "session",
+        "security": [{ "sessionCookie": [] }],
         "tags": ["Account"],
         "summary": "Delete the account",
         "description": "Session only, with a fresh `delete_account` code (06 §7). Immediate and irreversible; clears the cookie and emails a confirmation.",
@@ -613,6 +642,7 @@
       "post": {
         "operationId": "requestDeleteAccountCode",
         "x-scope": "session",
+        "security": [{ "sessionCookie": [] }],
         "tags": ["Account"],
         "summary": "Email a code to delete the account",
         "description": "Session only. Emails a `delete_account` step-up code (06 §7).",

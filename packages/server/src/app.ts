@@ -1,6 +1,6 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { GameManifest } from "@your-move/sdk";
-import { configRoute, healthRoute, type ErrorCode } from "@your-move/shared";
+import { configRoute, healthRoute, SESSION_COOKIE_SCHEME, type ErrorCode } from "@your-move/shared";
 import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { matchedRoutes } from "hono/route";
@@ -207,6 +207,7 @@ export function createApp(options: AppOptions): App {
     );
   }
 
+  app.openAPIRegistry.registerComponent("securitySchemes", "sessionCookie", SESSION_COOKIE_SCHEME);
   const document = openApiDocument(app, config.appName);
   app.get("/api/v1/openapi.json", (c) => c.json(document, 200));
 

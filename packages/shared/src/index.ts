@@ -4,6 +4,7 @@
  */
 export {
   deleteMeRoute,
+  SESSION_COOKIE_SCHEME,
   DeleteMeBodySchema,
   deleteOtpRoute,
   EmptyObjectSchema,

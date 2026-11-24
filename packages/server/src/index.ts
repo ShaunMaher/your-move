@@ -15,16 +15,13 @@ export {
 } from "./app.js";
 export { normaliseAddress, type NormalisedEmail } from "./accounts/email.js";
 export {
-  parseIp,
   resolveClientIp,
   type ClientIp,
   type ClientIpSource,
   type TrustProxy,
 } from "./auth/client-ip.js";
 export {
-  assertSafeHeaders,
   createConsoleEmailSender,
-  createUnavailableEmailSender,
   type CapturedEmail,
   type EmailMessage,
   type EmailSender,
