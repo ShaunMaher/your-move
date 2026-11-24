@@ -311,7 +311,9 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
   from the static-assets binding (Node reads it from disk). Lookup is a binary search directly over
   the text (no parse), or any index is built outside request handling, never inside a request.
   Memory < 25 MB per loaded dictionary. Measure Worker startup time and per-lookup CPU in M1 and
-  record the numbers.
+  record the numbers (M1, in `packages/dictionary/README.md`: about 1 µs CPU per ENABLE lookup,
+  under 3 MB resident, and no startup cost measurable locally from bundling the list as a text
+  module; the real startup time is recorded at the first Workers deployment).
 - `serverOnly` dictionaries (operator and uploaded, words §9.5) are loaded from `BlobStore` on first
   use into an in-memory LRU cache **sized by bytes** (default 60 MB per isolate or process, below the
   Worker's 128 MB limit). Lookup is a binary search over the raw sorted text with no index build,

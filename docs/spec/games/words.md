@@ -144,9 +144,13 @@ The game ends when any of the following happens:
 
 ### 8.1 Data format
 
-Each ruleset version is a JSON file at `games/words/engine/rulesets/<id>/v<N>.json`, validated by a
-schema at build time and registered in `games/words/engine/rulesets/index.ts`. Both server and client
-bundle all rulesets (they are small), so the client can render any game and preview any play.
+Each ruleset version is a data module at `games/words/src/engine/rulesets/<id>/v<N>.ts` that exports
+one object literal in the shape below and nothing else (a TypeScript module rather than a `.json`
+file, because built engine output may import only `.js` files, 02 §7.3). It is registered in
+`games/words/src/engine/rulesets/index.ts`, which parses every registered version with the ruleset
+schema when the engine loads, so an invalid ruleset fails the package's tests and `pnpm
+games:verify` (build time). Both server and client bundle all rulesets (they are small), so the
+client can render any game and preview any play.
 
 ```jsonc
 {
@@ -186,7 +190,11 @@ bundle all rulesets (they are small), so the client can render any game and prev
   New games always use the latest version of the chosen ruleset.
 - Schema validation at build time: tile letters ⊆ `a`–`z` plus `?`; counts and points are
   non-negative integers; total tiles ≥ `rackSize × maxPlayers`; `premiums` has exactly `boardSize`
-  rows of `boardSize` characters; `start` is in bounds.
+  rows of `boardSize` characters; `start` is in bounds. Also: `boardSize` ≤ 15 (the dictionaries'
+  longest word, §9.1); `rackSize` ≤ `boardSize`; blanks are worth 0; `2 ≤ minPlayers ≤
+  maxPlayers`; with `drawThenReturn`, `swapMinBag` ≥ `rackSize` (the replacements are drawn before
+  the swapped tiles go back, §3.2). A dictionary letter has a tile only if its count is at least 1
+  (§9.3).
 - Each premium layout MUST be symmetric under 90° rotation (validated by a test).
 - Premium layouts are **original arrangements** designed by us, keeping the reference game's
   premium counts and overall density so the game feels familiar. They MUST NOT copy any commercial
@@ -263,10 +271,16 @@ rulesets.
 - Each dictionary lives in `packages/dictionary/dictionaries/<id>/`:
   - `meta.json`: `{ id, version, name, description, language, licence, sourceUrl, sha256 }`
   - `source.txt`: the upstream list, unmodified, checked against `sha256` at build time
-  - `additions.txt`, `removals.txt`: our edits, applied at build time
-- Build output per dictionary: sorted, newline-delimited, lower-case `a`–`z` words of length 2..15,
-  plus brotli/gzip versions for the client. Longer words can't fit any MVP board and are dropped.
-  (When a ruleset with a larger board exists, the length cap becomes the largest `boardSize`.)
+  - `additions.txt`, `removals.txt`: our edits, applied at build time: one word per line, sorted,
+    no duplicates or comments; an addition must not already be in the source and a removal must be
+    in it. Any change to the source or the edits is a new `version`.
+- Build output per dictionary (`packages/dictionary/generated/<id>/`, never committed): sorted,
+  newline-delimited, lower-case `a`–`z` words of length 2..15 (`words.txt`), plus brotli/gzip
+  versions for the client, and a manifest (the `meta.json` fields plus `wordCount`, `alphabet`,
+  the SHA-256 and size of `words.txt`, and how many upstream lines were dropped). Upstream lines
+  with any character outside `a`–`z` are dropped, never lower-cased (they are proper nouns or
+  abbreviations). Longer words can't fit any MVP board and are dropped. (When a ruleset with a
+  larger board exists, the length cap becomes the largest `boardSize`.)
 - **Licensing gate**: only public-domain or permissively licensed lists may be added, with the
   licence recorded in `meta.json` and `packages/dictionary/README.md`. The official tournament
   lists (the North American NWL/TWL family and the Commonwealth Collins list) are **not** freely
@@ -274,7 +288,8 @@ rulesets.
   them can bring their own (§9.5).
 - `removals.txt` ships with a list of slurs so they can't be played (Q7). The same words are also
   kept in a shared `packages/dictionary/removals-global.txt`, which is applied to every operator
-  and uploaded dictionary (§9.5).
+  and uploaded dictionary (§9.5) and, as a safeguard, to the built-in ones too; a test checks that
+  each built-in `removals.txt` contains every global removal.
 
 ### 9.2 MVP dictionary
 
