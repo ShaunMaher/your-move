@@ -172,6 +172,8 @@ export function setup(ctx: { options: Options; seats: number; rng: RandomSource 
 }
 ```
 
+Transitions get an `rng` too and may draw from it: when the example's deck can't give every playing
+seat a card, the face-down cards of seats that left are shuffled back in with `shuffle(…, rng)`.
 The platform records every value drawn and replays a game from its log, so the same state, action
 and draws must always give the same result. Keep no module-level mutable state: one loaded engine
 serves many games at once, and the kit plays games interleaved to catch leaks between them.
@@ -243,7 +245,12 @@ enforces this strictly: it randomises everything a viewer can't see (`perturbHid
 transition, and requires the identical record — and, unless your game declares
 `publicRandomness` (dice), it repeats it with different random draws too. So a record must not
 contain the card played, the cards revealed when a round resolves, who scored or lost a life in
-that transition, or what anyone drew. The example's records are only:
+that transition, or what anyone drew. The kit also plays two different legal actions by the same
+seat on the same state: if every other seat's view and the public view come out identical, the two
+records and their `describe` text must be identical too, so a record can't repeat a secret choice.
+(If a public move leaves no trace in any view, show it in the view, for example as a last-move
+field.) Views are compared as the JSON clients receive, key order included: build them with a fixed
+key order, never one that depends on hidden state. The example's records are only:
 
 ```ts
 { kind: "played", seat, round } | { kind: "resigned", seat } | { kind: "declined", seat } | { kind: "timedOut", seat }
@@ -282,11 +289,21 @@ The `test` object drives the generic kit (02 §6):
 - `perturbHidden(state, viewer, rng)`: re-deals at random everything `viewer` can't see while
   keeping the state consistent — same cards overall, same hand sizes, same "has played" flags.
   For `null`, everything hidden from the public. It must actually change the state most of the
-  time.
+  time. The kit counts a perturbation only if it changes what some _other_ viewer sees (another seat's
+  hand, say), unless no perturbation ever changes any view (hidden deck order only).
 - `hiddenInformation`: whether anything is ever hidden (must match the manifest).
-- `maxActions(options, seats)`: an upper bound on transitions in a game, for the termination check.
+- `maxActions(options, seats)`: an upper bound on transitions in a game, for the termination
+  check: a whole number from 1 to 1 000 000, as tight as you can prove it.
 - `worstCase(options, seats, rng)`: the most expensive `{ state, seat, action }` inputs, for the
-  CPU budget check.
+  CPU budget check. Each must be a real move (its seat in `toAct`, its action valid), and every
+  playable seat count needs at least one.
+- `optionInputs(ctx)` (required): the option inputs the kit plays, each with every seat count your
+  options allow. List the defaults (`{}`) and enough others to reach every rule an option changes:
+  each ruleset or variant and the corners of each range. The example lists six.
+- `context()` (optional): the configuration and resource catalog `resolveOptions`, `catalog` and
+  `checkConfig` see in the kit; by default your `configSchema` parsed from `{}`, and no resources.
+- `resources(options)` (optional): the resources `validate` and `preview` get in the kit's games,
+  e.g. a small dictionary for a word game; by default none. Replay always gets none.
 
 ## 4. Testing
 
@@ -308,13 +325,20 @@ it("passes the generic test kit", () => {
 });
 ```
 
-Use `mode: "fast"` while developing and `mode: "full"` in CI (thousands of games per option set
-and seat count). By default the kit plays only your default options (`resolveOptions({})`); pass
-`optionInputs` to play more option sets, as the example does with the corners of its ranges
-(`src/kit.test.ts`). Every seat count `players(options)` allows and `validateStart` accepts is
-played. A failure names the property and the seed, so you can replay it. The kit also
-checks that the manifest agrees with the engine: the type, `hiddenInformation`, player bounds,
-rules text for every exported version, and the resource kinds.
+Use `mode: "fast"` while developing (300 games per rules version, spread over your option inputs
+and seat counts) and `mode: "full"` in CI (1000 games per option input and seat count, a tenth of
+them checked for secrecy at every step). The kit plays the option inputs your `test.optionInputs`
+lists, with your `test.context` and `test.resources`, at every seat count `players(options)`
+allows and `validateStart` accepts; the operator's `games:verify` plays exactly the same hooks, so
+what passes for you passes there. Secrecy is checked at points spread evenly over each game, early
+and late alike. A failure names the property and the seed, so you can replay it. The kit also
+checks that the manifest agrees with the engine: the type, `hiddenInformation`, player bounds
+(exactly the union of the engine's bounds over your option inputs), rules text for every exported
+version, and the resource kinds.
+
+The CPU budget (5 ms per call at the 99th percentile) is measured on the machine running the kit.
+If a slow CI host fails a game that is within budget elsewhere, `games:verify --cpu-budget-ms <n>`
+raises it there; don't raise it to hide a slow engine.
 
 ### The built-output rules
 
@@ -431,10 +455,17 @@ explicitly as in section 2. An operator installs it by:
    });
    ```
 
-3. running `pnpm build`, which runs `pnpm games:generate` and `pnpm games:verify`. Verification
-   fails on a duplicate or invalid type id, an SDK peer range the instance doesn't satisfy, a
-   licence outside the allow-list that isn't accepted, a built-output rule violation, a kit
-   failure, a manifest that disagrees with the engine, or an icon that fails sanitisation.
+3. running `pnpm build`, which runs `pnpm games:generate`, `pnpm games:verify --fast` (the kit's
+   fast mode: 300 games per rules version, with your package's own test hooks), the app builds,
+   and finally `pnpm games:check-inputs`. Verification fails on a duplicate or invalid type id, an
+   SDK peer range the instance doesn't satisfy, a licence outside the allow-list that isn't
+   accepted, a built-output rule violation (including a relative import that doesn't name its
+   `.js` file, or TypeScript or JSX sources in the package), a kit failure, a manifest that
+   disagrees with the engine, or an icon that fails sanitisation. `games:check-inputs` then fails
+   if a bundler read any file of your package that verification didn't check for that build: the
+   server builds may read only what your engine and manifest reach, the web build also what your
+   client reaches. CI runs the full kit (1000 games per option input and seat count) with
+   `pnpm games:verify`.
 
 At runtime the operator's `ENABLED_GAMES` setting decides which installed games are offered for new
 games.
@@ -455,7 +486,10 @@ games.
       for a schema-valid action.
 - [ ] Records and `describe` text carry nothing hidden and nothing drawn; a decline says
       "declined", never "resigned".
-- [ ] `runKit(engines, { mode: "full", manifest })` reports no failures.
+- [ ] `test.optionInputs` lists the defaults and every option set that changes a rule, and
+      `runKit(engines, { mode: "full", manifest })` reports no failures.
+- [ ] Built relative imports name their files (`./rules.js`, not `./rules`), and the published
+      files hold no `.ts`, `.tsx` or `.jsx` sources.
 - [ ] dependency-cruiser and the engine ESLint config pass on the built output.
 - [ ] Your rules tables pass, with coverage at 95 % for the engine and 80 % for the client.
 - [ ] A changed rule or state shape is a new rules version, and the old one is still exported.

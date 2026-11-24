@@ -169,7 +169,11 @@ The project's foundation, built to 11 (engineering standards) from the first com
   `ADMIN_TOKEN_FILE`.
 - Game shell UI: new-game flow (game picker → module options form → players), game list across
   types, lobby screen, game frame (header, menu, history drawer, finished/ranking screen), lazy
-  module loading.
+  module loading. When the web app first imports the generated client map, set
+  `WEB_BUNDLES_GAME_CLIENTS` (scripts/src/games/inputs.ts) to `true`, so the bundler-input check
+  requires every client entry in the web build's record (02 §7.3).
+- `rng` stores `[max, value]` pairs so replay detects a changed draw range (`game_actions.rng`
+  and `games.setup_rng`, 04; M1 review P-20).
 - Words client module: board UI — drag & drop + tap-to-place, zoom, blank picker, live preview, shuffle/recall,
   swap/pass/resign dialogs.
 - Realtime: `UserChannel` DO + Node hub; refetch on visibility.
