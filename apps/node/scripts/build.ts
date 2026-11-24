@@ -3,7 +3,7 @@
  * dist/public. Run with `tsx scripts/build.ts` from apps/node.
  */
 import { cpSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { bundleServer } from "./bundle.js";
 
@@ -15,7 +15,12 @@ if (!existsSync(webDist)) {
 const outdir = fileURLToPath(new URL("../dist/", import.meta.url));
 const files = await bundleServer(outdir, (inputs) => {
   // For `pnpm games:check-inputs` (10 M1): what the bundle read, relative to this directory.
-  const record = new URL("../../../generated/bundles/", import.meta.url);
+  // `BUNDLE_INPUTS_DIR` sends the record elsewhere (the contract tests' builds use it).
+  const elsewhere = process.env["BUNDLE_INPUTS_DIR"];
+  const record =
+    elsewhere === undefined
+      ? new URL("../../../generated/bundles/", import.meta.url)
+      : pathToFileURL(`${elsewhere}/`);
   mkdirSync(record, { recursive: true });
   writeFileSync(
     new URL("node.json", record),

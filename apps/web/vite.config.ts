@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
@@ -6,6 +7,7 @@ import { defineConfig, type Plugin } from "vite";
 /**
  * Records every module the build read in generated/bundles/web.json, for `pnpm games:check-inputs`
  * (10 M1): each input from an installed game package must be a file games:verify checked.
+ * `BUNDLE_INPUTS_DIR` sends the record elsewhere (the contract tests' builds use it).
  */
 function recordInputs(): Plugin {
   return {
@@ -16,7 +18,11 @@ function recordInputs(): Plugin {
         .filter((id) => !id.startsWith("\0"))
         .map((id) => id.split("?")[0] ?? id)
         .sort();
-      const dir = new URL("../../generated/bundles/", import.meta.url);
+      const elsewhere = process.env["BUNDLE_INPUTS_DIR"];
+      const dir =
+        elsewhere === undefined
+          ? new URL("../../generated/bundles/", import.meta.url)
+          : pathToFileURL(`${elsewhere}/`);
       mkdirSync(dir, { recursive: true });
       writeFileSync(
         new URL("web.json", dir),
