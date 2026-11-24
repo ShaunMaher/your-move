@@ -434,9 +434,11 @@ Options = { rulesetId: string; rulesetVersion: number; dictionaryId: string; dic
 
 ### 10.2 State (secret, server-only)
 
-`{ rulesetId, rulesetVersion, board, bag, racks[seat], scores[seat], turn, scorelessStreak,
-finished?: { reason, adjustments[seat] } }`. The bag order and other players' racks are hidden
-information for `perturbHidden`.
+`{ options, board, bag, racks[seat], scores[seat], turn, scorelessStreak, lastMove,
+finished: null | { reason, adjustments[seat], leaver } }`, where `options` holds the ruleset and
+dictionary ids and versions, `lastMove` is the record of the last transition (§10.4) and `leaver`
+is the seat that resigned, timed out or declined (null for `out` and `scoreless`). The bag order
+and other players' racks are hidden information for `perturbHidden`.
 
 ### 10.3 Actions
 
@@ -451,11 +453,18 @@ Action =
 (`detail`: `NOT_IN_LINE` · `GAP` · `NOT_CONNECTED` · `START_NOT_COVERED` · `SQUARE_OCCUPIED` ·
 `OUT_OF_BOUNDS` · `DUPLICATE_SQUARE` · `TILE_NOT_IN_RACK` · `BLANK_NEEDS_LETTER` ·
 `LETTER_ON_NON_BLANK` · `TOO_FEW_TILES` · `NO_WORD_FORMED` · `TOO_MANY_TILES`), `INVALID_WORDS`
-(`detail: { words: string[] }`), `SWAP_NOT_ALLOWED`, plus `UNKNOWN_RULESET`, `UNKNOWN_DICTIONARY`,
-`INCOMPATIBLE_DICTIONARY`, `NOT_ENOUGH_TILES` from option resolution and start.
+(`detail: { words: string[] }`: each word not in the dictionary once, in the order formed),
+`SWAP_NOT_ALLOWED` (`detail`: `BAG_TOO_SMALL` · `TILE_NOT_IN_RACK`), `NOT_TO_ACT` (`validate` or
+`preview` for a seat that isn't in `toAct`, which the framework never asks), plus
+`UNKNOWN_RULESET`, `UNKNOWN_DICTIONARY`, `INCOMPATIBLE_DICTIONARY`, `NOT_ENOUGH_TILES`,
+`OPTIONS_NOT_OBJECT` and `UNKNOWN_OPTION` from option resolution, `checkConfig` (with `detail: {
+key }` naming the config key, never its value) and start.
 
 **Check order** (first failure wins): every `INVALID_PLACEMENT` check, rack checks included, runs
-before any dictionary lookup; `INVALID_WORDS` comes last. Errors are computed only from the
+before any dictionary lookup, in the order `TOO_MANY_TILES`, `OUT_OF_BOUNDS`, `DUPLICATE_SQUARE`,
+`SQUARE_OCCUPIED`, `BLANK_NEEDS_LETTER`/`LETTER_ON_NON_BLANK`, `TILE_NOT_IN_RACK`, `NOT_IN_LINE`,
+`GAP`, then `TOO_FEW_TILES` and `START_NOT_COVERED` for the opening play or `NOT_CONNECTED` for a
+later one, and `NO_WORD_FORMED`; `INVALID_WORDS` comes last. Errors are computed only from the
 submitter's rack and the public board (secrecy contract), and the kit's `randomAnyAction` exercises
 off-rack plays to prove `INVALID_WORDS` is never returned for them.
 
@@ -465,16 +474,22 @@ off-rack plays to prove `INVALID_WORDS` is never returned for them.
 View = {
   ruleset: { id, version }, dictionary: { id, version },   // name/distribution come from the envelope's resources (05)
   board: (null | { tile: string, letter: string, blank: boolean })[][],
-  scores: number[], rackCounts: number[], bagCount: number,
-  yourRack: string[] | null,                  // the viewer's only; null in the public view
-  final?: { reason: "out" | "scoreless" | "resign" | "timeout", adjustments: number[], racks: string[][] }  // only once finished
+  scores: number[], rackCounts: number[], bagCount: number,   // scores: final scores once finished
+  yourRack: string[] | null,                  // the viewer's only, sorted; null in the public view
+  lastMove: WordsRecord | null,               // the last transition's record
+  final?: { reason: "out" | "scoreless" | "resign" | "timeout" | "decline", adjustments: number[], racks: string[][] }  // only once finished
 }
 WordsRecord = {
-  seat, type: "play" | "swap" | "pass" | "resign" | "timeout",
+  seat, type: "play" | "swap" | "pass" | "resign" | "timeout" | "decline",
   placements?: { row, col, tile, letter }[], words?: { word: string, score: number }[],
   score: number, bingo: boolean, swapCount?: number          // never which tiles were swapped
 }
 ```
+
+Racks (`yourRack`, `final.racks`) are shown sorted (`a`–`z`, then blanks), so no view shows the
+order tiles were drawn in (§7). `lastMove` makes every public move visible in the view: a swap
+and a pass, or two swaps of different sizes, otherwise leave every other viewer's view the same,
+and the kit requires their different records to show up in a view (02 §6.3).
 
 ### 10.5 Preview
 
@@ -495,9 +510,20 @@ debounced (§9.5).
   non-resigning player ranks 1 for `resign` / `timeout`.
 - `summary()`: `{ headline: [{seat:0}, " 212 – 187 ", {seat:1}], scores }`, rendered as
   "You 212 – 187 Sam"; `describe()`: `[{seat:1}, " played QUIZ for 64"]`.
-- `test.maxActions`: bounded by the scoreless-streak rule; the coder derives and documents a bound.
-- `test.worstCase`: full-rack plays on crowded boards with many cross-words, against the largest
-  bundled dictionary.
+- `test.maxActions`: bounded by the scoreless-streak rule. Every play puts at least one tile on
+  the board for good, so there are at most `P = min(total tiles, boardSize²)` plays, at most
+  `scorelessTurnLimit − 1` passes and swaps in a row around each of them, and one exit:
+  `P + (P + 1)(scorelessTurnLimit − 1) + 1` (606 for `classic`, 630 for `casual`).
+- `test.worstCase`: full-rack plays on crowded boards with many cross-words: a seven-tile play
+  between two seven-letter words, forming the main word and seven cross-words, with and without a
+  blank, and a swap of the whole rack (which shuffles the whole bag).
+- `test.context` and `test.resources`: an engine can't load a word list (02 §2), so the kit plays
+  with a **kit word list** carried in the engine: every two- and three-letter word of the built
+  `enable` list plus the longer `enable` words the worst cases need (about 1,070 words; a test
+  checks each one is in the built list). The package's own tests also play the kit, and thousands
+  of property-test games per ruleset, against the full built `enable` list.
+- With more than two seats (no MVP ruleset allows it), a resignation, timeout or decline still
+  ends the game, until multi-player resignation is specified (§3.4).
 
 ### 10.7 Module-specific tests
 
