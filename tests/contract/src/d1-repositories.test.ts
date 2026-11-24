@@ -33,7 +33,7 @@ repositoryContract("D1", async () => {
   });
   const db = proxy.env.DB as unknown as {
     prepare(sql: string): {
-      bind(...values: unknown[]): { all<T>(): Promise<{ results: T[] }> };
+      bind(...values: unknown[]): { all(): Promise<{ results: Record<string, unknown>[] }> };
     };
   };
   return {
@@ -43,7 +43,7 @@ repositoryContract("D1", async () => {
         await db
           .prepare(statement)
           .bind(...params)
-          .all<Record<string, unknown>>()
+          .all()
       ).results,
     close: async () => {
       await proxy.dispose();
