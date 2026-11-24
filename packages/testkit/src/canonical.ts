@@ -1,16 +1,12 @@
 /**
- * Comparing module output: views, records, states and errors are compared as canonical JSON
- * (object keys sorted), because the framework stores and serves them as JSON.
+ * Comparing module output: views, records, states and errors are compared as the JSON the
+ * framework stores and serves. Key order is kept, not normalised: it reaches clients on the wire,
+ * so a key order that follows hidden state is a leak (02 §6.3).
  */
 
-const sortKeys = (_key: string, value: unknown): unknown => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
-  return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : 1)));
-};
-
-/** JSON with object keys in a stable order; `undefined` stays distinguishable from absent. */
+/** The JSON text of `value`, keys in insertion order; `undefined` stays distinguishable. */
 export function canonical(value: unknown): string {
-  return value === undefined ? "undefined" : JSON.stringify(value, sortKeys);
+  return value === undefined ? "undefined" : JSON.stringify(value);
 }
 
 /** Whether two module outputs are the same once serialised. */

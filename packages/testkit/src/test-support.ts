@@ -28,10 +28,12 @@ interface ToyState {
   readonly turn: Seat;
   readonly out: readonly boolean[];
   readonly marker?: number;
+  /** The `open` option: kept in the state, changing nothing in the correct game. */
+  readonly open: boolean;
 }
 
 interface ToyOptions {
-  readonly seats?: number | undefined;
+  readonly open?: boolean | undefined;
 }
 
 interface ToyAction {
@@ -105,7 +107,7 @@ export function toyGame(): Toy {
     type: "toy",
     version: 1,
     configSchema: z.object({}).strict(),
-    optionsSchema: z.object({ seats: z.number().int().optional() }).strict(),
+    optionsSchema: z.object({ open: z.boolean().optional() }).strict(),
     actionSchema: z.object({ card: z.number().int() }).strict(),
     viewSchema: z
       .object({
@@ -132,13 +134,16 @@ export function toyGame(): Toy {
     catalogSchema: z.object({ maxSeats: z.number() }).strict(),
     errorCodes: ["BAD_OPTIONS", "NOT_IN_HAND"],
 
-    resolveOptions: (input): ToyOptions | GameError =>
-      typeof input === "object" &&
-      input !== null &&
-      !Array.isArray(input) &&
-      Object.keys(input).length === 0
-        ? {}
-        : { code: "BAD_OPTIONS" },
+    resolveOptions: (input): ToyOptions | GameError => {
+      if (typeof input !== "object" || input === null || Array.isArray(input)) {
+        return { code: "BAD_OPTIONS" };
+      }
+      const { open, ...rest } = input as { open?: unknown };
+      if (Object.keys(rest).length > 0 || (open !== undefined && typeof open !== "boolean")) {
+        return { code: "BAD_OPTIONS" };
+      }
+      return open === true ? { open } : {};
+    },
     catalog: () => ({ maxSeats: 3 }),
     players: () => ({ min: 2, max: 3 }),
     validateStart: (): Ok => OK,
@@ -146,10 +151,11 @@ export function toyGame(): Toy {
     resources: () => [],
     checkConfig: () => OK,
 
-    setup({ seats, rng }) {
+    setup({ options, seats, rng }) {
       const deck = shuffle(DECK, rng);
       return {
         seats,
+        open: options.open === true,
         hands: Array.from({ length: seats }, (_, seat) => deck.slice(seat * 2, seat * 2 + 2)),
         deck: deck.slice(seats * 2),
         scores: Array.from({ length: seats }, () => 0),
@@ -230,6 +236,7 @@ export function toyGame(): Toy {
       },
       hiddenInformation: true,
       maxActions: (_options, seats) => DECK.length + seats,
+      optionInputs: () => [{}, { open: true }],
       worstCase: (options, seats, rng) => {
         const state = toyGame().setup({ options, seats, rng });
         return [{ state, seat: 0, action: { card: state.hands[0]?.[0] ?? 1 } }];
@@ -264,12 +271,86 @@ function spin(iterations: number): number {
 }
 
 /**
- * The broken fixture modules (02 §6), each with the property the kit must fail it on. Each call
+ * The broken fixture modules (02 §6), each with the property (or `|`-separated properties) the kit
+ * must fail it on. Each call
  * returns a fresh module, so module-level state in one doesn't leak into another test.
  */
 export function brokenFixtures(): Record<string, { property: string; engines: () => GameEngines }> {
   const variant = (change: (toy: Toy) => Toy) => () => asEngines(change(toyGame()));
+  /** Another seat's hand, which `viewer` must never see. */
+  const otherHand = (s: ToyState, viewer: Seat | null): readonly number[] =>
+    s.hands[viewer === null ? 0 : (viewer + 1) % s.seats] ?? [];
   return {
+    "leaks other hands only late in the game": {
+      property: "secrecy",
+      engines: variant((toy) => ({
+        ...toy,
+        view: (s, v) =>
+          s.hands.flat().length <= 2
+            ? { ...toy.view(s, v), peek: otherHand(s, v) }
+            : toy.view(s, v),
+      })),
+    },
+    "leaks other hands only under a non-default option": {
+      property: "secrecy",
+      engines: variant((toy) => ({
+        ...toy,
+        view: (s, v) => (s.open ? { ...toy.view(s, v), peek: otherHand(s, v) } : toy.view(s, v)),
+      })),
+    },
+    "orders a view's keys by hidden state": {
+      property: "secrecy",
+      engines: variant((toy) => ({
+        ...toy,
+        view: (s, v) => {
+          const { hand, ...rest } = toy.view(s, v);
+          return (otherHand(s, v)[0] ?? 0) % 2 === 0 ? { hand, ...rest } : { ...rest, hand };
+        },
+      })),
+    },
+    "records a choice no other seat can see": {
+      property: "secrecy",
+      // Scores are hidden, so the card a seat plays is its secret; the record repeats it.
+      engines: variant((toy) => ({
+        ...toy,
+        view: (s, v) => ({ ...toy.view(s, v), scores: [] }),
+        summary: () => ({ headline: ["Playing"] }),
+        apply: (s, seat, a, rng) => {
+          const { state, record } = toy.apply(s, seat, a, rng);
+          return { state, record: { ...record, card: a.card } };
+        },
+      })),
+    },
+    "never terminates, with a large maxActions": {
+      property: "termination",
+      engines: variant((toy) => ({
+        ...toy,
+        apply: (s, seat, a, rng) => {
+          const { state, record } = toy.apply(s, seat, a, rng);
+          return { state: { ...state, deck: [...state.deck, a.card] }, record };
+        },
+        test: { ...toy.test, maxActions: () => 2000 },
+      })),
+    },
+    "returns an invalid maxActions": {
+      property: "termination",
+      engines: variant((toy) => ({ ...toy, test: { ...toy.test, maxActions: () => 0.5 } })),
+    },
+    "has no legal worst case": {
+      property: "cpu",
+      engines: variant((toy) => ({
+        ...toy,
+        test: {
+          ...toy.test,
+          worstCase: (options, seats, rng) =>
+            toy.test.worstCase(options, seats, rng).map((c) => ({ ...c, action: { card: 99 } })),
+        },
+      })),
+    },
+    "has an empty worst case": {
+      property: "cpu",
+      engines: variant((toy) => ({ ...toy, test: { ...toy.test, worstCase: () => [] } })),
+    },
     "leaks other hands into a view": {
       property: "secrecy",
       engines: variant((toy) => ({
@@ -367,7 +448,8 @@ export function brokenFixtures(): Record<string, { property: string; engines: ()
       engines: variant((toy) => ({ ...toy, toAct: (s) => [s.turn] })),
     },
     "keeps hidden state in a module-level cache shared between games": {
-      property: "isolation",
+      // Whichever check meets the stale entry first: interleaved games, or a perturbed sample.
+      property: "isolation|secrecy",
       engines: () => {
         const toy = toyGame();
         const cache = new Map<string, ToyView>();
@@ -395,6 +477,20 @@ export function brokenFixtures(): Record<string, { property: string; engines: ()
         ...toy,
         validate: (s, seat, a, res) =>
           s.deck.length === 3 ? { code: "NOT_IN_HAND" } : toy.validate(s, seat, a, res),
+      })),
+    },
+    "puts a seat that can't act in a multi-seat toAct": {
+      property: "turns",
+      // The next seat is in toAct too, but only the seat whose turn it is may play.
+      engines: variant((toy) => ({
+        ...toy,
+        toAct: (s) => {
+          const seats = toy.toAct(s);
+          const next = ((seats[0] ?? 0) + 1) % s.seats;
+          return seats.length > 0 && s.out[next] === false ? [...seats, next] : seats;
+        },
+        validate: (s, seat, a, res) =>
+          seat === s.turn ? toy.validate(s, seat, a, res) : { code: "NOT_IN_HAND" },
       })),
     },
     "returns a view that doesn't match its schema": {

@@ -18,14 +18,20 @@ describe("runKit on a correct module", () => {
   it("passes in full mode", () => {
     const report = runKit(asEngines(toyGame()), { ...fast, mode: "full", games: 50 });
     expect(report.failures).toEqual([]);
-    expect(report.games).toBe(100);
+    // 50 games per option set (two) and seat count (two).
+    expect(report.games).toBe(200);
   });
 });
 
 describe("runKit on the broken fixtures (02 §6)", () => {
   it.each(Object.entries(brokenFixtures()))("fails a module that %s", (_name, fixture) => {
-    const report = runKit(fixture.engines(), fast);
-    expect(report.failures.map((failure) => failure.property)).toContain(fixture.property);
+    // Fast mode, stopping at the first failing game: a broken module must fail fast mode, and the
+    // test stays cheap on a slow CI runner.
+    const report = runKit(fixture.engines(), { ...fast, stopAtFirstFailure: true });
+    const properties = report.failures.map((failure) => failure.property);
+    expect(properties.some((property) => fixture.property.split("|").includes(property))).toBe(
+      true,
+    );
     for (const failure of report.failures.filter((f) => f.property !== "manifest")) {
       expect(failure.version).toBe(1);
     }
@@ -41,7 +47,7 @@ describe("runKit's static checks", () => {
     });
     expect(report.failures.filter((f) => f.property === "manifest").map((f) => f.message)).toEqual([
       "rules version 1: hiddenInformation differs between the engine and the manifest",
-      "rules version 1: players 2–3 are outside the manifest's 2–2",
+      "the engines allow 2–3 players over their option inputs, but the manifest says 2–2",
     ]);
   });
 
@@ -178,17 +184,29 @@ describe("runKit's static checks", () => {
     expect(thrown.failures.map((f) => f.message).join("\n")).toMatch(/threw not an error/u);
   });
 
-  it("times worst cases whose action is illegal, and reports ones that throw", () => {
+  it("fails worst cases that aren't real moves, and reports ones that throw", () => {
     const toy = toyGame();
-    const worstCase = (illegal: number) => () => {
-      const state = toy.setup({ options: {}, seats: 2, rng: { nextInt: () => 0 } });
-      return [{ state: { ...state, marker: illegal }, seat: 0, action: { card: 99 } }];
-    };
-    const legal = runKit(asEngines({ ...toy, test: { ...toy.test, worstCase: worstCase(0) } }), {
-      mode: "fast",
-      games: 1,
-    });
-    expect(legal.failures).toEqual([]);
+    const worstCase =
+      (marker: number, card?: number, seat = 0) =>
+      () => {
+        const state = toy.setup({ options: {}, seats: 2, rng: { nextInt: () => 0 } });
+        return [
+          { state: { ...state, marker }, seat, action: { card: card ?? state.hands[0]?.[0] ?? 1 } },
+        ];
+      };
+    const messages = (marker: number, card?: number, seat?: number): string[] =>
+      runKit(
+        asEngines({ ...toy, test: { ...toy.test, worstCase: worstCase(marker, card, seat) } }),
+        {
+          mode: "fast",
+          games: 1,
+        },
+      ).failures.map((f) => f.message);
+    expect(messages(0)).toEqual([]);
+    expect(messages(0, 99)).toContain(
+      "worstCase input 0: the action doesn't validate (NOT_IN_HAND)",
+    );
+    expect(messages(0, undefined, 1)).toContain("worstCase input 0: seat 1 isn't in toAct");
     const throwing = runKit(
       asEngines({
         ...toy,
@@ -203,6 +221,43 @@ describe("runKit's static checks", () => {
     expect(throwing.failures.map((f) => f.message)).toContain(
       "worstCase input 0 threw Error: slow path",
     );
+  });
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+    "refuses a CPU budget of %s, which would pass anything",
+    (cpuBudgetMs) => {
+      const report = runKit(asEngines(toyGame()), { mode: "fast", games: 1, cpuBudgetMs });
+      expect(report.failures.map((f) => f.message)).toContain(
+        `cpuBudgetMs must be a positive number; it is ${String(cpuBudgetMs)}`,
+      );
+    },
+  );
+
+  it("measures against the given CPU budget", () => {
+    // About a millisecond per worst-case call: over a 0.01 ms budget, well within a 10 s one.
+    const toy = toyGame();
+    let sink = 0;
+    const busy = {
+      ...toy,
+      validate: (...args: Parameters<typeof toy.validate>) => {
+        if (args[0].marker === 7) for (let i = 0; i < 300_000; i += 1) sink = (sink + i) % 7919;
+        return toy.validate(...args);
+      },
+      test: {
+        ...toy.test,
+        worstCase: (...args: Parameters<typeof toy.test.worstCase>) =>
+          toy.test.worstCase(...args).map((c) => ({ ...c, state: { ...c.state, marker: 7 } })),
+      },
+    };
+    const run = (cpuBudgetMs: number) =>
+      runKit(asEngines(busy), {
+        mode: "fast",
+        games: 1,
+        optionInputs: [{}],
+        cpuBudgetMs,
+      }).failures.map((f) => f.message);
+    expect(run(0.01).join("\n")).toMatch(/over the 0\.01 ms budget at the 99th percentile/u);
+    expect(run(10_000)).toEqual([]);
   });
 
   it("reports a worstCase that throws", () => {
@@ -228,6 +283,160 @@ describe("runKit's static checks", () => {
       mode: "fast",
       games: 30,
     });
-    expect(report.failures.map((f) => f.message).join("\n")).toMatch(/must change at least half/u);
+    expect(report.failures.map((f) => f.message).join("\n")).toMatch(
+      /changed the state in only 0 of \d+ samples/u,
+    );
+  });
+
+  it("counts a perturbation that only reorders a deck no viewer sees, when no view ever changes", () => {
+    const toy = toyGame();
+    const deckOnly = {
+      ...toy,
+      test: {
+        ...toy.test,
+        perturbHidden: (s: Parameters<typeof toy.view>[0]) => ({
+          ...s,
+          deck: [...s.deck].reverse(),
+        }),
+      },
+    };
+    expect(runKit(asEngines(deckOnly), { mode: "fast", games: 20 }).failures).toEqual([]);
+  });
+
+  it("counts a perturbation only when it changes another viewer's view, once any view can change", () => {
+    const toy = toyGame();
+    // Perturbs other hands only rarely: views change sometimes, but in under half the samples.
+    let calls = 0;
+    const rare = {
+      ...toy,
+      test: {
+        ...toy.test,
+        perturbHidden: (
+          s: Parameters<typeof toy.view>[0],
+          v: number | null,
+          rng: Parameters<typeof toy.test.perturbHidden>[2],
+        ) => {
+          calls += 1;
+          const deck = { ...s, deck: [...s.deck].reverse() };
+          return calls % 5 === 0 ? toy.test.perturbHidden(deck, v, rng) : deck;
+        },
+      },
+    };
+    expect(
+      runKit(asEngines(rare), { mode: "fast", games: 30 })
+        .failures.map((f) => f.message)
+        .join("\n"),
+    ).toMatch(/changed another viewer's view in only/u);
+  });
+});
+
+describe("how runKit makes seats leave (02 §4)", () => {
+  it("declines only when enough seats remain, also resigns seats that haven't acted, and times out only seats that have", () => {
+    const toy = toyGame();
+    const seen = { declines: 0, unactedResigns: 0, timeouts: 0 };
+    const acted = (s: Parameters<typeof toy.view>[0], seat: number) =>
+      (s.hands[seat]?.length ?? 0) < 2 || s.scores[seat] !== 0;
+    const watched = {
+      ...toy,
+      onResign: (...args: Parameters<typeof toy.onResign>) => {
+        const [s, seat, , reason] = args;
+        const playing = s.out.filter((o) => !o).length;
+        if (reason === "decline") {
+          if (playing - 1 < 2) throw new Error("declined below the minimum");
+          seen.declines += 1;
+        } else if (!acted(s, seat)) {
+          seen.unactedResigns += 1;
+        }
+        return toy.onResign(...args);
+      },
+      onTimeout: (...args: Parameters<typeof toy.onTimeout>) => {
+        if (!acted(args[0], args[1])) throw new Error("timed out before acting");
+        seen.timeouts += 1;
+        return toy.onTimeout(...args);
+      },
+    };
+    expect(runKit(asEngines(watched), { mode: "fast", games: 200 }).failures).toEqual([]);
+    expect(seen.declines).toBeGreaterThan(0);
+    expect(seen.unactedResigns).toBeGreaterThan(0);
+    expect(seen.timeouts).toBeGreaterThan(0);
+  });
+});
+
+describe("runKit's test hooks (02 §6)", () => {
+  it("fails a module without test.optionInputs, and plays its defaults", () => {
+    const toy = toyGame();
+    const hooks: Partial<typeof toy.test> = { ...toy.test };
+    delete hooks.optionInputs;
+    const report = runKit(asEngines({ ...toy, test: hooks as typeof toy.test }), {
+      mode: "fast",
+      games: 1,
+    });
+    expect(report.failures.map((f) => f.message)).toEqual([
+      "test.optionInputs is missing: list the option sets the kit must play",
+    ]);
+    expect(report.games).toBe(2);
+  });
+
+  it.each([
+    ["returns none", () => [], "test.optionInputs must return at least one option input"],
+    [
+      "throws",
+      () => {
+        throw new Error("no");
+      },
+      "test.optionInputs threw Error: no",
+    ],
+  ])("fails a module whose test.optionInputs %s", (_name, optionInputs, message) => {
+    const toy = toyGame();
+    const report = runKit(asEngines({ ...toy, test: { ...toy.test, optionInputs } }), {
+      mode: "fast",
+      games: 1,
+    });
+    expect(report.failures.map((f) => f.message)).toEqual([message]);
+  });
+
+  it("plays every option input the module lists, with its context and resources", () => {
+    const toy = toyGame();
+    const seen: unknown[] = [];
+    const contextual = {
+      ...toy,
+      configSchema: toy.actionSchema,
+      validate: (...args: Parameters<typeof toy.validate>) => {
+        seen.push(args[3].dictionary?.id);
+        return toy.validate(...args);
+      },
+      test: {
+        ...toy.test,
+        context: () => ({ config: { card: 1 }, resources: [] }),
+        resources: (options: { open?: boolean | undefined }) => ({
+          dictionary: {
+            id: options.open === true ? "open" : "closed",
+            version: 1,
+            has: () => true,
+          },
+        }),
+      },
+    };
+    const report = runKit(asEngines(contextual), { mode: "fast", games: 1 });
+    expect(report.failures).toEqual([]);
+    expect(report.games).toBe(4);
+    expect(new Set(seen)).toEqual(new Set(["open", "closed", undefined]));
+  });
+
+  it("fails a module whose test.context throws", () => {
+    const toy = toyGame();
+    const report = runKit(
+      asEngines({
+        ...toy,
+        test: {
+          ...toy.test,
+          context: () => {
+            throw new Error("ctx");
+          },
+        },
+      }),
+      { mode: "fast", games: 1 },
+    );
+    expect(report.failures.map((f) => f.message)).toEqual(["test.context threw Error: ctx"]);
   });
 });

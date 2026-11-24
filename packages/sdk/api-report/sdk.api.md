@@ -289,12 +289,15 @@ export const gameStatusSchema: z.ZodEnum<{
 
 // @public
 export interface GameTestHooks<Options, State, Action> {
+    context?(): OptionsContext;
     readonly hiddenInformation: boolean;
     maxActions(options: Options, seats: number): number;
+    optionInputs(ctx: OptionsContext): readonly unknown[];
     perturbHidden(state: State, viewer: Seat | null, rng: RandomSource): State;
     readonly publicRandomness?: boolean;
     randomAction(state: State, seat: Seat, rng: RandomSource, res: Resources): Action;
     randomAnyAction(state: State, seat: Seat, rng: RandomSource): Action;
+    resources?(options: Options): Resources;
     worstCase(options: Options, seats: number, rng: RandomSource): readonly WorstCase<State, Action>[];
 }
 

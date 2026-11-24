@@ -23,8 +23,10 @@ A small card game for 2 to 4 players: play your cards in secret, then reveal the
 
 - Every round, each player still in the game picks one card from their hand and plays it face down. Players pick in any order, and nobody sees a card until everyone has played.
 - Then all the cards are revealed. The highest card scores a point and the lowest card loses a life.
+- Revealed cards stay out of the game.
 - A player with no lives left is out.
-- If the deck still has a card for every player still in, each of them draws one.
+- If the deck doesn't have a card for every player still in, the face-down cards of players who are out are shuffled into it.
+- Then, if the deck has a card for every player still in, each of them draws one.
 
 ## The end
 

@@ -13,7 +13,7 @@ import {
 
 import { at } from "./at.js";
 import { validateStart } from "./options.js";
-import { DECK_SIZE, type Action, type Options } from "./schemas.js";
+import { DECK_SIZE, HAND_SIZE, LIVES, PLAYERS, type Action, type Options } from "./schemas.js";
 import { ascending, copyState, playCard, setup, type State } from "./state.js";
 
 /** A card from `seat`'s hand: legal whenever `seat` is to act. */
@@ -37,8 +37,8 @@ function randomAnyAction(state: State, seat: Seat, rng: RandomSource): Action {
 }
 
 /**
- * Deals every card `viewer` can't see at random into the same places: the deck, the face-down
- * discards and, while the game is in progress, the other seats' hands and secret plays (every
+ * Deals every card `viewer` can't see at random into the same places: the deck (whose order is
+ * hidden, discards reshuffled into it included), the face-down discards and, while the game is in progress, the other seats' hands and secret plays (every
  * seat's for the public viewer). Hand sizes and who has played stay the same, and so does every
  * card the viewer can see.
  */
@@ -66,14 +66,37 @@ function perturbHidden(state: State, viewer: Seat | null, rng: RandomSource): St
   return next;
 }
 
-/** Every action plays a card, and each card is played at most once; each seat leaves at most once. */
+/**
+ * An upper bound on the transitions in a game. Each is a play or a seat leaving, and a seat leaves
+ * at most once. A play ends either revealed, and a revealed card never comes back into play (at
+ * most `DECK_SIZE` such plays), or discarded face down unrevealed, which happens to a seat's play
+ * only when it leaves or the game ends (at most once per seat). Reshuffled discards can be drawn
+ * and played again, but only within this bound, so the game always ends.
+ */
 function maxActions(_options: Options, seats: number): number {
-  return DECK_SIZE + seats;
+  return DECK_SIZE + 2 * seats;
 }
 
 /**
- * The most expensive inputs for the CPU budget (02 §6.6): the last play of a round with the most
- * seats, which resolves the round and refills every hand, and the first play of a round.
+ * The option inputs the kit plays (02 §6): the defaults, the four corners of the two ranges, and
+ * the largest hand the most seats can be dealt, which leaves the deck empty from the start so the
+ * first refill after someone leaves reshuffles.
+ */
+function optionInputs(): readonly unknown[] {
+  return [
+    {},
+    { handSize: HAND_SIZE.min, lives: LIVES.min },
+    { handSize: HAND_SIZE.min, lives: LIVES.max },
+    { handSize: HAND_SIZE.max, lives: LIVES.min },
+    { handSize: HAND_SIZE.max, lives: LIVES.max },
+    { handSize: DECK_SIZE / PLAYERS.max },
+  ];
+}
+
+/**
+ * The most expensive inputs for the CPU budget (02 §6.6): the first play of a round; the last play
+ * of a round with the most seats, which resolves the round and refills every hand; and that play
+ * with the whole deck in the face-down discards, so the refill reshuffles every card left.
  */
 function worstCase(
   options: Options,
@@ -85,11 +108,15 @@ function worstCase(
   const last = seats - 1;
   let state = start;
   for (let seat = 0; seat < last; seat += 1) {
-    state = playCard(state, seat, at(at(state.hands, seat), 0));
+    state = playCard(state, seat, at(at(state.hands, seat), 0), rng);
   }
+  const reshuffle = copyState(state);
+  reshuffle.discards.push(...reshuffle.deck);
+  reshuffle.deck = [];
   return [
     { state: start, seat: 0, action: randomAction(start, 0, rng) },
     { state, seat: last, action: randomAction(state, last, rng) },
+    { state: reshuffle, seat: last, action: randomAction(reshuffle, last, rng) },
   ];
 }
 
@@ -100,4 +127,5 @@ export const testHooks: GameTestHooks<Options, State, Action> = {
   hiddenInformation: true,
   maxActions,
   worstCase,
+  optionInputs,
 };

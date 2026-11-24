@@ -46,6 +46,7 @@ const definition = {
   describe: (r) => [{ seat: r.seat }, r.add === undefined ? " left" : ` added ${String(r.add)}`],
   summary: (s) => ({ headline: [String(s.count)] }),
   test: {
+    optionInputs: () => [{}],
     randomAction: (s, seat, rng) => ({ add: s.count + 2 > TARGET ? 1 : 1 + rng.nextInt(2) }),
     randomAnyAction: (s, seat, rng) => ({ add: 1 + rng.nextInt(2) }),
     perturbHidden: (s) => s,

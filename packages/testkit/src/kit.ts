@@ -35,13 +35,26 @@ import type { KitOptions, KitReport } from "./types.js";
 
 export type { KitFailure, KitMode, KitOptions, KitProperty, KitReport } from "./types.js";
 
-/** Games per package in fast mode, spread over the option sets and seat counts. */
+/** Games per rules version in fast mode, spread over its option sets and seat counts. */
 const FAST_GAMES = 300;
+/** Games per option set and seat count in full mode. */
 const FULL_GAMES = 1000;
-/** Chance per step that a seat leaves (resign, decline or timeout) instead of acting. */
-const EXIT_CHANCE = 40;
+/**
+ * In full mode, games at these positions in each run of {@link EVERY_STEP_PERIOD} are checked for
+ * secrecy at every step: a tenth of the games, one with seats leaving and one without.
+ */
+const EVERY_STEP_PERIOD = 20;
+const EVERY_STEP_SLOTS: ReadonlySet<number> = new Set([0, 11]);
+/** Secrecy samples per game, spread uniformly over the game (02 §6.3). */
+const SAMPLES = { fast: 2, full: 3 } as const;
+/** Exits (resign, decline, timeout) happen at most once per this many steps, on average. */
+const MIN_EXIT_ODDS = 40;
 /** Possibly-illegal actions tried per step and per secrecy sample. */
 const ANY_ACTIONS = 2;
+/** Tries at finding a second legal action that differs from the first (02 §6.3). */
+const OTHER_ACTION_TRIES = 4;
+/** The largest `maxActions` the kit accepts: beyond it, random play can't show termination. */
+const MAX_ACTIONS_CAP = 1_000_000;
 
 interface LogEntry {
   readonly kind: "action" | "resign" | "decline" | "timeout";
@@ -50,30 +63,49 @@ interface LogEntry {
   readonly draws: readonly number[];
 }
 
+/** One in-progress point of a game, kept for a secrecy check after the game ends. */
+interface Sample {
+  readonly state: unknown;
+  readonly toAct: readonly Seat[];
+  readonly acted: readonly Seat[];
+}
+
+/** How one game is played. */
+interface GamePlan {
+  /** Whether seats may leave (resign, decline, time out) during the game. */
+  readonly exits: boolean;
+  /** Whether secrecy is checked at every step rather than at sampled ones. */
+  readonly everyStep: boolean;
+}
+
 /** What a game looked like from outside at one point: used by the isolation check. */
 type Observation = string;
 
 /** Plays games through one engine and checks them (02 §6.2–§6.5, §6.7). */
 class Kit extends Reporter {
   games = 0;
-  /** Secrecy samples taken while a game was in progress, and how many perturbed something. */
+  /**
+   * Secrecy samples taken while a game was in progress; how many changed some other viewer's
+   * view; how many changed the state at all (02 §6.3 non-vacuity).
+   */
   private samples = 0;
-  private perturbed = 0;
+  private viewPerturbed = 0;
+  private statePerturbed = 0;
+  /** The resources of the combo being played (`test.resources`). */
+  private resources: Resources = {};
 
   readonly options: KitOptions;
-  readonly resources: Resources;
 
-  constructor(options: KitOptions, resources: Resources) {
+  constructor(options: KitOptions) {
     super();
     this.options = options;
-    this.resources = resources;
   }
 
   // --- one game ------------------------------------------------------------------------------
 
   /** Plays one seeded game with every per-step check. */
-  play(combo: Combo, seed: number): void {
-    const steps = this.game(combo, seed);
+  play(combo: Combo, seed: number, plan: GamePlan): void {
+    const steps = this.game(combo, seed, plan);
     try {
       while (steps.next().done !== true) {
         // Each step is one transition; nothing to do between them.
@@ -98,13 +130,18 @@ class Kit extends Reporter {
   private *game(
     combo: Combo,
     seed: number,
+    plan: GamePlan,
     observe?: (observation: Observation) => void,
   ): Generator<void, void> {
     const { def, options, seats } = combo;
+    this.resources = combo.resources;
     const where = { version: def.version, seats, seed };
     const rng = seededRandom(seed);
+    // Secrecy samples and their perturbations draw from their own source, so the game is the
+    // same whichever points are sampled.
+    const sampler = seededRandom(seed ^ 0x2545f491);
     const recording = recordRandom(seededRandom(seed ^ 0x5bd1e995));
-    let state: unknown = this.call("replay", "setup", where, () =>
+    let state: unknown = this.call("schema", "setup", where, () =>
       def.setup({ options, seats, rng: recording.rng }),
     );
     state = this.roundTrip(state, "setup", where);
@@ -112,10 +149,11 @@ class Kit extends Reporter {
     const log: LogEntry[] = [];
     const acted = new Set<Seat>();
     const out = new Set<Seat>();
-    const limit = this.call("termination", "maxActions", where, () =>
-      def.test.maxActions(options, seats),
-    );
-    let secrecyBudget = this.options.mode === "full" ? 3 : 1;
+    const limit = this.maxActions(combo, where);
+    // Exits stay rare enough that a game can still run to `maxActions` (02 §6.4).
+    const exitOdds = plan.exits ? Math.max(MIN_EXIT_ODDS, limit) : 0;
+    const reservoir: Sample[] = [];
+    const size = SAMPLES[this.options.mode];
 
     for (let step = 0; ; step += 1) {
       const toAct = this.turns(def, state, seats, out, where);
@@ -130,14 +168,33 @@ class Kit extends Reporter {
         );
         throw new GameAborted();
       }
-      if (secrecyBudget > 0 && rng.nextInt(4) === 0) {
-        secrecyBudget -= 1;
-        this.secrecy(def, state, seats, toAct, acted, rng, where);
+      const sample = { state: jsonClone(state), toAct, acted: [...acted] };
+      if (plan.everyStep) {
+        this.secrecy(combo, sample, sampler, where);
+      } else if (reservoir.length < size) {
+        // Reservoir sampling: every in-progress step is equally likely to be checked, early or
+        // late (02 §6.3).
+        reservoir.push(sample);
+      } else {
+        const slot = sampler.nextInt(step + 1);
+        if (slot < size) reservoir[slot] = sample;
       }
 
+      for (const seat of toAct) this.legalAction(def, state, seat, rng, where);
       const playing = this.playing(def, state, where);
-      const entry = this.transition(def, state, toAct, playing, acted, rng, where, observe);
-      const result = this.call("replay", entry.kind, where, entry.run);
+      const entry = this.transition(
+        combo,
+        state,
+        toAct,
+        playing,
+        acted,
+        rng,
+        exitOdds,
+        where,
+        observe,
+      );
+      // An exception from a transition is a bug (02 §2.1 rule 3).
+      const result = this.call("schema", entry.kind, where, entry.run);
       this.record(def, result.record, where, observe);
       state = this.roundTrip(result.state, entry.kind, where);
       log.push({ ...entry.log, draws: [...entry.draws()] });
@@ -154,16 +211,33 @@ class Kit extends Reporter {
       yield;
     }
     this.replay(def, options, seats, setupDraws, log, state, where);
+    for (const sample of reservoir) this.secrecy(combo, sample, sampler, where);
+  }
+
+  /** `maxActions`, which must be a positive safe integer no larger than the cap (02 §6.4). */
+  private maxActions(combo: Combo, where: Where): number {
+    const { def, options, seats } = combo;
+    const limit = this.call("termination", "maxActions", where, () =>
+      def.test.maxActions(options, seats),
+    );
+    this.check(
+      Number.isSafeInteger(limit) && limit > 0 && limit <= MAX_ACTIONS_CAP,
+      "termination",
+      `maxActions must be a whole number from 1 to ${String(MAX_ACTIONS_CAP)}; it returned ${String(limit)}`,
+      where,
+    );
+    return limit;
   }
 
   /** Chooses and prepares the next transition: usually an action, sometimes a seat leaving. */
   private transition(
-    def: AnyGameDefinition,
+    combo: Combo,
     state: unknown,
     toAct: readonly Seat[],
     playing: readonly Seat[],
     acted: ReadonlySet<Seat>,
     rng: RandomSource,
+    exitOdds: number,
     where: Where,
     observe?: (observation: Observation) => void,
   ): {
@@ -172,10 +246,14 @@ class Kit extends Reporter {
     draws: () => readonly number[];
     kind: string;
   } {
+    const { def } = combo;
     const recording = recordRandom(seededRandom(rng.nextInt(2 ** 32)));
     const leaver = playing[rng.nextInt(Math.max(1, playing.length))];
-    if (leaver !== undefined && rng.nextInt(EXIT_CHANCE) === 0) {
-      if (!acted.has(leaver)) {
+    if (leaver !== undefined && exitOdds > 0 && rng.nextInt(exitOdds) === 0) {
+      // A seat that hasn't acted declines only if enough would remain: otherwise the framework
+      // ends the game as declined without calling the module (02 §4). It may resign instead.
+      const canDecline = !acted.has(leaver) && playing.length - 1 >= combo.min;
+      if (canDecline && rng.nextInt(2) === 0) {
         return {
           kind: "onResign(decline)",
           log: { kind: "decline", seat: leaver },
@@ -183,7 +261,8 @@ class Kit extends Reporter {
           draws: () => recording.draws,
         };
       }
-      if (toAct.includes(leaver) && rng.nextInt(2) === 0) {
+      // Timeouts reach the module only for seats that have acted (02 §4).
+      if (acted.has(leaver) && toAct.includes(leaver) && rng.nextInt(2) === 0) {
         return {
           kind: "onTimeout",
           log: { kind: "timeout", seat: leaver },
@@ -259,10 +338,9 @@ class Kit extends Reporter {
     seat: Seat,
     action: unknown,
     where: Where,
-    res = this.resources,
   ): unknown {
     const verdict = this.call("schema", "validate", where, () =>
-      def.validate(state, seat, action, res),
+      def.validate(state, seat, action, this.resources),
     );
     if (isGameError(verdict)) this.errorCode(def, verdict.code, "validate", where);
     else
@@ -442,15 +520,10 @@ class Kit extends Reporter {
 
   // --- secrecy (02 §6.3) ---------------------------------------------------------------------
 
-  private secrecy(
-    def: AnyGameDefinition,
-    state: unknown,
-    seats: number,
-    toAct: readonly Seat[],
-    acted: ReadonlySet<Seat>,
-    rng: RandomSource,
-    where: Where,
-  ): void {
+  private secrecy(combo: Combo, sample: Sample, rng: RandomSource, where: Where): void {
+    const { def, seats } = combo;
+    const { state, toAct } = sample;
+    const acted = new Set(sample.acted);
     const before = canonical(state);
     for (const viewer of viewers(seats)) {
       const perturbed = this.call("secrecy", "perturbHidden", where, () =>
@@ -462,8 +535,7 @@ class Kit extends Reporter {
         "perturbHidden changed the state it was given",
         where,
       );
-      this.samples += 1;
-      if (canonical(perturbed) !== before) this.perturbed += 1;
+      this.tally(def, state, perturbed, viewer, seats, before, where);
       const who = viewer === null ? "the public" : `seat ${String(viewer)}`;
       const same = (what: string, fn: (s: unknown) => unknown): void => {
         // An exception is a bug whatever the state (02 §2.1 rule 3), so it counts as schema.
@@ -500,13 +572,39 @@ class Kit extends Reporter {
           }
         }
       }
-      this.records(def, state, perturbed, toAct, acted, who, rng, where);
+      this.records(combo, state, perturbed, toAct, acted, who, rng, where);
     }
+    for (const seat of toAct) this.choiceInRecords(def, state, seat, seats, rng, where);
+  }
+
+  /**
+   * Counts a perturbation for the non-vacuity rule (02 §6.3): it counts if it changes what some
+   * other viewer sees (their hand is part of what `viewer` can't see), and, for games whose
+   * hidden information no viewer ever sees (e.g. only deck order), if it changes the state.
+   */
+  private tally(
+    def: AnyGameDefinition,
+    state: unknown,
+    perturbed: unknown,
+    viewer: Seat | null,
+    seats: number,
+    before: string,
+    where: Where,
+  ): void {
+    this.samples += 1;
+    if (canonical(perturbed) !== before) this.statePerturbed += 1;
+    const others = viewers(seats).filter((other) => other !== viewer);
+    const changed = others.some((other) => {
+      const a = this.call("schema", "view", where, () => def.view(state, other));
+      const b = this.call("schema", "view (perturbed)", where, () => def.view(perturbed, other));
+      return !sameJson(a, b);
+    });
+    if (changed) this.viewPerturbed += 1;
   }
 
   /** Records by any seat must be the same on `s` and `s'`, and not depend on the draws (02 §6.3). */
   private records(
-    def: AnyGameDefinition,
+    combo: Combo,
     state: unknown,
     perturbed: unknown,
     toAct: readonly Seat[],
@@ -515,6 +613,7 @@ class Kit extends Reporter {
     rng: RandomSource,
     where: Where,
   ): void {
+    const { def } = combo;
     const transitions: { what: string; run: (s: unknown, r: RandomSource) => unknown }[] = [];
     for (const seat of toAct) {
       const action = this.call("secrecy", "randomAction", where, () =>
@@ -539,7 +638,8 @@ class Kit extends Reporter {
     const playing = this.playing(def, state, where);
     const leaver = playing[rng.nextInt(Math.max(1, playing.length))];
     if (leaver !== undefined) {
-      const reason = acted.has(leaver) ? "resign" : "decline";
+      // As the framework would (02 §4): a seat that hasn't acted declines if enough would remain.
+      const reason = !acted.has(leaver) && playing.length - 1 >= combo.min ? "decline" : "resign";
       transitions.push({
         what: `onResign(${reason}) of seat ${String(leaver)}`,
         run: (s, r) => def.onResign(s, leaver, r, reason).record,
@@ -572,17 +672,70 @@ class Kit extends Reporter {
     }
   }
 
+  /**
+   * A record mustn't show a seat's own secret choice (02 §6.3): two legal actions by `seat` on the
+   * same state that leave every other viewer's view identical must give the same record and
+   * `describe` text.
+   */
+  private choiceInRecords(
+    def: AnyGameDefinition,
+    state: unknown,
+    seat: Seat,
+    seats: number,
+    rng: RandomSource,
+    where: Where,
+  ): void {
+    const pick = (): unknown =>
+      this.call("secrecy", "randomAction", where, () =>
+        def.test.randomAction(state, seat, rng, this.resources),
+      );
+    const first = pick();
+    let second: unknown = first;
+    for (let i = 0; i < OTHER_ACTION_TRIES && sameJson(first, second); i += 1) second = pick();
+    if (sameJson(first, second)) return;
+    const draws = recordRandom(seededRandom(rng.nextInt(2 ** 32)));
+    const fallback = seededRandom(rng.nextInt(2 ** 32));
+    const a = this.call("schema", "apply", where, () =>
+      def.apply(jsonClone(state), seat, first, draws.rng),
+    );
+    const b = this.call("schema", "apply", where, () =>
+      def.apply(jsonClone(state), seat, second, scriptedRandom(draws.draws, fallback)),
+    );
+    const others = viewers(seats).filter((other) => other !== seat);
+    const lookSame = others.every((other) =>
+      sameJson(
+        this.call("schema", "view", where, () => def.view(a.state, other)),
+        this.call("schema", "view", where, () => def.view(b.state, other)),
+      ),
+    );
+    if (!lookSame) return;
+    const textA = this.call("schema", "describe", where, () => def.describe(a.record));
+    const textB = this.call("schema", "describe", where, () => def.describe(b.record));
+    this.check(
+      sameJson(a.record, b.record) && sameJson(textA, textB),
+      "secrecy",
+      `the record of an action by seat ${String(seat)} shows a choice no other seat can see: two actions that look the same to everyone else give different records`,
+      where,
+    );
+  }
+
   /** Whether the perturbation samples were vacuous (02 §6.3). */
   vacuity(def: AnyGameDefinition): void {
-    if (def.test.hiddenInformation && this.samples > 0 && this.perturbed * 2 < this.samples) {
+    const { samples, viewPerturbed, statePerturbed } = this;
+    this.samples = 0;
+    this.viewPerturbed = 0;
+    this.statePerturbed = 0;
+    if (!def.test.hiddenInformation || samples === 0) return;
+    // Views count when any viewer ever sees hidden information; otherwise only the state can.
+    const [counted, what] =
+      viewPerturbed > 0 ? [viewPerturbed, "another viewer's view"] : [statePerturbed, "the state"];
+    if (counted * 2 < samples) {
       this.fail(
         "secrecy",
-        `perturbHidden changed the state in only ${String(this.perturbed)} of ${String(this.samples)} samples taken in progress; it must change at least half`,
+        `perturbHidden changed ${what} in only ${String(counted)} of ${String(samples)} samples taken in progress; it must change at least half`,
         { version: def.version },
       );
     }
-    this.samples = 0;
-    this.perturbed = 0;
   }
 
   // --- replay (02 §5, §6.2) ------------------------------------------------------------------
@@ -615,7 +768,7 @@ class Kit extends Reporter {
     for (const [index, entry] of log.entries()) {
       const rng = replayRandom(entry.draws);
       state = this.call("replay", `replay of transition ${String(index)}`, where, () => {
-        const current = JSON.parse(JSON.stringify(state)) as unknown;
+        const current = jsonClone(state);
         switch (entry.kind) {
           case "action":
             def.validate(current, entry.seat, entry.action, none);
@@ -645,10 +798,13 @@ class Kit extends Reporter {
 
   isolation(combo: Combo, seedA: number, seedB: number): void {
     const where = { version: combo.def.version, seats: combo.seats, seed: seedA };
+    const plan: GamePlan = { exits: true, everyStep: false };
     const run = (seeds: readonly number[]): Observation[][] => {
       const seen = seeds.map((): Observation[] => []);
-      const games = seeds.map((seed, index) => this.game(combo, seed, (o) => seen[index]?.push(o)));
-      const tallies = [this.samples, this.perturbed] as const;
+      const games = seeds.map((seed, index) =>
+        this.game(combo, seed, plan, (o) => seen[index]?.push(o)),
+      );
+      const tallies = [this.samples, this.viewPerturbed, this.statePerturbed] as const;
       this.quietly(() => {
         let live = games.length;
         while (live > 0) {
@@ -662,7 +818,7 @@ class Kit extends Reporter {
           }
         }
       });
-      [this.samples, this.perturbed] = tallies;
+      [this.samples, this.viewPerturbed, this.statePerturbed] = tallies;
       return seen;
     };
     const alone = [...run([seedA]), ...run([seedB])];
@@ -678,44 +834,49 @@ class Kit extends Reporter {
 }
 
 /**
- * Runs the generic test kit (02 §6) over every rules version a package exports.
+ * Runs the generic test kit (02 §6) over every rules version a package exports. Fast mode plays
+ * 300 games per rules version, spread over its option sets and seat counts; full mode plays 1000
+ * per option set and seat count, a tenth of them with secrecy checked at every step. Half the
+ * games have no seat leaving, so long games run to their end (02 §6.4).
  *
  * @public
  */
 export function runKit(engines: GameEngines, options: KitOptions): KitReport {
-  const kit = new Kit(options, options.resources ?? {});
+  const kit = new Kit(options);
   if (options.manifest !== undefined) {
-    for (const message of checkManifest(
-      options.manifest,
-      engines,
-      options.optionInputs ?? [{}],
-      options.context,
-    )) {
+    for (const message of checkManifest(options.manifest, engines, options)) {
       kit.fail("manifest", message);
     }
   }
-  const seed0 = options.seed ?? 1;
-  let seed = seed0;
+  let seed = options.seed ?? 1;
+  const stop = (): boolean => options.stopAtFirstFailure === true && kit.failures.length > 0;
   for (const def of Object.values(engines)) {
     const combos = resolveCombos(kit, def, options);
-    if (combos.length === 0) continue;
     const perCombo =
       options.games ??
-      (options.mode === "full" ? FULL_GAMES : Math.max(3, Math.ceil(FAST_GAMES / combos.length)));
+      (options.mode === "full"
+        ? FULL_GAMES
+        : Math.max(3, Math.ceil(FAST_GAMES / Math.max(1, combos.length))));
     for (const combo of combos) {
-      for (let game = 0; game < perCombo; game += 1) {
+      for (let game = 0; game < perCombo && !stop(); game += 1) {
         seed += 1;
         kit.games += 1;
-        kit.play(combo, seed);
+        kit.play(combo, seed, {
+          // Half the games run without exits, so long games reach their end (02 §6.4).
+          exits: game % 2 === 1,
+          everyStep: options.mode === "full" && EVERY_STEP_SLOTS.has(game % EVERY_STEP_PERIOD),
+        });
       }
-      checkCpu(kit, combo, seed, options, kit.resources);
+      if (stop()) break;
+      checkCpu(kit, combo, seed, options);
       const pairs = options.mode === "full" ? 20 : 3;
-      for (let pair = 0; pair < pairs; pair += 1) {
+      for (let pair = 0; pair < pairs && !stop(); pair += 1) {
         seed += 2;
         kit.isolation(combo, seed - 1, seed);
       }
     }
     kit.vacuity(def);
+    if (stop()) break;
   }
   return { failures: kit.failures, games: kit.games };
 }

@@ -1,13 +1,24 @@
 /**
  * Rules tables for the example game (docs/spec/02-game-framework.md §7.6): dealing, secret plays,
- * round resolution, elimination, exits, the end of the game and the ranking. Every transition is
- * run with a source that throws if drawn from: only `setup` uses randomness.
+ * round resolution, the reshuffle, elimination, exits, the end of the game and the ranking. A
+ * transition that needs no reshuffle is run with a source that throws if drawn from, proving that
+ * only `setup` and the reshuffle use randomness.
  */
+import type { RandomSource } from "@your-move/sdk";
+import { seededRandom } from "@your-move/testkit";
 import { describe, expect, it } from "vitest";
 
-import { allCards, noRandom, OPTIONS, seeded, state } from "../test-support.js";
+import {
+  allCards,
+  noRandom,
+  OPTIONS,
+  recording,
+  replaying,
+  state,
+  type Draw,
+} from "../test-support.js";
 import { exampleV1 as game } from "./definition.js";
-import type { State } from "./state.js";
+import { ascending, type State } from "./state.js";
 
 const ALL = Array.from({ length: 20 }, (_, i) => i + 1);
 
@@ -18,7 +29,7 @@ function play(s: State, seat: number, card: number): State {
 
 describe("setup", () => {
   it("deals every seat a sorted hand from one shuffled deck", () => {
-    const s = game.setup({ options: { handSize: 4, lives: 3 }, seats: 3, rng: seeded(1) });
+    const s = game.setup({ options: { handSize: 4, lives: 3 }, seats: 3, rng: seededRandom(1) });
     expect(s.hands.map((hand) => hand.length)).toEqual([4, 4, 4]);
     for (const hand of s.hands) expect(hand).toEqual([...hand].sort((a, b) => a - b));
     expect(s.deck).toHaveLength(8);
@@ -33,14 +44,15 @@ describe("setup", () => {
   });
 
   it("is deterministic for the same draws and varies with them", () => {
-    const deal = (seed: number) => game.setup({ options: OPTIONS, seats: 2, rng: seeded(seed) });
+    const deal = (seed: number) =>
+      game.setup({ options: OPTIONS, seats: 2, rng: seededRandom(seed) });
     expect(deal(7)).toEqual(deal(7));
     expect(deal(7)).not.toEqual(deal(8));
   });
 
   it("refuses a seat count validateStart refuses", () => {
     expect(() =>
-      game.setup({ options: { handSize: 6, lives: 1 }, seats: 4, rng: seeded(1) }),
+      game.setup({ options: { handSize: 6, lives: 1 }, seats: 4, rng: seededRandom(1) }),
     ).toThrow(/can't deal/u);
   });
 });
@@ -139,7 +151,7 @@ describe("resolving a round", () => {
     expect(allCards(resolved)).toEqual(ALL);
   });
 
-  it("draws nothing when the deck can't give every seat a card", () => {
+  it("draws nothing when the deck can't give every seat a card and nothing is discarded", () => {
     const short = state({
       hands: [
         [1, 5],
@@ -152,6 +164,142 @@ describe("resolving a round", () => {
     expect(next.hands).toEqual([[1], [2], [3]]);
     expect(next.deck).toEqual([19, 20]);
     expect(next.endReason).toBeNull();
+  });
+});
+
+/** Seats 0–2 hold [1, 5], [2, 6], [3, 7]; seat 3 is out; every card not placed is face up. */
+function withOut(deck: number[], discards: number[]): State {
+  const placed = new Set([1, 2, 3, 5, 6, 7, ...deck, ...discards]);
+  return state({
+    hands: [[1, 5], [2, 6], [3, 7], []],
+    status: ["playing", "playing", "playing", "out"],
+    lives: [2, 2, 2, 0],
+    outOrder: [3],
+    deck,
+    discards,
+    faceUp: ALL.filter((card) => !placed.has(card)),
+  });
+}
+
+/** Seats 0–2 play 5, 6 and 7, resolving the round, with `rng` for the refill. */
+function playRound(s: State, rng: RandomSource): State {
+  let next = s;
+  for (const [seat, card] of [
+    [0, 5],
+    [1, 6],
+    [2, 7],
+  ] as const) {
+    next = game.apply(next, seat, { card }, rng).state;
+  }
+  return next;
+}
+
+describe("the reshuffle (02 §2.1 rule 2: randomness during play)", () => {
+  it.each([
+    // [what, deck, discards, reshuffles, deals]
+    [
+      "deals from the deck alone when it holds a card for every seat",
+      [10, 11, 12],
+      [8, 9],
+      false,
+      true,
+    ],
+    ["reshuffles the discards into a short deck, then deals", [10], [8, 9], true, true],
+    ["reshuffles an empty deck and too few discards, and deals nothing", [], [8, 9], true, false],
+    ["draws nothing when the deck is short and nothing is discarded", [10], [], false, false],
+  ])("%s", (_what, deck, discards, reshuffles, deals) => {
+    const s = withOut(deck, discards);
+    const { rng, draws } = recording(seededRandom(7));
+    const next = playRound(s, reshuffles ? rng : noRandom);
+    // Fisher–Yates draws once per card after the first.
+    expect(draws).toHaveLength(reshuffles ? deck.length + discards.length - 1 : 0);
+    expect(next.discards).toEqual(reshuffles ? [] : discards);
+    expect(next.hands.map((hand) => hand.length)).toEqual(deals ? [2, 2, 2, 0] : [1, 1, 1, 0]);
+    const drawn = next.hands.flat().filter((card) => card > 3);
+    expect([...drawn, ...next.deck, ...next.discards].sort(ascending)).toEqual(
+      [...deck, ...discards].sort(ascending),
+    );
+    expect(allCards(next)).toEqual(ALL);
+    expect(next.endReason).toBeNull();
+  });
+
+  it("reshuffles in the eliminated seat's hand in the round it goes out", () => {
+    const s = state({
+      hands: [
+        [1, 5],
+        [2, 6],
+        [3, 7],
+        [4, 8],
+      ],
+      lives: [2, 1, 2, 2],
+      deck: [9, 10],
+      faceUp: [11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+    });
+    const { rng, draws } = recording(seededRandom(3));
+    let next = s;
+    for (const [seat, card] of [
+      [0, 5],
+      [1, 2],
+      [2, 7],
+      [3, 8],
+    ] as const) {
+      next = game.apply(next, seat, { card }, rng).state;
+    }
+    expect(next.status[1]).toBe("out");
+    expect(draws).toHaveLength(2);
+    expect(next.deck).toEqual([]);
+    expect(next.discards).toEqual([]);
+    expect(
+      next.hands
+        .flat()
+        .filter((card) => [6, 9, 10].includes(card))
+        .sort(ascending),
+    ).toEqual([6, 9, 10]);
+    expect(allCards(next)).toEqual(ALL);
+  });
+
+  it.each([
+    ["onResign (resign)", (s: State, rng: RandomSource) => game.onResign(s, 2, rng, "resign")],
+    ["onResign (decline)", (s: State, rng: RandomSource) => game.onResign(s, 2, rng, "decline")],
+    ["onTimeout", (s: State, rng: RandomSource) => game.onTimeout(s, 2, rng)],
+  ])("%s that resolves the round reshuffles the leaving seat's cards in", (_what, leave) => {
+    // Seats 0 and 1 have played; seat 2 leaves, and the deck has one card for two seats.
+    const s = game.apply(withOut([10], []), 0, { card: 5 }, noRandom).state;
+    const waiting = game.apply(s, 1, { card: 6 }, noRandom).state;
+    const { rng, draws } = recording(seededRandom(5));
+    const { state: next } = leave(waiting, rng);
+    expect(draws).toHaveLength(2);
+    expect(next.hands.map((hand) => hand.length)).toEqual([2, 2, 0, 0]);
+    expect(next.deck).toHaveLength(1);
+    expect(next.discards).toEqual([]);
+    expect(allCards(next)).toEqual(ALL);
+  });
+
+  it("replays exactly from the recorded draws (02 §5)", () => {
+    const s = withOut([10], [8, 9]);
+    for (let seed = 0; seed < 10; seed += 1) {
+      const { rng, draws } = recording(seededRandom(seed));
+      const played = playRound(s, rng);
+      const recorded: Draw[] = [...draws];
+      expect(playRound(s, replaying(recorded))).toEqual(played);
+    }
+  });
+
+  it("keeps the record the same for different draws, which deal different cards (02 §6.3)", () => {
+    const waiting = game.apply(
+      game.apply(withOut([10], [8, 9]), 0, { card: 5 }, noRandom).state,
+      1,
+      { card: 6 },
+      noRandom,
+    ).state;
+    const outcomes = Array.from({ length: 10 }, (_, seed) =>
+      game.apply(waiting, 2, { card: 7 }, seededRandom(seed)),
+    );
+    for (const { record } of outcomes) {
+      expect(record).toEqual({ kind: "played", seat: 2, round: 1 });
+    }
+    const deals = new Set(outcomes.map(({ state: next }) => JSON.stringify(next.hands)));
+    expect(deals.size).toBeGreaterThan(1);
   });
 });
 

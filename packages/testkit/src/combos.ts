@@ -57,7 +57,7 @@ export function resolveCombos(
   }
 
   const combos: Combo[] = [];
-  for (const input of kitOptions.optionInputs ?? [{}]) {
+  for (const input of optionInputs(report, def, ctx, kitOptions)) {
     let options: unknown;
     try {
       options = def.resolveOptions(input, ctx);
@@ -102,7 +102,8 @@ export function resolveCombos(
           report.errorCode(def, start.code, "validateStart", where);
         } else {
           playable += 1;
-          combos.push({ def, options, seats });
+          const resources = kitOptions.resources ?? def.test.resources?.(options) ?? {};
+          combos.push({ def, options, seats, min, resources });
         }
       }
       if (playable === 0) {
@@ -119,13 +120,55 @@ export function resolveCombos(
   return combos;
 }
 
-/** What `resolveOptions` sees: the given context, or the module's empty configuration. */
+/**
+ * The option inputs to play: the kit's override, else the module's required `test.optionInputs`
+ * (02 §6). A module without them fails, and is played with its defaults only.
+ */
+function optionInputs(
+  report: Reporter,
+  def: AnyGameDefinition,
+  ctx: OptionsContext,
+  kitOptions: KitOptions,
+): readonly unknown[] {
+  if (kitOptions.optionInputs !== undefined) return kitOptions.optionInputs;
+  const where = { version: def.version };
+  // A JavaScript module may lack the hook its types require.
+  if ((def.test.optionInputs as unknown) === undefined) {
+    report.fail(
+      "schema",
+      "test.optionInputs is missing: list the option sets the kit must play",
+      where,
+    );
+    return [{}];
+  }
+  try {
+    const inputs = def.test.optionInputs(ctx);
+    if (Array.isArray(inputs) && inputs.length > 0) return inputs;
+    report.fail("schema", "test.optionInputs must return at least one option input", where);
+  } catch (error) {
+    report.fail("schema", `test.optionInputs threw ${errorName(error)}`, where);
+  }
+  return [{}];
+}
+
+/**
+ * What `resolveOptions` sees: the kit's override, the module's `test.context`, or the module's
+ * empty configuration with no resources.
+ */
 function context(
   report: Reporter,
   def: AnyGameDefinition,
   kitOptions: KitOptions,
 ): OptionsContext | null {
   if (kitOptions.context !== undefined) return kitOptions.context;
+  if (def.test.context !== undefined) {
+    try {
+      return def.test.context();
+    } catch (error) {
+      report.fail("schema", `test.context threw ${errorName(error)}`, { version: def.version });
+      return null;
+    }
+  }
   const config = def.configSchema.safeParse({});
   if (!config.success) {
     report.fail("schema", "configSchema doesn't accept an empty configuration; pass context", {

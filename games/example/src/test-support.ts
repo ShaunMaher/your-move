@@ -1,6 +1,7 @@
 /**
- * Test helpers for the example package: a seeded `RandomSource`, a state builder for rules tables
- * and a game envelope for client tests. Never imported by the engine, client or manifest, and left
+ * Test helpers for the example package: random sources that refuse, record or replay draws, a state
+ * builder for rules tables and a game envelope for client tests. Seeded randomness comes from the
+ * testkit's `seededRandom`. Never imported by the engine, client or manifest, and left
  * out of the published files.
  */
 import type { GameEnvelope, RandomSource } from "@your-move/sdk";
@@ -8,27 +9,49 @@ import type { GameEnvelope, RandomSource } from "@your-move/sdk";
 import { DECK_SIZE, type Options } from "./engine/schemas.js";
 import type { State } from "./engine/state.js";
 
-/** A deterministic source (mulberry32) for tests only; never for real games (08 T10). */
-export function seeded(seed: number): RandomSource {
-  let a = seed >>> 0;
-  return {
-    nextInt(maxExclusive) {
-      a = (a + 0x6d2b79f5) >>> 0;
-      let t = a;
-      t = Math.imul(t ^ (t >>> 15), t | 1);
-      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-      const value = ((t ^ (t >>> 14)) >>> 0) / 2 ** 32;
-      return Math.floor(value * maxExclusive);
-    },
-  };
-}
-
 /** A source that must never be drawn from: proves a transition uses no randomness. */
 export const noRandom: RandomSource = {
   nextInt() {
     throw new Error("drew a random value");
   },
 };
+
+/** One recorded draw: the range asked for and the value drawn. */
+export interface Draw {
+  readonly maxExclusive: number;
+  readonly value: number;
+}
+
+/** Wraps `rng` so every value drawn is recorded in `draws`, as the framework does (02 §2.1 rule 2). */
+export function recording(rng: RandomSource): { rng: RandomSource; draws: Draw[] } {
+  const draws: Draw[] = [];
+  return {
+    draws,
+    rng: {
+      nextInt(maxExclusive) {
+        const value = rng.nextInt(maxExclusive);
+        draws.push({ maxExclusive, value });
+        return value;
+      },
+    },
+  };
+}
+
+/**
+ * Replays recorded draws, as replay does (02 §5): it fails if the transition asks for a draw that
+ * wasn't recorded or for a different range.
+ */
+export function replaying(draws: readonly Draw[]): RandomSource {
+  let next = 0;
+  return {
+    nextInt(maxExclusive) {
+      const draw = draws[next];
+      next += 1;
+      if (draw?.maxExclusive !== maxExclusive) throw new Error("replay asked for another draw");
+      return draw.value;
+    },
+  };
+}
 
 /** The default options. */
 export const OPTIONS: Options = { handSize: 3, lives: 2 };

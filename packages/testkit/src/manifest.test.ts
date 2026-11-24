@@ -30,14 +30,51 @@ describe("checkManifest", () => {
       "manifest icon: is empty",
       'rules version 1: engine type "other" differs from manifest type "Bad"',
       "rules version 1: hiddenInformation differs between the engine and the manifest",
-      "rules version 1: players 2–3 are outside the manifest's 3–3",
       "rules version 2: the definition says version 3",
       'rules version 2: engine type "toy" differs from manifest type "Bad"',
       "rules version 2: hiddenInformation differs between the engine and the manifest",
       "rules version 2: the manifest has no rules text for it",
-      "rules version 2: players 2–3 are outside the manifest's 3–3",
       'rules version 2: requests a "dictionary" resource the manifest doesn\'t list',
+      "the engines allow 2–3 players over their option inputs, but the manifest says 3–3",
     ]);
+  });
+
+  it("requires the manifest's players to equal the union of the engines' bounds", () => {
+    const toy = toyGame();
+    const narrow = { ...toy, players: () => ({ min: 2, max: 2 }) };
+    expect(checkManifest(toyManifest, { 1: narrow })).toEqual([
+      "the engines allow 2–2 players over their option inputs, but the manifest says 2–3",
+    ]);
+    const byOption = {
+      ...toy,
+      players: (options: { open?: boolean | undefined }) => ({
+        min: 2,
+        max: options.open === true ? 3 : 2,
+      }),
+    };
+    expect(checkManifest(toyManifest, { 1: byOption })).toEqual([]);
+    expect(checkManifest(toyManifest, { 1: byOption }, { optionInputs: [{}] })).toHaveLength(1);
+  });
+
+  it("uses the module's test.context, or the override", () => {
+    const toy = toyGame();
+    const withContext = {
+      ...toy,
+      configSchema: toy.actionSchema,
+      test: { ...toy.test, context: () => ({ config: { card: 1 }, resources: [] }) },
+    };
+    expect(
+      checkManifest({ ...toyManifest, players: { min: 1, max: 1 } }, { 1: withContext }),
+    ).toHaveLength(1);
+    expect(
+      checkManifest(
+        { ...toyManifest, players: { min: 1, max: 1 } },
+        { 1: { ...toy, configSchema: toy.actionSchema } },
+        {
+          context: { config: {}, resources: [] },
+        },
+      ),
+    ).toHaveLength(1);
   });
 
   it("accepts resource requests of a kind the manifest lists", () => {
@@ -58,7 +95,9 @@ describe("checkManifest", () => {
         throw new Error("x");
       },
     };
-    expect(checkManifest(toyManifest, { 1: throwing }, [{}, { bad: 1 }])).toEqual([]);
+    expect(checkManifest(toyManifest, { 1: throwing }, { optionInputs: [{}, { bad: 1 }] })).toEqual(
+      [],
+    );
     const refusing = {
       ...toy,
       resolveOptions: () => {

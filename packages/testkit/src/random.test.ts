@@ -38,11 +38,12 @@ describe("scriptedRandom", () => {
 });
 
 describe("canonical JSON", () => {
-  it("sorts object keys at every depth", () => {
+  it("keeps key order, which reaches clients as it is", () => {
     expect(canonical({ b: 1, a: { d: [1, { f: 1, e: 2 }], c: 2 } })).toBe(
-      '{"a":{"c":2,"d":[1,{"e":2,"f":1}]},"b":1}',
+      '{"b":1,"a":{"d":[1,{"f":1,"e":2}],"c":2}}',
     );
-    expect(sameJson({ a: 1, b: 2 }, { b: 2, a: 1 })).toBe(true);
+    expect(sameJson({ a: 1, b: 2 }, { a: 1, b: 2 })).toBe(true);
+    expect(sameJson({ a: 1, b: 2 }, { b: 2, a: 1 })).toBe(false);
     expect(canonical(undefined)).toBe("undefined");
     expect(sameJson(undefined, null)).toBe(false);
   });

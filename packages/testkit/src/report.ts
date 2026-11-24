@@ -2,7 +2,7 @@
  * How the kit records failures and calls into a module: every exception from module code is a
  * failure (errors are values, 02 §2.1 rule 3), and a game stops at its first failure.
  */
-import { isGameError, type AnyGameDefinition, type Seat } from "@your-move/sdk";
+import { isGameError, type AnyGameDefinition, type Resources, type Seat } from "@your-move/sdk";
 
 import { sameJson } from "./canonical.js";
 import type { KitFailure, KitProperty } from "./types.js";
@@ -18,6 +18,10 @@ export interface Combo {
   readonly def: AnyGameDefinition;
   readonly options: unknown;
   readonly seats: number;
+  /** `players(options).min`: a decline that would leave fewer playing ends the game instead. */
+  readonly min: number;
+  /** What `validate` and `preview` get in these games (`test.resources`, 02 §6). */
+  readonly resources: Resources;
 }
 
 /** Where a failure happened. */

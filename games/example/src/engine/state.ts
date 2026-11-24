@@ -3,9 +3,14 @@
  *
  * Every round is one simultaneous secret phase: each playing seat plays one card face down, in any
  * order (02 §2.3). When the last one has played, the cards are revealed: the highest card scores a
- * point and the lowest loses a life, and a seat with no lives left is out. If the deck can give
- * every playing seat a card, each draws one, so the playing seats always hold equally many cards.
- * The game ends when at most one seat is playing or the playing seats' hands are empty.
+ * point and the lowest loses a life, and a seat with no lives left is out. Revealed cards stay out
+ * of play for good. If the deck can't give every playing seat a card, the face-down discards (the
+ * cards of seats that left) are shuffled into it; then, if it can, each playing seat draws one, so
+ * the playing seats always hold equally many cards. The game ends when at most one seat is playing
+ * or the playing seats' hands are empty.
+ *
+ * The reshuffle is the only random draw after `setup`, so the example exercises per-transition
+ * draws (02 §2.1 rule 2, §5) without ever letting a draw reach a record (§6.3).
  *
  * State is plain JSON data (it is stored as JSON, 02 §5). Transitions never change their input:
  * they copy it with {@link copyState} and change the copy.
@@ -110,12 +115,15 @@ export function toAct(state: State): Seat[] {
   return playingSeats(state).filter((seat) => state.pending[seat] === null);
 }
 
-/** Plays `card` from `seat`'s hand face down; the last play of a round resolves it. */
-export function playCard(state: State, seat: Seat, card: number): State {
+/**
+ * Plays `card` from `seat`'s hand face down; the last play of a round resolves it. `rng` is drawn
+ * from only if the refill needs a reshuffle.
+ */
+export function playCard(state: State, seat: Seat, card: number, rng: RandomSource): State {
   const next = copyState(state);
   next.hands[seat] = at(next.hands, seat).filter((held) => held !== card);
   next.pending[seat] = card;
-  settle(next);
+  settle(next, rng);
   return next;
 }
 
@@ -123,11 +131,11 @@ export function playCard(state: State, seat: Seat, card: number): State {
  * Takes `seat` out of the game (resigned, declined or timed out): its hand and any secret play
  * this round are discarded face down. If everyone left has already played, the round resolves.
  */
-export function removeSeat(state: State, seat: Seat): State {
+export function removeSeat(state: State, seat: Seat, rng: RandomSource): State {
   const next = copyState(state);
   if (next.endReason !== null || next.status[seat] !== "playing") return next;
   knockOut(next, seat);
-  settle(next);
+  settle(next, rng);
   return next;
 }
 
@@ -142,9 +150,10 @@ function knockOut(state: State, seat: Seat): void {
 
 /**
  * Brings the state to rest after a play or an exit: ends the game if at most one seat is left;
- * otherwise, once every playing seat has played, resolves the round and refills the hands.
+ * otherwise, once every playing seat has played, resolves the round and refills the hands,
+ * reshuffling the discards into a deck too small to give every playing seat a card.
  */
-function settle(state: State): void {
+function settle(state: State, rng: RandomSource): void {
   if (playingSeats(state).length > 1) {
     if (toAct(state).length > 0) return;
     resolveRound(state);
@@ -153,6 +162,11 @@ function settle(state: State): void {
   if (playing.length <= 1) {
     end(state, "last-standing");
     return;
+  }
+  if (state.deck.length < playing.length && state.discards.length > 0) {
+    // The deck order is hidden, so the discards go in shuffled together with what is left.
+    state.deck = shuffle([...state.deck, ...state.discards], rng);
+    state.discards = [];
   }
   if (state.deck.length >= playing.length) {
     for (const seat of playing) {

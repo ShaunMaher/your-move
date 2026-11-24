@@ -8,6 +8,7 @@ import {
   type GameDefinition,
   type GameError,
   type Ok,
+  type RandomSource,
   type Seat,
   type Transition,
 } from "@your-move/sdk";
@@ -56,8 +57,13 @@ function preview(state: State, seat: Seat, action: Action): PreviewResult | Game
 }
 
 /** A seat leaves (02 §4): the record names only the seat and why, so it hides nothing. */
-function exit(state: State, seat: Seat, record: PublicRecord): Transition<State, PublicRecord> {
-  return { state: removeSeat(state, seat), record };
+function exit(
+  state: State,
+  seat: Seat,
+  rng: RandomSource,
+  record: PublicRecord,
+): Transition<State, PublicRecord> {
+  return { state: removeSeat(state, seat, rng), record };
 }
 
 /** The example game's definition type, with its own option, state, action and view types. */
@@ -89,15 +95,15 @@ export const exampleV1: ExampleGame = {
   toAct,
   seatStatus: (state) => [...state.status],
   validate,
-  // Randomness is used only to shuffle at setup: no transition draws, so no record can show a
-  // draw (02 §2.1 rule 2, §6.3).
-  apply: (state, seat, action) => ({
-    state: playCard(state, seat, action.card),
+  // Every transition may draw (a reshuffle when the hands are refilled, 02 §2.1 rule 2), but
+  // the records never show a card or the deck, so they are the same for any draws (§6.3).
+  apply: (state, seat, action, rng) => ({
+    state: playCard(state, seat, action.card, rng),
     record: { kind: "played", seat, round: state.round },
   }),
-  onResign: (state, seat, _rng, reason) =>
-    exit(state, seat, { kind: reason === "decline" ? "declined" : "resigned", seat }),
-  onTimeout: (state, seat) => exit(state, seat, { kind: "timedOut", seat }),
+  onResign: (state, seat, rng, reason) =>
+    exit(state, seat, rng, { kind: reason === "decline" ? "declined" : "resigned", seat }),
+  onTimeout: (state, seat, rng) => exit(state, seat, rng, { kind: "timedOut", seat }),
   result,
 
   view,

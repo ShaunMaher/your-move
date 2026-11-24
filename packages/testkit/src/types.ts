@@ -4,8 +4,9 @@
 import type { GameManifest, OptionsContext, Resources } from "@your-move/sdk";
 
 /**
- * `fast`: a few hundred games per package (`pnpm games:verify --fast`); `full`: a thousand games per
- * option set and seat count (CI's test stage and each game package's own CI), 02 §6.
+ * `fast`: 300 games per rules version, spread over its option inputs and seat counts
+ * (`pnpm games:verify --fast`); `full`: 1000 games per option input and seat count (CI's test stage
+ * and each game package's own CI), 02 §6.
  *
  * @public
  */
@@ -44,18 +45,26 @@ export interface KitOptions {
   readonly mode: KitMode;
   /** The package's manifest: when given, it must agree with every engine (02 §7.2). */
   readonly manifest?: GameManifest;
-  /** Option inputs to resolve and play, each with every allowed seat count. Default `[{}]`. */
+  /** Option inputs to play, overriding the module's `test.optionInputs`. */
   readonly optionInputs?: readonly unknown[];
-  /** What `resolveOptions` and `catalog` see. Default: `configSchema` parsed from `{}`, no resources. */
+  /** What `resolveOptions` and `catalog` see, overriding the module's `test.context`. */
   readonly context?: OptionsContext;
-  /** Resources passed to `validate` and `preview` while playing (replay always uses none). */
+  /**
+   * Resources for `validate` and `preview` while playing, overriding the module's
+   * `test.resources` (replay always uses none).
+   */
   readonly resources?: Resources;
   /** The first seed; game `n` uses `seed + n`. Default 1. */
   readonly seed?: number;
   /** Games per option set and seat count, overriding the mode's number. */
   readonly games?: number;
-  /** Per-call CPU budget in milliseconds for `worstCase` inputs (08 T25). Default 5. */
+  /**
+   * Per-call CPU budget in milliseconds for `worstCase` inputs (08 T25), measured on the host
+   * running the kit. Default 5.
+   */
   readonly cpuBudgetMs?: number;
+  /** Stop at the first failing game instead of playing on: for tests of modules that must fail. */
+  readonly stopAtFirstFailure?: boolean;
 }
 
 /**

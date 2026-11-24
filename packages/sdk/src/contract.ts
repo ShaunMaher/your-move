@@ -217,6 +217,19 @@ export interface GameTestHooks<Options, State, Action> {
   ): readonly WorstCase<State, Action>[];
   /** Whether records legitimately show random draws (e.g. dice). */
   readonly publicRandomness?: boolean;
+  /**
+   * The option inputs the kit plays, each with every seat count `players` and `validateStart`
+   * allow (02 §6). Required and non-empty: list the defaults (`{}`) and enough other inputs to
+   * reach every rule an option changes (rulesets, variants, the corners of each range).
+   */
+  optionInputs(ctx: OptionsContext): readonly unknown[];
+  /**
+   * What `resolveOptions`, `catalog` and `checkConfig` see in the kit. Default: `configSchema`
+   * parsed from `{}`, and no resources.
+   */
+  context?(): OptionsContext;
+  /** The resources `validate` and `preview` get in a game with these options. Default: none. */
+  resources?(options: Options): Resources;
 }
 
 /**
