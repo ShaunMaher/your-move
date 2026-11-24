@@ -64,6 +64,9 @@ its own `removals.txt` (a test checks it), and the build applies both.
   `bytes` of `words.txt`, and `skipped` (upstream lines dropped for their length or characters);
 - `index.json`: every manifest; the runtime reads it through `parseIndex`.
 
+Tests elsewhere in the workspace that need a real list (the words engine's property tests) build
+one in memory, writing nothing, with `buildBuiltin(id)` from `@your-move/dictionary/builder`.
+
 Sizes of `enable` version 1: 168,493 words (4,272 upstream words longer than 15 letters dropped,
 55 removed); `words.txt` 1,665,683 bytes, gzip 440,243 bytes, brotli 358,236 bytes. The committed
 `source.txt` is 1,743,327 bytes. The build takes about 2.5 s, most of it brotli.
