@@ -5,6 +5,14 @@
  */
 import { asc, eq, inArray } from "drizzle-orm";
 
+import {
+  apiTokenRepo,
+  authEventRepo,
+  otpRepo,
+  rateLimitRepo,
+  sessionRepo,
+  userRepo,
+} from "./auth-repos.js";
 import { type Database, runBatch } from "./database.js";
 import { transitionStatements } from "./queries/transition.js";
 import type {
@@ -13,23 +21,8 @@ import type {
   NewGame,
   NewGamePlayer,
   Repositories,
-  UserRepo,
 } from "./repositories.js";
-import { gameActions, gamePlayers, games, users } from "./schema.js";
-
-function userRepo(db: Database): UserRepo {
-  return {
-    async create(user) {
-      await db.insert(users).values(user);
-    },
-    async findById(id) {
-      return (await db.select().from(users).where(eq(users.id, id)).get()) ?? null;
-    },
-    async findByEmail(email) {
-      return (await db.select().from(users).where(eq(users.email, email)).get()) ?? null;
-    },
-  };
-}
+import { gameActions, gamePlayers, games } from "./schema.js";
 
 function gameRepo(db: Database): GameRepo {
   return {
@@ -77,5 +70,13 @@ function gameRepo(db: Database): GameRepo {
 
 /** The repositories over one adapter's database. */
 export function createRepositories(db: Database): Repositories {
-  return { users: userRepo(db), games: gameRepo(db) };
+  return {
+    users: userRepo(db),
+    games: gameRepo(db),
+    otp: otpRepo(db),
+    sessions: sessionRepo(db),
+    rateLimits: rateLimitRepo(db),
+    authEvents: authEventRepo(db),
+    apiTokens: apiTokenRepo(db),
+  };
 }

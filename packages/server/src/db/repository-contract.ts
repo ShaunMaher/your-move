@@ -8,6 +8,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { address, authRepositoryContract } from "./auth-contract.js";
 import type {
   GamePlayerRecord,
   GameWriteSet,
@@ -111,10 +112,12 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
       await target.close();
     });
 
+    authRepositoryContract(() => repos);
+
     describe("users", () => {
       it("creates and finds a user by id and by email", async () => {
         const id = crypto.randomUUID();
-        const email = `${id}@example.org`;
+        const email = address(id);
         await repos.users.create({ id, email, createdAt: T0, updatedAt: T0 });
         const byId = await repos.users.findById(id);
         expect(byId).toMatchObject({
@@ -127,11 +130,11 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         });
         expect(await repos.users.findByEmail(email)).toEqual(byId);
         expect(await repos.users.findById(crypto.randomUUID())).toBeNull();
-        expect(await repos.users.findByEmail(`${crypto.randomUUID()}@example.org`)).toBeNull();
+        expect(await repos.users.findByEmail(address(crypto.randomUUID()))).toBeNull();
       });
 
       it("refuses a second user with the same email", async () => {
-        const email = `${crypto.randomUUID()}@example.org`;
+        const email = address(crypto.randomUUID());
         await repos.users.create({ id: crypto.randomUUID(), email, createdAt: T0, updatedAt: T0 });
         await expect(
           repos.users.create({ id: crypto.randomUUID(), email, createdAt: T0, updatedAt: T0 }),
@@ -142,7 +145,7 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         const owner = crypto.randomUUID();
         await repos.users.create({
           id: owner,
-          email: `${owner}@example.org`,
+          email: address(owner),
           createdAt: T0,
           updatedAt: T0,
         });
@@ -193,7 +196,7 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         const user = crypto.randomUUID();
         await repos.users.create({
           id: user,
-          email: `${user}@example.org`,
+          email: address(user),
           createdAt: T0,
           updatedAt: T0,
         });
