@@ -27,10 +27,14 @@ RUN pnpm games:generate \
  && pnpm --filter @your-move/web build \
  && pnpm --filter @your-move/node build \
  && pnpm games:check-inputs --only web,node
-# Production dependencies only (08 §6). The server bundle is self-contained today; this keeps the
-# image right once native modules (the SQLite driver, M2) are external.
+# Production dependencies only (08 §6), so the image's SBOM lists them. The server bundle is
+# self-contained (SQLite is Node's built-in node:sqlite, no native module), so nothing loads from
+# node_modules at runtime: its type declarations and source maps are dropped to keep the image
+# small.
 RUN pnpm --filter @your-move/node deploy --prod /deploy \
  && rm -rf /deploy/src /deploy/scripts /deploy/tsconfig.json /deploy/Dockerfile \
+ && find /deploy/node_modules -type f \
+      \( -name '*.d.ts' -o -name '*.d.cts' -o -name '*.d.mts' -o -name '*.map' \) -delete \
  && cp -r apps/node/dist /deploy/dist
 
 FROM ${NODE_IMAGE} AS runtime
