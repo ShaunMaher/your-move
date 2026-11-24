@@ -5,7 +5,7 @@
  * Tiles: table A, 100 tiles including 2 blanks.
  *
  * Premium layout: our own arrangement (Q15), symmetric under a quarter turn (but not a mirror),
- * keeping the reference game's counts and density:
+ * with no two premium squares side by side, keeping the reference game's counts and density:
  *   8 TW · 17 DW (including the start square) · 12 TL · 24 DL = 61 premium squares.
  */
 import type { RulesetData } from "../schema.js";
@@ -56,20 +56,20 @@ export const classicV1 = {
   },
   // . normal · d DL · t TL · D DW · T TW
   premiums: [
-    "..d.T...d...T..",
-    "..D....t.......",
-    "T..d.d..dD...Dd",
-    "....t.D...D.d..",
-    "...D.....t.t..T",
-    "..D.t.......d..",
-    "d.d....d...D...",
-    ".t....dDd....t.",
-    "...D...d....d.d",
-    "..d.......t.D..",
-    "T..t.t.....D...",
-    "..d.D...D.t....",
-    "dD...Dd..d.d..T",
-    ".......t....D..",
-    "..T...d...T.d..",
+    "..T..d....T....",
+    "....d...t..D...",
+    ".....D.d.t....T",
+    ".D....t.D.d....",
+    "T..d.D.d.....d.",
+    "..t...d...D.D.d",
+    ".t.D.....d.t...",
+    "..d.d..D..d.d..",
+    "...t.d.....D.t.",
+    "d.D.D...d...t..",
+    ".d.....d.D.d..T",
+    "....d.D.t....D.",
+    "T....t.d.D.....",
+    "...D..t...d....",
+    "....T....d..T..",
   ],
 } satisfies RulesetData;

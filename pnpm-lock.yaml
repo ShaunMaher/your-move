@@ -548,6 +548,9 @@ importers:
 
   games/words:
     devDependencies:
+      '@your-move/dictionary':
+        specifier: workspace:*
+        version: link:../../packages/dictionary
       '@your-move/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk

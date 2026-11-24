@@ -7,10 +7,11 @@
 import { z } from "@your-move/sdk/schema";
 
 /**
- * The longest word any dictionary keeps (words §9.1). A ruleset's board can't be larger, or
- * words that fit it would be missing from every dictionary.
+ * The largest board a ruleset may have: the longest word the dictionaries keep (words §9.1), or
+ * words that fit the board would be missing from every dictionary. Raising it means raising the
+ * dictionaries' `MAX_WORD_LENGTH` with it; a test ties the two.
  */
-const MAX_BOARD_SIZE = 15;
+export const MAX_BOARD_SIZE = 15;
 
 /** The blank's tile code (words §3.1). */
 const BLANK = "?";
@@ -88,6 +89,23 @@ export function isQuarterTurnSymmetric(premiums: readonly string[]): boolean {
   return premiums.every((row, index) => row === rotated[index]);
 }
 
+/** The premium squares that have another premium square directly beside or below them. */
+export function adjacentPremiums(premiums: readonly string[]): [number, number][] {
+  const premium = (row: number, col: number): boolean => {
+    const code = premiums[row]?.[col];
+    return code !== undefined && code !== ".";
+  };
+  const found: [number, number][] = [];
+  premiums.forEach((line, row) => {
+    for (let col = 0; col < line.length; col += 1) {
+      if (premium(row, col) && (premium(row, col + 1) || premium(row + 1, col))) {
+        found.push([row, col]);
+      }
+    }
+  });
+  return found;
+}
+
 /** How many squares of each premium a layout has, the start square included. */
 export function premiumCounts(premiums: readonly string[]): Record<Premium, number> {
   const counts: Record<Premium, number> = { DL: 0, TL: 0, DW: 0, TW: 0 };
@@ -119,6 +137,10 @@ export const rulesetSchema = rulesetObject.superRefine((ruleset, ctx) => {
   ) {
     issue("the premium layout must be symmetric under a quarter turn", ["premiums"]);
   }
+  if (adjacentPremiums(ruleset.premiums).length > 0) {
+    // Premiums never stack in one short word (words §8.2), the start square's included.
+    issue("no two premium squares may be orthogonally adjacent", ["premiums"]);
+  }
   const [row, col] = ruleset.start;
   if (row >= size || col >= size) issue("the start square must be on the board", ["start"]);
   if (ruleset.maxPlayers < ruleset.minPlayers) {
@@ -141,5 +163,10 @@ export const rulesetSchema = rulesetObject.superRefine((ruleset, ctx) => {
   }
 });
 
-/** A validated ruleset (words §8.1). */
-export type Ruleset = z.output<typeof rulesetSchema>;
+/** `T` with every nested property and element read-only. */
+export type DeepReadonly<T> = T extends object
+  ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+  : T;
+
+/** A validated ruleset (words §8.1); the registry deep-freezes it, and the type says so. */
+export type Ruleset = DeepReadonly<z.output<typeof rulesetSchema>>;

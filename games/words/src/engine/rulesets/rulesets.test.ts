@@ -1,8 +1,13 @@
+import { MAX_WORD_LENGTH } from "@your-move/dictionary";
 import { describe, expect, it } from "vitest";
 
+import * as casualModule from "./casual/v1.js";
+import * as classicModule from "./classic/v1.js";
 import { createRegistry, findRuleset, latestRuleset, RULESETS } from "./index.js";
 import {
+  adjacentPremiums,
   isQuarterTurnSymmetric,
+  MAX_BOARD_SIZE,
   premiumCounts,
   rotatePremiums,
   rulesetSchema,
@@ -95,6 +100,21 @@ describe.each(MVP)("ruleset $id (words §8.3)", (expected) => {
   it("has a premium layout symmetric under a quarter turn", () => {
     expect(isQuarterTurnSymmetric(r.premiums)).toBe(true);
   });
+
+  it("has no two premium squares side by side, the start square included", () => {
+    expect(adjacentPremiums(r.premiums)).toStrictEqual([]);
+  });
+
+  it("is deep-frozen, so no game can change the shared copy", () => {
+    expect(Object.isFrozen(r)).toBe(true);
+    expect(Object.isFrozen(r.tiles)).toBe(true);
+    expect(Object.isFrozen(r.tiles["a"])).toBe(true);
+    expect(Object.isFrozen(r.premiums)).toBe(true);
+    expect(Object.isFrozen(r.start)).toBe(true);
+    expect(() => {
+      (r.tiles as Record<string, { count: number }>)["a"]!.count = 99;
+    }).toThrow(TypeError);
+  });
 });
 
 it("registers exactly the two MVP rulesets, one version each", () => {
@@ -107,6 +127,20 @@ it("registers exactly the two MVP rulesets, one version each", () => {
 
 it("keeps the two MVP layouts different from each other", () => {
   expect(ruleset("classic").premiums).not.toStrictEqual(ruleset("casual").premiums);
+});
+
+it("has each ruleset module export exactly its one ruleset, which is what is registered", () => {
+  for (const [module, name, id] of [
+    [classicModule, "classicV1", "classic"],
+    [casualModule, "casualV1", "casual"],
+  ] as const) {
+    expect(Object.keys(module)).toStrictEqual([name]);
+    expect(rulesetSchema.parse(Object.values(module)[0])).toStrictEqual(ruleset(id));
+  }
+});
+
+it("caps the board at the dictionaries' longest word, so the two move together (words §9.1)", () => {
+  expect(MAX_BOARD_SIZE).toBe(MAX_WORD_LENGTH);
 });
 
 describe("premium helpers", () => {
@@ -125,6 +159,23 @@ describe("premium helpers", () => {
     { premiums: [".d.", "d.d", ".d."], symmetric: true },
   ])("$premiums is quarter-turn symmetric: $symmetric", ({ premiums, symmetric }) => {
     expect(isQuarterTurnSymmetric(premiums)).toBe(symmetric);
+  });
+
+  it.each([
+    { premiums: ["d.d", ".D.", "d.d"], adjacent: [] },
+    {
+      premiums: [".d.", "dDd", ".d."],
+      adjacent: [
+        [0, 1],
+        [1, 0],
+        [1, 1],
+      ],
+    },
+    { premiums: ["Tt", ".."], adjacent: [[0, 0]] },
+    { premiums: ["T.", "t."], adjacent: [[0, 0]] },
+    { premiums: ["T.", ".t"], adjacent: [] },
+  ])("$premiums has adjacent premiums at $adjacent", ({ premiums, adjacent }) => {
+    expect(adjacentPremiums(premiums)).toStrictEqual(adjacent);
   });
 
   it("counts each premium code", () => {
@@ -151,7 +202,7 @@ function small(): RulesetData {
     minPlayers: 2,
     maxPlayers: 2,
     tiles: { a: { count: 3, points: 1 }, "?": { count: 1, points: 0 } },
-    premiums: [".d.", "dDd", ".d."],
+    premiums: ["d.d", ".D.", "d.d"],
   };
 }
 
@@ -203,7 +254,12 @@ describe("ruleset schema (words §8.2)", () => {
       "premiums",
     ],
     ["an unknown premium code", (r) => ({ ...r, premiums: [".x.", "dDd", ".x."] }), "premiums"],
-    ["an asymmetric layout", (r) => ({ ...r, premiums: ["Td.", "dDd", ".d."] }), "premiums"],
+    ["an asymmetric layout", (r) => ({ ...r, premiums: ["T.d", ".D.", "d.d"] }), "premiums"],
+    [
+      "premiums side by side (here the start square and a DL)",
+      (r) => ({ ...r, premiums: [".d.", "dDd", ".d."] }),
+      "premiums",
+    ],
     ["a start square off the board", (r) => ({ ...r, start: [3, 1] }), "start"],
     ["a board above the dictionaries' longest word", (r) => ({ ...r, boardSize: 16 }), "boardSize"],
     ["a rack longer than the board", (r) => ({ ...r, rackSize: 4, swapMinBag: 4 }), "rackSize"],
