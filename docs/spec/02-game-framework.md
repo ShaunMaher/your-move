@@ -541,6 +541,12 @@ each one, in fast mode.
 
 The framework, not the kit, enforces that only seats in `toAct` may act (05 `/actions`).
 
+Framework and runtime code never reads a definition's `test` hooks; only the testkit and `games:verify`
+do. The hooks still ship in every engine (they are part of the contract), so this keeps test-only
+code such as a bot or a kit word list out of every request path; a check in `scripts/src/ci`
+fails if code under `packages/server/src`, `packages/shared/src` or `apps/*/src` reads them
+(findings F-11).
+
 Module-specific tests (rules tables, scoring edge cases) are in addition to the kit.
 
 ## 7. Game packages, instance composition and versioning

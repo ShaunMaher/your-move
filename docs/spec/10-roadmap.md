@@ -158,7 +158,8 @@ The project's foundation, built to 11 (engineering standards) from the first com
   endpoint; **a game package built outside this repo (the M1 scratch package) installs into a
   local instance** and plays. `games:verify` supplies the instance's installed dictionaries to the
   kit as resources, so the instance gate exercises the real word lists (until then the words
-  engine's `test.resources` carries its kit word list, words §10.6).
+  engine's `test.resources` carries its kit word list, words §10.6). Measure the real dictionary's
+  `has()` on 15-letter words, the longest lookups a play can make (words §10.6 worst cases).
 - API tokens (06 §8): creation with per-purpose step-up codes, scopes (`read`, `play`,
   `games:create`, `join`; exclusive `admin`), the consolidated route-scope table enforced from
   `x-scope` with a deny-by-default route-enumeration test, `ym_pat_` format, HMAC storage, bearer
@@ -177,7 +178,8 @@ The project's foundation, built to 11 (engineering standards) from the first com
 - `rng` stores `[max, value]` pairs so replay detects a changed draw range (`game_actions.rng`
   and `games.setup_rng`, 04; M1 review P-20).
 - Words client module: board UI — drag & drop + tap-to-place, zoom, blank picker, live preview, shuffle/recall,
-  swap/pass/resign dialogs.
+  swap/pass/resign dialogs. The words engine exports a view-level play analysis for the board UI,
+  so local previews work from the `View` alone (the engine's own analysis takes the secret state).
 - Realtime: `UserChannel` DO + Node hub; refetch on visibility.
 - Built-in dictionaries served through `DictionaryProvider` (03 §10): the asset-fetch `loadText`
   reads the whole body inside the load, has a timeout, and its failures are negatively cached

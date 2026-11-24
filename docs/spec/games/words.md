@@ -192,7 +192,7 @@ client can render any game and preview any play.
   non-negative integers; total tiles ≥ `rackSize × maxPlayers`; `premiums` has exactly `boardSize`
   rows of `boardSize` characters; `start` is in bounds. Also: `boardSize` ≤ 15 (the dictionaries'
   longest word, §9.1); `rackSize` ≤ `boardSize`; blanks are worth 0; `2 ≤ minPlayers ≤
-  maxPlayers`; with `drawThenReturn`, `swapMinBag` ≥ `rackSize` (the replacements are drawn before
+  maxPlayers ≤ 2` (more seats wait until multi-player resignation is specified, §3.4); with `drawThenReturn`, `swapMinBag` ≥ `rackSize` (the replacements are drawn before
   the swapped tiles go back, §3.2). A dictionary letter has a tile only if its count is at least 1
   (§9.3).
 - Each premium layout MUST be symmetric under 90° rotation (validated by a test).
@@ -468,9 +468,15 @@ Action =
 (`detail: { words: string[] }`: each word not in the dictionary once, in the order formed),
 `SWAP_NOT_ALLOWED` (`detail`: `BAG_TOO_SMALL` · `TILE_NOT_IN_RACK`), `NOT_TO_ACT` (`validate` or
 `preview` for a seat that isn't in `toAct`, which the framework never asks), plus
-`UNKNOWN_RULESET`, `UNKNOWN_DICTIONARY`, `INCOMPATIBLE_DICTIONARY`, `NOT_ENOUGH_TILES`,
+`UNKNOWN_RULESET`, `UNKNOWN_DICTIONARY`, `INCOMPATIBLE_DICTIONARY`, `NOT_ENOUGH_TILES`
+(`detail: { needed, tiles }`: `rackSize × seats` and the ruleset's tile count),
 `OPTIONS_NOT_OBJECT` and `UNKNOWN_OPTION` from option resolution, `checkConfig` (with `detail: {
-key }` naming the config key, never its value) and start.
+key }` naming the config key, never its value) and start. `UNKNOWN_OPTION` has `detail: { option
+}` naming the unknown key only when the key matches `^[A-Za-z0-9_]{1,64}$`, and no `detail`
+otherwise, so arbitrary input is never echoed.
+
+Placements are taken in board order (by row, then column) whatever order they were sent in, so
+answers and records never depend on it; cross-words follow the main word in that order.
 
 **Check order** (first failure wins): every `INVALID_PLACEMENT` check, rack checks included, runs
 before any dictionary lookup, in the order `TOO_MANY_TILES`, `OUT_OF_BOUNDS`, `DUPLICATE_SQUARE`,
@@ -491,11 +497,11 @@ View = {
   lastMove: WordsRecord | null,               // the last transition's record
   final?: { reason: "out" | "scoreless" | "resign" | "timeout" | "decline", adjustments: number[], racks: string[][] }  // only once finished
 }
-WordsRecord = {
-  seat, type: "play" | "swap" | "pass" | "resign" | "timeout" | "decline",
-  placements?: { row, col, tile, letter }[], words?: { word: string, score: number }[],
-  score: number, bingo: boolean, swapCount?: number          // never which tiles were swapped
-}
+WordsRecord =                                   // discriminated by type
+  | { seat, type: "play", placements: { row, col, tile, letter }[],   // 1+, in board order
+      words: { word: string, score: number }[], score: number, bingo: boolean }  // 1+, main word first
+  | { seat, type: "swap", swapCount: number, score: 0, bingo: false }  // swapCount ≥ 1; never which tiles
+  | { seat, type: "pass" | "resign" | "timeout" | "decline", score: 0, bingo: false }
 ```
 
 Racks (`yourRack`, `final.racks`) are shown sorted (`a`–`z`, then blanks), so no view shows the
@@ -521,21 +527,28 @@ debounced (§9.5).
 - `result()`: ranking by final score (ties share rank) for `out` / `scoreless` endings; the
   non-resigning player ranks 1 for `resign` / `timeout`.
 - `summary()`: `{ headline: [{seat:0}, " 212 – 187 ", {seat:1}], scores }`, rendered as
-  "You 212 – 187 Sam"; `describe()`: `[{seat:1}, " played QUIZ for 64"]`.
+  "You 212 – 187 Sam"; `describe()`: `[{seat:1}, " played QUIZ for 64"]`, naming the main word of
+  a multi-tile play, and for a single tile (which has no play line) the longest word it formed,
+  the higher-scoring one on a tie; a bingo adds ", using every tile".
 - `test.maxActions`: bounded by the scoreless-streak rule. Every play puts at least one tile on
   the board for good, so there are at most `P = min(total tiles, boardSize²)` plays, at most
   `scorelessTurnLimit − 1` passes and swaps in a row around each of them, and one exit:
   `P + (P + 1)(scorelessTurnLimit − 1) + 1` (606 for `classic`, 630 for `casual`).
 - `test.worstCase`: full-rack plays on crowded boards with many cross-words: a seven-tile play
   between two seven-letter words, forming the main word and seven cross-words, with and without a
-  blank, and a swap of the whole rack (which shuffles the whole bag).
+  blank; a seven-tile play into the gaps of a 15-letter word, the longest word and lookup there is;
+  and a swap of the whole rack (which shuffles the whole bag).
 - `test.context` and `test.resources`: an engine can't load a word list (02 §2), so the kit plays
   with a **kit word list** carried in the engine: every two- and three-letter word of the built
-  `enable` list plus the longer `enable` words the worst cases need (about 1,070 words; a test
-  checks each one is in the built list). The package's own tests also play the kit, and thousands
+  `enable` list plus the longer `enable` words the worst cases need (about 1,070 words; its test
+  generates it from the built list and fails if it differs). It ships in the engine with the other
+  test hooks (02 §6), but only `test.resources` turns it into a lookup set, so loading the engine
+  never builds it. The package's own tests also play the kit, and thousands
   of property-test games per ruleset, against the full built `enable` list.
-- With more than two seats (no MVP ruleset allows it), a resignation, timeout or decline still
-  ends the game, until multi-player resignation is specified (§3.4).
+- Rulesets allow exactly two seats (§8.2), so every resignation, timeout or decline ends the game.
+  A game with more seats is a precondition failure (the engine throws, 02 §2.1 rule 3) until
+  multi-player resignation is specified (§3.4); so is `onResign`/`onTimeout` on a finished game,
+  which the framework never calls.
 
 ### 10.7 Module-specific tests
 
