@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "560b6714-73b5-4191-a689-20bdcd32881a",
+  "id": "030113d6-684a-489f-a32d-ffa1da500517",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "admin_audit": {
@@ -803,8 +803,7 @@
             "game_id",
             "user_id"
           ],
-          "isUnique": true,
-          "where": "\"game_players\".\"user_id\" IS NOT NULL"
+          "isUnique": true
         },
         "game_players_game_seat": {
           "name": "game_players_game_seat",
@@ -812,8 +811,7 @@
             "game_id",
             "seat"
           ],
-          "isUnique": true,
-          "where": "\"game_players\".\"seat\" IS NOT NULL"
+          "isUnique": true
         },
         "game_players_user_to_act": {
           "name": "game_players_user_to_act",
@@ -1412,6 +1410,13 @@
           "columns": [
             "user_id",
             "last_finished_at"
+          ],
+          "isUnique": false
+        },
+        "past_opponents_other_id": {
+          "name": "past_opponents_other_id",
+          "columns": [
+            "other_id"
           ],
           "isUnique": false
         }

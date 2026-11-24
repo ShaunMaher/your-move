@@ -117,8 +117,8 @@ CREATE TABLE `game_players` (
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `game_players_game_user` ON `game_players` (`game_id`,`user_id`) WHERE "game_players"."user_id" IS NOT NULL;--> statement-breakpoint
-CREATE UNIQUE INDEX `game_players_game_seat` ON `game_players` (`game_id`,`seat`) WHERE "game_players"."seat" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `game_players_game_user` ON `game_players` (`game_id`,`user_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `game_players_game_seat` ON `game_players` (`game_id`,`seat`);--> statement-breakpoint
 CREATE INDEX `game_players_user_to_act` ON `game_players` (`user_id`,`to_act`);--> statement-breakpoint
 CREATE INDEX `game_players_user_state` ON `game_players` (`user_id`,`state`);--> statement-breakpoint
 CREATE INDEX `game_players_invite_email` ON `game_players` (`invite_email`);--> statement-breakpoint
@@ -206,6 +206,7 @@ CREATE TABLE `past_opponents` (
 );
 --> statement-breakpoint
 CREATE INDEX `past_opponents_recent` ON `past_opponents` (`user_id`,`last_finished_at`);--> statement-breakpoint
+CREATE INDEX `past_opponents_other_id` ON `past_opponents` (`other_id`);--> statement-breakpoint
 CREATE TABLE `push_subscriptions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,

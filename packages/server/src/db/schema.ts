@@ -10,7 +10,6 @@
  * Only the core's repository implementations (`src/db/`) import this module; everything else uses
  * the repository interfaces (03 §4).
  */
-import { sql } from "drizzle-orm";
 import {
   type AnySQLiteColumn,
   index,
@@ -171,12 +170,10 @@ export const gamePlayers = sqliteTable(
     timeoutRemindersSent: integer("timeout_reminders_sent").notNull().default(0),
   },
   (table) => [
-    uniqueIndex("game_players_game_user")
-      .on(table.gameId, table.userId)
-      .where(sql`${table.userId} IS NOT NULL`),
-    uniqueIndex("game_players_game_seat")
-      .on(table.gameId, table.seat)
-      .where(sql`${table.seat} IS NOT NULL`),
+    // 04: unique where not null. SQLite treats NULLs as distinct in a unique index, so plain
+    // indexes mean exactly that, and they also serve every lookup by game_id.
+    uniqueIndex("game_players_game_user").on(table.gameId, table.userId),
+    uniqueIndex("game_players_game_seat").on(table.gameId, table.seat),
     index("game_players_user_to_act").on(table.userId, table.toAct),
     index("game_players_user_state").on(table.userId, table.state),
     index("game_players_invite_email").on(table.inviteEmail),
@@ -236,6 +233,8 @@ export const pastOpponents = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.userId, table.otherId] }),
     index("past_opponents_recent").on(table.userId, table.lastFinishedAt),
+    // Deleting a user cascades through other_id; blocks delete both directions (04).
+    index("past_opponents_other_id").on(table.otherId),
   ],
 );
 
