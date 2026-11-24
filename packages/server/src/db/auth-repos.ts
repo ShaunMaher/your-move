@@ -126,8 +126,9 @@ export function otpRepo(db: Database): OtpRepo {
         db
           .update(otpChallenges)
           .set({ consumedAt: now })
-          // The flag comes last, so the subquery runs either way (same work on every path).
-          .where(and(inArray(otpChallenges.id, beyondNewest), sql`${burns} = 1`)),
+          // The flag is compared with each row (every selected row has emailed = 1), so SQLite
+          // can't skip the subquery on a never-emailed path: the same work on every path.
+          .where(and(inArray(otpChallenges.id, beyondNewest), eq(otpChallenges.emailed, burns))),
       ]);
     },
     async live(email, purpose, now, maxAttempts) {

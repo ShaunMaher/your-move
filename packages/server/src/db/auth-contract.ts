@@ -38,6 +38,9 @@ function challenge(email: NormalisedEmail, overrides: Partial<NewOtpChallenge> =
 
 const ISSUE = { create: true, maxLive: 3, maxAttempts: 5 } as const;
 
+/** The verifies fired at once in the race test (10 M2). */
+const PARALLEL = 50;
+
 async function newUser(repos: Repositories): Promise<{ id: string; email: NormalisedEmail }> {
   const id = crypto.randomUUID();
   const email = address(id);
@@ -391,7 +394,7 @@ export function authRepositoryContract(target: () => AuthTarget): void {
   });
 
   describe("verifyCode through the core (06 §3.1, 10 M2)", () => {
-    it("50 parallel verifies of the right code: at most 5 evaluated, exactly 1 ok", async () => {
+    it("50 parallel verifies of the right code: exactly 5 evaluated, exactly 1 ok", async () => {
       const config = parseConfig(
         {
           PUBLIC_URL: "https://play.example.org",
@@ -405,10 +408,24 @@ export function authRepositoryContract(target: () => AuthTarget): void {
       );
       const keys = await deriveSubkeys(config.appSecret);
       let evaluated = 0;
+      // A barrier: every verify's `live()` result is held until all 50 have read it, so all 50
+      // then race to `attempt()` the same live challenge. Without it, Node's serialised HMAC work
+      // lets later calls see an already-burned challenge, and a broken attempt cap would pass.
+      let arrived = 0;
+      let release: () => void = () => undefined;
+      const allArrived = new Promise<void>((resolve) => {
+        release = resolve;
+      });
       const counting: Repositories = {
         ...repos(),
         otp: {
           ...repos().otp,
+          live: async (...args) => {
+            const ids = await repos().otp.live(...args);
+            if (++arrived === PARALLEL) release();
+            await allArrived;
+            return ids;
+          },
           attempt: async (...args) => {
             const result = await repos().otp.attempt(...args);
             if (result !== null) evaluated++;
@@ -432,7 +449,7 @@ export function authRepositoryContract(target: () => AuthTarget): void {
         now: T0,
       };
       const outcomes = await Promise.all(
-        Array.from({ length: 50 }, (_, i) =>
+        Array.from({ length: PARALLEL }, (_, i) =>
           verifyCode(deps, email, "signin", code, {
             ipBuckets: [{ hash: `race-${id}-${String(i)}`, multiplier: 1 }],
           }),
@@ -440,8 +457,7 @@ export function authRepositoryContract(target: () => AuthTarget): void {
       );
       expect(outcomes.filter((outcome) => outcome === "ok")).toHaveLength(1);
       expect(outcomes.filter((outcome) => outcome !== "ok" && outcome !== "invalid")).toEqual([]);
-      expect(evaluated).toBeGreaterThanOrEqual(1);
-      expect(evaluated).toBeLessThanOrEqual(5);
+      expect(evaluated).toBe(5);
     });
   });
 }

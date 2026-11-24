@@ -194,6 +194,27 @@ describe("addresses (S-7)", () => {
   });
 });
 
+describe("display names (round 2, P2-1)", () => {
+  it.each(["\u{2028}", "\u{2029}"])(
+    "PATCH /me refuses a Unicode line or paragraph separator (%j) and stores nothing",
+    async (separator) => {
+      h = createHarness();
+      const cookie = await h.signIn(fresh());
+      const response = await h.request(
+        "PATCH",
+        "/api/v1/me",
+        { displayName: `Sam${separator}Smith` },
+        { cookie },
+      );
+      expect(response.status).toBe(400);
+      const me = (await (await h.request("GET", "/api/v1/me", undefined, { cookie })).json()) as {
+        displayName: string | null;
+      };
+      expect(me.displayName).toBeNull();
+    },
+  );
+});
+
 describe("local-dev mode (S-8)", () => {
   it("/__dev/emails answers only requests addressed to PUBLIC_URL's host", async () => {
     h = createHarness(LOCAL_ENV);

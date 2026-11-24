@@ -67,6 +67,8 @@ describe("display names (06 §5.1)", () => {
     ["a".repeat(25), "length"],
     ["q\u{301}\u{302}\u{303}", "combining"],
     ["a\u{200D}b", "characters"],
+    ["Sam\u{2028}Smith", "characters"],
+    ["Sam\u{2029}Smith", "characters"],
     ["Mum \u{200D}\u{1F467}", "characters"],
     ["Sam\tSmith", "characters"],
     ["Sam\u{202E}x", "characters"],

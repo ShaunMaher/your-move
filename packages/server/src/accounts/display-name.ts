@@ -11,11 +11,12 @@ const MAX_CODE_POINTS = 64;
 const MAX_COMBINING_MARKS = 2;
 
 /**
- * Control (tabs and line breaks included), bidi override/isolate and zero-width characters
+ * Control characters (tabs and line breaks included), the Unicode line and paragraph separators
+ * (U+2028, U+2029), bidi override/isolate and zero-width characters
  * (06 §5.1). The zero-width joiner U+200D is allowed only inside an emoji sequence (below).
  */
 const FORBIDDEN_CHARACTERS =
-  /[\p{Cc}\u{202A}-\u{202E}\u{2066}-\u{2069}\u{200B}\u{200C}\u{200E}\u{200F}\u{FEFF}]/u;
+  /[\p{Cc}\p{Zl}\p{Zp}\u{202A}-\u{202E}\u{2066}-\u{2069}\u{200B}\u{200C}\u{200E}\u{200F}\u{FEFF}]/u;
 /**
  * A joiner between two emoji code points, as in family or flag sequences: the left one may carry a
  * skin-tone modifier or the emoji variation selector (06 §5.1).

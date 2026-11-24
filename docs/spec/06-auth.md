@@ -176,7 +176,8 @@ Verify on a real device during M2.
 
 - Normalise: Unicode NFC, trim, collapse runs of space separators to single spaces.
 - 1–24 graphemes **and** ≤ 64 code points after normalisation; ≤ 2 combining marks per grapheme.
-- Reject: control characters (tabs and line breaks included: refused, not collapsed),
+- Reject: control characters (tabs and line breaks included: refused, not collapsed), the
+  Unicode line and paragraph separators (U+2028, U+2029),
   bidi override/isolate characters (U+202A–202E, U+2066–2069),
   zero-width characters (U+200B–200F, U+FEFF; the joiner U+200D only when it isn't between two
   emoji code points, so emoji sequences such as families and flags work), anything containing

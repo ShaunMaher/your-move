@@ -46,3 +46,13 @@ outcome and where the fix lives. The spec changes are in v0.9.15 (the README his
 | P-20 | Fixed in part. Done: the error-code union from `ErrorCode`, settings parsed with `UserSettingsSchema`, `IssueOutcome.user` removed, `RequestOrigin` renamed `ClientBuckets`, `UserRecord.email` branded so the casts are gone, three unused exports dropped. Rebutted: `LIMIT -1` (Drizzle emits no `LIMIT` for `-1`, and SQLite rejects `OFFSET` without one; the code says so); telling burned challenges from used ones needs a column, so a migration (issue #13), and nothing reads the difference yet. | `packages/server/src/auth/`, `db/` |
 | P-21 | Fixed. Display names refuse tabs and line breaks (control characters) before collapsing space separators. | `packages/server/src/accounts/display-name.ts`, 06 §5.1 |
 | P-22 | Fixed (owner decision). U+200D is allowed only between two emoji code points (a skin-tone modifier or variation selector may sit before it); 06 §5.1 says so. | `packages/server/src/accounts/display-name.ts`, 06 §5.1 |
+
+## Round 2
+
+Round 2 reviewed HEAD 40e0a12. The security review passed; the remaining picky and security notes (P2-3 to P2-7, S2-1, S2-3, S2-4) are filed as an issue.
+
+| ID | Outcome | Where |
+|---|---|---|
+| P2-1 | Fixed. The P-21 change let the Unicode line and paragraph separators (U+2028, U+2029) through; display names refuse them again, and 06 §5.1 names them. Tests: the validator and `PATCH /me`, which stores nothing. | `packages/server/src/accounts/display-name.ts`, `apps/node/src/auth-review.test.ts`, 06 §5.1 |
+| P2-2 | Fixed. The core race test holds every `live()` result at a barrier until all 50 verifies have read it, so all 50 race to `attempt()` on both drivers, and it asserts exactly 5 evaluated and exactly 1 `ok`. Checked that it can fail: with `attempt()` ignoring the cap it goes red on Node and D1 (50 evaluated). | `packages/server/src/db/auth-contract.ts` |
+| S2-2 | Fixed. The burn predicate compares the flag with each row (`emailed = flag`), so SQLite runs the subquery on every path; behaviour is unchanged, as every selected row has `emailed = 1`. The new-accounts-limited timing gap didn't move (z about -2.9 before and after, median about 1.5 to 3% quicker), so its cause lies elsewhere; it stays within the test's bound and is noted in the follow-up issue. | `packages/server/src/db/auth-repos.ts` |
