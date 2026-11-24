@@ -86,15 +86,28 @@ const NAME = /^[A-Za-z][A-Za-z0-9-]*$/u;
 const TAG = /<(\/?)([A-Za-z][A-Za-z0-9-]*)((?:\s+[^\s=<>"'/]+\s*=\s*"[^"<>]*")*)\s*(\/?)>/guy;
 const ATTRIBUTE = /\s+([^\s=<>"'/]+)\s*=\s*"([^"<>]*)"/guy;
 
-/** Problems with an attribute's value: only `url(#id)` references, no schemes, no entities. */
+/** Attributes whose whole value is a URL. None is allowed; checked in case one ever is. */
+const URL_ATTRIBUTES: ReadonlySet<string> = new Set(["href", "xlink:href"]);
+
+const URL_SCHEME = /[a-z][a-z0-9+.-]*:/iu;
+
+/**
+ * Problems with an attribute's value: no entities, no CSS escapes (`u\72l(…)` is `url(…)` to a CSS
+ * parser), and URLs only as `url(#id)` references to the icon's own ids. Schemes are looked for only
+ * where a value is a URL (a URL attribute, inside `url(…)`), so free text such as
+ * `aria-label="Score: 5"` is fine.
+ */
 function valueProblems(name: string, value: string): string[] {
   const problems: string[] = [];
   if (value.includes("&")) problems.push(`${name}: character references are not allowed`);
-  if (/[a-z][a-z0-9+.-]*:/iu.test(value) && name !== "xmlns") {
+  if (value.includes("\\")) problems.push(`${name}: backslashes (CSS escapes) are not allowed`);
+  if (URL_ATTRIBUTES.has(name) && URL_SCHEME.test(value)) {
     problems.push(`${name}: values must not contain a URL scheme`);
   }
-  for (const match of value.matchAll(/url\(([^)]*)\)/giu)) {
-    if (!/^#[A-Za-z][\w-]*$/u.test(match[1] ?? "")) {
+  for (const match of value.matchAll(/url\(([^)]*)\)?/giu)) {
+    const reference = match[1] ?? "";
+    if (URL_SCHEME.test(reference)) problems.push(`${name}: url() must not contain a URL scheme`);
+    if (!/^#[A-Za-z][\w-]*$/u.test(reference) || match[0].at(-1) !== ")") {
       problems.push(`${name}: only url(#id) references to the icon's own ids are allowed`);
     }
   }

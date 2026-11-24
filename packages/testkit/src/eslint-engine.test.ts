@@ -90,6 +90,15 @@ describe("engineEslintConfig", () => {
       /constructors or prototypes/u,
     ],
     ["(({ __proto__: p }) => p)({})", /constructors or prototypes/u],
+    // Reaching a prototype through a value: S-9 / P-16.
+    ["Object.getPrototypeOf([]).includes = () => true", /Object\.getPrototypeOf reaches/u],
+    ['Reflect.getPrototypeOf("").trim', /Reflect\.getPrototypeOf reaches/u],
+    ['({}).__lookupGetter__("__proto__").call([])', /constructors or prototypes/u],
+    ['[].__lookupSetter__("x")', /constructors or prototypes/u],
+    ['[].__defineGetter__("x", () => 1)', /constructors or prototypes/u],
+    ['({})["__defineSetter__"]("x", () => 1)', /constructors or prototypes/u],
+    ["({})[`__lookupGetter__`]", /constructors or prototypes/u],
+    ["(({ __lookupGetter__: g }) => g)({})", /constructors or prototypes/u],
     ["Math", /Use Math by name/u],
     ["[Math][0].max(1)", /Use Math by name/u],
     ["Object.values(Math)", /Use Math by name/u],
@@ -212,6 +221,9 @@ describe("engineEslintConfig", () => {
         export const cell = board.cells[0];
         export const max = Math.max(...board.cells);
         export const keys = Reflect.ownKeys(board);
+        export const proto = Object.create(null);
+        export const getters = { lookupGetter: 1, defineSetter: 2, getPrototype: 3 };
+        export const lookup = getters.lookupGetter + getters.getPrototype;
       `),
     ).toEqual([]);
   });

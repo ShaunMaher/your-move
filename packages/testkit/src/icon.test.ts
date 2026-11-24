@@ -16,6 +16,9 @@ describe("checkIcon", () => {
     ],
     ["a title", svg('<title>Cards</title><g><rect x="1" y="1" width="2" height="2"/></g>')],
     ["surrounding whitespace", `\n  ${svg("<g/>")}\n`],
+    // A colon outside a URL context is just text (P-22).
+    ["an accessible name with a colon", svg("<g/>", ' role="img" aria-label="Score: 5"')],
+    ["a title with a colon", svg("<title>Note: cards</title>")],
   ])("accepts %s", (_name, icon) => {
     expect(checkIcon(icon)).toEqual([]);
   });
@@ -34,7 +37,28 @@ describe("checkIcon", () => {
       svg('<rect fill="url(https://example.org/x)"/>'),
       /URL scheme|url\(#id\)/u,
     ],
-    ["a javascript: value", svg('<rect fill="javascript:x"/>'), /URL scheme/u],
+    [
+      "a javascript: url()",
+      svg('<rect fill="url(javascript:x)"/>'),
+      /url\(\) must not contain a URL scheme/u,
+    ],
+    [
+      "a data: url()",
+      svg('<rect fill="URL(data:image/png,x)"/>'),
+      /url\(\) must not contain a URL scheme/u,
+    ],
+    ["an unclosed url()", svg('<rect fill="url(#g"/>'), /only url\(#id\)/u],
+    ["a quoted url()", svg("<rect clip-path=\"url('#g')\"/>"), /only url\(#id\)/u],
+    [
+      "a CSS-escaped url()",
+      svg('<rect fill="u\\72l(https://example.org/x)"/>'),
+      /backslashes \(CSS escapes\)/u,
+    ],
+    [
+      "a namespaced href",
+      svg('<rect xlink:href="https://example.org"/>'),
+      /xlink:href is not allowed/u,
+    ],
     ["a character reference", svg('<rect fill="&#106;"/>'), /character references/u],
     ["a comment", svg("<!-- hi -->"), /unrecognised markup/u],
     ["a DOCTYPE", `<!DOCTYPE svg>${svg("")}`, /unrecognised markup/u],

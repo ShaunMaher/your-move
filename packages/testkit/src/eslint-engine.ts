@@ -193,8 +193,13 @@ const noBuiltInValues: Rule.RuleModule = {
   },
 };
 
-/** Keys that lead from a value to its constructor or prototype. */
-const PROTO_KEYS = "/^(constructor|__proto__)$/";
+/**
+ * Keys that lead from a value to its constructor or prototype: `constructor`, `__proto__`, and the
+ * legacy accessor methods every object inherits (`({}).__lookupGetter__("__proto__")` is the
+ * prototype getter; `__defineGetter__` and `__defineSetter__` write accessors onto any object).
+ */
+const PROTO_KEYS =
+  "/^(constructor|__proto__|__lookupGetter__|__lookupSetter__|__defineGetter__|__defineSetter__)$/";
 
 /** Attribute selectors for `field` being a template literal without expressions naming a PROTO_KEY. */
 function staticTemplateKey(field: string): string {
@@ -210,13 +215,17 @@ const RESTRICTED_MEMBERS: readonly { object: string; property: string }[] = [
     "deleteProperty",
     "get",
     "getOwnPropertyDescriptor",
+    "getPrototypeOf",
     "set",
     "setPrototypeOf",
   ].map((property) => ({ object: "Reflect", property })),
-  ...["getOwnPropertyDescriptor", "getOwnPropertyDescriptors"].map((property) => ({
-    object: "Object",
-    property,
-  })),
+  // `Object.getPrototypeOf([])` is `Array.prototype`, a write target a by-name rule can't see.
+  ...["getOwnPropertyDescriptor", "getOwnPropertyDescriptors", "getPrototypeOf"].map(
+    (property) => ({
+      object: "Object",
+      property,
+    }),
+  ),
 ];
 
 /**
@@ -275,10 +284,10 @@ export function engineEslintConfig(files: readonly string[]): Linter.Config[] {
             selector: "MetaProperty[meta.name='import']",
             message: "import.meta is host-provided; engines don't use it.",
           },
-          // `.constructor` and `__proto__` by name, by any static key (string or template literal)
+          // `.constructor`, `__proto__` and the legacy accessor methods by name, by any static key (string or template literal)
           // and by destructuring; a key computed at run time is beyond a static rule (F-5).
           ...[
-            "MemberExpression[property.name=/^(constructor|__proto__)$/]",
+            `MemberExpression[property.name=${PROTO_KEYS}]`,
             `MemberExpression[property.value=${PROTO_KEYS}]`,
             `MemberExpression[computed=true]${staticTemplateKey("property")}`,
             `ObjectPattern > Property[computed=false][key.name=${PROTO_KEYS}]`,
