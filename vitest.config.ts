@@ -67,6 +67,9 @@ export default defineConfig({
         // Process entry points: exercised by the e2e suite and the Docker smoke run, not unit tests.
         "apps/node/src/main.ts",
         "apps/worker/src/index.ts",
+        // The D1 adapter: exercised by the D1 repository contract suite (apps/worker/test), which
+        // runs workerd and so runs in CI's arm64 test:worker job, outside the coverage run.
+        "apps/worker/src/d1.ts",
         "apps/web/src/main.tsx",
         "packages/dictionary/src/builder/bench.ts",
         "packages/dictionary/src/builder/cli.ts",

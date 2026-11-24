@@ -29,7 +29,8 @@ const config: KnipConfig = {
       ignoreDependencies: ["@your-move/web"],
     },
     "apps/worker": {
-      project: ["src/**/*.ts", "scripts/**/*.ts"],
+      entry: ["src/index.ts", "test/**/*.test.ts"],
+      project: ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
       // Build-order dependency: the build copies the web app's output (pnpm builds it first).
       ignoreDependencies: ["@your-move/web"],
     },

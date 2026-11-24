@@ -1,0 +1,10 @@
+# The D1 repository contract suite's configuration (src/d1.test.ts): only the D1 binding, with
+# the same shared migrations as wrangler.example.toml. Local only; never deployed.
+name = "d1-contract"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "d1-contract"
+database_id = "d1-contract-local"
+migrations_dir = "../../../packages/server/migrations"

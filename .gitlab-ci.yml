@@ -221,10 +221,10 @@ test:
     WRANGLER_LOG_PATH: $CI_PROJECT_DIR/reports/wrangler-logs
   script:
     # Unit, integration, property, component and API contract tests. The Worker half of the
-    # contract suite runs in test:worker instead (see there): to fold it back, drop the --exclude
-    # and the test:worker job. Vitest matches --exclude against each project's own directory, so
-    # only an absolute path names this one file and no other.
-    - pnpm test --exclude "$CI_PROJECT_DIR/tests/contract/src/worker.test.ts"
+    # contract suite and the D1 repository contract suite run in test:worker instead (see there):
+    # to fold them back, drop the --excludes and the test:worker job. Vitest matches --exclude
+    # against each project's own directory, so only an absolute path names one file and no other.
+    - pnpm test --exclude "$CI_PROJECT_DIR/tests/contract/src/worker.test.ts" --exclude "$CI_PROJECT_DIR/apps/worker/test/d1.test.ts"
     # The full game kit and every other games:verify check on each installed game (02 §6, 11 §4);
     # the build stage runs the fast kit.
     - pnpm games:verify
@@ -247,10 +247,12 @@ test:
         coverage_format: cobertura
         path: coverage/cobertura-coverage.xml
 
-# The Worker half of the contract suite (workerd), on the arm64 runner. It is a separate job only
-# because the amd64 shared runner's VM CPU lacks SSE4.2 (x86-64-v2), which workerd's linux-64
-# build needs (M0 review CI-1; docs/deploy.md). Once that runner offers x86-64-v2, delete this job
-# and the --exclude in `test`. It covers no sources of its own, so coverage stays with `test`.
+# The Worker half of the contract suite and the D1 repository contract suite (workerd), on the
+# arm64 runner. It is a separate job only because the amd64 shared runner's VM CPU lacks SSE4.2
+# (x86-64-v2), which workerd's linux-64 build needs (M0 review CI-1; docs/deploy.md). Once that
+# runner offers x86-64-v2, delete this job
+# and the --excludes in `test`. Coverage stays with `test`, which excludes the D1 adapter
+# (apps/worker/src/d1.ts) that only this job exercises.
 test:worker:
   stage: test
   extends: [.pnpm, .every-pipeline]
@@ -274,6 +276,8 @@ test:worker:
   script:
     # The contract project's global setup builds the web app, Node server and Worker first.
     - pnpm exec vitest run --project tests/contract src/worker.test.ts
+    # The repository contract suite against a local D1 (03 §4).
+    - pnpm exec vitest run --project apps/worker
   after_script:
     - mkdir -p "$WRANGLER_LOG_PATH"
     - *runner-report
