@@ -82,10 +82,13 @@ in the `test:worker` job on the arm64 runner (`arch-arm64`); when it does, delet
 The game kit's CPU budget (08 T25) is measured on the host running the kit, and the shared amd64
 runner (a `qemu64` VM, 2–3× slower than a developer laptop, often running several pipelines at
 once) can't hold the 5 ms reference budget reliably. CI therefore sets one calibrated budget,
-`KIT_CPU_BUDGET_MS` (20 ms, 4× the reference), in `.gitlab-ci.yml`'s global variables: every
-`games:verify` run in CI reads it (`pnpm build` in `build:app`, the full kit in `test`), and the
-image build receives it as a `--build-arg`. Developer machines, local Docker builds and each game
-package's own kit test keep the real 5 ms budget, so a slow engine still fails there. Measured on a
+`KIT_CPU_BUDGET_MS` (20 ms, 4× the reference; a whole number from 1 to 50), in `.gitlab-ci.yml`'s
+global variables, and every kit run in CI uses it: the testkit's `runKit` reads it whenever it
+isn't given a budget, so the game packages' own kit tests in `pnpm test`, `games:verify` in
+`pnpm build` (`build:app`) and the full kit in `test` all do, and the image build receives it as a
+`--build-arg`. In CI, installed third-party games are checked at the calibrated budget too.
+Developer machines keep the real 5 ms budget, enforced by every local `pnpm test` and
+`pnpm games:verify` (and local Docker builds), so a slow engine still fails there. Measured on a
 developer laptop (2026-11-24), the words engine's worst cases take 0.02 ms median and under 0.1 ms
 at the 99th percentile; budget failures on the runner are pauses (garbage collection, a busy
 host), not engine cost. Revisit the value when the runner changes.

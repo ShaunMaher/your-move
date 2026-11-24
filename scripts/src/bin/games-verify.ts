@@ -5,7 +5,7 @@
  * job never runs it. `--cpu-budget-ms` (or the `KIT_CPU_BUDGET_MS` variable, which CI sets once
  * for every job and image build that runs the kit) raises the kit's CPU budget (default 5 ms,
  * 08 T25) on a host slower than the reference hardware; the budget is measured on the host
- * running the kit (../games/cpu-budget.ts).
+ * running the kit (@your-move/testkit, budget.ts).
  *
  * It also writes `generated/verified-files.json`: every installed package file the checks covered,
  * by role (reached from the engine and manifest entry points, or from the client entry point),
@@ -15,7 +15,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
-import { cpuBudget, CPU_BUDGET_VARIABLE } from "../games/cpu-budget.js";
+import { CPU_BUDGET_VARIABLE, readCpuBudget } from "@your-move/testkit";
+
 import { writeVerifiedFiles, type CheckedPackage } from "../games/inputs.js";
 import { loadGames, loadInstanceConfig } from "../games/load.js";
 import { nodeModulesResolver } from "../games/packages.js";
@@ -27,7 +28,7 @@ run("games:verify", async () => {
   const { values } = parseArgs({
     options: { fast: { type: "boolean", default: false }, "cpu-budget-ms": { type: "string" } },
   });
-  const budget = cpuBudget(values["cpu-budget-ms"], process.env[CPU_BUDGET_VARIABLE]);
+  const budget = readCpuBudget(values["cpu-budget-ms"], process.env[CPU_BUDGET_VARIABLE]);
   if (!budget.ok) fail("games:verify", [budget.problem]);
   const cpuBudgetMs = budget.ms;
   const resolvePackage = nodeModulesResolver(ROOT_DIR);

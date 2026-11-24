@@ -17,6 +17,7 @@ import {
   type Seat,
 } from "@your-move/sdk";
 
+import { environmentCpuBudget, readCpuBudget } from "./budget.js";
 import { canonical, isPlainJson, sameJson } from "./canonical.js";
 import { resolveCombos } from "./combos.js";
 import { checkCpu } from "./cpu.js";
@@ -855,10 +856,20 @@ class Kit extends Reporter {
  * per option set and seat count, a tenth of them with secrecy checked at every step. Half the
  * games have no seat leaving, so long games run to their end (02 §6.4).
  *
+ * The CPU budget is the `cpuBudgetMs` option, else the host's `KIT_CPU_BUDGET_MS` (set in CI to
+ * its calibrated value), else the reference 5 ms (./budget.ts).
+ *
  * @public
  */
-export function runKit(engines: GameEngines, options: KitOptions): KitReport {
+export function runKit(engines: GameEngines, given: KitOptions): KitReport {
+  const fromEnvironment =
+    given.cpuBudgetMs === undefined ? readCpuBudget(undefined, environmentCpuBudget()) : undefined;
+  const options: KitOptions =
+    fromEnvironment?.ok === true && fromEnvironment.ms !== undefined
+      ? { ...given, cpuBudgetMs: fromEnvironment.ms }
+      : given;
   const kit = new Kit(options);
+  if (fromEnvironment?.ok === false) kit.fail("cpu", fromEnvironment.problem);
   if (options.manifest !== undefined) {
     for (const message of checkManifest(options.manifest, engines, options)) {
       kit.fail("manifest", message);

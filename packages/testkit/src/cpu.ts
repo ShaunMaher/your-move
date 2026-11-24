@@ -3,6 +3,7 @@
  */
 import { isGameError, type Seat } from "@your-move/sdk";
 
+import { DEFAULT_CPU_BUDGET_MS } from "./budget.js";
 import { seededRandom } from "./random.js";
 import { errorName, jsonClone, type Combo, type Reporter } from "./report.js";
 import type { KitOptions } from "./types.js";
@@ -11,8 +12,6 @@ import type { KitOptions } from "./types.js";
 const WARM_UP_RUNS = 10;
 /** Timed runs per `worstCase` input. */
 const RUNS = { fast: 100, full: 300 } as const;
-/** The default budget, 08 T25. */
-const DEFAULT_CPU_BUDGET_MS = 5;
 
 /**
  * The CPU budget (02 §6.6, 08 T25): `validate` + `preview` + `apply` on each `worstCase` input,

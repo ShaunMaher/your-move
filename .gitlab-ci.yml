@@ -61,8 +61,9 @@ variables:
   # The game kit's CPU budget on our runners (08 T25, docs/deploy.md "CI runners"): the shared
   # amd64 runner is a qemu64 VM without SSE4.2, 2-3x slower than a developer laptop and often
   # running several pipelines at once, so 4x the 5 ms reference budget. One variable for every
-  # games:verify run here: `pnpm build` (build:app), the test job's full kit, and the image build
-  # (a --build-arg). Developer machines and the packages' own tests keep the real 5 ms.
+  # kit run here: the testkit reads it whenever a run isn't given a budget, so the packages' own
+  # kit tests (test), games:verify in `pnpm build` (build:app) and the full kit (test) use it, and
+  # the image build gets it as a --build-arg. Developer machines keep the real 5 ms.
   KIT_CPU_BUDGET_MS: "20"
 
 default:
