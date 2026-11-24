@@ -12,6 +12,7 @@ reports/
 !scripts/test-fixtures/games/node_modules/
 !scripts/test-fixtures/games/node_modules/**/dist/
 !scripts/test-fixtures/games/registry/**/dist/
+!scripts/test-fixtures/gates/arch/node_modules/
 
 # CI caches and outputs kept inside the project directory (GitLab caches only paths there).
 /.pnpm-store/

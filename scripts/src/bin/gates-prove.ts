@@ -70,7 +70,7 @@ const proofs: Record<string, Proof> = {
     return null;
   },
 
-  "architecture: an engine importing node:fs, the core using node:http and the schema, the web app importing the server"() {
+  "architecture: an engine importing node:fs, the core using node:http and the schema, the web app importing the server and Drizzle"() {
     const result = exec(
       join(ROOT_DIR, "node_modules/.bin/depcruise"),
       ["--config", join(ROOT_DIR, ".dependency-cruiser.mjs"), "games", "packages", "apps"],
@@ -81,9 +81,32 @@ const proofs: Record<string, Proof> = {
       "game-engine-imports",
       "server-web-standard-only",
       "core-storage-through-repositories",
+      "drizzle-only-in-storage-adapters",
       "web-only-through-api-client",
     ]) {
       if (!result.output.includes(rule)) return `dependency-cruiser did not report ${rule}`;
+    }
+    return null;
+  },
+
+  "db:check: a column added to schema.ts without a migration"() {
+    const schema = join(ROOT_DIR, "packages/server/src/db/schema.ts");
+    const original = readFileSync(schema, "utf8");
+    const anchor = '    suspendedAt: integer("suspended_at"),\n';
+    if (!original.includes(anchor)) return "schema.ts no longer has the anchor line";
+    let result: Result;
+    try {
+      writeFileSync(
+        schema,
+        original.replace(anchor, `${anchor}    gateFixture: integer("gate_fixture"),\n`),
+      );
+      result = exec("pnpm", ["db:check"]);
+    } finally {
+      writeFileSync(schema, original);
+    }
+    if (result.status === 0) return "db:check passed";
+    if (!result.output.includes("schema.ts changed without a committed migration")) {
+      return "db:check did not report the missing migration";
     }
     return null;
   },

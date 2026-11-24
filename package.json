@@ -30,6 +30,7 @@
     "games:verify": "tsx scripts/src/bin/games-verify.ts",
     "games:check-inputs": "tsx scripts/src/bin/games-check-inputs.ts",
     "games:check-db": "tsx scripts/src/bin/games-check-db.ts",
+    "db:check": "tsx scripts/src/bin/db-check.ts",
     "api:generate": "tsx scripts/src/bin/api-generate.ts",
     "renovate:sync": "tsx scripts/src/bin/renovate-sync.ts",
     "gates:prove": "tsx scripts/src/bin/gates-prove.ts",

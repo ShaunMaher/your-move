@@ -185,6 +185,9 @@ validate:
     - pnpm api:surface
     - git diff --exit-code -- packages/api-client renovate.json packages/sdk/api-report
     - end generated
+    # The committed migrations: journal, the D1 rebuild rule, and drizzle-kit regenerating them
+    # from schema.ts unchanged (04 §Migrations, 11 §3).
+    - section migrations "Migrations"; pnpm db:check; end migrations
     - section gates "Each gate fails on a deliberate violation"; pnpm gates:prove; end gates
     - |
       if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
