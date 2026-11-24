@@ -43,14 +43,24 @@ works with a read-only root filesystem (`read_only: true` in compose, or `docker
 It starts with `node --disallow-code-generation-from-strings` and refuses to start if code
 generation from strings turns out to be allowed. Its health check calls `/api/health`.
 
-The database is one SQLite file, `DATABASE_PATH` (default `/data/app.sqlite`), in WAL mode. At
-every start the server first applies any new migrations (all in one transaction), then refuses to
-start if a `lobby` or `active` game needs a game type or rules version this image doesn't install
-(02 §7.3); finish or cancel those games first, or start **once** with `ALLOW_ORPHAN_GAMES=true` to
-accept that the sweep cancels them. It also refuses a database that a newer image has migrated:
-roll forward, or restore a backup. Run one container per database file: a second one on the same
-file refuses to start (it finds the first one's lock on `<DATABASE_PATH>.lock`, which the
-operating system releases when that process exits, even after a crash).
+The database is one SQLite file, `DATABASE_PATH` (default `/data/app.sqlite`; an absolute path), in WAL
+mode. At every start the server first validates its whole configuration, then takes the
+single-instance lock, applies any new migrations (all in one transaction), and refuses to start if
+a `lobby` or `active` game needs a game type or rules version this image doesn't install (02 §7.3).
+Finish or cancel those games first; or, to accept that exactly those games become orphaned, start
+with `ALLOW_ORPHAN_GAMES` set to the 12-character digest the refusal printed (a value left set
+matches no later set, so it is safe to leave, though you should remove it). **Until M3 nothing
+cancels an orphaned game**: it keeps its state, and M3 adds the `409 GAME_UNAVAILABLE` answer and the
+sweep that cancels it. The server also refuses a database that a newer image has migrated (or
+whose applied migration was edited): roll forward, or restore a backup.
+
+Run one container per database file: a second one on the same file refuses to start (it finds the
+first one's lock on `<DATABASE_PATH>.lock`, which the operating system releases when that process
+exits, even after a crash).
+
+The database, its `-wal`/`-shm` files and the lock file are created readable by the server's user
+only (0600), and the image makes `/data` 0700. A named Docker volume inherits that. With a **bind
+mount** the host directory's own permissions apply: make it owned by the image's `node` user (UID 1000) and mode 0700, and don't put it where other host users can read it.
 
 To build and try it locally:
 

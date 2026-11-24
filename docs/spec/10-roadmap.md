@@ -154,7 +154,9 @@ The project's foundation, built to 11 (engineering standards) from the first com
   them are mutually assignable (the routes arrive here, so the test does too).
 - Game packages for real: `words` and `example` installed through `instance.config.ts`, the
   generated registry and client import map, `ENABLED_GAMES` filtering, `pnpm games:check-db` and
-  the Node startup check, orphaned-game runtime behaviour (`409 GAME_UNAVAILABLE`), the rules
+  the Node startup check, orphaned-game runtime behaviour (`409 GAME_UNAVAILABLE` lands before any
+  game route, so a game accepted as orphaned in M2 can never be played; until M3 nothing cancels
+  it), the rules
   endpoint; **a game package built outside this repo (the M1 scratch package) installs into a
   local instance** and plays. `games:verify` supplies the instance's installed dictionaries to the
   kit as resources, so the instance gate exercises the real word lists (until then the words
