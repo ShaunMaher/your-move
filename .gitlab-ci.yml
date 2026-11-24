@@ -58,6 +58,13 @@ variables:
   IMAGE_REPOSITORY: $CI_REGISTRY_IMAGE/server
   WRANGLER_SEND_METRICS: "false"
   FF_TIMESTAMPS: "true"
+  # The game kit's CPU budget on our runners (08 T25, docs/deploy.md "CI runners"): the shared
+  # amd64 runner is a qemu64 VM without SSE4.2, 2-3x slower than a developer laptop and often
+  # running several pipelines at once, so 4x the 5 ms reference budget. One variable for every
+  # kit run here: the testkit reads it whenever a run isn't given a budget, so the packages' own
+  # kit tests (test), games:verify in `pnpm build` (build:app) and the full kit (test) use it, and
+  # the image build gets it as a --build-arg. Developer machines keep the real 5 ms.
+  KIT_CPU_BUDGET_MS: "20"
 
 default:
   interruptible: true
@@ -334,6 +341,7 @@ build:app:
         --build-arg "IMAGE_SOURCE=$CI_PROJECT_URL" \
         --build-arg "IMAGE_PIPELINE_ID=$CI_PIPELINE_ID" \
         --build-arg "IMAGE_PIPELINE_URL=$CI_PIPELINE_URL" \
+        --build-arg "KIT_CPU_BUDGET_MS=$KIT_CPU_BUDGET_MS" \
         --snapshot-mode=redo \
         --cleanup \
         --no-push \

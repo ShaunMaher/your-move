@@ -309,6 +309,7 @@ describe("ruleset schema (words §8.2)", () => {
     ],
     ["maxPlayers below minPlayers", (r) => ({ ...r, minPlayers: 3, maxPlayers: 2 }), "maxPlayers"],
     ["one player", (r) => ({ ...r, minPlayers: 1 }), "minPlayers"],
+    ["three players (words §3.4)", (r) => ({ ...r, maxPlayers: 3 }), "maxPlayers"],
     [
       "an unknown swap order",
       (r) => ({ ...r, swapOrder: "swapThenPray" as "drawThenReturn" }),

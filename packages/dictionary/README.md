@@ -76,6 +76,9 @@ faggoting and faggotings) was removed by owner decision.
 - `index.json`: every manifest and the global removals, which the M6 upload and operator paths
   apply to their lists; the runtime reads it through `parseIndex`.
 
+Tests elsewhere in the workspace that need a real list (the words engine's property tests) build
+one in memory, writing nothing, with `buildBuiltin(id)` from `@your-move/dictionary/builder`.
+
 Sizes of `enable` version 2: 168,462 words (4,272 upstream words longer than 15 letters dropped,
 86 removed); `words.txt` 1,665,430 bytes, gzip 440,177 bytes, brotli 358,284 bytes. The committed
 `source.txt` is 1,743,327 bytes. The build takes about 2.5 s, most of it brotli.
