@@ -14,7 +14,7 @@ import { z } from "@your-move/sdk/schema";
 export const MAX_BOARD_SIZE = 15;
 
 /** The blank's tile code (words §3.1). */
-const BLANK = "?";
+export const BLANK = "?";
 
 /** Tile codes: lower-case `a`–`z`, and `?` for the blank (words §3.1). */
 const TILE_CODE = /^[a-z?]$/u;
@@ -60,7 +60,8 @@ const rulesetObject = z
     swapOrder: z.enum(SWAP_ORDERS),
     scorelessTurnLimit: positive,
     minPlayers: z.number().int().min(2),
-    maxPlayers: z.number().int().min(2),
+    /** At most 2 until multi-player resignation is specified (words §3.4, §8.2). */
+    maxPlayers: z.number().int().min(2).max(2),
     tiles: z.record(z.string().regex(TILE_CODE), tileSchema),
     /** `boardSize` rows of `boardSize` characters: `.` normal, `d` DL, `t` TL, `D` DW, `T` TW. */
     premiums: z.array(z.string().regex(PREMIUM_ROW)),

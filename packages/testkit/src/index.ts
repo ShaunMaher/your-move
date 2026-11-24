@@ -21,5 +21,12 @@ export {
   type KitProperty,
   type KitReport,
 } from "./kit.js";
+export {
+  CPU_BUDGET_VARIABLE,
+  DEFAULT_CPU_BUDGET_MS,
+  MAX_CPU_BUDGET_MS,
+  readCpuBudget,
+  type CpuBudget,
+} from "./budget.js";
 export { checkManifest } from "./manifest.js";
 export { seededRandom } from "./random.js";

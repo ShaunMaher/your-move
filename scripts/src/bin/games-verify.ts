@@ -2,8 +2,10 @@
  * `pnpm games:verify [--fast] [--cpu-budget-ms <n>]`: fails the build when an installed game
  * package breaks the rules of 02 §7.3 (see ../games/verify.ts). Without `--fast` it runs the full
  * test kit (CI's test stage); `pnpm build` and the Docker build pass `--fast` (02 §6). The deploy
- * job never runs it. `--cpu-budget-ms` raises the kit's CPU budget (default 5 ms, 08 T25) on a host
- * slower than the reference hardware; the budget is measured on the host running the kit.
+ * job never runs it. `--cpu-budget-ms` (or the `KIT_CPU_BUDGET_MS` variable, which CI sets once
+ * for every job and image build that runs the kit) raises the kit's CPU budget (default 5 ms,
+ * 08 T25) on a host slower than the reference hardware; the budget is measured on the host
+ * running the kit (@your-move/testkit, budget.ts).
  *
  * It also writes `generated/verified-files.json`: every installed package file the checks covered,
  * by role (reached from the engine and manifest entry points, or from the client entry point),
@@ -12,6 +14,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+
+import { CPU_BUDGET_VARIABLE, readCpuBudget } from "@your-move/testkit";
 
 import { writeVerifiedFiles, type CheckedPackage } from "../games/inputs.js";
 import { loadGames, loadInstanceConfig } from "../games/load.js";
@@ -24,11 +28,9 @@ run("games:verify", async () => {
   const { values } = parseArgs({
     options: { fast: { type: "boolean", default: false }, "cpu-budget-ms": { type: "string" } },
   });
-  const budget = values["cpu-budget-ms"];
-  const cpuBudgetMs = budget === undefined ? undefined : Number(budget);
-  if (cpuBudgetMs !== undefined && !(Number.isFinite(cpuBudgetMs) && cpuBudgetMs > 0)) {
-    fail("games:verify", ["--cpu-budget-ms must be a positive number of milliseconds"]);
-  }
+  const budget = readCpuBudget(values["cpu-budget-ms"], process.env[CPU_BUDGET_VARIABLE]);
+  if (!budget.ok) fail("games:verify", [budget.problem]);
+  const cpuBudgetMs = budget.ms;
   const resolvePackage = nodeModulesResolver(ROOT_DIR);
   const sdkDir = resolvePackage("@your-move/sdk");
   if (sdkDir === null) fail("games:verify", ["@your-move/sdk is not installed at the root"]);

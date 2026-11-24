@@ -12,6 +12,7 @@
  */
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 
 import type { DictionaryIndex } from "../manifest.js";
@@ -83,6 +84,19 @@ function writeDictionary(outDir: string, built: BuiltDictionary): BuildReport {
     gzipBytes: gzip.length,
     brotliBytes: brotli.length,
   };
+}
+
+/** This package's own directory, where `dictionaries/` and `removals-global.txt` live. */
+const PACKAGE_DIR = fileURLToPath(new URL("../..", import.meta.url));
+
+/**
+ * Builds one built-in dictionary in memory, writing nothing: for tests elsewhere in the
+ * workspace (e.g. the words engine's property tests) that need the real list without a build
+ * step.
+ */
+export async function buildBuiltin(id: string): Promise<BuiltDictionary> {
+  const globalRemovals = readText(join(PACKAGE_DIR, "removals-global.txt"));
+  return buildDirectory(join(PACKAGE_DIR, "dictionaries", id), id, globalRemovals);
 }
 
 /**
