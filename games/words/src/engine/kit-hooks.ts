@@ -28,13 +28,12 @@ import { allTiles, rackOf, rulesetOf, setup, type State } from "./state.js";
 /** The id of the kit dictionary (`kit-words.ts`) in the kit's resource catalog. */
 export const KIT_DICTIONARY_ID = "kit";
 
-/** The kit dictionary's words, as a set (built on first use; it never changes). */
-let kitWords: ReadonlySet<string> | undefined;
+/** The kit dictionary's words, as a set: about a thousand short words, built once and never changed. */
+const KIT_SET: ReadonlySet<string> = new Set(KIT_WORDS.flatMap((line) => line.split(" ")));
 
 /** Whether `word` is in the kit dictionary. */
 export function kitHas(word: string): boolean {
-  kitWords ??= new Set(KIT_WORDS.flatMap((line) => line.split(" ")));
-  return kitWords.has(word);
+  return KIT_SET.has(word);
 }
 
 /** The kit dictionary's metadata (02 §2 `ResourceMeta`). */
