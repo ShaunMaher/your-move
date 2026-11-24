@@ -15,14 +15,13 @@ describe("the generic test kit (02 §6)", () => {
     expect(report.games).toBeGreaterThanOrEqual(300);
   }, 300_000);
 
-  it("passes it with the full built-in word list too", async () => {
+  it("passes it with the full built-in word list too, as many games as fast mode plays", async () => {
     const { meta, resources } = await realDictionary();
     const report = runKit(engines, {
       mode: "fast",
       manifest,
       context: { config: configSchema.parse({}), resources: [meta] },
       resources,
-      games: 10,
     });
     expect(report.failures).toEqual([]);
   }, 300_000);
