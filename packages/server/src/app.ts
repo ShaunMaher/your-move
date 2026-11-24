@@ -69,9 +69,21 @@ const REJECTION_CODES: Partial<Record<number, ErrorCode>> = {
   429: "RATE_LIMITED",
 };
 
-/** The stack without its first line, which repeats the (possibly input-derived) message. */
+/**
+ * The stack's frames without its header, which repeats the (possibly input-derived) message. V8
+ * formats the stack lazily as `String(error)` and then the frames, and the message may span lines
+ * that look like frames (`JSON.parse` quotes its input with the newlines in it), so the header is
+ * cut off by its exact text before frames are picked out. A stack that doesn't start with it was
+ * formatted some other way: nothing is kept rather than risk keeping the message.
+ */
 function stackFrames(error: Error): string {
-  return (error.stack ?? "")
+  const stack = error.stack ?? "";
+  const header = String(error);
+  if (!stack.startsWith(`${header}\n`)) {
+    return "";
+  }
+  return stack
+    .slice(header.length + 1)
     .split("\n")
     .filter((line) => line.trimStart().startsWith("at "))
     .join("\n");

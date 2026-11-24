@@ -13,7 +13,7 @@
     "prepare": "tsx scripts/src/bin/hooks-install.ts && pnpm games:generate",
     "dev:node": "pnpm games:generate && pnpm --filter @your-move/node dev",
     "dev:worker": "pnpm games:generate && pnpm --filter @your-move/worker dev",
-    "build": "pnpm games:generate && pnpm games:verify --fast && pnpm --recursive --filter=!@your-move/root build",
+    "build": "pnpm games:check-inputs --reset && pnpm games:generate && pnpm games:verify --fast && pnpm --recursive --filter=!@your-move/root build && pnpm games:check-inputs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "pnpm games:generate && eslint . --max-warnings 0",
@@ -28,6 +28,7 @@
     "test:e2e": "pnpm --filter @your-move/e2e test",
     "games:generate": "tsx scripts/src/bin/games-generate.ts",
     "games:verify": "tsx scripts/src/bin/games-verify.ts",
+    "games:check-inputs": "tsx scripts/src/bin/games-check-inputs.ts",
     "games:check-db": "tsx scripts/src/bin/games-check-db.ts",
     "api:generate": "tsx scripts/src/bin/api-generate.ts",
     "renovate:sync": "tsx scripts/src/bin/renovate-sync.ts",
@@ -37,6 +38,7 @@
     "changeset": "changeset"
   },
   "dependencies": {
+    "@your-move/game-example": "workspace:*",
     "@your-move/sdk": "workspace:*"
   },
   "devDependencies": {

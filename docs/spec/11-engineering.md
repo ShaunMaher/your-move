@@ -209,7 +209,8 @@ writes the arm64 caches (M0 review CI-1). Stages, in order:
    kit, API contract on both runtimes, the Worker half on arm64 for now, above); JUnit and
    Cobertura reports to the MR.
 3. **build** — `pnpm games:verify --fast`, web app, Node server build (`apps/node/dist`), Worker
-   bundle, `generated/installed.json` kept as an artifact for the deploy job, Docker image per
+   bundle, then `pnpm games:check-inputs` (the bundler-input closure check, 02 §7.3; the whole
+   sequence is `pnpm build`), `generated/installed.json` kept as an artifact for the deploy job, Docker image per
    architecture built natively with kaniko (or rootless BuildKit, where the runner grants user
    namespaces; `linux/amd64` job tagged `arch-amd64`, `linux/arm64` job tagged `arch-arm64`).
    CycloneDX SBOMs of what each deployment ships (`pnpm sbom:app`: the production dependencies

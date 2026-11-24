@@ -4,7 +4,73 @@
 
 ```ts
 
+import { ComponentType } from 'react';
+import { ReactElement } from 'react';
+import { z } from 'zod';
+
 // @public
-export const CLIENT_API_PLANNED = true;
+export interface BoardProps<Action, View, PreviewResult> {
+    // Warning: (ae-forgotten-export) The symbol "GameEnvelope" needs to be exported by the entry point client.d.ts
+    //
+    // (undocumented)
+    readonly game: GameEnvelope;
+    // Warning: (ae-forgotten-export) The symbol "GameError" needs to be exported by the entry point client.d.ts
+    readonly preview: (action: Action) => Promise<PreviewResult | GameError>;
+    // Warning: (ae-forgotten-export) The symbol "SubmitResult" needs to be exported by the entry point client.d.ts
+    readonly submit: (action: Action) => Promise<SubmitResult>;
+    readonly view: View;
+}
+
+// Warning: (ae-forgotten-export) The symbol "Text_2" needs to be exported by the entry point client.d.ts
+//
+// @public
+export function formatText(text: Text_2, names: readonly string[]): string;
+
+// @public
+export interface GameClientModule<Options = unknown, Action = unknown, View = unknown, PreviewResult = unknown> {
+    // (undocumented)
+    readonly Board: ComponentType<BoardProps<Action, View, PreviewResult>>;
+    // (undocumented)
+    readonly HistoryItem: ComponentType<HistoryItemProps>;
+    // (undocumented)
+    readonly OptionsForm: ComponentType<OptionsFormProps>;
+    // (undocumented)
+    readonly RulesSheet: ComponentType<RulesSheetProps<Options>>;
+    // (undocumented)
+    readonly type: string;
+    readonly versions: readonly number[];
+}
+
+// @public
+export interface HistoryItemProps {
+    readonly describe: Text_2;
+    // (undocumented)
+    readonly gameVersion: number;
+    readonly names: readonly string[];
+    // (undocumented)
+    readonly record: unknown;
+}
+
+// @public
+export interface OptionsFormProps {
+    readonly catalog: unknown;
+    // (undocumented)
+    readonly onChange: (input: unknown) => void;
+    readonly value: unknown;
+}
+
+// @public
+export interface RulesSheetProps<Options> {
+    // (undocumented)
+    readonly gameVersion: number;
+    // (undocumented)
+    readonly options: Options;
+}
+
+// @public
+export function TextView(props: {
+    readonly text: Text_2;
+    readonly names: readonly string[];
+}): ReactElement;
 
 ```

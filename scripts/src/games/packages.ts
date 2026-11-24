@@ -10,6 +10,7 @@
  * other `package.json` (whose `imports`, `browser` and `type` Node and bundlers honour), no
  * `node_modules` (bundled dependencies) and no CommonJS.
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 
@@ -38,7 +39,7 @@ export type PackageResolver = (name: string) => string | null;
 export function nodeModulesResolver(rootDir: string): PackageResolver {
   return (name) => {
     const dir = join(rootDir, "node_modules", name);
-    return existsSync(join(dir, "package.json")) ? realpathSync(dir) : null;
+    return existsSync(join(dir, "package.json")) ? realpathSync.native(dir) : null;
   };
 }
 
@@ -65,7 +66,7 @@ export type ReadResult =
 function containedFile(dir: string, target: string): string | null {
   const file = resolve(dir, target);
   if (!existsSync(file)) return null;
-  const real = realpathSync(file);
+  const real = realpathSync.native(file);
   return real.startsWith(`${dir}${sep}`) ? real : null;
 }
 
@@ -81,32 +82,57 @@ const TARGET_EXTENSIONS = {
  * package from a registry (or, in a workspace package, one leading out of it). A workspace package's
  * own top-level `node_modules` is where pnpm links its development dependencies, and is skipped;
  * a published package never has one, so for anything installed from a registry it is refused.
+ *
+ * `packed`, for a workspace package, is the set of files publishing would include (see
+ * `packedFiles`): only those and their directories are walked, because sources, tests and coverage
+ * output never ship (M0 review P3-4). A package from a registry is walked in full.
+ *
+ * Names are compared case-insensitively: on the case-insensitive file systems of macOS and Windows,
+ * bundlers read `PACKAGE.JSON` as `package.json` and `x.CJS` as CommonJS.
  */
-export function packageFileProblems(name: string, dir: string, workspace: boolean): string[] {
+export function packageFileProblems(
+  name: string,
+  dir: string,
+  workspace: boolean,
+  packed?: ReadonlySet<string>,
+): string[] {
   const problems: string[] = [];
+  const shipped = packed === undefined ? undefined : withDirectories(packed);
   const walk = (current: string): void => {
     for (const entry of readdirSync(current, { withFileTypes: true })) {
       const path = join(current, entry.name);
       const rel = relative(dir, path);
-      if (entry.name === "node_modules") {
+      const lower = entry.name.toLowerCase();
+      // Files publishing leaves out aren't checked by name, but symlinks are, wherever they are:
+      // in this workspace the bundlers follow them whether or not publishing would.
+      const unpublished = shipped !== undefined && !shipped.has(rel.split(sep).join("/"));
+      if (workspace && unpublished && !entry.isSymbolicLink()) {
+        if (entry.isDirectory() && lower !== "node_modules") walk(path);
+        continue;
+      }
+      if (lower === "node_modules") {
         if (!(workspace && current === dir)) {
           problems.push(`${name}: must not contain a node_modules directory (${rel}) (02 §7.1.1)`);
         }
         continue;
       }
       // Checked by name first, so a symlink can't hide a package.json or a CommonJS file.
-      if (entry.name === "package.json" && current !== dir) {
+      if (lower === "package.json" && (current !== dir || entry.name !== "package.json")) {
         problems.push(
           `${name}: must not contain another package.json (${rel}): Node and bundlers would read its "imports", "browser" and "type" (02 §7.1.1)`,
         );
-      } else if (/\.c[jt]s$/u.test(entry.name)) {
+      } else if (/\.c[jt]s$/iu.test(entry.name)) {
         problems.push(`${name}: must not contain CommonJS (${rel}) (02 §7.1.1)`);
+      } else if (isSource(lower)) {
+        problems.push(
+          `${name}: must not contain TypeScript or JSX sources (${rel}): bundlers would compile them, Node wouldn't (02 §7.1.1)`,
+        );
       }
       if (entry.isSymbolicLink()) {
         if (!workspace) {
           // A published tarball can't carry symlinks, so one here didn't come from a registry.
           problems.push(`${name}: must not contain a symlink (${rel}) (02 §7.1.1)`);
-        } else if (existsSync(path) && !realpathSync(path).startsWith(`${dir}${sep}`)) {
+        } else if (existsSync(path) && !realpathSync.native(path).startsWith(`${dir}${sep}`)) {
           problems.push(`${name}: ${rel} links outside the package`);
         }
         // A link inside a workspace package is checked where it points.
@@ -117,6 +143,48 @@ export function packageFileProblems(name: string, dir: string, workspace: boolea
   };
   walk(dir);
   return problems;
+}
+
+/**
+ * Whether a (lower-case) file name is TypeScript or JSX source: `.ts`, `.mts`, `.tsx`, `.jsx`.
+ * Declaration files (`.d.ts`, `.d.mts`) are what `types` targets are, and are allowed; a package
+ * ships built JavaScript only (02 §7.1.1), and the import check refuses any relative import that
+ * doesn't end in `.js` or `.mjs`, so a declaration file is never loaded as code.
+ */
+function isSource(lower: string): boolean {
+  return /\.(m?ts|tsx|jsx)$/u.test(lower) && !/\.d\.m?ts$/u.test(lower);
+}
+
+/** `files` plus every directory above them, as `/`-separated paths relative to the package. */
+function withDirectories(files: ReadonlySet<string>): Set<string> {
+  const all = new Set<string>();
+  for (const file of files) {
+    const parts = file.split("/");
+    for (let i = 1; i <= parts.length; i += 1) all.add(parts.slice(0, i).join("/"));
+  }
+  return all;
+}
+
+/**
+ * The files `pnpm pack` would publish from the package in `dir`, relative to it: what a registry
+ * install of a workspace package would contain. `undefined` if pnpm can't pack it, and then the
+ * whole package is checked.
+ */
+export function packedFiles(dir: string): ReadonlySet<string> | undefined {
+  let output: string;
+  try {
+    output = execFileSync("pnpm", ["pack", "--dry-run", "--json"], {
+      cwd: dir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return undefined;
+  }
+  const parsed = z
+    .object({ files: z.array(z.object({ path: z.string() })) })
+    .parse(JSON.parse(output.slice(output.indexOf("{"))));
+  return new Set(parsed.files.map((file) => file.path));
 }
 
 /** Reads a game package and checks its `package.json` contract and three entry points. */

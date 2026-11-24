@@ -18,6 +18,13 @@ export interface Finding {
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/u;
 
+/**
+ * The keys an `IgnoredVulns` entry may set, spelled exactly. osv-scanner's TOML decoder matches
+ * keys to its fields case-insensitively, so `ID` or `IGNOREUNTIL` beside the checked key could
+ * override it; refusing every other spelling also refuses every duplicate after case folding.
+ */
+const ENTRY_KEYS: ReadonlySet<string> = new Set(["id", "ignoreUntil", "reason"]);
+
 /** A TOML value as text: strings as they are, dates as `YYYY-MM-DD`, anything else unset. */
 function text(value: unknown, date = false): string | undefined {
   if (typeof value === "string") return value;
@@ -30,7 +37,8 @@ function text(value: unknown, date = false): string | undefined {
  * osv-scanner accepts (comments after headers, spaced headers, inline arrays) is seen. Throws on
  * invalid TOML or an `IgnoredVulns` that isn't an array of tables, so the check fails closed.
  * Any other top-level key is refused too: `PackageOverrides` (and whatever osv-scanner adds) can
- * also silence findings, and nothing here checks those against an accepted risk.
+ * also silence findings, and nothing here checks those against an accepted risk. So is any entry
+ * key other than `id`, `ignoreUntil` and `reason`.
  */
 export function parseIgnoredVulns(source: string): IgnoredVuln[] {
   const config = parse(source);
@@ -47,6 +55,12 @@ export function parseIgnoredVulns(source: string): IgnoredVuln[] {
       throw new Error("osv-scanner.toml: every IgnoredVulns entry must be a table");
     }
     const fields = entry as Record<string, unknown>;
+    const unknown = Object.keys(fields).filter((key) => !ENTRY_KEYS.has(key));
+    if (unknown.length > 0) {
+      throw new Error(
+        `osv-scanner.toml: an IgnoredVulns entry may set only id, ignoreUntil and reason (found ${unknown.join(", ")}); osv-scanner reads keys case-insensitively, so another spelling could override a checked value`,
+      );
+    }
     return {
       id: text(fields["id"]),
       ignoreUntil: text(fields["ignoreUntil"], true),

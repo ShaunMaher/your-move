@@ -8,7 +8,7 @@
   "scripts": {
     "assets": "tsx scripts/prepare-assets.ts",
     "dev": "pnpm --filter @your-move/web build && PUBLIC_URL=http://localhost:8787 tsx scripts/prepare-assets.ts && wrangler dev --config wrangler.example.toml --env-file ../../config/local-dev.env --var PUBLIC_URL:http://localhost:8787 --port 8787",
-    "build": "tsx scripts/prepare-assets.ts && wrangler deploy --dry-run --config wrangler.example.toml --outdir dist/worker"
+    "build": "tsx scripts/prepare-assets.ts && wrangler deploy --dry-run --config wrangler.example.toml --outdir dist/worker --metafile dist/bundle-meta.json && tsx scripts/record-inputs.ts"
   },
   "dependencies": {
     "@your-move/server": "workspace:*"

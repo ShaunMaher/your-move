@@ -126,13 +126,18 @@ export default config(
     languageOptions: { globals: globals.browser },
     rules: { "react/no-danger": "error" },
   },
-  // Engines, manifests and the SDK's pure entry point: the globals allow-list (02 §7.5).
+  // Engines, manifests and the SDK's pure entry point: the globals allow-list (02 §7.5). Tests
+  // beside an engine don't ship, and may use what the engine may not.
   engineEslintConfig([
     "games/*/src/engine/**/*.ts",
     "games/*/src/manifest.ts",
     "packages/sdk/src/index.ts",
+    "packages/sdk/src/api.ts",
+    "packages/sdk/src/contract.ts",
+    "packages/sdk/src/manifest.ts",
+    "packages/sdk/src/random.ts",
     "packages/sdk/src/schema.ts",
-  ]),
+  ]).map((config) => ({ ...config, ignores: ["**/*.test.ts"] })),
   {
     // CommonJS plugins imported by config files expose their default export at runtime only.
     files: ["**/*.{js,mjs,cjs}"],

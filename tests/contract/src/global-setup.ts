@@ -2,9 +2,14 @@
  * Builds what the suite runs against, exactly as the build stage does: the web app, the Node
  * server bundle and the Worker bundle with its `_headers`. Then starts the Node build
  * (`node apps/node/dist/main.js`) on a free port; the Worker half runs in Wrangler's test harness.
+ * The builds record their bundler inputs in a temporary directory, not generated/bundles/, so a
+ * test run never stands in for `pnpm build`'s records (02 §7.3).
  */
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { TestProject } from "vitest/node";
@@ -48,15 +53,20 @@ async function waitForHealth(url: string, child: ChildProcess): Promise<void> {
 }
 
 export default async function setup(project: TestProject): Promise<() => void> {
+  const records = mkdtempSync(join(tmpdir(), "contract-bundles-"));
   const build = (name: string) => {
     execFileSync("pnpm", ["--filter", name, "build"], {
       stdio: "inherit",
-      env: { ...process.env, PUBLIC_URL: CONTRACT_VARS.PUBLIC_URL },
+      env: { ...process.env, PUBLIC_URL: CONTRACT_VARS.PUBLIC_URL, BUNDLE_INPUTS_DIR: records },
     });
   };
-  build("@your-move/web");
-  build("@your-move/node");
-  build("@your-move/worker");
+  try {
+    build("@your-move/web");
+    build("@your-move/node");
+    build("@your-move/worker");
+  } finally {
+    rmSync(records, { recursive: true, force: true });
+  }
 
   const port = await freePort();
   const child = spawn(process.execPath, ["--disallow-code-generation-from-strings", NODE_MAIN], {

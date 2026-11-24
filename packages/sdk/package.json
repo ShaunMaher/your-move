@@ -1,7 +1,6 @@
 {
   "name": "@your-move/sdk",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "The contract between the game framework and every game package",
   "license": "BSD-2-Clause",
   "type": "module",
@@ -30,7 +29,8 @@
   "files": [
     "dist",
     "!dist/**/*.test.*",
-    "!dist/.tsbuildinfo"
+    "!dist/.tsbuildinfo",
+    "!dist/api-report-temp"
   ],
   "scripts": {
     "build": "tsc --build",
@@ -38,10 +38,18 @@
     "api:surface:check": "tsc --build && api-extractor run -c api-extractor.json && api-extractor run -c api-extractor.schema.json && api-extractor run -c api-extractor.client.json"
   },
   "peerDependencies": {
+    "react": "^19.0.0",
     "zod": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@microsoft/api-extractor": "catalog:",
+    "@types/react": "catalog:",
+    "react": "catalog:",
     "vitest": "catalog:",
     "zod": "catalog:"
   }

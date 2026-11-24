@@ -213,16 +213,25 @@ test:
     # Wrangler's own log file goes where the artifacts can keep it.
     WRANGLER_LOG_PATH: $CI_PROJECT_DIR/reports/wrangler-logs
   script:
-    # Unit, integration, property, component and API contract tests; the full game kit joins in
-    # M1. The Worker half of the contract suite runs in test:worker instead (see there): to fold it
-    # back, drop the --exclude and the test:worker job.
-    - pnpm test --exclude src/worker.test.ts
+    # Unit, integration, property, component and API contract tests. The Worker half of the
+    # contract suite runs in test:worker instead (see there): to fold it back, drop the --exclude
+    # and the test:worker job. Vitest matches --exclude against each project's own directory, so
+    # only an absolute path names this one file and no other.
+    - pnpm test --exclude "$CI_PROJECT_DIR/tests/contract/src/worker.test.ts"
+    # The full game kit and every other games:verify check on each installed game (02 §6, 11 §4);
+    # the build stage runs the fast kit.
+    - pnpm games:verify
   after_script:
+    # The Worker build writes Wrangler's log, but a job that fails earlier writes none: an empty
+    # directory keeps the artifact upload from warning.
+    - mkdir -p "$WRANGLER_LOG_PATH"
     - *runner-report
   coverage: '/Lines\s*:\s*(\d+(?:\.\d+)?)%/'
   artifacts:
     when: always
     expire_in: 1 week
+    # Wrangler's logs can carry the test configuration; only project members read them.
+    access: developer
     paths:
       - reports/wrangler-logs/
     reports:
@@ -259,10 +268,12 @@ test:worker:
     # The contract project's global setup builds the web app, Node server and Worker first.
     - pnpm exec vitest run --project tests/contract src/worker.test.ts
   after_script:
+    - mkdir -p "$WRANGLER_LOG_PATH"
     - *runner-report
   artifacts:
     when: always
     expire_in: 1 week
+    access: developer
     paths:
       - reports/wrangler-logs/
     reports:
@@ -417,7 +428,8 @@ security:dependencies:
 # environment: those variables are protected, and MR pipelines don't run on protected refs.
 # ENV_SCOPE_CANARY, an unprotected variable scoped to each environment with the environment's
 # name as its value (docs/deploy.md), proves the job really got that environment's variables, so
-# the check can't pass vacuously. Prints only whether each variable is set.
+# the check can't pass vacuously. Prints only whether each variable is set. The environments and
+# variables match docs/deploy.md's secrets table (scripts/src/ci/no-secrets-on-mr.test.ts).
 security:no-secrets-on-mr:
   stage: security
   extends: .merge-requests

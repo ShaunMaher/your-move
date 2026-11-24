@@ -28,7 +28,7 @@ async function fixtureGames(): Promise<readonly LoadedGame[]> {
 describe("games:generate output", () => {
   it("renders an empty instance", () => {
     const files = renderAll([]);
-    expect(files["server-registry.ts"]).toContain("export const installedGames = [] as const;");
+    expect(files["server-registry.ts"]).toContain("}[] = [];");
     expect(files["client-games.ts"]).toContain(
       "export const gameClients: Readonly<Record<string, () => Promise<unknown>>> = {};",
     );

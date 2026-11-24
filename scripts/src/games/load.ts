@@ -5,7 +5,7 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type { GameManifest } from "@your-move/sdk";
+import type { GameEngines, GameManifest } from "@your-move/sdk";
 import { z } from "zod";
 
 import { instanceConfigSchema } from "../instance/define.js";
@@ -35,6 +35,8 @@ export interface LoadedGame {
   readonly packageName: string;
   readonly pkg: GamePackage;
   readonly manifest: GameManifest;
+  /** The engine's `engines` export: rules version → definition, as the package exports it. */
+  readonly engines: GameEngines;
   /** The rules versions the engine exports (02 §7.4), ascending. */
   readonly rulesVersions: readonly number[];
   readonly enabledByDefault: boolean;
@@ -105,6 +107,8 @@ export async function loadGames(
       packageName: entry.package,
       pkg: read.pkg,
       manifest: manifest.data,
+      // Checked as a map of rules versions above; the definitions themselves the kit checks.
+      engines: engines as GameEngines,
       rulesVersions: Object.keys(engines)
         .map(Number)
         .sort((a, b) => a - b),

@@ -19,9 +19,9 @@ const config: KnipConfig = {
     ".": {
       entry: ["instance.config.ts"],
       project: ["*.{ts,js,mjs}"],
-      // The instance's SDK: games:verify checks installed games against its version, and game
-      // packages listed in instance.config.ts resolve it as their peer from the root.
-      ignoreDependencies: ["@your-move/sdk"],
+      // Installed game packages: named in instance.config.ts and imported only by the generated,
+      // git-ignored registry and client import map (02 §7.3), which knip doesn't read.
+      ignoreDependencies: ["@your-move/game-example"],
     },
     "apps/node": {
       project: ["src/**/*.ts", "scripts/**/*.ts"],

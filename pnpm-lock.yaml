@@ -325,6 +325,9 @@ importers:
 
   .:
     dependencies:
+      '@your-move/game-example':
+        specifier: workspace:*
+        version: link:games/example
       '@your-move/sdk':
         specifier: workspace:*
         version: link:packages/sdk
@@ -500,12 +503,39 @@ importers:
 
   games/example:
     devDependencies:
+      '@testing-library/dom':
+        specifier: 'catalog:'
+        version: 10.4.2
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.3.0(@types/react@19.3.0)
       '@your-move/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
+      '@your-move/testkit':
+        specifier: workspace:*
+        version: link:../../packages/testkit
+      jsdom:
+        specifier: 'catalog:'
+        version: 31.0.1
+      react:
+        specifier: 'catalog:'
+        version: 19.3.1
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.3.1(react@19.3.1)
       vitest:
         specifier: 'catalog:'
         version: 5.1.1(@types/node@26.6.6)(@vitest/coverage-v8@5.1.1)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
 
   games/paths:
     devDependencies:
@@ -552,6 +582,12 @@ importers:
       '@microsoft/api-extractor':
         specifier: 'catalog:'
         version: 7.60.1(@types/node@26.6.6)
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.3.0
+      react:
+        specifier: 'catalog:'
+        version: 19.3.1
       vitest:
         specifier: 'catalog:'
         version: 5.1.1(@types/node@26.6.6)(@vitest/coverage-v8@5.1.1)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
@@ -606,6 +642,9 @@ importers:
         specifier: 'catalog:'
         version: 17.14.0
     devDependencies:
+      '@your-move/sdk':
+        specifier: workspace:*
+        version: link:../sdk
       dependency-cruiser:
         specifier: 'catalog:'
         version: 18.8.0
@@ -618,6 +657,9 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 5.1.1(@types/node@26.6.6)(@vitest/coverage-v8@5.1.1)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.7
 
   scripts:
     devDependencies:

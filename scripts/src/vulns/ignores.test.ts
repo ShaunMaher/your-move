@@ -72,6 +72,36 @@ describe("parseIgnoredVulns", () => {
     expect(() => parseIgnoredVulns(source)).toThrow();
   });
 
+  // osv-scanner matches keys case-insensitively: another spelling could override a checked value.
+  it.each([
+    [
+      "an entry key spelled differently",
+      toml('ID = "GHSA-1"\nignoreUntil = 2027-01-31\nreason = "F-11"'),
+    ],
+    [
+      "a duplicate id after case folding",
+      toml('id = "GHSA-1"\nID = "GHSA-2"\nignoreUntil = 2027-01-31\nreason = "F-11"'),
+    ],
+    [
+      "a duplicate ignoreUntil after case folding",
+      toml('id = "GHSA-1"\nignoreUntil = 2027-01-31\nIGNOREUNTIL = 2099-01-01\nreason = "F-11"'),
+    ],
+    [
+      "a duplicate reason after case folding",
+      toml('id = "GHSA-1"\nignoreUntil = 2027-01-31\nreason = "F-11"\nReason = "x"'),
+    ],
+    [
+      "an unknown entry key",
+      toml('id = "GHSA-1"\nignoreUntil = 2027-01-31\nreason = "F-11"\nnote = "x"'),
+    ],
+    [
+      "an unknown key in an inline entry",
+      'IgnoredVulns = [{ id = "GHSA-1", ignoreUntil = 2027-01-31, reason = "F-11", Id = "GHSA-2" }]\n',
+    ],
+  ])("refuses %s", (_, source) => {
+    expect(() => parseIgnoredVulns(source)).toThrow(/may set only id, ignoreUntil and reason/u);
+  });
+
   it("finds no ignores in the committed file", () => {
     const committed = readFileSync(new URL("../../../osv-scanner.toml", import.meta.url), "utf8");
     expect(checkIgnores(parseIgnoredVulns(committed), FINDINGS)).toEqual([]);

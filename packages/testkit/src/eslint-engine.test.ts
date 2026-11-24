@@ -90,12 +90,47 @@ describe("engineEslintConfig", () => {
       /constructors or prototypes/u,
     ],
     ["(({ __proto__: p }) => p)({})", /constructors or prototypes/u],
+    // Reaching a prototype through a value: S-9 / P-16.
+    ["Object.getPrototypeOf([]).includes = () => true", /Object\.getPrototypeOf reaches/u],
+    ['Reflect.getPrototypeOf("").trim', /Reflect\.getPrototypeOf reaches/u],
+    ['({}).__lookupGetter__("__proto__").call([])', /constructors or prototypes/u],
+    ['[].__lookupSetter__("x")', /constructors or prototypes/u],
+    ['[].__defineGetter__("x", () => 1)', /constructors or prototypes/u],
+    ['({})["__defineSetter__"]("x", () => 1)', /constructors or prototypes/u],
+    ["({})[`__lookupGetter__`]", /constructors or prototypes/u],
+    ["(({ __lookupGetter__: g }) => g)({})", /constructors or prototypes/u],
     ["Math", /Use Math by name/u],
     ["[Math][0].max(1)", /Use Math by name/u],
     ["Object.values(Math)", /Use Math by name/u],
     ["({ ...Reflect })", /Use Reflect by name/u],
-    ["[1].filter(Boolean)", /Use Boolean by name/u],
     ["typeof Date", /Use Date by name/u],
+    // The allowed value uses don't open writes by name.
+    ["Number.prototype.x = 1", /must not write to prototypes/u],
+    ["Number.parseFloat = (s) => s", /must not write to built-in objects/u],
+    ["Object.assign(Number, { x: 1 })", /must not write to built-in objects/u],
+    ["Error.prototype.x = 1", /must not write to prototypes/u],
+    ["Error.captureStackTrace = () => 1", /must not write to built-in objects/u],
+    // Member chains rooted at a built-in (M1a round 2, P2-4 / S2-2).
+    ["Array.prototype.push.x = 1", /must not write to built-in objects/u],
+    ["JSON.parse.cache = {}", /must not write to built-in objects/u],
+    ["Math.max.calls++", /must not write to built-in objects/u],
+    ["delete Array.prototype.push", /must not write to built-in objects/u],
+    ["delete JSON.parse.cache", /must not write to built-in objects/u],
+    ["[Math.x] = [1]", /must not write to built-in objects/u],
+    ["({ a: JSON.y } = { a: 1 })", /must not write to built-in objects/u],
+    ["{ for (Math.x of [1]); }", /must not write to built-in objects/u],
+    ["Object.freeze(Array.prototype)", /must not write to built-in objects/u],
+    ["Object.seal(Math)", /must not write to built-in objects/u],
+    ["Object.preventExtensions(JSON.parse)", /must not write to built-in objects/u],
+    ["Object.defineProperty(Array.prototype.push, 'x', {})", /must not write to built-in objects/u],
+    ["Reflect.preventExtensions(Math)", /must not write to built-in objects/u],
+    ["Array.prototype", /Use Array's members by name/u],
+    ["[Object.prototype][0].x = 1", /Use Object's members by name/u],
+    ["((p) => p)(Array.prototype)", /Use Array's members by name/u],
+    ["JSON.parse", /Use JSON's members by name/u],
+    ["Array.prototype.push", /Use Array's members by name/u],
+    ["[1].map(Math.abs)", /Use Math's members by name/u],
+    ["Math?.max", /Use Math's members by name/u],
   ])("rejects %s", (code, expected) => {
     const found = messages(`export const x = () => ${code};`);
     expect(
@@ -108,8 +143,52 @@ describe("engineEslintConfig", () => {
     "const M = Math; export const r = () => M.max(1);",
     "const { max } = Math; export const m = max(1, 2);",
     "export const f = (n = Number) => n;",
+    // Conversion functions: only as an array method's callback, never aliased or handed on.
+    "const N = Number; export const p = N.prototype;",
+    "const f = (n) => n; export const p = f(Number);",
+    "export const s = [1].map(Math);",
+    "export const s = [1].map(Object);",
+    "export const s = [1].map(JSON);",
+    "export const s = [1].map(Reflect);",
+    "export const s = [1].map(Map);",
+    "export const s = [1].map(...Number);",
+    "export const s = [1].map((x) => x, Number);",
+    "export const s = [1][`map`](Number);",
+    "export const s = [1].reduce(Number);",
+    // Heritage: error classes only.
+    "export class M extends Map {}",
+    "export class O extends Object {}",
+    "export const E = class extends (Error, Math) {};",
   ])("rejects a built-in used as a value: %s", (code) => {
     expect(messages(code).join("\n")).toMatch(/by name \(a member, call or new\), not as a value/u);
+  });
+
+  it("refuses an aliased global the allow-list leaves off, whatever the form", () => {
+    expect(messages("export const s = [1].map(Function);").join("\n")).toMatch(
+      /'Function' is not defined|Function is not on/u,
+    );
+    expect(messages("export const s = [1].map(globalThis);").join("\n")).toMatch(
+      /globalThis is not on the engine globals allow-list/u,
+    );
+    expect(messages("export const s = [1].map(eval);").join("\n")).toMatch(
+      /eval is not on the engine globals allow-list/u,
+    );
+  });
+
+  it("allows instanceof, error subclasses and conversion functions as array callbacks", () => {
+    expect(
+      messages(`
+        export class InvalidMove extends Error {}
+        export const Rejected = class extends RangeError {};
+        export const isMap = (x) => x instanceof Map;
+        export const isDate = (x) => x instanceof Date;
+        export const numbers = ["1", "2"].map(Number);
+        export const strings = [1, 2].map(String);
+        export const present = [0, 1, null].filter(Boolean);
+        export const any = [0, 1].some(Boolean);
+        export const maybe = (xs) => xs?.map(Number);
+      `),
+    ).toEqual([]);
   });
 
   it("allows the primitive built-ins and a local binding that shadows a built-in's name", () => {
@@ -163,6 +242,16 @@ describe("engineEslintConfig", () => {
         export const cell = board.cells[0];
         export const max = Math.max(...board.cells);
         export const keys = Reflect.ownKeys(board);
+        export const proto = Object.create(null);
+        export const slice = Array.prototype.slice.call([1, 2], 1);
+        export const tau = Math.PI * 2 + Number.MAX_SAFE_INTEGER + Math.max.length;
+        export const iterator = [][Symbol.iterator];
+        export const raw = String.raw\`a\`;
+        export const kind = typeof Math.max;
+        export const frozen = Object.freeze({ a: 1 });
+        export const optional = Math?.max(1, 2);
+        export const getters = { lookupGetter: 1, defineSetter: 2, getPrototype: 3 };
+        export const lookup = getters.lookupGetter + getters.getPrototype;
       `),
     ).toEqual([]);
   });

@@ -123,6 +123,10 @@ interface GameDefinition<Options, State, Action, View, PublicRecord, PreviewResu
     maxActions(options: Options, seats: number): number;  // termination bound
     worstCase(options: Options, seats: number, rng: RandomSource): { state: State; seat: Seat; action: Action }[]; // CPU budget
     publicRandomness?: boolean;                            // true if records legitimately show random draws (e.g. dice)
+    hiddenFromEveryone?: boolean;                          // true if no seat ever sees the hidden information (e.g. deck order only), §6.3
+    optionInputs(ctx: OptionsContext): unknown[];          // the option inputs the kit plays (§6); required, non-empty
+    context?(): OptionsContext;                            // what resolveOptions, catalog and checkConfig see in the kit; default: configSchema.parse({}), no resources
+    resources?(options: Options): Resources;               // what validate and preview get in the kit's games; default: none
   };
 }
 
@@ -141,13 +145,20 @@ Enforced by the generic test kit (§6) where possible:
 2. **Randomness** comes only from the `rng` argument. The framework wraps the WebCrypto source so
    every value drawn is recorded. This makes every game replayable (§5).
 3. **Errors** are values (`GameError`), never exceptions, and use only codes in `errorCodes`.
-   Exceptions mean a bug and become a `500` with no detail (05 §Errors).
+   Exceptions mean a bug and become a `500` with no detail (05 §Errors); the kit reports an
+   exception from any module function, a transition's included, as a schema failure (§6.1). A
+   `GameError` is recognised by its shape (an object whose only keys are a string `code` and an
+   optional `detail`), so resolved options and preview results never have that shape.
 4. **Secrecy**: while the game is in progress, `view`, `summary`, `toAct`, `seatStatus`, whether
    `result()` is null, and the results of `validate` and `preview` (including error `detail`) for a
    seat MUST NOT depend on information hidden from that seat. After `result()` is non-null, `view`
    may reveal anything the module chooses (e.g. final racks).
 5. **Public records** contain only information visible to every seat. They appear in history and
-   notifications, and `describe` builds text from the record alone.
+   notifications, and `describe` builds text from the record alone. Because the kit compares the
+   record of a transition on a state and on its perturbation (§6.3), a record never depends on
+   information hidden before the transition, even what the transition reveals (e.g. the cards
+   shown when a secret phase ends, or who lost a life because of them): such outcomes reach
+   players through `view`.
 6. **Resources** are loaded by the framework before calling the module and passed in as synchronous
    lookup objects, so the module stays pure. Example: a dictionary's `has(word): boolean`. Only
    `validate` and `preview` receive resources. `setup`, `apply`, `onResign` and `onTimeout` MUST NOT
@@ -222,7 +233,7 @@ interface GameClientModule<Options, Action, View, PreviewResult> {
     preview(action: Action): Promise<PreviewResult | GameError>;   // local when possible, else server
   }>;
   RulesSheet: Component<{ options: Options; gameVersion: number }>;   // may render the manifest's rules markdown (§7.2)
-  HistoryItem: Component<{ record: unknown; gameVersion: number; names: string[] }>;
+  HistoryItem: Component<{ record: unknown; describe: Text; gameVersion: number; names: string[] }>; // describe: the stored fallback text
 }
 ```
 
@@ -441,44 +452,92 @@ start, remove, join, accept or cancel simply makes the guard fail.
 
 ## 6. Generic test kit (`@your-move/testkit`)
 
-Every game module MUST pass the kit, which runs thousands of random games per module and option
-set and seat count, with seeded randomness:
+Every game module MUST pass the kit, which plays many random games per rules version, with seeded
+randomness (counts below). It plays every option input the module's **`test.optionInputs(ctx)`**
+lists, each with every seat count that `players(options)` allows and `validateStart` accepts. The
+hook is **required and must return at least one input**, so a module can't pass by leaving it out
+and being played on its defaults. Covering the option space is the author's job, which the kit
+can't check (`[{}]` is accepted): a module with options lists the defaults (`{}`) and enough other
+inputs to reach every rule an option changes (each ruleset, each variant, the corners of each
+range). The
+optional `test.context()` gives what `resolveOptions`, `catalog` and `checkConfig` see (default:
+`configSchema` parsed from `{}`, no resources) and `test.resources(options)` what `validate` and
+`preview` get in those games (default: none; replay always gets none, rule 6). `pnpm games:verify`
+plays exactly these hooks, so a game that needs a dictionary supplies one through them.
 
 1. **Schema conformance**: every option, view, record, preview and catalog matches its schema;
-   every error code is in `errorCodes` and none is reserved (§2.2).
+   every error code is in `errorCodes` and none is reserved (§2.2). An exception from any module
+   function, a transition's included, fails here (§2.1 rule 3).
 2. **Replay**: as in §5, with an empty resource provider (§2.1 rule 6).
-3. **Secrecy (perturbation)**: at random points in a game, for each seat `v` **and for the public
-   viewer `v = null`**, with `s' = perturbHidden(s, v)` (which randomises everything `v` can't see —
-   other hands, deck order, secret phase actions; for `null`, everything hidden from the public
-   view — while keeping the state consistent):
-   - `view`, `summary`, `toAct`, `seatStatus` and `result() === null` are identical for `s` and `s'`;
-   - the perturbation isn't vacuous: for a module with `hiddenInformation: true`, `s'` differs from
-     `s` in at least half of the samples taken while `result()` is null;
+3. **Secrecy (perturbation)**: at sampled points of every game, for each seat `v` **and for the
+   public viewer `v = null`**, with `s' = perturbHidden(s, v)` (which randomises everything `v`
+   can't see — other hands, deck order, secret phase actions; for `null`, everything hidden from
+   the public view — while keeping the state consistent):
+   - `view`, `summary`, `toAct`, `seatStatus` and `result() === null` are identical for `s` and
+     `s'`. Outputs are compared as the JSON the framework serves, **object key order included**
+     (it survives JSON and Zod, so a key order that follows hidden state is a leak);
+   - the perturbation isn't vacuous: for a module with `hiddenInformation: true`, at least half of
+     the samples taken while `result()` is null must change **some other viewer's view** (seat
+     `w ≠ v`, or the public view), so reordering a deck while hands are hidden doesn't count. Only
+     a module that declares **`test.hiddenFromEveryone: true`** — no seat ever sees its hidden
+     information, e.g. only the deck order is hidden — is counted by whether `s'` differs from `s`
+     instead (it requires `hiddenInformation: true`);
    - `validate` and `preview` results, including `detail`, are identical for `s` and `s'`, for
      legal actions from `randomAction` **and** for possibly-illegal ones from `randomAnyAction`;
    - the `record` from `apply`/`onResign`/`onTimeout` by any seat is identical for `s` and `s'`
      (whenever the action still validates on `s'`), both with the same recorded draws and, unless
-     `publicRandomness` is set, with different draws. This catches drawn tiles leaking into history.
-4. **Termination**: random play always reaches `result() !== null` within `maxActions(options, seats)`.
-5. **Turn sanity** (module-checkable): `toAct` ⊆ seats that `seatStatus` reports `playing`; every
-   seat in `toAct` has an action that validates (`randomAction` result is checked); a seat reported
-   `out` never returns to `playing` or `toAct`; `toAct` is empty exactly when `result()` is non-null.
+     `publicRandomness` is set, with different draws. This catches drawn tiles leaking into history;
+   - **a record doesn't repeat a secret choice**: at each sample the kit draws 8 legal actions from
+     `randomAction` for each seat in `toAct`, applies each on the same state with the same draws,
+     and groups them by every other seat's view and the public view afterwards; within a group the
+     records and their `describe` text are identical. (The comparison on `s'` can't see this: it
+     replays the same action, so a record that repeats `action.card` is the same both times.) So
+     that a rare kind of action (an exchange, say) is drawn twice often enough, **`randomAction`
+     MUST produce every kind of action that is legal at a state at least about a tenth of the
+     time**. A module whose public moves leave no trace in any view must show them in `view` (e.g. a
+     last-move field), not only in the record.
+
+   Points are sampled **uniformly over each game's length** (the game is played first and its
+   samples kept by reservoir sampling), so a leak that appears only late, e.g. once the deck is
+   empty, is as likely to be sampled as one at the start. In full mode every tenth game is also
+   checked at every step.
+4. **Termination**: random play always reaches `result() !== null` within `maxActions(options,
+   seats)`, a positive safe integer of at most 1 000 000. Half the games are played with no seat
+   leaving, and in the rest a seat leaves with a chance of about 1 / `maxActions` per transition, so
+   long games really run to their end.
+5. **Turn sanity** (module-checkable): `toAct` ⊆ seats that `seatStatus` reports `playing`; at
+   every step every seat in `toAct` has an action that validates (its `randomAction` result is
+   checked); a seat reported `out` never returns to `playing` or `toAct`; `toAct` is empty exactly
+   when `result()` is non-null. Seats leave the way the framework makes them (§4): a seat that hasn't
+   acted declines only when at least `min` playing seats would remain (otherwise the framework
+   ends the game itself), and may also resign; only a seat that has acted times out.
 6. **CPU budget**: per-call CPU for `validate` + `apply` (and `preview`) on the `worstCase` inputs
-   stays within the budget in 08 T25.
+   stays within the budget in 08 T25 at the 99th percentile, timed after warm-up runs (100 timed
+   runs per input in fast mode, 300 in full). The budget is measured **on the host running the
+   kit**; `pnpm games:verify --cpu-budget-ms <n>` sets it (raising it for a host slower than the
+   reference hardware, or lowering it). `worstCase` must not be vacuous: it returns at least one
+   input for every playable seat count, each input is a game of that seat count (`seatStatus`
+   has one entry per seat), its seat is in `toAct` and its action validates.
 7. **Isolation between games**: two random games are played interleaved through the same loaded
    engine module and compared with the same games played alone; every view, record, `validate` and
    `preview` result must be identical. This catches module-level state (e.g. a wrongly keyed cache)
    leaking one game's hidden state into another.
 
-The kit has two modes: **fast** (a few hundred games per package; run by `pnpm build` and the
-Docker build through `pnpm games:verify --fast`; the deploy job never runs it, §7.3) and **full** (thousands of games per
-option set and seat count; run in CI's test stage and in each game package's own CI).
+The kit has two modes: **fast**, 300 games per rules version spread evenly over its option inputs
+and seat counts (rounded up, at least 3 per combination), run by `pnpm build` and the Docker build through
+`pnpm games:verify --fast` (`games:verify`, fast or full, never runs in a deploy job, §7.3); and
+**full**, 1000 games per option input and seat count, run in CI's test stage and in each game
+package's own CI.
 
 The kit itself is tested against deliberately **broken fixture modules** (one leaks hidden state
-into a view, one into an error detail, one into a record, one into the public view; one has a
-no-op `perturbHidden`; one reads resources in `setup`; one is nondeterministic; one never
-terminates; one leaves `toAct` non-empty after the end; one keeps hidden state in a module-level
-variable shared between games): the kit MUST fail each one.
+into a view, one into an error detail, one into a record, one into the public view; one leaks only
+late in the game; one only under a non-default option; one orders a view's keys by hidden state;
+one repeats a secret choice in its record, and one a rare secret choice; one has a no-op
+`perturbHidden`, and one perturbs only the deck while hands are hidden; one reads resources in
+`setup`; one is nondeterministic; one never terminates, with a small and with a large
+`maxActions`; one leaves `toAct` non-empty after the end; one keeps hidden state in a module-level
+variable shared between games; one has an empty and one an illegal `worstCase`): the kit MUST fail
+each one, in fast mode.
 
 The framework, not the kit, enforces that only seats in `toAct` may act (05 `/actions`).
 
@@ -592,8 +651,27 @@ Cloudflare Workers can't load code at runtime, so an instance's set of games is 
   - the manifest disagrees with the engine (§7.2), or the manifest icon fails sanitisation.
 
   `pnpm build` and the Docker build run it in **fast** mode; CI's test stage runs the **full** kit
-  (§6). **The deploy job never runs it**, nor anything else that imports game package code: deploy
-  jobs hold deploy credentials (08 §6).
+  (§6). It plays each package's own test hooks (`test.optionInputs`, `test.context`,
+  `test.resources`, §6), never just its defaults. A game package in this repository's workspace is built with its own `build` script before
+  `games:generate` and `games:verify` read it, so it is checked through its built `exports` like a
+  published package; for such a package the file-name rules of §7.1.1 cover the files `pnpm pack`
+  would publish, plus every symlink anywhere in it, and names are compared case-insensitively.
+- **Bundler-input closure.** `games:verify` records every package file its checks covered
+  (`generated/verified-files.json`); the web, Node and Worker builds record the files their
+  bundler read (`generated/bundles/<app>.json`); and `pnpm games:check-inputs`, the last step of
+  `pnpm build` (`--only web,node` in the Docker build), fails if any bundler input inside an
+  installed game package is not a file `games:verify` checked **for that build's role**: the Node
+  and Worker builds may read only files the engine and manifest entry points reach (the files the
+  engine ESLint rules ran on), the web build also those the client entry point reaches. Each record
+  must also contain the entry points its build loads (Node and Worker: every installed package's
+  engine and manifest; web: every client entry, from M3, when the web app first imports the client
+  map), every package in `installed.json` must appear in `verified-files.json`, and `pnpm build`
+  deletes `generated/bundles/` first, so a missing or stale record fails. Built output must name
+  the file in every relative import (ending in `.js` or `.mjs`), and a package's published files
+  contain no TypeScript or JSX sources (`.ts`, `.mts`, `.tsx`, `.jsx`; declaration files
+  excepted), so no resolver can pick a file the checks didn't see. Only **module** inputs are
+  covered, not CSS `@import` or `url()` assets. **`games:verify` never runs in a deploy job**, nor
+  does anything else that imports game package code: deploy jobs hold deploy credentials (08 §6).
 - At runtime `ENABLED_GAMES` (09) still filters which installed types are offered for **new**
   games; an installed but disabled type keeps serving its existing games.
 
