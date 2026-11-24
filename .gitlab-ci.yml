@@ -377,8 +377,18 @@ e2e:
   needs: [build:app]
   parallel: 2
   script:
-    # Against the Node build output from build:app, never the Docker image (11 §9).
+    # Against the Node build output from build:app, never the Docker image (11 §9). Time budgets
+    # and the one worker per shard are set and explained in tests/e2e/playwright.config.ts. The
+    # browsers come with the image, so nothing is downloaded per job.
     - pnpm --filter @your-move/e2e exec playwright test --shard="$CI_NODE_INDEX/$CI_NODE_TOTAL"
+  after_script:
+    # When a shard fails, how busy the runner was and what it offers (issue #7).
+    - |
+      if [ "$CI_JOB_STATUS" = "failed" ]; then
+        grep -m1 '^model name' /proc/cpuinfo || true
+        echo "nproc: $(nproc); loadavg: $(cat /proc/loadavg)"
+        grep -E '^(MemTotal|MemAvailable)' /proc/meminfo || true
+      fi
   artifacts:
     when: always
     expire_in: 1 week
