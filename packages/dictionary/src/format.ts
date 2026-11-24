@@ -46,9 +46,13 @@ export interface CheckOptions {
  * be fails at once, before it is copied or matched, and `maxWords` stops the pass early.
  */
 export function checkWordList(text: string, options: CheckOptions = {}): WordListCheck {
+  const { maxWords = Number.POSITIVE_INFINITY } = options;
+  if (options.maxWords !== undefined && !(Number.isSafeInteger(maxWords) && maxWords > 0)) {
+    // NaN or a fraction would silently disable or blur the cap (M1b review S2-3).
+    throw new RangeError("maxWords must be a positive safe integer");
+  }
   if (text.length === 0) return { ok: false, problem: "EMPTY", line: 0 };
   if (!text.endsWith("\n")) return { ok: false, problem: "NO_FINAL_NEWLINE", line: 0 };
-  const maxWords = options.maxWords ?? Number.POSITIVE_INFINITY;
   const letters = new Set<string>();
   let previous = "";
   let line = 0;

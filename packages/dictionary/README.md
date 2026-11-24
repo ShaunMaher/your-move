@@ -59,8 +59,8 @@ deliberately small; change it by review like any other code. The build applies b
 list and each dictionary's own `removals.txt`.
 
 The borderline set added in the M1b review (squaw, sambo, greaseball, bohunk, kaffir, kafir,
-coolie, shylock, mongoloid, gyp, faggotry and spick, with their inflected forms) was removed by
-owner decision.
+coolie, shylock, mongoloid, gyp, faggotry and spick, with their inflected forms, and faggoted,
+faggoting and faggotings) was removed by owner decision.
 
 ## Build output
 
@@ -76,8 +76,8 @@ owner decision.
 - `index.json`: every manifest and the global removals, which the M6 upload and operator paths
   apply to their lists; the runtime reads it through `parseIndex`.
 
-Sizes of `enable` version 2: 168,465 words (4,272 upstream words longer than 15 letters dropped,
-83 removed); `words.txt` 1,665,460 bytes, gzip 440,181 bytes, brotli 358,167 bytes. The committed
+Sizes of `enable` version 2: 168,462 words (4,272 upstream words longer than 15 letters dropped,
+86 removed); `words.txt` 1,665,430 bytes, gzip 440,177 bytes, brotli 358,284 bytes. The committed
 `source.txt` is 1,743,327 bytes. The build takes about 2.5 s, most of it brotli.
 
 ## Runtime
@@ -99,14 +99,14 @@ one-pass format validation that uploaded lists will need (M6); it doesn't apply 
 Measured 2026-11-24 on an AMD Ryzen 7 PRO 7840HS laptop with Node 26.13.1 and the workerd bundled
 with wrangler 4.165.0. Load and lookup numbers are for `enable` version 2, from the committed
 benchmark: `pnpm --filter @your-move/dictionary bench` (`src/builder/bench.ts`, CPU time from
-`process.cpuUsage()`). The Worker numbers were taken on version 1, which differs by 223 bytes.
+`process.cpuUsage()`). The Worker numbers were taken on version 1, which differs by 253 bytes.
 
 | What                                                                                         | Result                                                                                                                                                |
 | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Lookup CPU (200,000 lookups × 5, half present, half one-letter near misses)                  | median 0.86–0.90 µs per lookup                                                                                                                        |
+| Lookup CPU (200,000 lookups × 5, half present, half absent one-letter near misses)           | median 0.85 µs per lookup (two runs)                                                                                                                  |
 | A play's lookups (derived: 8 words, the main word and one cross-word per tile, × the median) | about 7 µs                                                                                                                                            |
-| Loading the list, once per process or isolate (read, plus the SHA-256 check)                 | 3.7–3.9 ms CPU, of which the SHA-256 check is 2.3–2.5 ms                                                                                              |
-| Resident memory added by the list                                                            | 3.4 MB (the limit is 25 MB)                                                                                                                           |
+| Loading the list, once per process or isolate (read, plus the SHA-256 check)                 | 3.9–4.6 ms CPU, of which the SHA-256 check is 2.6–2.7 ms                                                                                              |
+| Resident memory added by the list                                                            | 3.3 MB (the limit is 25 MB)                                                                                                                           |
 | Worker bundle with `words.txt` as a text module (`wrangler deploy --dry-run`)                | 1,628 KiB, 431 KiB gzipped                                                                                                                            |
 | Worker startup (`wrangler check startup`, three runs each, with and without the list)        | 0–8.7 ms sampled active time with the list, 0 ms without, within the profiler's resolution (one or two samples per run); profile windows 17.5–18.9 ms |
 

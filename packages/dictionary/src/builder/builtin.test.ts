@@ -27,7 +27,7 @@ const read = (path: string): string => readFileSync(`${PACKAGE}/${path}`, "utf8"
 const RELEASED: Readonly<Record<string, Readonly<Record<number, string>>>> = {
   enable: {
     1: "6cd2880601e4ccc32b53b735de08e8bf233d2d87890dad378a4a023872f6f59d",
-    2: "36c2c06464b7eecf7f8093b16a47725bf8e09895049f53fe7132cc8e8f6adb94",
+    2: "e0d3f91c421ce6f1fcab7ddf8805cf95eeba246fb79c31a715cbbddd2511b278",
   },
 };
 
@@ -114,11 +114,11 @@ describe("ENABLE (words §9.2)", () => {
     );
   });
 
-  it("is public domain English, 172,820 upstream words cut to 168,465", () => {
+  it("is public domain English, 172,820 upstream words cut to 168,462", () => {
     expect(built.manifest.language).toBe("en");
     expect(built.manifest.licence).toBe("Public domain");
     expect(built.manifest.skipped).toStrictEqual({ length: 4272, characters: 0 });
-    expect(built.manifest.wordCount).toBe(168_465);
+    expect(built.manifest.wordCount).toBe(168_462);
     expect(built.manifest.alphabet).toStrictEqual(
       Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i)),
     );

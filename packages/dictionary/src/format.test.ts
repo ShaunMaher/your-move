@@ -52,10 +52,18 @@ describe("checkWordList", () => {
   it.each([
     [3, { ok: true, wordCount: 3, alphabet: ["a", "b", "c"] }],
     [2, { ok: false, problem: "TOO_MANY_WORDS", line: 3 }],
-    [0, { ok: false, problem: "TOO_MANY_WORDS", line: 1 }],
+    [1, { ok: false, problem: "TOO_MANY_WORDS", line: 2 }],
   ])("stops once there are more than maxWords = %d words", (maxWords, result) => {
     expect(checkWordList("aa\nbb\ncc\n", { maxWords })).toStrictEqual(result);
   });
+
+  // M1b review S2-3: NaN compared false with every line count, so it switched the cap off.
+  it.each([Number.NaN, 0, -1, 1.5, Number.POSITIVE_INFINITY, 2 ** 53])(
+    "refuses maxWords = %d",
+    (maxWords) => {
+      expect(() => checkWordList("aa\n", { maxWords })).toThrow(RangeError);
+    },
+  );
 
   it("stops at maxWords before looking at the rest of the text", () => {
     expect(checkWordList("aa\nbb\nNOT A WORD\n", { maxWords: 2 })).toStrictEqual({

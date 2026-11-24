@@ -46,20 +46,26 @@ for (const manifest of index.dictionaries) {
     hashes.push(await cpuMs(() => sha256TextHex(text)));
   }
 
-  // Lookups: half present, half one-letter near misses, from a fixed pseudo-random sequence.
+  // Lookups: half present, half absent one-letter near misses (a near miss that happens to be a
+  // word is rerolled), from a fixed pseudo-random sequence.
   const words = text.slice(0, -1).split("\n");
+  const list = createWordList(manifest.id, manifest.version, text);
   let seed = 12345;
   const next = (n: number): number => {
     seed = (seed * 1103515245 + 12345) >>> 0;
     return seed % n;
   };
-  const queries = Array.from({ length: 200_000 }, (_, i) => {
-    const word = words[next(words.length)] ?? "";
-    if (i % 2 === 0) return word;
-    const at = next(word.length);
-    return word.slice(0, at) + String.fromCharCode(97 + next(26)) + word.slice(at + 1);
-  });
-  const list = createWordList(manifest.id, manifest.version, text);
+  const nearMiss = (): string => {
+    for (;;) {
+      const word = words[next(words.length)] ?? "";
+      const at = next(word.length);
+      const miss = word.slice(0, at) + String.fromCharCode(97 + next(26)) + word.slice(at + 1);
+      if (!list.has(miss)) return miss;
+    }
+  };
+  const queries = Array.from({ length: 200_000 }, (_, i) =>
+    i % 2 === 0 ? (words[next(words.length)] ?? "") : nearMiss(),
+  );
   const perLookup: number[] = [];
   for (let round = 0; round < 6; round += 1) {
     const ms = await cpuMs(() => {

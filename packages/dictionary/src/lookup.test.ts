@@ -1,4 +1,4 @@
-import { array, assert, property, stringMatching } from "fast-check";
+import { array, assert, constantFrom, oneof, property, string, stringMatching } from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import { formatWordList } from "./format.js";
@@ -62,6 +62,31 @@ describe("hasWord (words §9.4)", () => {
     ["aa", "a", false],
   ])("terminates on %j without a final newline: %j → %s", (text, word, found) => {
     expect(hasWord(text, word)).toBe(found);
+  });
+
+  // M1b review S2-1: a text starting with "\n" looped, since lastIndexOf treats -1 as 0.
+  it.each([
+    ["\nzz\n", "ab", false],
+    ["\nzz\n", "zz", true],
+    ["\n\n\n", "aa", false],
+    ["\naa\nbb\n", "aa", true],
+  ])("terminates on %j: %j → %s", (text, word, found) => {
+    expect(hasWord(text, word)).toBe(found);
+    expect(createWordList("x", 1, text).has(word)).toBe(found);
+  });
+
+  it("returns on arbitrary text, whatever it holds", () => {
+    const text = oneof(
+      string(),
+      string({ unit: constantFrom("\n", "a", "b", "z", "\r", " ") }),
+      array(stringMatching(/^[a-z]{0,4}$/u)).map((lines) => lines.join("\n")),
+    );
+    assert(
+      property(text, stringMatching(/^[a-z]{2,4}$/u), (haystack, word) => {
+        expect(typeof hasWord(haystack, word)).toBe("boolean");
+      }),
+      { seed: 20261126, numRuns: 2000 },
+    );
   });
 
   it("terminates on any text, newline or not, and agrees with its lines", () => {

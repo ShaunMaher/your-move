@@ -17,7 +17,8 @@ export function hasWord(text: string, word: string): boolean {
   let high = text.length;
   while (low < high) {
     const middle = (low + high) >>> 1;
-    const start = text.lastIndexOf("\n", middle - 1) + 1;
+    // lastIndexOf treats a negative position as 0, so a text starting with "\n" needs the guard.
+    const start = middle === 0 ? 0 : text.lastIndexOf("\n", middle - 1) + 1;
     const newline = text.indexOf("\n", start);
     const end = newline === -1 ? text.length : newline;
     const candidate = text.slice(start, end);
