@@ -20,6 +20,7 @@ import { createJsonLogger, installedSchema, registryMismatches } from "@your-mov
 import installedJson from "../../../generated/installed.json" with { type: "json" };
 import { codeGenerationFromStringsAllowed } from "./code-generation.js";
 import { scrubSecrets } from "./env.js";
+import { createBackgroundTracker, createNodePlatform } from "./platform.js";
 import { createNodeApp } from "./server.js";
 import { isRefusal, startup, type Started } from "./startup.js";
 
@@ -97,20 +98,30 @@ if (mismatches.length > 0) {
 
 // 5. Serve.
 const app = createNodeApp({
-  platform: { repos: storage.repos, config, log, now },
+  platform: createNodePlatform({ repos: storage.repos, config, nodeConfig, log, now }),
   games,
   staticRoot: args.static,
 });
-const server = serve({ fetch: app.fetch, port: nodeConfig.port }, (info) => {
-  log.info("listening", { port: info.port, games: games.length });
-});
+// Background work (emails) is per request and tracked, so shutdown waits for it (03 §4).
+const background = createBackgroundTracker();
+const server = serve(
+  {
+    fetch: (request, env) => app.fetch(request, env, background.context()),
+    port: nodeConfig.port,
+  },
+  (info) => {
+    log.info("listening", { port: info.port, games: games.length });
+  },
+);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     log.info("shutting down", { signal });
     server.close(() => {
-      storage.close();
-      process.exit(0);
+      void background.drain().finally(() => {
+        storage.close();
+        process.exit(0);
+      });
     });
   });
 }
