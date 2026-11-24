@@ -6,8 +6,12 @@ import * as classicModule from "./classic/v1.js";
 import { createRegistry, findRuleset, latestRuleset, RULESETS } from "./index.js";
 import {
   adjacentPremiums,
+  closestWordPremiums,
   isQuarterTurnSymmetric,
   MAX_BOARD_SIZE,
+  maxWordMultiplier,
+  MIN_WORD_PREMIUM_DISTANCE,
+  WORD_MULTIPLIER_CAPS,
   premiumCounts,
   rotatePremiums,
   rulesetSchema,
@@ -105,6 +109,19 @@ describe.each(MVP)("ruleset $id (words §8.3)", (expected) => {
     expect(adjacentPremiums(r.premiums)).toStrictEqual([]);
   });
 
+  it("never lets a short word stack word multipliers (M1b review P2-1)", () => {
+    expect(closestWordPremiums(r.premiums)).toBeGreaterThanOrEqual(MIN_WORD_PREMIUM_DISTANCE);
+    // The caps are the reference boards' own limits: ×4 up to 6 letters, ×6 at 7.
+    expect(WORD_MULTIPLIER_CAPS).toStrictEqual([
+      { maxLength: 6, max: 4 },
+      { maxLength: 7, max: 6 },
+    ]);
+    for (let length = 2; length <= 6; length += 1) {
+      expect(maxWordMultiplier(r.premiums, length)).toBeLessThanOrEqual(4);
+    }
+    expect(maxWordMultiplier(r.premiums, 7)).toBeLessThanOrEqual(6);
+  });
+
   it("is deep-frozen, so no game can change the shared copy", () => {
     expect(Object.isFrozen(r)).toBe(true);
     expect(Object.isFrozen(r.tiles)).toBe(true);
@@ -176,6 +193,28 @@ describe("premium helpers", () => {
     { premiums: ["T.", ".t"], adjacent: [] },
   ])("$premiums has adjacent premiums at $adjacent", ({ premiums, adjacent }) => {
     expect(adjacentPremiums(premiums)).toStrictEqual(adjacent);
+  });
+
+  it.each([
+    { premiums: ["D...D", ".....", "....."], closest: 4 },
+    { premiums: ["D..T.", ".....", "....."], closest: 3 },
+    { premiums: ["d.d.d", ".....", "....."], closest: Number.POSITIVE_INFINITY },
+    { premiums: ["D....", ".....", "T...."], closest: 2 },
+    { premiums: ["D.....", "......", "......", ".....T", "......", "D....."], closest: 5 },
+  ])("$premiums has word premiums $closest apart at the closest", ({ premiums, closest }) => {
+    expect(closestWordPremiums(premiums)).toBe(closest);
+  });
+
+  it.each([
+    { line: "D...D....T", length: 2, max: 3 },
+    { line: "D...D....T", length: 4, max: 3 },
+    { line: "D...D....T", length: 5, max: 4 },
+    { line: "D...D....T", length: 6, max: 6 },
+    { line: "D...D....T", length: 10, max: 12 },
+    { line: "d.t.....", length: 8, max: 1 },
+    { line: "T.T", length: 9, max: 9 },
+  ])("$line: a word of $length letters covers at most ×$max", ({ line, length, max }) => {
+    expect(maxWordMultiplier([line], length)).toBe(max);
   });
 
   it("counts each premium code", () => {
@@ -285,6 +324,39 @@ describe("ruleset schema (words §8.2)", () => {
     const result = rulesetSchema.safeParse(breakIt(small()));
     expect(result.success).toBe(false);
     expect(result.error?.issues.some((issue) => (issue.path[0] ?? "") === path)).toBe(true);
+  });
+
+  it.each<[string, number, string[], RegExp]>([
+    [
+      "word premiums two squares apart",
+      5,
+      ["D.D.D", ".....", "D...D", ".....", "D.D.D"],
+      /word premiums in one row or column must be at least 4 squares apart/u,
+    ],
+    [
+      "a 5-letter word covering two TWs",
+      5,
+      ["T...T", ".....", ".....", ".....", "T...T"],
+      /6 letters or fewer may cover at most ×4/u,
+    ],
+    [
+      "a 7-letter word covering two TWs",
+      7,
+      ["T.....T", ".......", ".......", ".......", ".......", ".......", "T.....T"],
+      /7 letters or fewer may cover at most ×6/u,
+    ],
+  ])("rejects %s (M1b review P2-1)", (_name, boardSize, premiums, message) => {
+    const result = rulesetSchema.safeParse({ ...small(), boardSize, start: [2, 2], premiums });
+    expect(result.success).toBe(false);
+    const messages = result.error?.issues.map((issue) => issue.message) ?? [];
+    expect(messages.some((text) => message.test(text))).toBe(true);
+  });
+
+  it("keeps a valid board whose word premiums are 4 apart and cover ×4 at most", () => {
+    const premiums = ["D...D", ".....", "..d..", ".....", "D...D"];
+    expect(
+      rulesetSchema.safeParse({ ...small(), boardSize: 5, start: [2, 2], premiums }).success,
+    ).toBe(true);
   });
 
   it("allows returnThenDraw with a swap minimum below the rack size", () => {

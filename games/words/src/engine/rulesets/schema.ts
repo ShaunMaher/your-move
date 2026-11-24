@@ -106,6 +106,60 @@ export function adjacentPremiums(premiums: readonly string[]): [number, number][
   return found;
 }
 
+/** Every row and every column of a premium picture, as strings. */
+function premiumLines(premiums: readonly string[]): string[] {
+  const columns = Array.from({ length: premiums[0]?.length ?? 0 }, (_, col) =>
+    premiums.map((line) => line[col] ?? ".").join(""),
+  );
+  return [...premiums, ...columns];
+}
+
+const WORD_MULTIPLIERS: Readonly<Record<string, number>> = { D: 2, T: 3 };
+
+/**
+ * The closest two word-premium squares (DW, TW) may be in one row or column: their positions
+ * differ by at least this much, so no word shorter than 5 letters covers two (words §8.2).
+ */
+export const MIN_WORD_PREMIUM_DISTANCE = 4;
+
+/**
+ * The most a word of up to `maxLength` letters may be multiplied by the word premiums it covers
+ * (words §8.2): ×4 up to 6 letters, ×6 up to 7, the limits both reference boards keep.
+ */
+export const WORD_MULTIPLIER_CAPS: readonly { readonly maxLength: number; readonly max: number }[] =
+  [
+    { maxLength: 6, max: 4 },
+    { maxLength: 7, max: 6 },
+  ];
+
+/** The closest two word-premium squares come in any row or column; Infinity if never. */
+export function closestWordPremiums(premiums: readonly string[]): number {
+  let closest = Number.POSITIVE_INFINITY;
+  for (const line of premiumLines(premiums)) {
+    let previous = -1;
+    for (let index = 0; index < line.length; index += 1) {
+      if (WORD_MULTIPLIERS[line.charAt(index)] === undefined) continue;
+      if (previous >= 0) closest = Math.min(closest, index - previous);
+      previous = index;
+    }
+  }
+  return closest;
+}
+
+/** The largest word multiplier a word of `length` letters can cover anywhere on the board. */
+export function maxWordMultiplier(premiums: readonly string[], length: number): number {
+  let best = 1;
+  for (const line of premiumLines(premiums)) {
+    const span = Math.min(length, line.length);
+    for (let start = 0; start + span <= line.length; start += 1) {
+      let product = 1;
+      for (const code of line.slice(start, start + span)) product *= WORD_MULTIPLIERS[code] ?? 1;
+      best = Math.max(best, product);
+    }
+  }
+  return best;
+}
+
 /** How many squares of each premium a layout has, the start square included. */
 export function premiumCounts(premiums: readonly string[]): Record<Premium, number> {
   const counts: Record<Premium, number> = { DL: 0, TL: 0, DW: 0, TW: 0 };
@@ -140,6 +194,20 @@ export const rulesetSchema = rulesetObject.superRefine((ruleset, ctx) => {
   if (adjacentPremiums(ruleset.premiums).length > 0) {
     // Premiums never stack in one short word (words §8.2), the start square's included.
     issue("no two premium squares may be orthogonally adjacent", ["premiums"]);
+  }
+  if (closestWordPremiums(ruleset.premiums) < MIN_WORD_PREMIUM_DISTANCE) {
+    issue(
+      `word premiums in one row or column must be at least ${String(MIN_WORD_PREMIUM_DISTANCE)} squares apart`,
+      ["premiums"],
+    );
+  }
+  for (const cap of WORD_MULTIPLIER_CAPS) {
+    if (maxWordMultiplier(ruleset.premiums, cap.maxLength) > cap.max) {
+      issue(
+        `a word of ${String(cap.maxLength)} letters or fewer may cover at most ×${String(cap.max)}`,
+        ["premiums"],
+      );
+    }
   }
   const [row, col] = ruleset.start;
   if (row >= size || col >= size) issue("the start square must be on the board", ["start"]);
