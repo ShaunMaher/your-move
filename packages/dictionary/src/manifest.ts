@@ -25,15 +25,18 @@ export const manifestSchema = z
     language: z.string().regex(LANGUAGE),
     licence: z.string().min(1),
     sourceUrl: z.url({ protocol: /^https$/u }),
-    /** SHA-256 of the unmodified upstream list, as checked by the build. */
-    sourceSha256: z.string().regex(SHA256),
+    /** SHA-256 of the unmodified upstream list (`source.txt`), as in `meta.json`. */
+    sha256: z.string().regex(SHA256),
     /** Built-in lists are freely licensed, so clients may download them (words §9.5). */
     distribution: z.literal("public"),
     wordCount: count,
     /** The letters the list's words use, sorted (words §9.3). */
     alphabet: z.array(z.string().regex(/^[a-z]$/u)),
-    /** SHA-256 of the built word list (`words.txt`), for versioned, hashed URLs (words §9.4). */
-    sha256: z.string().regex(SHA256),
+    /**
+     * SHA-256 of the built word list (`words.txt`): checked when the list loads, and the basis of
+     * its versioned, hashed URL (words §9.4).
+     */
+    wordsSha256: z.string().regex(SHA256),
     /** Length of the built word list in bytes (one byte per character: it is ASCII). */
     bytes: count,
     /** Upstream lines dropped by the build: too short or long, or not `a`–`z` only. */
@@ -43,9 +46,15 @@ export const manifestSchema = z
 
 export type DictionaryManifest = z.infer<typeof manifestSchema>;
 
-/** The build's index of every built-in dictionary (`generated/index.json`). */
+/**
+ * The build's index (`generated/index.json`): every built-in dictionary, and the global removals
+ * (`removals-global.txt`, Q7), which the M6 upload and operator paths apply to their lists.
+ */
 const indexSchema = z
-  .object({ dictionaries: z.array(manifestSchema) })
+  .object({
+    dictionaries: z.array(manifestSchema),
+    globalRemovals: z.array(z.string().regex(/^[a-z]{2,15}$/u)),
+  })
   .strict()
   .superRefine((index, ctx) => {
     const ids = index.dictionaries.map((manifest) => manifest.id);
@@ -73,7 +82,8 @@ export function toResourceMeta(manifest: DictionaryManifest): ResourceMeta {
     version: manifest.version,
     name: manifest.name,
     language: manifest.language,
-    alphabet: manifest.alphabet,
+    // A copy, frozen: the catalog is shared by every caller and must not alias the manifest.
+    alphabet: Object.freeze([...manifest.alphabet]),
     distribution: manifest.distribution,
     source: "builtin",
   };

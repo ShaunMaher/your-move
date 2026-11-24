@@ -7,7 +7,8 @@ import { isWord } from "./format.js";
 
 /**
  * Whether `word` is in `text`, a valid word list (see `checkWordList`). Anything that can't be a
- * word (wrong length, characters other than `a`–`z`) is never found.
+ * word (wrong length, characters other than `a`–`z`) is never found. A text without its final
+ * newline still terminates: its last line ends at the end of the text.
  */
 export function hasWord(text: string, word: string): boolean {
   if (!isWord(word)) return false;
@@ -17,7 +18,8 @@ export function hasWord(text: string, word: string): boolean {
   while (low < high) {
     const middle = (low + high) >>> 1;
     const start = text.lastIndexOf("\n", middle - 1) + 1;
-    const end = text.indexOf("\n", start);
+    const newline = text.indexOf("\n", start);
+    const end = newline === -1 ? text.length : newline;
     const candidate = text.slice(start, end);
     if (candidate === word) return true;
     if (candidate < word) low = end + 1;
@@ -33,7 +35,20 @@ export interface WordList {
   has(word: string): boolean;
 }
 
-/** A `WordList` over one word list's text. */
+/** Thrown for a text that isn't in the word-list format (the final newline is missing). */
+export class WordListFormatError extends Error {
+  constructor(id: string) {
+    super(`dictionary ${id}: the word list must be empty or end with a newline`);
+    this.name = "WordListFormatError";
+  }
+}
+
+/**
+ * A `WordList` over one word list's text, which must be empty or end with a newline. The rest of
+ * the format is the build's (or, in M6, the upload validation's) to guarantee: checking it here
+ * would cost a full pass at load.
+ */
 export function createWordList(id: string, version: number, text: string): WordList {
-  return { id, version, has: (word) => hasWord(text, word) };
+  if (text !== "" && !text.endsWith("\n")) throw new WordListFormatError(id);
+  return Object.freeze({ id, version, has: (word: string) => hasWord(text, word) });
 }

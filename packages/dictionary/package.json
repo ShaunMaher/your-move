@@ -10,7 +10,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsx src/builder/cli.ts"
+    "build": "tsx src/builder/cli.ts",
+    "bench": "tsx src/builder/cli.ts && tsx src/builder/bench.ts"
   },
   "dependencies": {
     "@your-move/sdk": "workspace:*",

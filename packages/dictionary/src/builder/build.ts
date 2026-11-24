@@ -13,6 +13,7 @@ import {
   MAX_WORD_LENGTH,
   MIN_WORD_LENGTH,
 } from "../format.js";
+import { sha256Hex, sha256TextHex } from "../hash.js";
 import { DICTIONARY_ID, LANGUAGE, type DictionaryManifest } from "../manifest.js";
 
 /** `meta.json` (words §9.1). */
@@ -52,12 +53,6 @@ export class BuildError extends Error {
     super(message);
     this.name = "BuildError";
   }
-}
-
-/** The SHA-256 of some bytes, as lower-case hex. */
-export async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 /**
@@ -156,11 +151,11 @@ export async function buildDictionary(
       language: meta.language,
       licence: meta.licence,
       sourceUrl: meta.sourceUrl,
-      sourceSha256,
+      sha256: sourceSha256,
       distribution: "public",
       wordCount: check.wordCount,
       alphabet: [...check.alphabet],
-      sha256: await sha256Hex(new TextEncoder().encode(text)),
+      wordsSha256: await sha256TextHex(text),
       bytes: text.length,
       skipped,
     },

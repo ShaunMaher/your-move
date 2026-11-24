@@ -1,12 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { sha256Hex } from "../hash.js";
 import { parseIndex } from "../manifest.js";
-import { sha256Hex } from "./build.js";
 import { buildAll } from "./files.js";
 
 let dir: string;
@@ -68,10 +68,11 @@ describe("buildAll", () => {
     ).toBe(text);
     const index = parseIndex(JSON.parse(readFileSync(join(out, "index.json"), "utf8")));
     expect(index.dictionaries.map((manifest) => manifest.id)).toStrictEqual(["one", "two"]);
+    expect(index.globalRemovals).toStrictEqual(["bb"]);
     expect(JSON.parse(readFileSync(join(out, "two", "manifest.json"), "utf8"))).toStrictEqual(
       index.dictionaries[1],
     );
-    expect(() => readFileSync(join(out, "stale"))).toThrow();
+    expect(existsSync(join(out, "stale"))).toBe(false);
   });
 
   it("refuses a dictionary whose id isn't its directory name", async () => {

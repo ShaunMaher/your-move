@@ -23,29 +23,42 @@ export function isWord(word: string): boolean {
 
 /** Why a text is not a valid word list. */
 export type WordListProblem =
-  "EMPTY" | "BAD_CHARACTERS" | "BAD_LENGTH" | "NOT_SORTED" | "NO_FINAL_NEWLINE";
+  "EMPTY" | "BAD_CHARACTERS" | "BAD_LENGTH" | "NOT_SORTED" | "NO_FINAL_NEWLINE" | "TOO_MANY_WORDS";
 
 /** The result of checking a word list. */
 export type WordListCheck =
   | { readonly ok: true; readonly wordCount: number; readonly alphabet: readonly string[] }
   | { readonly ok: false; readonly problem: WordListProblem; readonly line: number };
 
+export interface CheckOptions {
+  /** Stop with `TOO_MANY_WORDS` as soon as the list has more words than this (words §9.5). */
+  readonly maxWords?: number;
+}
+
 /**
  * Checks that a text is a valid word list in one linear pass, and computes its word count and
  * alphabet (the letters its words use, words §9.3). The build checks its own output with it; it is
  * also the validation pass uploaded lists will need (words §9.5, M6).
+ *
+ * It validates the format only and never applies removals: a caller building a stored list (the
+ * build, and in M6 the upload and operator paths) removes the global removals first and then
+ * computes the count, alphabet, hash and size from the cleaned text. A line longer than a word can
+ * be fails at once, before it is copied or matched, and `maxWords` stops the pass early.
  */
-export function checkWordList(text: string): WordListCheck {
+export function checkWordList(text: string, options: CheckOptions = {}): WordListCheck {
   if (text.length === 0) return { ok: false, problem: "EMPTY", line: 0 };
   if (!text.endsWith("\n")) return { ok: false, problem: "NO_FINAL_NEWLINE", line: 0 };
+  const maxWords = options.maxWords ?? Number.POSITIVE_INFINITY;
   const letters = new Set<string>();
   let previous = "";
   let line = 0;
   let start = 0;
   while (start < text.length) {
     const end = text.indexOf("\n", start);
-    const word = text.slice(start, end);
     line += 1;
+    if (line > maxWords) return { ok: false, problem: "TOO_MANY_WORDS", line };
+    if (end - start > MAX_WORD_LENGTH) return { ok: false, problem: "BAD_LENGTH", line };
+    const word = text.slice(start, end);
     if (!WORD.test(word)) return { ok: false, problem: "BAD_CHARACTERS", line };
     if (!isWord(word)) return { ok: false, problem: "BAD_LENGTH", line };
     if (word <= previous) return { ok: false, problem: "NOT_SORTED", line };

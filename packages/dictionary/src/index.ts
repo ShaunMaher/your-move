@@ -8,13 +8,14 @@
 export {
   checkWordList,
   formatWordList,
+  type CheckOptions,
   isWord,
   MAX_WORD_LENGTH,
   MIN_WORD_LENGTH,
   type WordListCheck,
   type WordListProblem,
 } from "./format.js";
-export { createWordList, hasWord, type WordList } from "./lookup.js";
+export { createWordList, hasWord, WordListFormatError, type WordList } from "./lookup.js";
 export {
   manifestSchema,
   parseIndex,
