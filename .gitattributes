@@ -5,6 +5,10 @@
 *.ico binary
 *.woff2 binary
 
+# Upstream word lists, kept byte for byte: the build checks them against meta.json's SHA-256
+# (words §9.1), so git must never convert their line endings. Too large to diff usefully.
+packages/dictionary/dictionaries/*/source.txt -text -diff linguist-vendored
+
 # Generated: collapsed in diffs and excluded from language statistics.
 pnpm-lock.yaml linguist-generated=true -diff
 packages/api-client/openapi/v1.json linguist-generated=true

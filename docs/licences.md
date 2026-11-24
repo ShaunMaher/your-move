@@ -30,3 +30,11 @@ table.
 
 | Package | Licence | Decision |
 | ------- | ------- | -------- |
+
+## Bundled data
+
+Word lists ship with the app too (the server looks words up in them and clients download them),
+so they follow the same rule: public domain or a permissive licence only, never the official
+tournament lists (words §9.1). Each list's licence, source and checksum are recorded in its
+`meta.json` and in [packages/dictionary/README.md](../packages/dictionary/README.md). Today there
+is one: ENABLE, in the public domain.

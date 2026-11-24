@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Web-standard APIs only (03 §1): the WebWorker library has WebCrypto and TextEncoder, no DOM.
+    "lib": ["ES2023", "WebWorker"],
+    "rootDir": "src",
+    "outDir": "dist/runtime",
+    "tsBuildInfoFile": "dist/runtime/.tsbuildinfo",
+    "emitDeclarationOnly": true
+  },
+  "include": ["src"],
+  "exclude": ["src/builder"],
+  "references": [{ "path": "../sdk" }]
+}

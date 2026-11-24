@@ -1,0 +1,13 @@
+{
+  // The dictionary build (Node tooling, run with tsx) and its tests.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "rootDir": "src",
+    "outDir": "dist/builder",
+    "tsBuildInfoFile": "dist/builder/.tsbuildinfo",
+    "emitDeclarationOnly": true
+  },
+  "include": ["src/builder"],
+  "references": [{ "path": "./tsconfig.runtime.json" }]
+}

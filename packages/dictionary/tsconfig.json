@@ -1,10 +1,6 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist",
-    "tsBuildInfoFile": "dist/.tsbuildinfo",
-    "emitDeclarationOnly": true
-  },
-  "include": ["src"]
+  // Solution file: the runtime (Web-standard APIs only, 03 §1) and the Node build tooling are
+  // separate projects, so the runtime can't reach Node types.
+  "files": [],
+  "references": [{ "path": "./tsconfig.runtime.json" }, { "path": "./tsconfig.build.json" }]
 }

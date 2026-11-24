@@ -9,7 +9,17 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "build": "tsx src/builder/cli.ts"
+  },
+  "dependencies": {
+    "@your-move/sdk": "workspace:*",
+    "zod": "catalog:"
+  },
   "devDependencies": {
+    "@types/node": "catalog:",
+    "fast-check": "catalog:",
+    "tsx": "catalog:",
     "vitest": "catalog:"
   }
 }

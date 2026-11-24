@@ -60,6 +60,21 @@ export default {
       to: CORE,
     },
     {
+      name: "dictionary-runtime-web-standard-only",
+      comment:
+        "The dictionary runtime is used by the server core on every runtime (03 §1, §10); only its build tooling (src/builder/) uses Node.",
+      severity: "error",
+      from: { path: `^packages/dictionary/src/(?!builder/).*${NOT_A_TEST}` },
+      to: CORE,
+    },
+    {
+      name: "dictionary-runtime-not-build",
+      comment: "The dictionary runtime never imports its Node build tooling.",
+      severity: "error",
+      from: { path: "^packages/dictionary/src/(?!builder/)" },
+      to: { path: "^packages/dictionary/src/builder/" },
+    },
+    {
       name: "server-no-runtime-packages",
       comment: "No Cloudflare- or Node-specific packages in the core (03 §1).",
       severity: "error",
