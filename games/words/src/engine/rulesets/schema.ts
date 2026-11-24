@@ -10,10 +10,10 @@ import { z } from "@your-move/sdk/schema";
  * The longest word any dictionary keeps (words §9.1). A ruleset's board can't be larger, or
  * words that fit it would be missing from every dictionary.
  */
-export const MAX_BOARD_SIZE = 15;
+const MAX_BOARD_SIZE = 15;
 
 /** The blank's tile code (words §3.1). */
-export const BLANK = "?";
+const BLANK = "?";
 
 /** Tile codes: lower-case `a`–`z`, and `?` for the blank (words §3.1). */
 const TILE_CODE = /^[a-z?]$/u;

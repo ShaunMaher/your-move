@@ -16,7 +16,7 @@ export const casualV1 = {
   version: 1,
   name: "Casual",
   description:
-    "Relaxed scoring: 104 tiles, higher letter values and a 35-point bonus for all seven.",
+    "Mobile-style rules: 104 tiles, higher letter values, a 35-point bonus for using all seven, and swaps that may redraw your own tiles.",
   language: "en",
   boardSize: 15,
   start: [7, 7],

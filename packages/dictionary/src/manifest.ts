@@ -10,8 +10,8 @@ import { z } from "zod";
 const SHA256 = /^[0-9a-f]{64}$/u;
 const count = z.number().int().min(0);
 
-/** Registry ids: never `u_…` (uploads) and the operator-id pattern of words §9.5. */
-export const DICTIONARY_ID = /^(?!u_)[a-z][a-z0-9-]{1,31}$/u;
+/** Registry ids: the operator-id pattern of words §9.5, which can never start `u_` (uploads). */
+export const DICTIONARY_ID = /^[a-z][a-z0-9-]{1,31}$/u;
 
 /** A BCP 47-style language tag, matched exactly against a ruleset's (words §9.3). */
 export const LANGUAGE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/u;
