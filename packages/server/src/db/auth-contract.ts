@@ -383,7 +383,9 @@ export function authRepositoryContract(target: () => AuthTarget): void {
         agents,
         others,
       );
-      const revoked = Object.fromEntries(rows.map((row) => [row["id"], row["revoked_at"]]));
+      const revoked = Object.fromEntries(
+        rows.map((row): [string, unknown] => [String(row["id"]), row["revoked_at"]]),
+      );
       expect(revoked).toEqual({ [own]: T0 + 5, [agents]: T0 + 5, [others]: null });
     });
   });

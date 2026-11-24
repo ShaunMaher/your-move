@@ -103,7 +103,7 @@ export function otpRepo(db: Database): OtpRepo {
       const now = challenge.createdAt;
       const enabled = sql`${create ? 1 : 0}`;
       // A never-emailed challenge (06 §3.2) burns nothing: the statement still runs, matching no row.
-      const burns = sql`${create && challenge.emailed === 1 ? 1 : 0}`;
+      const burns = create && challenge.emailed === 1 ? 1 : 0;
       const beyondNewest = db
         .select({ id: otpChallenges.id })
         .from(otpChallenges)
@@ -126,7 +126,8 @@ export function otpRepo(db: Database): OtpRepo {
         db
           .update(otpChallenges)
           .set({ consumedAt: now })
-          .where(and(burns, inArray(otpChallenges.id, beyondNewest))),
+          // The flag comes last, so the subquery runs either way (same work on every path).
+          .where(and(inArray(otpChallenges.id, beyondNewest), sql`${burns} = 1`)),
       ]);
     },
     async live(email, purpose, now, maxAttempts) {

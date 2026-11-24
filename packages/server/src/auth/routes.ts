@@ -201,11 +201,13 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     if (buckets === null) return fail(c, 400, "BAD_REQUEST");
     const outcome = await issueSignInCode(context, email, buckets);
     if (outcome.kind === "ip-limited") return fail(c, 429, "RATE_LIMITED");
-    if (outcome.send?.type === "code") {
-      send(c, signInCodeEmail(email, outcome.send.code, templateContext()));
-    } else if (outcome.send?.type === "suspended") {
-      send(c, suspendedNoticeEmail(email, templateContext()));
-    }
+    // Both messages are built on every path, sent or not, so the work before the response doesn't
+    // depend on the outcome (06 §3.2).
+    const template = templateContext();
+    const codeEmail = signInCodeEmail(email, outcome.code, template);
+    const notice = suspendedNoticeEmail(email, template);
+    if (outcome.send?.type === "code") send(c, codeEmail);
+    else if (outcome.send?.type === "suspended") send(c, notice);
     return c.json({}, 202);
   });
 

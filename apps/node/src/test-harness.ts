@@ -170,11 +170,12 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     emails,
     lastEmail,
     async requestCode(email, options) {
-      const before = (await emails()).length;
+      // By identity, not index: the capture keeps only the newest 200 messages.
+      const to = email.trim().toLowerCase();
+      const before = new Set((await emails()).filter((e) => e.to === to));
       const response = await request("POST", "/api/v1/auth/otp/request", { email }, options);
       if (response.status !== 202) throw new Error(`request answered ${String(response.status)}`);
-      const all = await emails();
-      const fresh = all.slice(before).filter((e) => e.to === email.trim().toLowerCase());
+      const fresh = (await emails()).filter((e) => e.to === to && !before.has(e));
       return codeOf(fresh.at(-1));
     },
     async signIn(email, options) {

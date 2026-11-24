@@ -60,6 +60,8 @@ export interface OtpDeps {
 /** The decision for one code request, before anything is sent. */
 export interface IssueOutcome {
   readonly kind: "ip-limited" | "accepted";
+  /** The generated code, whether or not it is sent: the caller builds the email either way. */
+  readonly code: string;
   /** The code to email, or the suspended notice; null when nothing may be sent. */
   readonly send:
     { readonly type: "code"; readonly code: string } | { readonly type: "suspended" } | null;
@@ -104,7 +106,7 @@ export async function issueSignInCode(
 ): Promise<IssueOutcome> {
   const { repos, config, keys, now } = deps;
   const ip = await checkLimits(repos, config, now, bucketChecks(buckets, "OTP_REQUEST_IP_HOUR", 1));
-  if (ip.some((result) => result.exceeded)) return { kind: "ip-limited", send: null };
+  if (ip.some((result) => result.exceeded)) return { kind: "ip-limited", code: "", send: null };
 
   const [id, user] = await Promise.all([emailId(keys, email), repos.users.findByEmail(email)]);
   const results = await checkLimits(repos, config, now, [
@@ -154,7 +156,7 @@ export async function issueSignInCode(
     : suspended
       ? { type: "suspended" as const }
       : { type: "code" as const, code };
-  return { kind: "accepted", send };
+  return { kind: "accepted", code, send };
 }
 
 /**

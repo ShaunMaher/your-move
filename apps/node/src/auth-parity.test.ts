@@ -15,9 +15,9 @@ import { performance } from "node:perf_hooks";
 import { normaliseAddress, type Repositories } from "@your-move/server";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createHarness, type Harness, T0 } from "./test-harness.js";
+import { createHarness, type Harness, PROD_ENV, T0 } from "./test-harness.js";
 
-const SAMPLES = 120;
+const SAMPLES = 200;
 
 let h: Harness | null = null;
 afterEach(() => {
@@ -64,66 +64,6 @@ function shuffle<T>(items: T[]): T[] {
 
 const ip = (i: number): string =>
   `10.${String((i >> 16) & 255)}.${String((i >> 8) & 255)}.${String(i & 255)}`;
-
-interface Timings {
-  readonly known: number[];
-  readonly unknown: number[];
-}
-
-/** Times `send` for SAMPLES known and SAMPLES unknown addresses, interleaved and shuffled. */
-async function measure(
-  harness: Harness,
-  send: (email: string, ip: string) => Promise<Response>,
-  /** Runs, unmeasured, before each measured request. */
-  prepare?: (email: string, ip: string) => Promise<unknown>,
-): Promise<Timings> {
-  const jobs: { kind: "known" | "unknown"; email: string }[] = [];
-  for (let i = 0; i < SAMPLES; i++) {
-    const known = `known-${String(i)}-${crypto.randomUUID().slice(0, 6)}@example.org`;
-    const email = normaliseAddress(known);
-    if (email === null) throw new Error("bad test address");
-    await harness.platform.repos.users.create({
-      id: crypto.randomUUID(),
-      email,
-      displayName: "Known",
-      onboardedAt: T0,
-      createdAt: T0,
-      updatedAt: T0,
-    });
-    jobs.push({ kind: "known", email: known });
-    jobs.push({
-      kind: "unknown",
-      email: `unknown-${String(i)}-${crypto.randomUUID().slice(0, 6)}@example.org`,
-    });
-  }
-  // Warm-up: JIT and statement caches, not measured.
-  for (let i = 0; i < 20; i++) await send(`warm-${String(i)}@example.org`, ip(100_000 + i));
-  const timings: Timings = { known: [], unknown: [] };
-  let n = 0;
-  for (const job of shuffle(jobs)) {
-    const from = ip(++n);
-    await prepare?.(job.email, from);
-    const started = performance.now();
-    const response = await send(job.email, from);
-    const elapsed = performance.now() - started;
-    await response.arrayBuffer();
-    timings[job.kind].push(elapsed);
-  }
-  await harness.emails();
-  return timings;
-}
-
-/** Prints a result for the record (the handoff quotes them). */
-function report(label: string, result: { z: number; ratio: number }): void {
-  process.stdout.write(
-    `${label}: z = ${result.z.toFixed(2)}, median ratio = ${result.ratio.toFixed(3)}\n`,
-  );
-}
-
-function indistinguishable({ known, unknown }: Timings): { z: number; ratio: number } {
-  return { z: mannWhitneyZ(known, unknown), ratio: median(known) / median(unknown) };
-}
-
 describe("enumeration parity: responses (06 §3.2, 05 §Auth & account)", () => {
   it("/otp/request answers byte-for-byte the same for every kind of address", async () => {
     h = createHarness();
@@ -182,47 +122,207 @@ describe("enumeration parity: responses (06 §3.2, 05 §Auth & account)", () => 
   });
 });
 
-describe("enumeration parity: timing (06 §3.2, loose statistical test)", () => {
-  const request = (harness: Harness) => (email: string, from: string) =>
-    harness.request("POST", "/api/v1/auth/otp/request", { email }, { ip: from });
-  const verify = (harness: Harness) => (email: string, from: string) =>
-    harness.request("POST", "/api/v1/auth/otp/verify", { email, code: "12345678" }, { ip: from });
+/** One group of measured requests: how to make each address and set it up before the request. */
+interface Arm {
+  /** Creates the i-th address of this group (unmeasured). */
+  readonly make: (harness: Harness, i: number) => Promise<string>;
+  /** Runs, unmeasured, just before each measured request. */
+  readonly prepare?: (harness: Harness, email: string, from: string) => Promise<unknown>;
+}
 
-  it("/otp/request takes the same time for known and unknown addresses", async () => {
+/** A known, onboarded account. */
+const knownArm: Arm = {
+  make: async (harness, i) => {
+    const text = `known-${String(i)}-${crypto.randomUUID().slice(0, 6)}@example.org`;
+    const email = normaliseAddress(text);
+    if (email === null) throw new Error("bad test address");
+    await harness.platform.repos.users.create({
+      id: crypto.randomUUID(),
+      email,
+      displayName: "Known",
+      onboardedAt: T0,
+      createdAt: T0,
+      updatedAt: T0,
+    });
+    return text;
+  },
+};
+
+const unknownArm: Arm = {
+  make: (_, i) =>
+    Promise.resolve(`unknown-${String(i)}-${crypto.randomUUID().slice(0, 6)}@example.org`),
+};
+
+interface Comparison {
+  readonly z: number;
+  readonly ratio: number;
+}
+
+/**
+ * Times SAMPLES requests of each arm, interleaved in a shuffled order, each address used once and
+ * each request from its own client IP, and compares the two with a Mann–Whitney U test.
+ */
+async function compare(
+  harness: Harness,
+  send: (email: string, from: string) => Promise<Response>,
+  a: Arm,
+  b: Arm,
+): Promise<Comparison> {
+  const jobs: { arm: 0 | 1; email: string }[] = [];
+  for (let i = 0; i < SAMPLES; i++) {
+    jobs.push({ arm: 0, email: await a.make(harness, i) });
+    jobs.push({ arm: 1, email: await b.make(harness, i) });
+  }
+  // Warm-up: JIT and statement caches, not measured.
+  for (let i = 0; i < 20; i++) await send(`warm-${String(i)}@example.org`, ip(200_000 + i));
+  const times: [number[], number[]] = [[], []];
+  let n = 0;
+  for (const job of shuffle(jobs)) {
+    const from = ip(++n);
+    await (job.arm === 0 ? a : b).prepare?.(harness, job.email, from);
+    const started = performance.now();
+    const response = await send(job.email, from);
+    const elapsed = performance.now() - started;
+    await response.arrayBuffer();
+    times[job.arm].push(elapsed);
+    // Background work (emails) finishes before the next measurement, so it never lands in one.
+    await harness.emails();
+  }
+  await harness.emails();
+  return { z: mannWhitneyZ(times[0], times[1]), ratio: median(times[0]) / median(times[1]) };
+}
+
+/** Prints a result for the record (the review record quotes them). */
+function report(label: string, result: Comparison): void {
+  process.stdout.write(
+    `${label}: z = ${result.z.toFixed(2)}, median ratio = ${result.ratio.toFixed(3)}\n`,
+  );
+}
+
+/**
+ * The verdict: |z| < 4 is the test; the median band (within 35%) is only a sanity check. The
+ * power test below shows that a difference as small as one extra indexed SELECT is caught.
+ */
+function expectIndistinguishable(result: Comparison): void {
+  expect(Math.abs(result.z)).toBeLessThan(4);
+  expect(result.ratio).toBeGreaterThan(1 / 1.35);
+  expect(result.ratio).toBeLessThan(1.35);
+}
+
+const request = (harness: Harness) => (email: string, from: string) =>
+  harness.request("POST", "/api/v1/auth/otp/request", { email }, { ip: from });
+const verifyWrong = (harness: Harness) => (email: string, from: string) =>
+  harness.request("POST", "/api/v1/auth/otp/verify", { email, code: "12345678" }, { ip: from });
+
+/** Another client address in the same request's family, for unmeasured set-up requests. */
+const other = (from: string, i: number): string => `${from.replace(/^10\./u, "11.")}${String(i)}`;
+
+describe("enumeration parity: timing (06 §3.2, statistical test)", () => {
+  it("/otp/request: known vs unknown", async () => {
     h = createHarness();
-    const result = indistinguishable(await measure(h, request(h)));
-    report("otp/request parity", result);
-    expect(Math.abs(result.z)).toBeLessThan(4);
-    expect(result.ratio).toBeGreaterThan(1 / 1.35);
-    expect(result.ratio).toBeLessThan(1.35);
+    const result = await compare(h, request(h), knownArm, unknownArm);
+    report("request known vs unknown", result);
+    expectIndistinguishable(result);
   }, 60_000);
 
-  it("/otp/verify (wrong code) takes the same time for known and unknown addresses", async () => {
+  it("/otp/verify, wrong code with a live challenge: known vs unknown", async () => {
     h = createHarness();
-    const harness = h;
-    // Every address first gets a live challenge, as an attacker's target would.
-    const result = indistinguishable(await measure(harness, verify(harness), request(harness)));
-    report("otp/verify parity", result);
-    expect(Math.abs(result.z)).toBeLessThan(4);
-    expect(result.ratio).toBeGreaterThan(1 / 1.35);
-    expect(result.ratio).toBeLessThan(1.35);
+    const withChallenge = (arm: Arm): Arm => ({
+      ...arm,
+      prepare: (harness, email, from) => request(harness)(email, other(from, 0)),
+    });
+    const result = await compare(
+      h,
+      verifyWrong(h),
+      withChallenge(knownArm),
+      withChallenge(unknownArm),
+    );
+    report("verify known vs unknown", result);
+    expectIndistinguishable(result);
   }, 60_000);
 
-  it("the method has power: a 2 ms slower known-account path is detected", async () => {
-    const slowKnown = (repos: Repositories): Repositories => ({
+  it("/otp/request: a suspended account vs a known one", async () => {
+    h = createHarness();
+    const suspended: Arm = {
+      make: async (harness, i) => {
+        const email = await knownArm.make(harness, i);
+        harness.exec("UPDATE users SET suspended_at = 1 WHERE email = ?", email);
+        return email;
+      },
+    };
+    const result = await compare(h, request(h), suspended, knownArm);
+    report("request suspended vs known", result);
+    expectIndistinguishable(result);
+  }, 60_000);
+
+  it("/otp/request over the per-email limit: known vs unknown (and vs an unlimited known one)", async () => {
+    h = createHarness({
+      ...PROD_ENV,
+      LIMIT_OTP_EMAIL_GLOBAL_HOUR: "100000",
+      LIMIT_OTP_EMAIL_GLOBAL_DAY: "100000",
+    });
+    // Five earlier requests from other clients use up the address's hour.
+    const useUp = async (harness: Harness, email: string, from: string): Promise<void> => {
+      for (let i = 0; i < 5; i++) await request(harness)(email, other(from, i));
+    };
+    const limitedKnown: Arm = { ...knownArm, prepare: useUp };
+    const limitedUnknown: Arm = { ...unknownArm, prepare: useUp };
+    const result = await compare(h, request(h), limitedKnown, limitedUnknown);
+    report("request per-email-limited, known vs unknown", result);
+    expectIndistinguishable(result);
+    // For the record only: the limited path creates no challenge (06 §3), so it may be a little
+    // quicker than an unlimited one. That says nothing about the account: the caller can see the
+    // limit was reached from their own request count, and it is the same for every address.
+    report(
+      "request per-email-limited vs unlimited known (not asserted)",
+      await compare(h, request(h), limitedKnown, knownArm),
+    );
+  }, 180_000);
+
+  it("/otp/request: an unknown address from a full new-accounts bucket vs a known one", async () => {
+    // Hundreds of set-up sign-ins: the instance-wide email caps are raised out of the way.
+    h = createHarness({
+      ...PROD_ENV,
+      LIMIT_NEW_ACCOUNTS_IP_DAY: "1",
+      LIMIT_OTP_EMAIL_GLOBAL_HOUR: "100000",
+      LIMIT_OTP_EMAIL_GLOBAL_DAY: "100000",
+    });
+    // Each measured client has already created an account.
+    const fill = async (harness: Harness, _email: string, from: string): Promise<void> => {
+      await harness.signIn(`filler-${crypto.randomUUID()}@example.org`, { ip: from });
+    };
+    const result = await compare(
+      h,
+      request(h),
+      { ...unknownArm, prepare: fill },
+      { ...knownArm, prepare: fill },
+    );
+    report("request new-accounts-limited vs known", result);
+    expectIndistinguishable(result);
+  }, 120_000);
+
+  it("/otp/request over the instance-wide email cap: known vs unknown", async () => {
+    h = createHarness({ ...PROD_ENV, LIMIT_OTP_EMAIL_GLOBAL_HOUR: "1" });
+    const result = await compare(h, request(h), knownArm, unknownArm);
+    report("request over the global cap, known vs unknown", result);
+    expectIndistinguishable(result);
+  }, 60_000);
+
+  it("has power: one extra indexed SELECT on the known path is detected", async () => {
+    const oneMoreSelect = (repos: Repositories): Repositories => ({
       ...repos,
       users: {
         ...repos.users,
         async findByEmail(email) {
           const user = await repos.users.findByEmail(email);
-          if (user !== null) await new Promise((resolve) => setTimeout(resolve, 2));
+          if (user !== null) await repos.users.findById(user.id);
           return user;
         },
       },
     });
-    h = createHarness(undefined, { wrapRepos: slowKnown });
-    const result = indistinguishable(await measure(h, request(h)));
-    report("otp/request with a planted 2 ms difference", result);
+    h = createHarness(undefined, { wrapRepos: oneMoreSelect });
+    const result = await compare(h, request(h), knownArm, unknownArm);
+    report("request with one planted SELECT", result);
     expect(Math.abs(result.z)).toBeGreaterThan(4);
   }, 60_000);
 });

@@ -22,7 +22,6 @@ const FORBIDDEN_CHARACTERS =
  */
 const EMOJI_JOINER =
   /\p{Extended_Pictographic}[\p{Emoji_Modifier}\u{FE0F}]?\u{200D}(?=\p{Extended_Pictographic})/gu;
-const ZWJ = /\u{200D}/u;
 const URL_LIKE = /:\/\/|www\.|@/iu;
 const DOMAIN_LIKE = /\p{L}\.\p{L}{2,}/iu;
 const LONG_DIGIT_RUN = /\p{Nd}{7}/u;
@@ -44,7 +43,9 @@ export function normaliseDisplayName(input: string): string {
 /** Validates a display name (also used for AI accounts and token names later, 06 §8). */
 export function validateDisplayName(input: string, appName: string): DisplayNameResult {
   if (FORBIDDEN_CHARACTERS.test(input)) return { ok: false, reason: "characters" };
-  if (ZWJ.test(input.replace(EMOJI_JOINER, ""))) return { ok: false, reason: "characters" };
+  if (input.replace(EMOJI_JOINER, "").includes("\u{200D}")) {
+    return { ok: false, reason: "characters" };
+  }
   const name = normaliseDisplayName(input);
   const graphemes = Array.from(segmenter.segment(name), (part) => part.segment);
   if (graphemes.length < 1 || graphemes.length > MAX_GRAPHEMES) {
