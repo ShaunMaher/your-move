@@ -1,8 +1,12 @@
 # 04 — Data model
 
-SQLite dialect (D1 and better-sqlite3). Defined once in Drizzle (`packages/server/src/db/schema.ts`)
-with generated SQL migrations in `packages/server/migrations/`, applied by `wrangler d1 migrations
-apply` on Cloudflare and by the Node runtime on startup.
+SQLite dialect (D1 and `node:sqlite`). Defined once in Drizzle (`packages/server/src/db/schema.ts`)
+with generated SQL migrations in `packages/server/migrations/` (`pnpm --filter @your-move/server
+db:generate <name>`, reviewed and committed), applied by `wrangler d1 migrations apply` on
+Cloudflare (tracked in its `d1_migrations` table) and by the Node runtime on startup, in one
+transaction (tracked in Drizzle's `__drizzle_migrations` table; a database migrated by a newer
+build refuses to start). Every table below is created by the first migration, before the
+milestones that use it.
 
 Conventions:
 

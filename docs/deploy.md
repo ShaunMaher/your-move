@@ -43,6 +43,13 @@ works with a read-only root filesystem (`read_only: true` in compose, or `docker
 It starts with `node --disallow-code-generation-from-strings` and refuses to start if code
 generation from strings turns out to be allowed. Its health check calls `/api/health`.
 
+The database is one SQLite file, `DATABASE_PATH` (default `/data/app.sqlite`), in WAL mode. At
+every start the server first applies any new migrations (all in one transaction), then refuses to
+start if a `lobby` or `active` game needs a game type or rules version this image doesn't install
+(02 §7.3); finish or cancel those games first, or start **once** with `ALLOW_ORPHAN_GAMES=true` to
+accept that the sweep cancels them. It also refuses a database that a newer image has migrated:
+roll forward, or restore a backup. Run one container per database file.
+
 To build and try it locally:
 
 ```sh
@@ -64,6 +71,11 @@ Copy [`apps/worker/wrangler.example.toml`](../apps/worker/wrangler.example.toml)
 (`pnpm build`) copies the web app into `apps/worker/dist/assets` together with a `_headers` file
 generated from the same security-header definition the Node server uses; set `PUBLIC_URL` (and
 `TURNSTILE_ENABLED=true` if you use Turnstile) when building so the static headers match.
+
+The database is the D1 binding `DB`: set its `database_id` in your copy, and apply the shared
+migrations (`packages/server/migrations`, the same files the Node server applies) before each
+deploy with `wrangler d1 migrations apply DB --remote --config apps/worker/wrangler.toml`, then
+check for orphaned games with `pnpm games:check-db --d1 <database>`.
 
 There is no CI deploy job for Workers yet. It arrives with the first Workers deployment
 (09 §6, 10), built to deploy the build artifact (`dist/worker`, `--no-bundle`) with a

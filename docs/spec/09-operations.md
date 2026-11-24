@@ -57,8 +57,8 @@ equal.
 
 ### 1.1 Secret derivation and rotation
 
-Subkeys are derived from `APP_SECRET` with HKDF-SHA256, each with a distinct, versioned `info`
-label:
+Subkeys are derived from `APP_SECRET` with HKDF-SHA256 (empty salt, 32-byte output used as an
+HMAC-SHA256 key), each with a distinct, versioned `info` label:
 
 | Label | Used for | Effect of changing it |
 |---|---|---|
