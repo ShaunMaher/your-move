@@ -604,8 +604,8 @@ describe("onboarding: PATCH /api/v1/me (06 §5)", () => {
     "call 5551234567",
     "Family Games fan",
     "the admin",
-    "Sam‮evil",
-    "Sam​x",
+    "Sam\u{202E}evil",
+    "Sam\u{200B}x",
     "Sam\nBcc: x",
   ])("refuses the display name %j", async (displayName) => {
     const cookie = await h.signIn(fresh());

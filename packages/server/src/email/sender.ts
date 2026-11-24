@@ -55,12 +55,12 @@ const CAPTURE_LIMIT = 200;
 export function createConsoleEmailSender(log: Logger, now: () => Date): ConsoleEmailSender {
   const messages: CapturedEmail[] = [];
   return {
-    send(message) {
+    async send(message) {
       assertSafeHeaders(message);
       messages.push({ ...message, sentAt: now().toISOString() });
       if (messages.length > CAPTURE_LIMIT) messages.shift();
       log.info("email captured (console provider)", { capturedEmails: messages.length });
-      return Promise.resolve();
+      await Promise.resolve();
     },
     captured() {
       return [...messages];
