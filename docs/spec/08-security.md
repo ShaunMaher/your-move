@@ -90,7 +90,7 @@ generated `_headers` file for static assets (03 §9). One shared definition gene
 | Invite emails per inviter (addresses without an account) | 5 / day, 20 / 30 days (2 / day for new accounts, 06 §6.6) | silent (seat created, no email) |
 | Invite emails per target address (by email HMAC) | 3 / 30 days | silent (seat created, no email) |
 | **Invite emails instance-wide** | 100 / day | silent; alert |
-| New accounts per IP (bucketed) | 10 / day | silent on `/otp/request` for unknown emails from that bucket (a never-emailed challenge is still inserted, for verify parity, 06 §3.2). Counted when a sign-in creates an account; `/otp/request` only reads it, on every path |
+| New accounts per IP (bucketed) | 10 / day | silent on `/otp/request` for unknown emails from that bucket (a never-emailed challenge is still inserted, for verify parity, 06 §3.2). Judged and counted where a sign-in creates an account, against the verifying client's buckets (an unknown address verifying from a full bucket gets `INVALID_CODE`); `/otp/request` only reads it, on every path |
 | WebSocket upgrades per IP | 30 / min | `429` |
 | Moves per user | 120 / min | `429` |
 | Preview per user | 300 / min | `429` |

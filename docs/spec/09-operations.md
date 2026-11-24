@@ -148,9 +148,9 @@ that work on both runtimes, plus SMTP for Node only.
      Worker secrets or Docker secrets (`*_FILE`). To revoke, remove the app's access from the sender
      user's Google account and repeat step 3.
 - The generic `smtp` provider (Node only) stays available for operators with their own SMTP relay.
-- **Providers not built yet.** Until a provider's implementation lands (`gmail` in M4; `smtp`,
-  `resend`, `postmark`, `ses` and `cloudflare` when scheduled), a configuration naming it still
-  starts, logs an `email_provider_unavailable` alert at startup and on every message, and sends
+- **Providers not built yet.** Until a provider's implementation lands (`gmail` in M4; `smtp` once
+  Q26 is decided, 10 M2; `resend`, `postmark`, `ses` and `cloudflare` when scheduled), a configuration naming it still
+  starts, logs an error-level `email_provider_unavailable` alert at startup and on every message, and sends
   nothing; the API keeps its normal responses. Only `console` (local-dev) sends in M2.
 - Also supported: a transactional provider with an HTTP API (Resend, Postmark, Amazon SES).
   Cloudflare's own Email Service is supported via its `send_email` binding *if* it's available on
