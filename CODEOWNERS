@@ -62,3 +62,9 @@
 /packages/sdk/src/schema.ts @applications
 /apps/web/index.html @applications
 /apps/web/vite.config.ts @applications
+
+[Bundled word lists (licensing gate and removals, words §9.1, Q7)]
+/.gitattributes @applications
+/packages/dictionary/dictionaries/ @applications
+/packages/dictionary/removals-global.txt @applications
+/packages/dictionary/src/builder/builtin.test.ts @applications

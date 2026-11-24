@@ -1,10 +1,10 @@
 {
   "id": "enable",
-  "version": 1,
+  "version": 2,
   "name": "ENABLE",
   "description": "Enhanced North American Benchmark LExicon: a public-domain list of about 173,000 English words.",
   "language": "en",
   "licence": "Public domain",
-  "sourceUrl": "https://norvig.com/ngrams/enable1.txt",
+  "sourceUrl": "https://www.norvig.com/ngrams/enable1.txt",
   "sha256": "61ba1392a5b6199dd161fae7b483cd262fb8a88c0d49bd2c9ecb6753e755697f"
 }

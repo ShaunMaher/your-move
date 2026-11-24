@@ -1,13 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { sha256Hex } from "../hash.js";
 import { hasWord } from "../lookup.js";
-import {
-  BuildError,
-  buildDictionary,
-  parseEdits,
-  sha256Hex,
-  type DictionarySources,
-} from "./build.js";
+import { BuildError, buildDictionary, parseEdits, type DictionarySources } from "./build.js";
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
 
@@ -85,11 +80,11 @@ describe("buildDictionary (words §9.1)", () => {
       language: "en",
       licence: "CC0-1.0",
       sourceUrl: "https://example.org/tiny.txt",
-      sourceSha256: (input.meta as { sha256: string }).sha256,
+      sha256: (input.meta as { sha256: string }).sha256,
       distribution: "public",
       wordCount: 2,
       alphabet: ["a", "b", "c", "d"],
-      sha256: await sha256Hex(encode("bad\ncab\n")),
+      wordsSha256: await sha256Hex(encode("bad\ncab\n")),
       bytes: 8,
       skipped: { length: 0, characters: 0 },
     });

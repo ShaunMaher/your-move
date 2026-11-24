@@ -5,14 +5,24 @@
  */
 import { casualV1 } from "./casual/v1.js";
 import { classicV1 } from "./classic/v1.js";
-import { rulesetSchema, type Ruleset, type RulesetData } from "./schema.js";
+import { rulesetSchema, type DeepReadonly, type Ruleset, type RulesetData } from "./schema.js";
 
 /** Every ruleset's versions, keyed by id. */
 export type RulesetRegistry = ReadonlyMap<string, readonly Ruleset[]>;
 
+/** Freezes a parsed value and everything inside it (plain objects and arrays only). */
+function deepFreeze<T>(value: T): DeepReadonly<T> {
+  if (typeof value === "object" && value !== null) {
+    for (const inner of Object.values(value)) deepFreeze(inner);
+    Object.freeze(value);
+  }
+  return value as DeepReadonly<T>;
+}
+
 /**
  * Parses and checks a registry: each entry's versions are its id's rulesets numbered 1, 2, 3, …
- * in order. Throws on any problem, so an invalid ruleset can't be loaded (words §8.2).
+ * in order. Throws on any problem, so an invalid ruleset can't be loaded (words §8.2). Every
+ * ruleset is deep-frozen: one shared copy serves every game, so nothing may change it.
  */
 export function createRegistry(
   data: Readonly<Record<string, readonly RulesetData[]>>,
@@ -20,7 +30,7 @@ export function createRegistry(
   const registry = new Map<string, readonly Ruleset[]>();
   for (const [id, versions] of Object.entries(data)) {
     if (versions.length === 0) throw new Error(`ruleset ${id} has no versions`);
-    const parsed = versions.map((version, index) => {
+    const parsed = versions.map((version, index): Ruleset => {
       const result = rulesetSchema.safeParse(version);
       if (!result.success) {
         throw new Error(`ruleset ${id} v${String(index + 1)} is invalid: ${result.error.message}`);
@@ -30,9 +40,9 @@ export function createRegistry(
           `ruleset ${id} entry ${String(index + 1)} must be ${id} v${String(index + 1)}`,
         );
       }
-      return result.data;
+      return deepFreeze(result.data);
     });
-    registry.set(id, parsed);
+    registry.set(id, Object.freeze(parsed));
   }
   return registry;
 }

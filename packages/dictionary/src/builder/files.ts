@@ -5,7 +5,8 @@
  * - `<id>/words.txt`: the compact word list the server looks words up in;
  * - `<id>/words.txt.gz` and `<id>/words.txt.br`: the same, compressed, for clients;
  * - `<id>/manifest.json`: its metadata, alphabet, hash and size;
- * - `index.json`: every manifest, which the runtime parses with `parseIndex`.
+ * - `index.json`: every manifest and the global removals, which the runtime parses with
+ *   `parseIndex`.
  *
  * `generated/` is rebuilt from scratch each time and never committed.
  */
@@ -15,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 
 import type { DictionaryIndex } from "../manifest.js";
-import { BuildError, buildDictionary, type BuiltDictionary } from "./build.js";
+import { BuildError, buildDictionary, parseEdits, type BuiltDictionary } from "./build.js";
 
 /** One built dictionary's output files, with their sizes in bytes. */
 export interface BuildReport {
@@ -116,7 +117,10 @@ export async function buildAll(packageDir: string, outDir: string): Promise<Buil
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
   const reports = built.map((dictionary) => writeDictionary(outDir, dictionary));
-  const index: DictionaryIndex = { dictionaries: built.map((dictionary) => dictionary.manifest) };
+  const index: DictionaryIndex = {
+    dictionaries: built.map((dictionary) => dictionary.manifest),
+    globalRemovals: parseEdits("removals-global.txt", globalRemovals),
+  };
   writeFileSync(join(outDir, "index.json"), `${JSON.stringify(index, null, 2)}\n`);
   return reports;
 }

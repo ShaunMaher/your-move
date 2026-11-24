@@ -68,6 +68,7 @@ export default defineConfig({
         "apps/node/src/main.ts",
         "apps/worker/src/index.ts",
         "apps/web/src/main.tsx",
+        "packages/dictionary/src/builder/bench.ts",
         "packages/dictionary/src/builder/cli.ts",
         "scripts/src/bin/**",
       ],

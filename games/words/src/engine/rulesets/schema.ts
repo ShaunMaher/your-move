@@ -7,8 +7,9 @@
 import { z } from "@your-move/sdk/schema";
 
 /**
- * The longest word any dictionary keeps (words §9.1). A ruleset's board can't be larger, or
- * words that fit it would be missing from every dictionary.
+ * The largest board a ruleset may have: the longest word the dictionaries keep (words §9.1), or
+ * words that fit the board would be missing from every dictionary. Raising it means raising the
+ * dictionaries' `MAX_WORD_LENGTH` with it; a test ties the two.
  */
 export const MAX_BOARD_SIZE = 15;
 
@@ -88,6 +89,77 @@ export function isQuarterTurnSymmetric(premiums: readonly string[]): boolean {
   return premiums.every((row, index) => row === rotated[index]);
 }
 
+/** The premium squares that have another premium square directly beside or below them. */
+export function adjacentPremiums(premiums: readonly string[]): [number, number][] {
+  const premium = (row: number, col: number): boolean => {
+    const code = premiums[row]?.[col];
+    return code !== undefined && code !== ".";
+  };
+  const found: [number, number][] = [];
+  premiums.forEach((line, row) => {
+    for (let col = 0; col < line.length; col += 1) {
+      if (premium(row, col) && (premium(row, col + 1) || premium(row + 1, col))) {
+        found.push([row, col]);
+      }
+    }
+  });
+  return found;
+}
+
+/** Every row and every column of a premium picture, as strings. */
+function premiumLines(premiums: readonly string[]): string[] {
+  const columns = Array.from({ length: premiums[0]?.length ?? 0 }, (_, col) =>
+    premiums.map((line) => line[col] ?? ".").join(""),
+  );
+  return [...premiums, ...columns];
+}
+
+const WORD_MULTIPLIERS: Readonly<Record<string, number>> = { D: 2, T: 3 };
+
+/**
+ * The closest two word-premium squares (DW, TW) may be in one row or column: their positions
+ * differ by at least this much, so no word shorter than 5 letters covers two (words §8.2).
+ */
+export const MIN_WORD_PREMIUM_DISTANCE = 4;
+
+/**
+ * The most a word of up to `maxLength` letters may be multiplied by the word premiums it covers
+ * (words §8.2): ×4 up to 6 letters, ×6 up to 7, the limits both reference boards keep.
+ */
+export const WORD_MULTIPLIER_CAPS: readonly { readonly maxLength: number; readonly max: number }[] =
+  [
+    { maxLength: 6, max: 4 },
+    { maxLength: 7, max: 6 },
+  ];
+
+/** The closest two word-premium squares come in any row or column; Infinity if never. */
+export function closestWordPremiums(premiums: readonly string[]): number {
+  let closest = Number.POSITIVE_INFINITY;
+  for (const line of premiumLines(premiums)) {
+    let previous = -1;
+    for (let index = 0; index < line.length; index += 1) {
+      if (WORD_MULTIPLIERS[line.charAt(index)] === undefined) continue;
+      if (previous >= 0) closest = Math.min(closest, index - previous);
+      previous = index;
+    }
+  }
+  return closest;
+}
+
+/** The largest word multiplier a word of `length` letters can cover anywhere on the board. */
+export function maxWordMultiplier(premiums: readonly string[], length: number): number {
+  let best = 1;
+  for (const line of premiumLines(premiums)) {
+    const span = Math.min(length, line.length);
+    for (let start = 0; start + span <= line.length; start += 1) {
+      let product = 1;
+      for (const code of line.slice(start, start + span)) product *= WORD_MULTIPLIERS[code] ?? 1;
+      best = Math.max(best, product);
+    }
+  }
+  return best;
+}
+
 /** How many squares of each premium a layout has, the start square included. */
 export function premiumCounts(premiums: readonly string[]): Record<Premium, number> {
   const counts: Record<Premium, number> = { DL: 0, TL: 0, DW: 0, TW: 0 };
@@ -119,6 +191,24 @@ export const rulesetSchema = rulesetObject.superRefine((ruleset, ctx) => {
   ) {
     issue("the premium layout must be symmetric under a quarter turn", ["premiums"]);
   }
+  if (adjacentPremiums(ruleset.premiums).length > 0) {
+    // Premiums never stack in one short word (words §8.2), the start square's included.
+    issue("no two premium squares may be orthogonally adjacent", ["premiums"]);
+  }
+  if (closestWordPremiums(ruleset.premiums) < MIN_WORD_PREMIUM_DISTANCE) {
+    issue(
+      `word premiums in one row or column must be at least ${String(MIN_WORD_PREMIUM_DISTANCE)} squares apart`,
+      ["premiums"],
+    );
+  }
+  for (const cap of WORD_MULTIPLIER_CAPS) {
+    if (maxWordMultiplier(ruleset.premiums, cap.maxLength) > cap.max) {
+      issue(
+        `a word of ${String(cap.maxLength)} letters or fewer may cover at most ×${String(cap.max)}`,
+        ["premiums"],
+      );
+    }
+  }
   const [row, col] = ruleset.start;
   if (row >= size || col >= size) issue("the start square must be on the board", ["start"]);
   if (ruleset.maxPlayers < ruleset.minPlayers) {
@@ -141,5 +231,10 @@ export const rulesetSchema = rulesetObject.superRefine((ruleset, ctx) => {
   }
 });
 
-/** A validated ruleset (words §8.1). */
-export type Ruleset = z.output<typeof rulesetSchema>;
+/** `T` with every nested property and element read-only. */
+export type DeepReadonly<T> = T extends object
+  ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+  : T;
+
+/** A validated ruleset (words §8.1); the registry deep-freezes it, and the type says so. */
+export type Ruleset = DeepReadonly<z.output<typeof rulesetSchema>>;
