@@ -193,6 +193,148 @@ const noBuiltInValues: Rule.RuleModule = {
   },
 };
 
+/** `Object` and `Reflect` functions that change the object they are given. */
+const MUTATORS: Readonly<Record<string, ReadonlySet<string>>> = {
+  Object: new Set([
+    "assign",
+    "defineProperty",
+    "defineProperties",
+    "setPrototypeOf",
+    "freeze",
+    "seal",
+    "preventExtensions",
+  ]),
+  Reflect: new Set([
+    "defineProperty",
+    "deleteProperty",
+    "set",
+    "setPrototypeOf",
+    "preventExtensions",
+  ]),
+};
+
+/**
+ * Members of built-ins that are primitives: constants (`Math.PI`, `Number.MAX_SAFE_INTEGER`),
+ * well-known symbols (`Symbol.iterator`) and `length`. Taking one as a value exposes nothing.
+ */
+function primitiveMember(root: string, property: string | undefined): boolean {
+  return root === "Symbol" || property === "length" || /^[A-Z][A-Z0-9_]*$/u.test(property ?? "");
+}
+
+type ChainNode = Partial<{
+  type: string;
+  object: unknown;
+  property: Partial<{ type: string; name: string }>;
+  computed: boolean;
+  parent: ChainNode;
+  left: unknown;
+  value: unknown;
+  callee: unknown;
+  tag: unknown;
+  operator: string;
+  argument: unknown;
+  arguments: ChainNode[];
+  expression: unknown;
+}>;
+
+/** The identifier a member chain (`a.b.c`) starts from, if it starts from one. */
+function chainRoot(node: ChainNode | undefined): string | undefined {
+  let current = node;
+  while (current?.type === "MemberExpression") current = current.object as ChainNode;
+  if (current?.type === "ChainExpression") return chainRoot(current.expression as ChainNode);
+  return current?.type === "Identifier" ? (current as { name?: string }).name : undefined;
+}
+
+/** Whether `node` is a place a value is written to (assigned, updated, deleted or destructured into). */
+function isWriteTarget(node: ChainNode): boolean {
+  const parent = node.parent ?? {};
+  switch (parent.type) {
+    case "AssignmentExpression":
+    case "AssignmentPattern":
+      return parent.left === node;
+    case "ForInStatement":
+    case "ForOfStatement":
+      return parent.left === node;
+    case "UpdateExpression":
+      return true;
+    case "UnaryExpression":
+      return parent.operator === "delete";
+    case "ArrayPattern":
+    case "RestElement":
+      return true;
+    case "Property":
+      return parent.parent?.type === "ObjectPattern" && parent.value === node;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Members of built-ins (02 §7.5): a member chain rooted at a built-in (`JSON.parse`,
+ * `Array.prototype.push`) is never written to, assigned, deleted, or handed to a function that
+ * changes its argument (`Object.freeze(Array.prototype)`), however deep the chain; and it is taken
+ * as a value only if it is a primitive constant. Otherwise it is called (`Math.max(1)`), constructed,
+ * or the object of a further member (`Array.prototype.slice.call(x)`), so a built-in's prototype or
+ * method never reaches a name a write could go through.
+ */
+const noBuiltInMemberWrites: Rule.RuleModule = {
+  meta: {
+    type: "problem",
+    docs: { description: "Never write to built-ins' members, and use them by name only." },
+    schema: [],
+    messages: {
+      write: "Engines must not write to built-in objects.",
+      value: "Use {{name}}'s members by name (call them or reach a further member), not as values.",
+    },
+  },
+  create(context) {
+    const check = (variable: Scope.Variable) => {
+      if (!ENGINE_GLOBALS.includes(variable.name) || PRIMITIVE_GLOBALS.has(variable.name)) return;
+      for (const reference of variable.references) {
+        const identifier = reference.identifier as ChainNode;
+        let top = identifier;
+        while (top.parent?.type === "MemberExpression" && top.parent.object === top)
+          top = top.parent;
+        if (top.parent?.type === "ChainExpression") top = top.parent;
+        if (top === identifier) continue; // the identifier itself: no-built-in-values judges it
+        const parent = top.parent ?? {};
+        const last = (top.type === "ChainExpression" ? (top.expression as ChainNode) : top).property
+          ?.name;
+        if (isWriteTarget(top)) {
+          context.report({ node: top as Rule.Node, messageId: "write" });
+        } else if (parent.type === "CallExpression" && parent.callee === top) {
+          const mutator = MUTATORS[variable.name]?.has(last ?? "") === true;
+          const target = parent.arguments?.[0];
+          const root =
+            target?.type === "Identifier" ? (target as { name?: string }).name : chainRoot(target);
+          if (mutator && root !== undefined && ENGINE_GLOBALS.includes(root)) {
+            context.report({ node: parent as Rule.Node, messageId: "write" });
+          }
+        } else if (
+          !(parent.type === "NewExpression" && parent.callee === top) &&
+          !(parent.type === "TaggedTemplateExpression" && parent.tag === top) &&
+          !(parent.type === "UnaryExpression" && parent.operator === "typeof") &&
+          !primitiveMember(variable.name, last)
+        ) {
+          context.report({
+            node: top as Rule.Node,
+            messageId: "value",
+            data: { name: variable.name },
+          });
+        }
+      }
+    };
+    return {
+      "Program:exit"(node) {
+        context.sourceCode
+          .getScope(node)
+          .variables.filter((variable) => variable.defs.length === 0)
+          .forEach(check);
+      },
+    };
+  },
+};
+
 /**
  * Keys that lead from a value to its constructor or prototype: `constructor`, `__proto__`, and the
  * legacy accessor methods every object inherits (`({}).__lookupGetter__("__proto__")` is the
@@ -243,9 +385,17 @@ export function engineEslintConfig(files: readonly string[]): Linter.Config[] {
         sourceType: "module",
         globals: Object.fromEntries(ENGINE_GLOBALS.map((name) => [name, "readonly"])),
       },
-      plugins: { "your-move-engine": { rules: { "no-built-in-values": noBuiltInValues } } },
+      plugins: {
+        "your-move-engine": {
+          rules: {
+            "no-built-in-values": noBuiltInValues,
+            "no-built-in-member-writes": noBuiltInMemberWrites,
+          },
+        },
+      },
       rules: {
         "your-move-engine/no-built-in-values": "error",
+        "your-move-engine/no-built-in-member-writes": "error",
         // The allow-list: any host global not listed above is undefined here, and the
         // ECMAScript built-ins left off the list are restricted.
         "no-undef": ["error", { typeof: true }],
@@ -305,18 +455,7 @@ export function engineEslintConfig(files: readonly string[]): Linter.Config[] {
             selector: `MemberExpression[computed=true][object.name=/^(${BUILT_IN_OBJECTS})$/]`,
             message: "Use built-ins' members by name, not by computed access.",
           },
-          {
-            selector: `AssignmentExpression > MemberExpression.left[object.name=/^(${BUILT_IN_OBJECTS})$/]`,
-            message: "Engines must not write to built-in objects.",
-          },
-          {
-            selector: `UnaryExpression[operator='delete'] > MemberExpression[object.name=/^(${BUILT_IN_OBJECTS})$/]`,
-            message: "Engines must not write to built-in objects.",
-          },
-          ...["[arguments.0.name", "[arguments.0.object.name"].map((target) => ({
-            selector: `CallExpression[callee.object.name='Object'][callee.property.name=/^(assign|defineProperty|defineProperties|setPrototypeOf)$/]${target}=/^(${BUILT_IN_OBJECTS})$/]`,
-            message: "Engines must not write to built-in objects.",
-          })),
+          // Writes to built-ins' members, however deep, are the no-built-in-member-writes rule's.
           {
             selector: `AssignmentExpression > MemberExpression.left > MemberExpression.object[property.name='prototype']`,
             message: "Engines must not write to prototypes.",
