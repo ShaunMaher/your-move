@@ -16,7 +16,10 @@ import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
  * repository may use one (03 §4). Repositories build their queries from the shared schema's tables
  * (`schema.ts`); relational queries (`db.query`) aren't used.
  */
-export type Database = Omit<BaseSQLiteDatabase<"async", unknown>, "transaction"> & {
+export type Database = Pick<
+  BaseSQLiteDatabase<"async", unknown>,
+  "select" | "insert" | "update" | "delete" | "run"
+> & {
   batch<U extends BatchItem<"sqlite">, T extends Readonly<[U, ...U[]]>>(
     batch: T,
   ): Promise<BatchResponse<T>>;

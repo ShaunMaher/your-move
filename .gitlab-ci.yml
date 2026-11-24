@@ -170,7 +170,10 @@ validate:
   script:
     - *sections
     - section format "Prettier"; pnpm format:check; end format
-    - section lint "ESLint"; pnpm lint; end lint
+    # Typed lint holds every TypeScript project's program in one process. Drizzle's type graph
+    # (packages/server, apps/node, apps/worker) took the peak heap from about 2.45 GB to 2.9 GB
+    # when measured locally with --trace-gc (M2a review CI-1), past the default limit here.
+    - section lint "ESLint"; NODE_OPTIONS=--max-old-space-size=4096 pnpm lint; end lint
     - section typecheck "TypeScript"; pnpm typecheck; end typecheck
     - section arch "Architecture rules"; pnpm lint:arch; end arch
     - section unused "knip"; pnpm lint:unused; end unused
@@ -227,7 +230,7 @@ test:
     # contract suite and the D1 repository contract suite run in test:worker instead (see there):
     # to fold them back, drop the --excludes and the test:worker job. Vitest matches --exclude
     # against each project's own directory, so only an absolute path names one file and no other.
-    - pnpm test --exclude "$CI_PROJECT_DIR/tests/contract/src/worker.test.ts" --exclude "$CI_PROJECT_DIR/apps/worker/test/d1.test.ts"
+    - pnpm test --exclude "$CI_PROJECT_DIR/tests/contract/src/worker.test.ts" --exclude "$CI_PROJECT_DIR/tests/contract/src/d1-repositories.test.ts"
     # The full game kit and every other games:verify check on each installed game (02 §6, 11 §4);
     # the build stage runs the fast kit.
     - pnpm games:verify
@@ -277,10 +280,10 @@ test:worker:
       paths: [.mise]
       policy: pull-push
   script:
-    # The contract project's global setup builds the web app, Node server and Worker first.
-    - pnpm exec vitest run --project tests/contract src/worker.test.ts
-    # The repository contract suite against a local D1 (03 §4).
-    - pnpm exec vitest run --project apps/worker
+    # The Worker half of the API contract suite and the repository contract suite against a local
+    # D1 (03 §4). The contract project's global setup builds the web app, Node server and Worker
+    # first.
+    - pnpm exec vitest run --project tests/contract src/worker.test.ts src/d1-repositories.test.ts
   after_script:
     - mkdir -p "$WRANGLER_LOG_PATH"
     - *runner-report

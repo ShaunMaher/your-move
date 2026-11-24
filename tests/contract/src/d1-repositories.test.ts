@@ -13,12 +13,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { repositoryContract } from "@your-move/server/testing";
+import { d1Repositories } from "@your-move/worker/d1";
 import { describe, expect, it } from "vitest";
 import { getPlatformProxy } from "wrangler";
 
-import { d1Repositories } from "../src/d1.js";
 
-const CONFIG = fileURLToPath(new URL("wrangler.d1.toml", import.meta.url));
+const CONFIG = fileURLToPath(new URL("../wrangler.d1.toml", import.meta.url));
 const WRANGLER = fileURLToPath(new URL("../node_modules/.bin/wrangler", import.meta.url));
 
 repositoryContract("D1", async () => {

@@ -12,6 +12,7 @@
   "references": [
     { "path": "../../packages/api-client" },
     { "path": "../../packages/server" },
-    { "path": "../../packages/shared" }
+    { "path": "../../packages/shared" },
+    { "path": "../../apps/worker" }
   ]
 }

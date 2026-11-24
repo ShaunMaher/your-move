@@ -10,6 +10,7 @@
     "@your-move/api-client": "workspace:*",
     "@your-move/server": "workspace:*",
     "@your-move/shared": "workspace:*",
+    "@your-move/worker": "workspace:*",
     "vitest": "catalog:",
     "wrangler": "catalog:"
   }

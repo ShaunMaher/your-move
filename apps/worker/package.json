@@ -5,6 +5,9 @@
   "description": "The Cloudflare runtime: Worker, static assets and (later) Durable Objects",
   "license": "BSD-2-Clause",
   "type": "module",
+  "exports": {
+    "./d1": "./src/d1.ts"
+  },
   "scripts": {
     "assets": "tsx scripts/prepare-assets.ts",
     "dev": "pnpm --filter @your-move/web build && PUBLIC_URL=http://localhost:8787 tsx scripts/prepare-assets.ts && wrangler dev --config wrangler.example.toml --env-file ../../config/local-dev.env --var PUBLIC_URL:http://localhost:8787 --port 8787",
@@ -19,7 +22,6 @@
     "@types/node": "catalog:",
     "@your-move/web": "workspace:*",
     "tsx": "catalog:",
-    "vitest": "catalog:",
     "wrangler": "catalog:"
   }
 }
