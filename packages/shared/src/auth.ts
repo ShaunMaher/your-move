@@ -69,18 +69,24 @@ const EmailNudgesSetting = z.boolean().openapi({
     'Email me "It\'s your turn" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default.',
 });
 
+const ThemeSetting = z.enum(["system", "light", "dark"]).openapi({
+  description:
+    'Colour theme: "system" follows the device, "light" and "dark" override it (07 §5). "system" by default.',
+});
+
 export const UserSettingsSchema = z
   .object({
     whoCanAddMe: z
       .enum(["pastOpponents", "nobody"])
       .openapi({ description: "Who can add me to games (06 §6.2)." }),
     emailNudges: EmailNudgesSetting,
+    theme: ThemeSetting,
   })
   .openapi("UserSettings");
 
 /** The settings `PATCH /api/v1/me` changes: each key optional, only the keys given change. */
 const UserSettingsPatchSchema = z
-  .object({ emailNudges: EmailNudgesSetting.optional() })
+  .object({ emailNudges: EmailNudgesSetting.optional(), theme: ThemeSetting.optional() })
   .strict()
   .openapi("UserSettingsPatch");
 

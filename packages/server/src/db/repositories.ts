@@ -79,6 +79,8 @@ export interface UserRepo {
    * links); turning them off clears it. Suppressions are left alone.
    */
   setEmailNudges(id: string, change: EmailNudgesChange): Promise<void>;
+  /** Sets `settings.theme` (07 §5), leaving every other key as it is now in the database. */
+  setTheme(id: string, theme: "system" | "light" | "dark", updatedAt: number): Promise<void>;
   /**
    * Turns email nudges off, and clears `email_id`, for the account whose `users.email_id` is
    * `emailId`, if there is one (a `nudges` unsubscribe, 05 §Email links). Repeating it changes

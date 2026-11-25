@@ -40,6 +40,7 @@ const METHODS = {
     update: true,
     rememberGameOptions: true,
     setEmailNudges: true,
+    setTheme: true,
     disableNudgesByEmailId: true,
     deleteAccount: true,
   } satisfies Record<keyof UserRepo, true>,

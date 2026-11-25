@@ -82,6 +82,7 @@ const storedSettings = z
   .object({
     whoCanAddMe: UserSettingsSchema.shape.whoCanAddMe.optional().catch(undefined),
     emailNudges: UserSettingsSchema.shape.emailNudges.optional().catch(undefined),
+    theme: UserSettingsSchema.shape.theme.optional().catch(undefined),
   })
   .catch({});
 
@@ -103,6 +104,7 @@ function toMe(user: UserRecord, adminEmails: readonly string[], minAge: number):
       whoCanAddMe: settings.whoCanAddMe ?? "pastOpponents",
       // Off unless turned on (03 §7).
       emailNudges: settings.emailNudges ?? false,
+      theme: settings.theme ?? "system",
     },
     ageAttested: user.ageAttestedMinAge !== null && user.ageAttestedMinAge >= minAge,
     // M2b: onboarding is the display name; the age confirmation joins in M4 (10 M2).
@@ -323,6 +325,11 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
         await repos.users.setEmailNudges(user.id, { enabled: false, updatedAt: now() });
       }
       // The settings were changed in SQL, key by key: read back what is stored now.
+      user = (await repos.users.findById(user.id)) ?? user;
+    }
+    const theme = body.settings?.theme;
+    if (theme !== undefined) {
+      await repos.users.setTheme(user.id, theme, now());
       user = (await repos.users.findById(user.id)) ?? user;
     }
     return c.json(toMe(user, config.adminEmails, config.minAge), 200);

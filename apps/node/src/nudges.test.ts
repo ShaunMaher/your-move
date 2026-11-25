@@ -104,6 +104,7 @@ describe("the emailNudges setting (PATCH /api/v1/me)", () => {
     expect(await nudgesOf(ada)).toBe(false);
     expect((await setNudges(ada, true)).settings).toEqual({
       emailNudges: true,
+      theme: "system",
       whoCanAddMe: "pastOpponents",
     });
     expect(await nudgesOf(ada)).toBe(true);
@@ -128,11 +129,13 @@ describe("the emailNudges setting (PATCH /api/v1/me)", () => {
     expect((await call<Me>(h, ada, "GET", "/api/v1/me")).body.settings).toEqual({
       whoCanAddMe: "nobody",
       emailNudges: false,
+      theme: "system",
     });
     h.exec("UPDATE users SET settings = '[1,2]' WHERE id = ?", ada.id);
     expect((await call<Me>(h, ada, "GET", "/api/v1/me")).body.settings).toEqual({
       whoCanAddMe: "pastOpponents",
       emailNudges: false,
+      theme: "system",
     });
   });
 
@@ -196,7 +199,7 @@ describe("the emailNudges setting (PATCH /api/v1/me)", () => {
     const ada = await signUp(h, "Ada");
     for (const settings of [
       { emailNudges: "yes" },
-      { theme: "dark" },
+      { whoCanAddMe: "nobody" },
       { emailNudges: true, x: 1 },
     ]) {
       const result = await call(h, ada, "PATCH", "/api/v1/me", { settings });

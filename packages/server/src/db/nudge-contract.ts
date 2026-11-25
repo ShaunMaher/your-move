@@ -182,6 +182,44 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
       expect(order.indexOf(never.playerId)).toBeLessThan(order.indexOf(again.playerId));
     });
 
+    async function settingsOf(id: string): Promise<unknown> {
+      return JSON.parse((await repos().users.findById(id))?.settings ?? "null") as unknown;
+    }
+
+    it("setTheme changes only that key, and treats unreadable settings as empty (A9)", async () => {
+      const id = crypto.randomUUID();
+      await repos().users.create({
+        id,
+        email: address(id),
+        settings: JSON.stringify({ whoCanAddMe: "nobody", emailNudges: false }),
+        createdAt: T0,
+        updatedAt: T0,
+      });
+      await repos().users.setTheme(id, "dark", T0 + 1);
+      expect(await settingsOf(id)).toEqual({
+        whoCanAddMe: "nobody",
+        emailNudges: false,
+        theme: "dark",
+      });
+      expect((await repos().users.findById(id))?.updatedAt).toBe(T0 + 1);
+      await repos().users.setTheme(id, "system", T0 + 2);
+      expect(await settingsOf(id)).toMatchObject({ theme: "system" });
+      await repos().users.setEmailNudges(id, { enabled: false, updatedAt: T0 + 3 });
+      expect(await settingsOf(id)).toMatchObject({ theme: "system" });
+      await repos().users.setTheme(id, "light", T0 + 4);
+      expect(await settingsOf(id)).toMatchObject({ theme: "light", emailNudges: false });
+      const broken = crypto.randomUUID();
+      await repos().users.create({
+        id: broken,
+        email: address(broken),
+        settings: "[1",
+        createdAt: T0,
+        updatedAt: T0,
+      });
+      await repos().users.setTheme(broken, "dark", T0);
+      expect((await repos().users.findById(broken))?.settings).toBe('{"theme":"dark"}');
+    });
+
     it("setEmailNudges treats unreadable settings as empty", async () => {
       const id = crypto.randomUUID();
       await repos().users.create({

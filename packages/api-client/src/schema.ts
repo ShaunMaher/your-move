@@ -524,6 +524,11 @@ export interface components {
       whoCanAddMe: "pastOpponents" | "nobody";
       /** @description Email me "It's your turn" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default. */
       emailNudges: boolean;
+      /**
+       * @description Colour theme: "system" follows the device, "light" and "dark" override it (07 §5). "system" by default.
+       * @enum {string}
+       */
+      theme: "system" | "light" | "dark";
     };
     OtpVerify: {
       /**
@@ -549,6 +554,11 @@ export interface components {
     UserSettingsPatch: {
       /** @description Email me "It's your turn" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default. */
       emailNudges?: boolean;
+      /**
+       * @description Colour theme: "system" follows the device, "light" and "dark" override it (07 §5). "system" by default.
+       * @enum {string}
+       */
+      theme?: "system" | "light" | "dark";
     };
     DeleteMe: {
       /**

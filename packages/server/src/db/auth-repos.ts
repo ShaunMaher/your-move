@@ -109,6 +109,13 @@ export function userRepo(db: Database): UserRepo {
         })
         .where(eq(users.id, id));
     },
+    async setTheme(id, theme, updatedAt) {
+      // One key, in SQL, like setEmailNudges. The value is one of three fixed words, bound as text.
+      await db
+        .update(users)
+        .set({ settings: sql`json_set(${SETTINGS_OBJECT}, '$.theme', ${theme})`, updatedAt })
+        .where(eq(users.id, id));
+    },
     async disableNudgesByEmailId(emailId, updatedAt) {
       await db
         .update(users)

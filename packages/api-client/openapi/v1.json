@@ -137,9 +137,14 @@
           "emailNudges": {
             "type": "boolean",
             "description": "Email me \"It's your turn\" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default."
+          },
+          "theme": {
+            "type": "string",
+            "enum": ["system", "light", "dark"],
+            "description": "Colour theme: \"system\" follows the device, \"light\" and \"dark\" override it (07 §5). \"system\" by default."
           }
         },
-        "required": ["whoCanAddMe", "emailNudges"]
+        "required": ["whoCanAddMe", "emailNudges", "theme"]
       },
       "OtpVerify": {
         "type": "object",
@@ -188,6 +193,11 @@
           "emailNudges": {
             "type": "boolean",
             "description": "Email me \"It's your turn\" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default."
+          },
+          "theme": {
+            "type": "string",
+            "enum": ["system", "light", "dark"],
+            "description": "Colour theme: \"system\" follows the device, \"light\" and \"dark\" override it (07 §5). \"system\" by default."
           }
         },
         "additionalProperties": false
