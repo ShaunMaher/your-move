@@ -9,7 +9,7 @@
  * when the shell has the list, else the server), debounced; until it answers, the score shows
  * alone (07 §3). Nothing here is authoritative: the server validates every play.
  */
-import { isGameError, shuffle } from "@your-move/sdk";
+import { isGameError, shuffle, type GameError } from "@your-move/sdk";
 import { formatText, type BoardProps } from "@your-move/sdk/client";
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactElement } from "react";
 
@@ -37,15 +37,17 @@ import {
 } from "./geometry.js";
 import { Rack } from "./Rack.js";
 import { webCryptoRandom } from "./random.js";
+import { clearOrder, loadOrder, rackOrderKey, saveOrder } from "./storage.js";
 import { installStyles } from "./styles.js";
 import {
   cancelBlank,
   initial,
   move,
   onRack,
+  placedCount,
   recall,
+  reconcile,
   reorder,
-  savedOrder,
   setBlankLetter,
   squareKey,
   toPlacements,
@@ -54,87 +56,125 @@ import {
   type Tentative,
 } from "./tentative.js";
 import { errorText, plural, seatNames, shown } from "./text.js";
+import { Unsupported } from "./Unsupported.js";
 
 type Props = BoardProps<Action, View, PreviewResult>;
 
 const NO_TILES: readonly string[] = [];
 const PREVIEW_DELAY_MS = 250;
+/** Longer for a list only the server holds: every check is a request (05 §Rate limits). */
+const SERVER_PREVIEW_DELAY_MS = 600;
 const HOVER_ZOOM_MS = 300;
 const DRAG_SLOP = 6;
 const TOUCH_GHOST_OFFSET = 56;
 const SUBMIT_FAILED = "Couldn't send your play. Check your connection and try again.";
 
 /** What the shell's preview said about the tiles on the board. */
-interface Checked {
-  readonly key: string;
-  readonly answer: PreviewResult | { readonly code: string; readonly detail?: unknown } | "failed";
+type Answer = PreviewResult | GameError | "unchecked";
+
+/** The answers that refuse a play; any other error says only that the check didn't happen. */
+const REFUSALS: ReadonlySet<string> = new Set(["INVALID_WORDS", "INVALID_PLACEMENT"]);
+const MAX_ANSWERS = 64;
+
+function isRefusal(answer: Answer | null): answer is GameError {
+  return (
+    answer !== null && answer !== "unchecked" && isGameError(answer) && REFUSALS.has(answer.code)
+  );
+}
+
+/** The engine for a game's rules version, if this app has it. */
+function engineFor(version: number): (typeof engines)[1] | undefined {
+  return Object.hasOwn(engines, version) ? engines[version as 1] : undefined;
 }
 
 export function Board(props: Props): ReactElement {
   const { game, view } = props;
-  useEffect(() => {
-    installStyles();
-  }, []);
+  const [styled] = useState(installStyles);
   const ruleset = findRuleset(view.ruleset.id, view.ruleset.version);
-  if (ruleset === undefined) {
+  const engine = engineFor(game.gameVersion);
+  if (!styled) return <Unsupported />;
+  if (ruleset === undefined || engine === undefined) {
     return (
       <p role="alert">
         This game uses a version of the rules this app doesn&apos;t know. Reload the page to update.
       </p>
     );
   }
-  // A new version of the game (any play, a refetch) starts the tentative tiles afresh.
-  return <Table key={`${game.id}:${String(game.version)}`} {...props} ruleset={ruleset} />;
+  // The tentative tiles belong to one game and survive its new versions (see `reconcile`).
+  return <Table key={game.id} {...props} ruleset={ruleset} engine={engine} />;
 }
 
-function loadOrder(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function saveOrder(key: string, order: string): void {
-  try {
-    localStorage.setItem(key, order);
-  } catch {
-    // Best effort: the order is a convenience (07 §2).
-  }
-}
-
-function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
-  const { game, view, ruleset } = props;
+function Table(
+  props: Props & {
+    readonly ruleset: Ruleset;
+    readonly engine: NonNullable<ReturnType<typeof engineFor>>;
+  },
+): ReactElement {
+  const { game, view, ruleset, engine } = props;
   const rack = view.yourRack ?? NO_TILES;
   const names = seatNames(game, view.scores.length);
-  const storageKey = `words-rack:${game.id}`;
+  const storageKey = rackOrderKey(game);
   const canArrange = view.yourRack !== null && view.final === undefined && game.status === "active";
   const canAct = canArrange && game.yourTurn;
   const points = (tile: string): number => tilePoints(ruleset, tile);
 
-  const [t, setT] = useState<Tentative>(() => initial(rack, loadOrder(storageKey)));
+  const [t, setT] = useState<Tentative>(() =>
+    initial(rack, canArrange ? loadOrder(storageKey, rack.length) : null),
+  );
   const [selected, setSelected] = useState<Source | null>(null);
   const [viewport, setViewport] = useState<Viewport>(FIT);
   const [dialog, setDialog] = useState<"swap" | "pass" | null>(null);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [checked, setChecked] = useState<Checked | null>(null);
+  const [answers, setAnswers] = useState<ReadonlyMap<string, Answer>>(new Map());
   const [ghost, setGhost] = useState<{ tile: string; x: number; y: number } | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  // A new view of the game (an opponent played, a refetch): keep what the player arranged where
+  // it still makes sense, and forget what was waiting on the old view. Done while rendering, so
+  // no frame ever pairs the old tiles with the new rack.
+  const [seen, setSeen] = useState({ version: game.version, rack });
+  if (seen.version !== game.version) {
+    setSeen({ version: game.version, rack });
+    setT((now) =>
+      reconcile(now, seen.rack, rack, (key) => {
+        const [row = 0, col = 0] = key.split(",").map(Number);
+        return view.board[row]?.[col] != null;
+      }),
+    );
+    setSelected(null);
+    setSent(false);
+    setMessage(null);
+    setAnswers(new Map());
+  }
 
   const frame = useRef<HTMLDivElement>(null);
   const rackBox = useRef<HTMLDivElement>(null);
   const preview = useRef(props.preview);
   const live = useRef({ viewport, t });
   const dragged = useRef(false);
+  const dragging = useRef(false);
+  const arranged = useRef(false);
   useEffect(() => {
     preview.current = props.preview;
     live.current = { viewport, t };
   });
+
+  // The saved order is written only after the player reorders, and only while the game is on; a
+  // game that is over keeps nothing.
   useEffect(() => {
-    saveOrder(storageKey, savedOrder(t, rack));
-  }, [storageKey, t, rack]);
+    if (!canArrange) clearOrder(storageKey);
+    else if (arranged.current) saveOrder(storageKey, t.order);
+  }, [canArrange, storageKey, t.order]);
+  // A new rack means the saved order no longer describes it.
+  const rackKey = rack.join("");
+  const lastRack = useRef(rackKey);
+  useEffect(() => {
+    if (lastRack.current === rackKey) return;
+    lastRack.current = rackKey;
+    if (!arranged.current) clearOrder(storageKey);
+  }, [rackKey, storageKey]);
 
   const placements = useMemo(() => toPlacements(t, rack), [t, rack]);
   const analysis = useMemo(
@@ -142,32 +182,48 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
     [view, placements],
   );
   const playable = analysis !== null && !isGameError(analysis);
-  const checkKey = JSON.stringify(placements);
+  // An answer holds for one version of the game and one set of tiles.
+  const checkKey = `${String(game.version)}:${JSON.stringify(placements)}`;
+  const answer = answers.get(checkKey) ?? null;
+  const settled = answer !== null && answer !== "unchecked";
+  const refused = isRefusal(answer) ? answer : null;
+  // A server-only list is checked over the network: ask less often.
+  const delay = game.resources.some((r) => r.distribution === "serverOnly")
+    ? SERVER_PREVIEW_DELAY_MS
+    : PREVIEW_DELAY_MS;
 
   useEffect(() => {
-    if (!canAct || !playable) return;
-    let current = true;
+    if (!canAct || !playable || settled) return;
     const timer = setTimeout(() => {
+      const remember = (result: Answer): void => {
+        setAnswers((now) => {
+          const next = new Map(now).set(checkKey, result);
+          // A bounded cache: the oldest answers go first.
+          for (const key of next.keys()) {
+            if (next.size <= MAX_ANSWERS) break;
+            next.delete(key);
+          }
+          return next;
+        });
+      };
       preview
         .current({ type: "play", placements })
         .then(
-          (answer) => {
-            if (current) setChecked({ key: checkKey, answer });
+          (result) => {
+            // Only a real answer is kept; a rate limit, a stale game or a lost connection says
+            // nothing about the words, so the server decides when the player plays.
+            remember(isGameError(result) && !REFUSALS.has(result.code) ? "unchecked" : result);
           },
           () => {
-            if (current) setChecked({ key: checkKey, answer: "failed" });
+            remember("unchecked");
           },
         )
         .catch(() => undefined);
-    }, PREVIEW_DELAY_MS);
+    }, delay);
     return () => {
-      current = false;
       clearTimeout(timer);
     };
-  }, [canAct, playable, checkKey, placements]);
-
-  const answer = checked?.key === checkKey ? checked.answer : null;
-  const refused = answer !== null && answer !== "failed" && isGameError(answer) ? answer : null;
+  }, [canAct, playable, settled, checkKey, placements, delay]);
 
   function clearTransient(): void {
     setSelected(null);
@@ -175,6 +231,7 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
   }
 
   function put(source: Source, target: Target): void {
+    if (target.kind === "rack") arranged.current = true;
     setT((now) => move(now, rack, source, target));
     clearTransient();
   }
@@ -237,9 +294,12 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
   /** Starts a possible drag of a tile; a press that doesn't travel stays a tap. */
   function beginDrag(source: Source, tile: string, event: PointerEvent<HTMLElement>): void {
     if (!canArrange || busy || (event.pointerType === "mouse" && event.button !== 0)) return;
+    // One drag at a time: a second finger or button while one is live does nothing.
+    if (dragging.current) return;
+    dragging.current = true;
     const start = { x: event.clientX, y: event.clientY };
     const lift = event.pointerType === "touch" ? TOUCH_GHOST_OFFSET : 0;
-    let dragging = false;
+    let moved = false;
     let hover: ReturnType<typeof setTimeout> | null = null;
     let at = start;
     const stopHover = (): void => {
@@ -250,8 +310,8 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
     const onMove = (e: globalThis.PointerEvent): void => {
       if (e.pointerId !== event.pointerId) return;
       at = { x: e.clientX, y: e.clientY };
-      if (!dragging && distance(start, at) < DRAG_SLOP) return;
-      dragging = true;
+      if (!moved && distance(start, at) < DRAG_SLOP) return;
+      moved = true;
       setGhost({ tile, x: at.x, y: at.y - lift });
       const target = aim();
       setDropTarget(target?.kind === "square" ? target.key : null);
@@ -271,10 +331,11 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onCancel);
+      dragging.current = false;
       stopHover();
       setGhost(null);
       setDropTarget(null);
-      if (!dragging) return;
+      if (!moved) return;
       dragged.current = true;
       setTimeout(() => {
         dragged.current = false;
@@ -321,8 +382,18 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
       : [],
   );
   const heldTile = selected?.kind === "rack" ? selected.id : null;
+  const heldId =
+    selected?.kind === "rack"
+      ? selected.id
+      : selected?.kind === "square"
+        ? t.placed[selected.key]?.id
+        : undefined;
+  const heldRack = heldId === undefined ? undefined : rack[heldId];
+  const held = heldRack === undefined ? null : heldName(heldRack);
   const idle = !canAct || busy || sent;
-  const refusedWords = refused !== null;
+  /** Where focus goes when a dialog closes and what opened it is gone: the board's own square. */
+  const restoreTo = (): HTMLElement | null =>
+    frame.current?.querySelector<HTMLElement>('[data-square][tabindex="0"]') ?? null;
 
   return (
     <section className="ym-w" aria-label="Words board">
@@ -336,9 +407,7 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
       </ul>
       <p className="ym-w-meta">
         {plural(view.bagCount, "tile", "tiles")} in the bag
-        {view.lastMove === null
-          ? ""
-          : ` · ${formatText(engines[1].describe(view.lastMove), names)}`}
+        {view.lastMove === null ? "" : ` · ${formatText(engine.describe(view.lastMove), names)}`}
       </p>
 
       {view.final !== undefined && (
@@ -369,9 +438,9 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
             <Status
               names={names}
               game={game}
-              placed={placements.length}
               analysis={analysis}
-              checked={answer}
+              answer={answer}
+              held={held}
               sent={sent}
               canAct={canAct}
             />
@@ -400,6 +469,7 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
             <button
               type="button"
               onClick={() => {
+                arranged.current = true;
                 setT((now) => reorder(now, shuffle(now.order, webCryptoRandom)));
               }}
             >
@@ -407,7 +477,7 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
             </button>
             <button
               type="button"
-              disabled={placements.length === 0 && Object.keys(t.placed).length === 0}
+              disabled={placedCount(t) === 0}
               onClick={() => {
                 setT(recall);
                 clearTransient();
@@ -436,7 +506,7 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
             <button
               type="button"
               className="ym-w-primary"
-              disabled={idle || !playable || refusedWords}
+              disabled={idle || !playable || refused !== null}
               onClick={() => {
                 void send({ type: "play", placements });
               }}
@@ -449,6 +519,7 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
 
       {t.blankFor !== null && (
         <BlankPicker
+          restoreTo={restoreTo}
           onPick={(letter) => {
             setT((now) => setBlankLetter(now, letter));
           }}
@@ -459,6 +530,7 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
       )}
       {dialog === "swap" && (
         <SwapDialog
+          restoreTo={restoreTo}
           rack={rack}
           points={points}
           swapMinBag={ruleset.swapMinBag}
@@ -474,6 +546,7 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
       )}
       {dialog === "pass" && (
         <PassDialog
+          restoreTo={restoreTo}
           busy={busy}
           onPass={() => {
             void send({ type: "pass" });
@@ -503,19 +576,27 @@ function Table(props: Props & { readonly ruleset: Ruleset }): ReactElement {
   );
 }
 
+/** A tile as the status line names it: "Tile A", "Blank tile". */
+function heldName(tile: string): string {
+  return tile === "?" ? "Blank tile" : `Tile ${shown(tile)}`;
+}
+
 /** The line under the board: whose turn it is, or what the tiles on the board would do. */
 function Status(props: {
   readonly names: readonly string[];
   readonly game: Props["game"];
-  readonly placed: number;
   readonly analysis: ReturnType<typeof analyseViewPlay> | null;
-  readonly checked: Checked["answer"] | null;
+  readonly answer: Answer | null;
+  readonly held: string | null;
   readonly sent: boolean;
   readonly canAct: boolean;
 }): ReactElement {
-  const { analysis, checked } = props;
+  const { analysis, answer, held } = props;
+  // Selecting a tile (by tap or by keyboard) is announced, with what to do next.
+  const holding = held === null ? null : <span>{held} selected. Choose a square.</span>;
   if (props.sent) return <span>Sent. Waiting for the board to update.</span>;
   if (analysis === null) {
+    if (holding !== null) return holding;
     if (props.canAct) return <span>Your turn. Place tiles to make a word.</span>;
     const waiting = props.game.toAct.map((seat) => props.names[seat] ?? "").join(", ");
     return (
@@ -526,30 +607,32 @@ function Status(props: {
       </span>
     );
   }
-  if (isGameError(analysis)) return <span>{errorText(analysis)}</span>;
+  if (isGameError(analysis)) {
+    return (
+      <>
+        {holding}
+        <span>{errorText(analysis)}</span>
+      </>
+    );
+  }
   const words = analysis.words.map((w) => `${w.word.toUpperCase()} ${String(w.score)}`).join(", ");
-  const score =
-    checked !== null && checked !== "failed" && !isGameError(checked)
-      ? checked.score
-      : analysis.score;
+  const result = answer !== null && answer !== "unchecked" && !isGameError(answer) ? answer : null;
+  const refusal = isRefusal(answer) ? answer : null;
   return (
     <>
+      {holding}
       <span>
-        <span className="ym-w-score">+{score}</span> {words}
+        <span className="ym-w-score">+{result?.score ?? analysis.score}</span> {words}
         {analysis.bingo ? " · uses every tile" : ""}
       </span>
-      {props.canAct && checked === null && <span className="ym-w-meta">Checking the words…</span>}
-      {checked === "failed" && (
+      {props.canAct && answer === null && <span className="ym-w-meta">Checking the words…</span>}
+      {answer === "unchecked" && (
         <span className="ym-w-meta">
           Couldn&apos;t check the words now; the server will when you play.
         </span>
       )}
-      {checked !== null && checked !== "failed" && isGameError(checked) && (
-        <span data-tone="bad">{errorText(checked)}</span>
-      )}
-      {checked !== null && checked !== "failed" && !isGameError(checked) && (
-        <span data-tone="ok">All words are in the word list.</span>
-      )}
+      {refusal !== null && <span data-tone="bad">{errorText(refusal)}</span>}
+      {result !== null && <span data-tone="ok">All words are in the word list.</span>}
     </>
   );
 }

@@ -6,22 +6,28 @@
  * word list" is the shell's.
  */
 import type { OptionsFormProps } from "@your-move/sdk/client";
-import { useEffect, type ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 
 import { catalogSchema, type Catalog } from "../engine/index.js";
-import { installStyles } from "./styles.js";
+import { installStyles, TOKENS } from "./styles.js";
 import { plural } from "./text.js";
+import { Unsupported } from "./Unsupported.js";
 
 type CatalogRuleset = Catalog["rulesets"][number];
 
-const FILL = { T: "#a8351f", D: "#e7a79c", t: "#1f6f7d", d: "#b3dbe3" } as const;
+const FILL = {
+  T: TOKENS["tw-bg"],
+  D: TOKENS["dw-bg"],
+  t: TOKENS["tl-bg"],
+  d: TOKENS["dl-bg"],
+} as const;
 
 /** The premium layout as a small picture; the card's text carries the same facts (aria-hidden). */
 function Layout({ ruleset }: { readonly ruleset: CatalogRuleset }): ReactElement {
   const n = ruleset.boardSize;
   return (
     <svg viewBox={`0 0 ${String(n)} ${String(n)}`} aria-hidden="true" focusable="false">
-      <rect width={n} height={n} fill="#efe6d0" />
+      <rect width={n} height={n} fill={TOKENS.cell} />
       {ruleset.premiums.flatMap((line, row) =>
         Array.from(line).map((code, col) =>
           code in FILL ? (
@@ -42,9 +48,8 @@ function Layout({ ruleset }: { readonly ruleset: CatalogRuleset }): ReactElement
 
 export function OptionsForm(props: OptionsFormProps): ReactElement {
   const { catalog, value } = props;
-  useEffect(() => {
-    installStyles();
-  }, []);
+  const [styled] = useState(installStyles);
+  if (!styled) return <Unsupported />;
   const parsed = catalogSchema.safeParse(catalog);
   if (!parsed.success) return <p>The options for this game are unavailable.</p>;
   const { rulesets, dictionaries, defaults } = parsed.data;

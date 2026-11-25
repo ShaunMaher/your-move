@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { wordsV1 as words } from "../engine/definition.js";
 import { catalogSchema, engines } from "../engine/index.js";
 import { manifest } from "../manifest.js";
+import "./dom-setup.js";
 import { client } from "./index.js";
 
 afterEach(cleanup);
