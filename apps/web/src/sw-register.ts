@@ -1,0 +1,74 @@
+/**
+ * Registers the service worker and reports when an updated one is waiting (07 §4): the app shows
+ * "New version available" and activates the update only when the person agrees, so a game in
+ * progress is never replaced under them. Once it is activated, every open tab reloads, the other
+ * tabs without being asked (the old worker's cache is gone, so a tab left on the old code would
+ * find its files missing); input not yet sent in those tabs is lost.
+ */
+
+export interface UpdateWatch {
+  /** Activates the waiting worker; the page reloads when it takes over. */
+  readonly apply: () => void;
+}
+
+/**
+ * Watches a registration for a worker that finishes installing while another controls the page.
+ * `container` is `navigator.serviceWorker`; it is a parameter so tests can fake it.
+ */
+export function watchForUpdates(
+  container: ServiceWorkerContainer,
+  registration: ServiceWorkerRegistration,
+  onUpdate: (watch: UpdateWatch) => void,
+  reload: () => void,
+): void {
+  // A page controlled by a worker reloads when another takes over, in whichever tab the person
+  // asked for the update. The first worker claiming an uncontrolled page also fires
+  // `controllerchange`, and that must not reload a page that has just loaded.
+  let controlled = container.controller !== null;
+  const offer = (worker: ServiceWorker) => {
+    onUpdate({
+      apply: () => {
+        worker.postMessage("SKIP_WAITING");
+      },
+    });
+  };
+  // A worker already waiting from an earlier visit.
+  if (registration.waiting !== null && container.controller !== null) offer(registration.waiting);
+  registration.addEventListener("updatefound", () => {
+    const installing = registration.installing;
+    if (installing === null) return;
+    installing.addEventListener("statechange", () => {
+      if (installing.state === "installed" && container.controller !== null) offer(installing);
+    });
+  });
+  container.addEventListener("controllerchange", () => {
+    const wasControlled = controlled;
+    controlled = true;
+    if (wasControlled) reload();
+  });
+}
+
+/** Registers `/sw.js` in a production build; a no-op in development and where unsupported. */
+export function registerServiceWorker(onUpdate: (watch: UpdateWatch) => void): void {
+  if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
+  const container = navigator.serviceWorker;
+  const register = () => {
+    void container.register("/sw.js").then(
+      (registration) => {
+        watchForUpdates(container, registration, onUpdate, () => {
+          window.location.reload();
+        });
+        // A long-lived home-screen app is resumed, not reloaded: look for a new version then.
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") {
+            void registration.update().catch(() => undefined);
+          }
+        });
+      },
+      () => undefined,
+    );
+  };
+  // After the page has loaded, so installing the worker never competes with showing the app.
+  if (document.readyState === "complete") register();
+  else window.addEventListener("load", register, { once: true });
+}

@@ -82,19 +82,40 @@ describe("GET /api/v1/openapi.json", () => {
 });
 
 describe("server-handled paths", () => {
-  it.each([
-    "/api/nope",
-    "/api/v1/nope",
-    "/api/v2/health",
-    "/__dev/emails",
-    "/manifest.webmanifest",
-  ])("%s is a JSON 404, never the SPA", async (path) => {
+  it.each(["/api/nope", "/api/v1/nope", "/api/v2/health", "/__dev/emails"])(
+    "%s is a JSON 404, never the SPA",
+    async (path) => {
+      const { app } = setup();
+      for (const method of ["GET", "POST"]) {
+        const res = await app.request(path, { method });
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual({ error: { code: "NOT_FOUND", message: "Not found." } });
+      }
+    },
+  );
+});
+
+describe("/manifest.webmanifest", () => {
+  it("is generated from APP_NAME and APP_SHORT_NAME at runtime", async () => {
+    const { app } = setup({ ...PROD_ENV, APP_NAME: "Family Games", APP_SHORT_NAME: "Games" });
+    const res = await app.request("/manifest.webmanifest");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/manifest+json");
+    expect(res.headers.get("Cache-Control")).toBe("no-cache");
+    const manifest = (await res.json()) as Record<string, unknown>;
+    expect(manifest).toMatchObject({
+      name: "Family Games",
+      short_name: "Games",
+      display: "standalone",
+      start_url: "/",
+      scope: "/",
+    });
+    expect(manifest["icons"]).toHaveLength(3);
+  });
+
+  it("answers anything but GET with a JSON 404", async () => {
     const { app } = setup();
-    for (const method of ["GET", "POST"]) {
-      const res = await app.request(path, { method });
-      expect(res.status).toBe(404);
-      expect(await res.json()).toEqual({ error: { code: "NOT_FOUND", message: "Not found." } });
-    }
+    expect((await app.request("/manifest.webmanifest", { method: "POST" })).status).toBe(404);
   });
 });
 

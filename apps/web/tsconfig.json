@@ -12,6 +12,13 @@
     "tsBuildInfoFile": "dist-types/.tsbuildinfo",
     "emitDeclarationOnly": true
   },
-  "include": ["src", "vite.config.ts", "vitest.config.ts", "../../generated/client-games.ts"],
+  "include": [
+    "src",
+    "vite-plugin",
+    "sw",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "../../generated/client-games.ts"
+  ],
   "references": [{ "path": "../../packages/api-client" }]
 }

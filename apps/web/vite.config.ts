@@ -4,6 +4,9 @@ import { pathToFileURL } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
+import { defines } from "./vite-plugin/defines.js";
+import { serviceWorker } from "./vite-plugin/service-worker.js";
+
 /**
  * Records every module the build read in generated/bundles/web.json, for `pnpm games:check-inputs`
  * (10 M1): each input from an installed game package must be a file games:verify checked.
@@ -37,7 +40,8 @@ function recordInputs(): Plugin {
  * break the CSP) and hashed output under /assets/ (cached immutably, 03 §9).
  */
 export default defineConfig({
-  plugins: [react(), recordInputs()],
+  plugins: [react(), recordInputs(), serviceWorker()],
+  define: defines,
   build: {
     assetsInlineLimit: 0,
     assetsDir: "assets",

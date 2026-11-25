@@ -29,6 +29,8 @@ export default {
           "[.]d[.]ts$",
           "(^|/)tsconfig[.]json$",
           "(^|/)(?:vite|vitest|playwright)[.]config[.]ts$",
+          // Read by the build's service-worker plugin (vite.config.ts), never imported.
+          "^apps/web/sw/sw[.]js$",
         ],
       },
       to: {},
@@ -150,8 +152,19 @@ export default {
       name: "web-only-through-api-client",
       comment: "The web app reaches the server only through @your-move/api-client (03 §1).",
       severity: "error",
-      from: { path: "^apps/web/" },
+      // The build (vite.config.ts, vite-plugin/) runs in Node and takes the server-path list from
+      // @your-move/shared/server-paths; nothing of it reaches the browser bundle.
+      from: { path: "^apps/web/", pathNot: "^apps/web/(vite-plugin/|vite(st)?[.]config[.]ts$)" },
       to: { path: "^packages/(server|shared)/" },
+    },
+    {
+      name: "web-src-not-to-build-code",
+      comment:
+        "The app's source and worker never import the build's code (vite-plugin/, the Vite configuration): " +
+        "it runs in Node and may use server packages; the build hands the app constants instead (07 §4).",
+      severity: "error",
+      from: { path: "^apps/web/(src|sw)/", pathNot: "[.]test[.]tsx?$" },
+      to: { path: "^apps/web/(vite-plugin/|vite(st)?[.]config)" },
     },
   ],
   options: {
