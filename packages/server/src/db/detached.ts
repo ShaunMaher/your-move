@@ -34,6 +34,7 @@ const METHODS = {
     findByIds: true,
     findByEmail: true,
     update: true,
+    rememberGameOptions: true,
     deleteAccount: true,
   } satisfies Record<keyof UserRepo, true>,
   otp: { issue: true, live: true, attempt: true, consume: true } satisfies Record<

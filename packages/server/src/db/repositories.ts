@@ -34,7 +34,7 @@ export type NewUser = Omit<InferInsertModel<typeof users>, "email"> & {
 };
 
 /** The `users` columns the account endpoints change. `updated_at` is always set. */
-export type UserUpdate = Partial<Pick<UserRecord, "displayName" | "onboardedAt" | "settings">> &
+export type UserUpdate = Partial<Pick<UserRecord, "displayName" | "onboardedAt">> &
   Pick<UserRecord, "updatedAt">;
 
 export interface UserRepo {
@@ -50,6 +50,15 @@ export interface UserRepo {
   findByIds(ids: readonly string[]): Promise<UserRecord[]>;
   findByEmail(email: NormalisedEmail): Promise<UserRecord | null>;
   update(id: string, set: UserUpdate): Promise<void>;
+  /**
+   * Sets `settings.lastGameType` and, unless `input` is null, `settings.lastOptions[gameType]` to
+   * the JSON `input`, leaving every other key as it is now in the database (05 §Remembered
+   * options). `gameType` matches the manifest's type pattern.
+   */
+  rememberGameOptions(
+    id: string,
+    remember: { gameType: string; input: string | null; updatedAt: number },
+  ): Promise<void>;
   /**
    * Deletes an account that holds no game rows (04 §Account deletion steps 1, 3, 4 and 5): its
    * sessions and API tokens, its OTP challenges, blocks and past-opponent rows, the

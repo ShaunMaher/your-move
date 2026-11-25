@@ -22,7 +22,7 @@ import { ApiError } from "../http/api-error.js";
 import type { Platform } from "../platform.js";
 import type { GameType } from "./registry.js";
 import type { ResourceProvider } from "./resources.js";
-import { lastOptionsOf, mergeOptions, rememberOptions } from "./settings.js";
+import { lastOptionsOf, mergeOptions, rememberedInput } from "./settings.js";
 
 type CreateGameBody = z.infer<typeof CreateGameBodySchema>;
 
@@ -221,8 +221,9 @@ export async function createGame(
       })),
     },
   );
-  await repos.users.update(creator.id, {
-    settings: rememberOptions(creator.settings, type.type, input),
+  await repos.users.rememberGameOptions(creator.id, {
+    gameType: type.type,
+    input: rememberedInput(input),
     updatedAt: now,
   });
   return gameId;

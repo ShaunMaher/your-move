@@ -14,7 +14,7 @@ import {
   DictionaryUnavailableError,
   ResourceConfigError,
 } from "./resources.js";
-import { lastOptionsOf, mergeOptions, rememberOptions } from "./settings.js";
+import { lastOptionsOf, mergeOptions, rememberedInput } from "./settings.js";
 
 describe("rerank (02 §4 Ranking)", () => {
   it("drops declined seats and re-ranks the rest with standard competition ranking", () => {
@@ -43,25 +43,17 @@ describe("remembered options (05 §Remembered options)", () => {
     expect(mergeOptions({ a: 1 }, ["no"])).toEqual({ a: 1 });
   });
 
-  it("keeps the settings' other keys and survives unreadable settings", () => {
-    const stored = rememberOptions(JSON.stringify({ whoCanAddMe: "nobody" }), "words", { a: 1 });
-    expect(JSON.parse(stored)).toEqual({
-      whoCanAddMe: "nobody",
-      lastOptions: { words: { a: 1 } },
-      lastGameType: "words",
-    });
+  it("reads remembered options only from an object, and survives unreadable settings", () => {
+    const stored = JSON.stringify({ lastOptions: { words: { a: 1 } }, lastGameType: "words" });
     expect(lastOptionsOf(stored, "words")).toEqual({ a: 1 });
     expect(lastOptionsOf("not json", "words")).toBeUndefined();
     expect(lastOptionsOf("[1]", "words")).toBeUndefined();
-    expect(JSON.parse(rememberOptions("{", "words", undefined))).toEqual({
-      lastOptions: { words: {} },
-      lastGameType: "words",
-    });
   });
 
   it("doesn't remember an input too large to be worth keeping", () => {
-    const stored = rememberOptions("{}", "words", { big: "x".repeat(5000) });
-    expect(lastOptionsOf(stored, "words")).toBeUndefined();
+    expect(rememberedInput(undefined)).toBe("{}");
+    expect(rememberedInput({ a: 1 })).toBe('{"a":1}');
+    expect(rememberedInput({ big: "x".repeat(5000) })).toBeNull();
   });
 });
 

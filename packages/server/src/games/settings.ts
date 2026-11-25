@@ -1,7 +1,7 @@
 /**
  * The game parts of `users.settings` (04): the remembered options per game type and the last game
- * type (05 §Remembered options). The column is JSON; anything unreadable counts as unset, and
- * every other key is kept as it is when these are written.
+ * type (05 §Remembered options). The column is JSON; anything unreadable counts as unset. Writes
+ * go through `UserRepo.rememberGameOptions`, which changes only these keys in SQL.
  */
 const MAX_REMEMBERED_BYTES = 4096;
 
@@ -39,14 +39,10 @@ export function mergeOptions(input: unknown, remembered: unknown): unknown {
 }
 
 /**
- * The settings with `input` remembered for `gameType`, and `gameType` as the last one. An input
- * too large to be worth keeping is not remembered (the options came from a 16 kB body).
+ * The option input as stored in `lastOptions[gameType]`, or null when it is too large to be worth
+ * keeping (the options came from a 16 kB body): then only `lastGameType` changes.
  */
-export function rememberOptions(settings: string, gameType: string, input: unknown): string {
-  const current = read(settings);
-  const last = isRecord(current["lastOptions"]) ? current["lastOptions"] : {};
+export function rememberedInput(input: unknown): string | null {
   const serialised = JSON.stringify(input ?? {});
-  const lastOptions =
-    serialised.length > MAX_REMEMBERED_BYTES ? last : { ...last, [gameType]: input ?? {} };
-  return JSON.stringify({ ...current, lastOptions, lastGameType: gameType });
+  return serialised.length > MAX_REMEMBERED_BYTES ? null : serialised;
 }

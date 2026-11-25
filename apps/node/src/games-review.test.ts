@@ -42,10 +42,7 @@ function exampleWith(overrides: Partial<AnyGameDefinition>): InstalledGame[] {
   const example = installed("example");
   const engine = example.engines[1];
   if (engine === undefined) throw new Error("no example engine");
-  return [
-    installed("words"),
-    { ...example, engines: { 1: { ...engine, ...overrides } } },
-  ];
+  return [installed("words"), { ...example, engines: { 1: { ...engine, ...overrides } } }];
 }
 
 /** A two-player example game between `a` and `b`, started by b's accept. */
@@ -103,5 +100,41 @@ describe("P-5: the games' randomness is injected", () => {
     const first = await deal(7);
     expect(await deal(7)).toEqual(first);
     expect(await deal(8)).not.toEqual(first);
+  });
+});
+
+describe("S-3: creating a game changes only the remembered options in users.settings", () => {
+  it("keeps a setting changed while the game was being created", async () => {
+    const hook: { during?: () => void } = {};
+    const h = harness(
+      {},
+      {
+        wrapRepos: (repos) => ({
+          ...repos,
+          games: {
+            ...repos.games,
+            async create(...args) {
+              await repos.games.create(...args);
+              hook.during?.();
+            },
+          },
+        }),
+      },
+    );
+    const a = await signUp(h, "Ada");
+    // Another request changes a setting after this one loaded the session's copy of the user.
+    hook.during = () => {
+      h.exec(
+        "UPDATE users SET settings = json_set(settings, '$.whoCanAddMe', 'nobody') WHERE id = ?",
+        a.id,
+      );
+    };
+    await createGame(h, a, { gameType: "example", options: { lives: 2 }, invitees: [] });
+    const [row] = h.query("SELECT settings FROM users WHERE id = ?", a.id);
+    expect(JSON.parse(String(row?.["settings"]))).toEqual({
+      whoCanAddMe: "nobody",
+      lastOptions: { example: { lives: 2 } },
+      lastGameType: "example",
+    });
   });
 });

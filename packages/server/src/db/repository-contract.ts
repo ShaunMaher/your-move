@@ -164,6 +164,60 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
           });
         }
       });
+
+      it("remembers game options by changing only those keys (A2 review S-3)", async () => {
+        const id = crypto.randomUUID();
+        const settings = async () =>
+          JSON.parse((await repos.users.findById(id))?.settings ?? "null") as unknown;
+        await repos.users.create({
+          id,
+          email: address(id),
+          settings: JSON.stringify({ whoCanAddMe: "nobody", lastOptions: { example: { x: 2 } } }),
+          createdAt: T0,
+          updatedAt: T0,
+        });
+        await repos.users.rememberGameOptions(id, {
+          gameType: "words",
+          input: JSON.stringify({ ruleset: "casual", n: [1, "two"] }),
+          updatedAt: T0 + 1,
+        });
+        expect(await settings()).toEqual({
+          whoCanAddMe: "nobody",
+          lastOptions: { example: { x: 2 }, words: { ruleset: "casual", n: [1, "two"] } },
+          lastGameType: "words",
+        });
+        expect((await repos.users.findById(id))?.updatedAt).toBe(T0 + 1);
+        await repos.users.rememberGameOptions(id, {
+          gameType: "example",
+          input: null,
+          updatedAt: T0 + 2,
+        });
+        expect(await settings()).toMatchObject({
+          lastOptions: { example: { x: 2 } },
+          lastGameType: "example",
+        });
+        // Settings that aren't an object, or a lastOptions that isn't one, count as empty.
+        for (const stored of ["{", "[1]", JSON.stringify({ lastOptions: 5, keep: true })]) {
+          const other = crypto.randomUUID();
+          await repos.users.create({
+            id: other,
+            email: address(other),
+            settings: stored,
+            createdAt: T0,
+            updatedAt: T0,
+          });
+          await repos.users.rememberGameOptions(other, {
+            gameType: "words",
+            input: "{}",
+            updatedAt: T0,
+          });
+          expect(JSON.parse((await repos.users.findById(other))?.settings ?? "")).toEqual({
+            ...(stored.includes("keep") ? { keep: true } : {}),
+            lastOptions: { words: {} },
+            lastGameType: "words",
+          });
+        }
+      });
     });
 
     describe("games", () => {
