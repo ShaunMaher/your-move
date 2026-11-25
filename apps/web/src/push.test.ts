@@ -13,7 +13,8 @@ import {
 import { fakeApi, fakePush, problem, PUSH_KEY, removeFakePush } from "./test-support.js";
 
 const SAFARI_IPHONE =
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 " +
+  "(KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1";
 const OTHER_KEY = `${PUSH_KEY.slice(0, -2)}AA`;
 
 const saved = () =>
@@ -175,7 +176,7 @@ describe("dropPushSubscription (sign-out, 06 §4)", () => {
 });
 
 describe("the offer after creating a game", () => {
-  it("is made once per device, only when push could be turned on and wasn't asked about", async () => {
+  it("is made once per device, when push could be turned on and wasn't asked about", async () => {
     fakePush();
     expect(await shouldOfferPush(undefined)).toBe(false);
     expect(await shouldOfferPush(PUSH_KEY)).toBe(true);

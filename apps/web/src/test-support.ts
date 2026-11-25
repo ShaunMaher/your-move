@@ -180,7 +180,8 @@ interface FakePushOptions {
 
 /**
  * A device with the Push API: a registration whose `pushManager` remembers one subscription, and
- * `Notification` with a permission. Undo it with {@link removeFakePush} (and `vi.unstubAllGlobals`).
+ * `Notification` with a permission. Undo it with {@link removeFakePush} (and
+ * `vi.unstubAllGlobals`).
  */
 export function fakePush(options: FakePushOptions = {}) {
   let permission: NotificationPermission = options.permission ?? "default";

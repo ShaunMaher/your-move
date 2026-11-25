@@ -812,6 +812,10 @@ describe("the notifications offer after accepting an invitation (A8-P-2)", () =>
       expect(screen.queryByRole("dialog")).toBeNull();
     });
     expect(calls.some((call) => call.path === "/api/v1/push/subscriptions")).toBe(true);
+    // Focus lands on the screen's heading, not the page (A8-R2-4).
+    await waitFor(() => {
+      expect(document.activeElement?.tagName).toBe("H1");
+    });
   });
 
   it("isn't offered again on this device, nor without a key, nor for a failed accept", async () => {

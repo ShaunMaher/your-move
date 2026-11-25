@@ -47,8 +47,10 @@ export async function writeVapidKeys(
   const privateKeyFile = checkOutFile(join(dir, PRIVATE_KEY_FILE), repositoryRoot);
   const existing = [publicKeyFile, privateKeyFile].filter((file) => existsSync(file));
   if (existing.length > 0) {
+    const verb = existing.length === 1 ? "exists" : "exist";
     throw new Error(
-      `${existing.join(" and ")} already exist${existing.length === 1 ? "s" : ""}: a key pair there may be in use, so nothing was written`,
+      `${existing.join(" and ")} already ${verb}: ` +
+        "a key pair there may be in use, so nothing was written",
     );
   }
   const keys = await newVapidKeys();

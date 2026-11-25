@@ -17,9 +17,11 @@ run("gen:vapid", async () => {
   console.log(`VAPID public key: ${written.publicKey}`);
   console.log(`Wrote ${written.publicKeyFile} and ${written.privateKeyFile} (mode 0600).`);
   console.log(
-    "Give them to the server as VAPID_PUBLIC_KEY_FILE and VAPID_PRIVATE_KEY_FILE (Docker secrets), and set VAPID_SUBJECT.",
+    "Give them to the server as VAPID_PUBLIC_KEY_FILE and VAPID_PRIVATE_KEY_FILE " +
+      "(Docker secrets), and set VAPID_SUBJECT.",
   );
   console.log(
-    "Keep the pair: a new one makes every device's subscription stop working until it subscribes again.",
+    "Keep the pair: a new one makes every device's subscription stop working " +
+      "until it subscribes again.",
   );
 });

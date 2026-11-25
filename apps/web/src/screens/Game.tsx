@@ -97,6 +97,14 @@ export function Game({
   const [load, setLoad] = useState<Load>({ status: "loading" });
   /** The notifications offer, open after an accepted invitation (A8-P-2). */
   const [offering, setOffering] = useState(false);
+  /** The offer just closed: focus goes to the screen's heading (A8-R2-4). */
+  const offerClosed = useRef(false);
+  useEffect(() => {
+    if (offering || !offerClosed.current) return;
+    offerClosed.current = false;
+    // After the dialog's own clean-up, whose opener (the Accept button) may be gone.
+    document.querySelector<HTMLElement>("h1")?.focus();
+  }, [offering]);
   /** Why the screen may be out of date (offline, a failing server), or `null` when it is current. */
   const [notice, setNotice] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<{
@@ -325,6 +333,7 @@ export function Game({
         appName={appName}
         pushKey={pushKey}
         onDone={() => {
+          offerClosed.current = true;
           setOffering(false);
         }}
       />

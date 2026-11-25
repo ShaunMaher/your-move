@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 describe("gen:vapid (09 §1)", () => {
-  it("makes a P-256 pair in the shapes the config takes, and the halves belong together", async () => {
+  it("makes a P-256 pair in the shapes the config takes, the halves matching", async () => {
     const { publicKey, privateKey } = await newVapidKeys();
     expect(publicKey).toMatch(/^[\w-]{87}$/u);
     expect(privateKey).toMatch(/^[\w-]{43}$/u);
