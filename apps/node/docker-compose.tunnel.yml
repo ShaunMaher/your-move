@@ -5,12 +5,16 @@
 #   docker compose -f apps/node/docker-compose.tunnel.yml --env-file <your env file> up -d
 #
 # - No host port is published and no inbound firewall rule is needed: `cloudflared` dials out to
-#   Cloudflare, and TLS ends there. The tunnel's public hostname must route only to the app
-#   (http://app:8080), with no catch-all rule.
-# - `front` is internal (no route out, nothing else can join it) and holds only the app and
-#   `cloudflared`, so nothing else can reach the app's port and forge CF-Connecting-IP. Its subnet is
-#   pinned, and TRUST_PROXY_PEERS is exactly that subnet plus loopback (the container's own health
-#   check); a request from any other peer is refused (08 §4.1). If you change the subnet, change both.
+#   Cloudflare, and TLS ends there. The tunnel's public hostname must route only to the app's
+#   front-only alias, http://app-front:8080 (never http://app:8080: Docker resolves `app` to its
+#   `egress` address, a peer outside TRUST_PROXY_PEERS, and every request would be refused with
+#   400), with no catch-all rule.
+# - `front` is internal (no route out) and holds only the app and `cloudflared`. Only the services
+#   in this file are attached to it, but the Docker host itself has an address on it (its
+#   gateway), so the app does not rely on the network alone: TRUST_PROXY_PEERS is exactly
+#   cloudflared's pinned address plus loopback (the container's own health check), so a request
+#   from any other peer, the host's gateway included, is refused (08 §4.1). The subnet and both
+#   addresses are pinned; if you change one, change TRUST_PROXY_PEERS and the tunnel's route.
 # - `egress` is an ordinary bridge for outbound calls: the app's (Gmail) and the tunnel's.
 # - Every secret is a Docker secret read through `<NAME>_FILE`, so none shows in `docker inspect`
 #   or the process environment.
@@ -36,7 +40,7 @@ services:
       EMAIL_FROM: ${EMAIL_FROM:?set EMAIL_FROM to "Name" <address>}
       GMAIL_SENDER: ${GMAIL_SENDER:?set GMAIL_SENDER to the sender user's address (EMAIL_FROM's address)}
       TRUST_PROXY: cloudflare
-      TRUST_PROXY_PEERS: 172.30.99.0/28,127.0.0.0/8,::1/128
+      TRUST_PROXY_PEERS: 172.30.99.2/32,127.0.0.0/8,::1/128
       APP_SECRET_FILE: /run/secrets/app_secret
       GMAIL_CLIENT_ID_FILE: /run/secrets/gmail_client_id
       GMAIL_CLIENT_SECRET_FILE: /run/secrets/gmail_client_secret
@@ -50,8 +54,18 @@ services:
       - data:/data
       - blobs:/data/blobs
     networks:
-      - front
-      - egress
+      front:
+        aliases:
+          - app-front
+        ipv4_address: 172.30.99.3
+      egress: {}
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    pids_limit: 256
+    mem_limit: 512m
 
   cloudflared:
     image: cloudflare/cloudflared:2026.11.2@sha256:55c7e3e8d89d5e8d20b75a82f3602cbf98e06db406e73e282073cfdc5a9a3af6
@@ -74,8 +88,12 @@ services:
       app:
         condition: service_healthy
     networks:
-      - front
-      - egress
+      front:
+        ipv4_address: 172.30.99.2
+      egress: {}
+    logging: *logging
+    pids_limit: 128
+    mem_limit: 256m
 
 networks:
   front:

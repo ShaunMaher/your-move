@@ -20,7 +20,10 @@ interface Service {
   image: string;
   environment?: Record<string, string>;
   secrets?: string[];
-  networks?: string[];
+  networks?: Record<string, { aliases?: string[]; ipv4_address?: string } | null>;
+  logging?: { driver?: string; options?: Record<string, string> };
+  pids_limit?: number;
+  mem_limit?: string;
   ports?: unknown;
   expose?: unknown;
   network_mode?: string;
@@ -37,6 +40,8 @@ const compose = parse(text) as {
 const app = compose.services["app"]!;
 const tunnel = compose.services["cloudflared"]!;
 const SUBNET = "172.30.99.0/28";
+const TUNNEL_ADDRESS = "172.30.99.2";
+const ORIGIN_HOST = "app-front";
 
 describe("docker-compose.tunnel.yml (09 §4)", () => {
   it("is exactly the app and cloudflared", () => {
@@ -56,16 +61,47 @@ describe("docker-compose.tunnel.yml (09 §4)", () => {
     expect(compose.networks["front"]?.ipam?.config).toEqual([{ subnet: SUBNET }]);
     expect(compose.networks["egress"]?.internal).not.toBe(true);
     // Both reach each other over `front`; both go out over `egress` (Gmail; the tunnel).
-    expect(app.networks?.slice().sort()).toEqual(["egress", "front"]);
-    expect(tunnel.networks?.slice().sort()).toEqual(["egress", "front"]);
+    expect(Object.keys(app.networks ?? {}).sort()).toEqual(["egress", "front"]);
+    expect(Object.keys(tunnel.networks ?? {}).sort()).toEqual(["egress", "front"]);
     expect(Object.keys(compose.networks).sort()).toEqual(["egress", "front"]);
   });
 
-  it("trusts exactly the front subnet plus loopback, behind Cloudflare", () => {
+  it("gives the app a front-only alias and pins both addresses on `front` (A5-S-1, A5-S-2)", () => {
+    // The tunnel's origin is the alias, which Docker resolves only on `front`; the service name
+    // `app` also resolves on `egress`, a peer outside TRUST_PROXY_PEERS.
+    expect(app.networks?.["front"]?.aliases).toEqual([ORIGIN_HOST]);
+    expect(app.networks?.["egress"]?.aliases).toBeUndefined();
+    expect(tunnel.networks?.["front"]?.aliases).toBeUndefined();
+    expect(tunnel.networks?.["front"]?.ipv4_address).toBe(TUNNEL_ADDRESS);
+    expect(app.networks?.["front"]?.ipv4_address).toBe("172.30.99.3");
+    for (const service of [app, tunnel]) {
+      expect(service.networks?.["egress"]?.ipv4_address).toBeUndefined();
+      const address = service.networks?.["front"]?.ipv4_address ?? "";
+      expect(address.startsWith("172.30.99.")).toBe(true);
+    }
+    // The documented origin is exactly that alias, in the file's comments and in the docs.
+    const deploy = readFileSync(new URL("../../../docs/deploy.md", import.meta.url), "utf8");
+    for (const document of [text, deploy]) {
+      expect(document).toContain(`http://${ORIGIN_HOST}:8080`);
+    }
+    expect(deploy).not.toMatch(/URL `app:8080`/u);
+  });
+
+  it("trusts exactly cloudflared's pinned address plus loopback, behind Cloudflare (A5-S-2)", () => {
     expect(app.environment?.["TRUST_PROXY"]).toBe("cloudflare");
     expect(app.environment?.["TRUST_PROXY_PEERS"]?.split(",").sort()).toEqual(
-      [SUBNET, "127.0.0.0/8", "::1/128"].sort(),
+      [`${TUNNEL_ADDRESS}/32`, "127.0.0.0/8", "::1/128"].sort(),
     );
+  });
+
+  it("bounds both containers' logs, processes and memory (A5-S-10)", () => {
+    for (const service of [app, tunnel]) {
+      expect(service.logging?.driver).toBe("json-file");
+      expect(service.logging?.options?.["max-size"]).toMatch(/^\d+m$/u);
+      expect(Number(service.logging?.options?.["max-file"])).toBeGreaterThan(0);
+      expect(service.pids_limit).toBeGreaterThan(0);
+      expect(service.mem_limit).toMatch(/^\d+m$/u);
+    }
   });
 
   it("gives every secret as a file mounted as a Docker secret, and none in the environment", () => {
@@ -164,10 +200,14 @@ describe("the proxy settings it declares (08 §4.1)", () => {
     "198.51.100.1",
     "172.30.98.2",
     "172.30.99.16",
+    // The Docker host's own address on `front` (the bridge gateway) and the app itself.
+    "172.30.99.1",
+    "172.30.99.3",
+    "172.30.99.4",
     "10.0.0.5",
     "192.168.1.9",
     "::ffff:8.8.8.8",
-  ])("answers 400 to a peer outside the front subnet: %s", async (peer) => {
+  ])("answers 400 to any peer but cloudflared: %s", async (peer) => {
     const response = await otp("a@example.org", { "CF-Connecting-IP": "203.0.113.7" }, peer);
     expect(response.status).toBe(400);
   });

@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Proves the tunnel compose file's routing on a running stack (docs/deploy.md, "Check it"; 09 §4):
+#
+#   1. a request that arrives the way the tunnel's does -- from cloudflared's own network
+#      namespace, to the origin hostname `app-front:8080`, with CF-Connecting-IP -- gets past the
+#      trusted-peer check (anything but 400);
+#   2. the same request to `app:8080`, the name Docker resolves to the app's `egress` address,
+#      is refused with 400 (the mistake the alias exists to prevent);
+#   3. a request from the Docker host (its gateway address on `front`) is refused with 400.
+#
+# Usage: COMPOSE="docker compose -f apps/node/docker-compose.tunnel.yml --env-file <file>" \
+#        PUBLIC_URL=https://<hostname> apps/node/scripts/check-tunnel-routing.sh
+# The stack must be up. It posts one sign-in request for an address that doesn't exist, so one
+# email attempt is made.
+set -euo pipefail
+
+: "${COMPOSE:?set COMPOSE to the docker compose command line (file and --env-file) of the running stack}"
+: "${PUBLIC_URL:?set PUBLIC_URL to the origin of the instance}"
+APP_FRONT_ADDRESS="${APP_FRONT_ADDRESS:-172.30.99.3}"
+PATH_UNDER_TEST="/api/v1/auth/otp/request"
+BODY='{"email":"routing-check@example.invalid"}'
+
+tunnel_container="$($COMPOSE ps -q cloudflared)"
+app_container="$($COMPOSE ps -q app)"
+[ -n "$tunnel_container" ] && [ -n "$app_container" ] || { echo "the stack is not up" >&2; exit 2; }
+image="$(docker inspect --format '{{.Config.Image}}' "$app_container")"
+
+# Sends the request from inside cloudflared's network namespace with the app image's Node (the
+# tunnel image has no shell or client of its own); prints the HTTP status.
+from_tunnel() {
+  docker run --rm --network "container:$tunnel_container" --entrypoint node \
+    -e "TARGET=$1" -e "PUBLIC_URL=$PUBLIC_URL" -e "PATH_UNDER_TEST=$PATH_UNDER_TEST" -e "BODY=$BODY" \
+    "$image" -e '
+      fetch(process.env.TARGET + process.env.PATH_UNDER_TEST, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: process.env.PUBLIC_URL,
+          "cf-connecting-ip": "203.0.113.7",
+        },
+        body: process.env.BODY,
+      }).then((r) => console.log(r.status), (e) => { console.error(String(e)); process.exit(1); });
+    '
+}
+
+failed=0
+# check <description> <400|not-400> <status>
+check() {
+  local good=0
+  case "$2:$3" in
+    400:400) good=1 ;;
+    not-400:[0-9][0-9][0-9]) if [ "$3" != "400" ]; then good=1; fi ;;
+  esac
+  if [ "$good" = 1 ]; then
+    echo "ok   $1 -> $3"
+  else
+    echo "FAIL $1 -> $3 (wanted $2)"
+    failed=1
+  fi
+}
+
+check "cloudflared -> http://app-front:8080 (the tunnel's route)" not-400 "$(from_tunnel http://app-front:8080)"
+check "cloudflared -> http://app:8080 (its egress address: must be refused)" 400 "$(from_tunnel http://app:8080)"
+host_status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 \
+  --request POST --header 'content-type: application/json' --header "origin: $PUBLIC_URL" \
+  --header 'cf-connecting-ip: 203.0.113.7' --data "$BODY" "http://$APP_FRONT_ADDRESS:8080$PATH_UNDER_TEST" || true)"
+check "the Docker host (front gateway) -> the app" 400 "$host_status"
+exit "$failed"
