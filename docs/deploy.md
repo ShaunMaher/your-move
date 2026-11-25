@@ -74,6 +74,10 @@ docker run --rm --read-only -p 127.0.0.1:8080:8080 \
 curl http://127.0.0.1:8080/api/health
 ```
 
+The server also runs the scheduled sweep itself, every 15 minutes (03 §8). For now its only job is
+the "It's your turn" email nudges: off by default, each person turns them on in Settings, and every
+nudge carries a one-click unsubscribe link (05 §Email links). Nothing needs configuring for it.
+
 The Cloudflare Tunnel compose file is below; the Caddy one arrives in M4 (09 §4).
 
 ## Email through Gmail
@@ -276,7 +280,9 @@ generated from the same security-header definition the Node server uses; set `PU
 The database is the D1 binding `DB`: set its `database_id` in your copy, and apply the shared
 migrations (`packages/server/migrations`, the same files the Node server applies) before each
 deploy with `wrangler d1 migrations apply DB --remote --config apps/worker/wrangler.toml`, then
-check for orphaned games with `pnpm games:check-db --d1 <database>`.
+check for orphaned games with `pnpm games:check-db --d1 <database>`. The example configuration's
+Cron Trigger (`*/15 * * * *`) runs the sweep (03 §8); keep it in your copy, or no email nudges go
+out.
 
 There is no CI deploy job for Workers yet. It arrives with the first Workers deployment
 (09 §6, 10), built to deploy the build artifact (`dist/worker`, `--no-bundle`) with a

@@ -5,12 +5,18 @@
 import { readFileSync } from "node:fs";
 
 import { createApiClient } from "@your-move/api-client";
-import { normaliseAddress, type Repositories, securityHeaders } from "@your-move/server";
-import { createSession } from "@your-move/server/testing";
+import {
+  deriveSubkeys,
+  emailId as emailIdOf,
+  normaliseAddress,
+  type Repositories,
+  securityHeaders,
+} from "@your-move/server";
+import { createSession, unsubscribeToken } from "@your-move/server/testing";
 import { ClientConfigSchema, ErrorResponseSchema } from "@your-move/shared";
 import { describe, expect, it } from "vitest";
 
-import { CONTRACT_VARS } from "./env.js";
+import { CONTRACT_SECRETS, CONTRACT_VARS } from "./env.js";
 
 export interface Target {
   /** Sends a request to the runtime under test. */
@@ -292,6 +298,48 @@ export function contractSuite(name: string, target: () => Target): void {
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
         });
         expect(response.status).toBe(415);
+      });
+
+      describe("the unsubscribe route (05 §Email links, alpha A6)", () => {
+        const PATH = "/api/v1/email/unsubscribe";
+        const oneClick = (token: string) =>
+          send(`${PATH}?t=${token}`, {
+            method: "POST",
+            body: "List-Unsubscribe=One-Click",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              Origin: "https://mail.example",
+            },
+          });
+
+        it("serves its page, uncached and with the security headers, for any token", async () => {
+          const response = await raw(`${PATH}?t=not-a-token`);
+          expect(response.status).toBe(200);
+          expect(response.headers.get("Content-Type")).toMatch(/^text\/html/u);
+          expectSecurityHeaders(response);
+          expect(await response.text()).toContain("This link isn&#39;t valid");
+          expect((await oneClick("not-a-token")).status).toBe(200);
+        });
+
+        it("a cross-origin one-click POST turns email nudges off", async () => {
+          const repos = await target().repos();
+          const id = crypto.randomUUID();
+          const email = normaliseAddress(`contract-${id}@example.org`);
+          if (email === null) throw new Error("bad address");
+          const keys = await deriveSubkeys(
+            Uint8Array.from(atob(CONTRACT_SECRETS.APP_SECRET), (c) => c.charCodeAt(0)),
+          );
+          const emailId = await emailIdOf(keys, email);
+          await repos.users.create({ id, email, createdAt: 0, updatedAt: 0 });
+          await repos.users.setEmailNudges(id, { enabled: true, emailId, updatedAt: 0 });
+          const token = await unsubscribeToken(keys, { purpose: "nudges", emailId });
+          const response = await oneClick(token);
+          expect(response.status).toBe(200);
+          expect(await response.text()).toContain("Email nudges are off");
+          expect(JSON.parse((await repos.users.findById(id))?.settings ?? "{}")).toEqual({
+            emailNudges: false,
+          });
+        });
       });
 
       it("GET /__dev/emails answers 404 in a production config (08 T19)", async () => {

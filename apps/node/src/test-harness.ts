@@ -13,6 +13,7 @@ import {
   createApp,
   createConsoleEmailSender,
   createJsonLogger,
+  createSweep,
   type EmailSender,
   type Env,
   type InstalledGame,
@@ -21,6 +22,7 @@ import {
   type Platform,
   type RandomFactory,
   type Repositories,
+  type SweepReport,
 } from "@your-move/server";
 
 import { migrate } from "./db/migrate.js";
@@ -71,6 +73,8 @@ interface SendOptions {
   /** `Origin`; default the instance's own, `null` to omit. */
   readonly origin?: string | null;
   readonly headers?: Record<string, string>;
+  /** A body sent as is, instead of `body` as JSON (set its `Content-Type` in `headers`). */
+  readonly rawBody?: string;
 }
 
 export interface Harness {
@@ -93,6 +97,8 @@ export interface Harness {
   readonly logs: Record<string, unknown>[];
   /** Every route and middleware registration of the app, as Hono lists them (`:param` paths). */
   routes(): readonly { readonly method: string; readonly path: string }[];
+  /** Runs the sweep once (03 §8), as the Node timer would. */
+  sweep(): Promise<SweepReport>;
   /** Runs one SQL statement directly, for state no endpoint sets yet (e.g. suspension, M3). */
   exec(sql: string, ...params: (string | number | null)[]): void;
   /** Runs one SQL query directly and returns its rows, for checking what was stored. */
@@ -122,6 +128,8 @@ export interface HarnessOptions {
   readonly wrapRepos?: (repos: Repositories) => Repositories;
   /** Replaces the capturing email sender (e.g. one that fails). */
   readonly sender?: EmailSender;
+  /** Wraps the capturing email sender (e.g. to fail some messages and still capture the rest). */
+  readonly wrapSender?: (capture: EmailSender) => EmailSender;
   /** The installed games (the generated registry); none by default. */
   readonly games?: readonly InstalledGame[];
   /** The games' randomness; WebCrypto by default, a seeded source in the game tests. */
@@ -161,13 +169,14 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     now,
     // Without games nothing reads a word list, so the tests of sign-in need no dictionary build.
     dictionaries: games.length === 0 ? NO_DICTIONARIES : nodeDictionaries(DICTIONARIES),
-    smtp: options.sender ?? capture,
+    smtp: options.sender ?? options.wrapSender?.(capture) ?? capture,
   });
   const app = createApp({
     platform,
     games,
     ...(options.random === undefined ? {} : { random: options.random }),
   });
+  const sweep = createSweep({ platform, games });
   const background = createBackgroundTracker();
   let scheduled = 0;
   const countedContext = (): ReturnType<typeof background.context> => {
@@ -190,7 +199,7 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     else if (ip !== null) headers["X-Forwarded-For"] = ip;
     if (options.origin !== null) headers["Origin"] = options.origin ?? origin;
     if (options.cookie) headers["Cookie"] = options.cookie;
-    let payload: string | undefined;
+    let payload: string | undefined = options.rawBody;
     if (body !== undefined) {
       payload = JSON.stringify(body);
       headers["Content-Type"] ??= "application/json";
@@ -239,6 +248,7 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     },
     logs,
     routes: () => app.routes.map((route) => ({ method: route.method, path: route.path })),
+    sweep,
     exec(sql, ...params) {
       sqlite.prepare(sql).run(...params);
     },

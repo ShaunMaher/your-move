@@ -8,7 +8,8 @@
  * 3. scrub secrets from `process.env`;
  * 4. check code generation from strings is really off, then load the generated game registry with
  *    a dynamic `import()`, and refuse to start unless it matches `installed.json`;
- * 5. check the gmail token's scope and account (when that is the provider), then serve.
+ * 5. check the gmail token's scope and account (when that is the provider), then serve and start
+ *    the sweep's timer (03 §8).
  */
 import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -18,6 +19,7 @@ import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
 import {
   createJsonLogger,
+  createSweep,
   GameConfigError,
   installedSchema,
   isLocalDev,
@@ -32,6 +34,7 @@ import { scrubSecrets } from "./env.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
 import { createNodeApp } from "./server.js";
 import { isRefusal, startup, type Started, verifyEmail } from "./startup.js";
+import { startSweeper } from "./sweeper.js";
 
 function exitWith(message: string): never {
   console.error(message);
@@ -167,11 +170,14 @@ const server = serve(
   },
 );
 
+// Scheduled work (03 §8): the alpha's sweep sends due email nudges.
+const sweeper = startSweeper(createSweep({ platform, games }));
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     log.info("shutting down", { signal });
     server.close(() => {
-      void background.drain().finally(() => {
+      void Promise.all([sweeper.stop(), background.drain()]).finally(() => {
         storage.close();
         process.exit(0);
       });

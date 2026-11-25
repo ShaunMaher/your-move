@@ -13,6 +13,7 @@ export {
   type Platform,
 } from "./app.js";
 export type { RandomFactory } from "./games/random.js";
+export { createSweep, type Sweep, type SweepOptions, type SweepReport } from "./sweep/sweep.js";
 export { normaliseAddress, type NormalisedEmail } from "./accounts/email.js";
 export {
   resolveClientIp,
