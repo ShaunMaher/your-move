@@ -316,7 +316,10 @@ export const HistoryItemSchema = z
     kind: z.enum(["action", "resign", "timeout", "decline"]),
     record: z.unknown().openapi({ description: "The module's public record (02 §2.1 rule 5)." }),
     describe: TextSchema,
-    via: z.enum(["app", "token"]),
+    via: z.enum(["app", "token", "system"]).openapi({
+      description:
+        "How the transition was made: the app, an API token (an AI move, 02 §9.1) or the server itself (a timeout).",
+    }),
     createdAt: z.number().int(),
   })
   .strict()

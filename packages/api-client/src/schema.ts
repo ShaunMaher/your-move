@@ -774,8 +774,11 @@ export interface components {
             seat: number;
           }
       )[];
-      /** @enum {string} */
-      via: "app" | "token";
+      /**
+       * @description How the transition was made: the app, an API token (an AI move, 02 §9.1) or the server itself (a timeout).
+       * @enum {string}
+       */
+      via: "app" | "token" | "system";
       createdAt: number;
     };
     ActionResult: {

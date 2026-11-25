@@ -472,3 +472,21 @@ function recording(repos: Repositories, calls: string[]): Repositories {
     Object.entries(repos).map(([group, repo]) => [group, wrap(group, repo as object)]),
   ) as unknown as Repositories;
 }
+
+describe("P-19: history says which transitions the server made", () => {
+  it("shows via as stored: app, token or system", async () => {
+    const h = harness();
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    const game = await startedExample(h, a, b);
+    expect((await transition(h, b, game.id, "resign")).status).toBe(200);
+    h.exec("UPDATE game_actions SET via = 'system' WHERE game_id = ?", game.id);
+    const history = await call<{ items: { via: string }[] }>(
+      h,
+      a,
+      "GET",
+      `/api/v1/games/${game.id}/history`,
+    );
+    expect(history.body.items.map((item) => item.via)).toEqual(["system"]);
+  });
+});

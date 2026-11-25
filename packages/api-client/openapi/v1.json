@@ -686,7 +686,11 @@
               ]
             }
           },
-          "via": { "type": "string", "enum": ["app", "token"] },
+          "via": {
+            "type": "string",
+            "enum": ["app", "token", "system"],
+            "description": "How the transition was made: the app, an API token (an AI move, 02 §9.1) or the server itself (a timeout)."
+          },
           "createdAt": { "type": "integer" }
         },
         "required": ["seq", "seat", "kind", "describe", "via", "createdAt"],

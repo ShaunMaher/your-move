@@ -205,8 +205,9 @@ viewer isn't a member (04 §Membership; never `403`).
 
 ### `GET /api/v1/games/:id/history`
 Members only (`404` otherwise). Cursor-paginated, oldest first (`?cursor=`, 100 per page):
-`{ items: [{ seq, seat, kind, record, describe: Text, via: "app" | "token", createdAt }], nextCursor }`
-from `game_actions`. `via` lets every client mark AI moves (02 §9.1). Never returns `action` or
+`{ items: [{ seq, seat, kind, record, describe: Text, via: "app" | "token" | "system", createdAt }], nextCursor }`
+from `game_actions`. `via` lets every client mark AI moves (02 §9.1); `system` is a transition the
+server made itself (a timeout). Never returns `action` or
 `rng`. Empty for games that never started.
 
 ### `POST /api/v1/games/:id/actions`

@@ -432,7 +432,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       kind: row.kind,
       record: JSON.parse(row.record) as unknown,
       describe: JSON.parse(row.describe) as (string | { seat: number })[],
-      via: row.via === "token" ? ("token" as const) : ("app" as const),
+      via: row.via,
       createdAt: row.createdAt,
     }));
     const last = page.at(-1);
