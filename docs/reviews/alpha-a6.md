@@ -41,7 +41,7 @@ Round 2 verified every round 1 resolution. Its new findings, with the owner's de
 | ID | Outcome | Where |
 |---|---|---|
 | A6-S2-1 / A6-P2-1 | Fixed (owner decision, reversing A6-P-3). Turning nudges on deletes no suppression. Nudge eligibility, in `due` and in the claim, is stopped only by `bounced` and `complained` rows; an `unsubscribed` row is about invite emails, and nudges have their own opt-out. The M4 note on showing a suppression in Settings stays, since bounces and complaints still stop nudges silently. Tests on both drivers and end to end. | `db/auth-repos.ts`, `db/nudge-repos.ts`, 03 §7, 04 `email_suppressions`, 10 M4, Q27 |
-| A6-P2-2 | Fixed (owner decision). The room left is read without counting, only claimed nudges are counted, and the alert is raised once per fixed window through a counter of its own. Test: a day of 15-minute runs under saturation across midnight sends the cap plus at most one, counts exactly what it sent, and alerts once in each window. | `auth/limits.ts`, `sweep/nudges.ts`, `apps/node/src/nudges.test.ts` |
+| A6-P2-2 | Fixed (owner decision). The room left is read without counting, only claimed nudges are counted, and the alert is raised once per fixed window through a counter of its own. Test: a day of 15-minute runs under saturation across midnight sends the cap plus at most one, counts exactly what it sent, and alerts once in each window. The daily caps allow about the cap per UTC day and up to about twice the cap in any 24 hours (wording corrected in round 3, A6-P3-3). | `auth/limits.ts`, `sweep/nudges.ts`, `apps/node/src/nudges.test.ts` |
 | A6-S2-2 | Fixed (owner decision). `due` lists the least recently nudged first, then the longest waiting; a per-recipient daily cap `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY` (default 10) is read and counted the same way, with no alert. 08 §4, 09 §1, Q27. Tests for the order (both drivers) and the cap. | `db/nudge-repos.ts`, `sweep/nudges.ts`, 08 §4, 09 §1 |
 | A6-P2-3 | Fixed (owner decision). A deleted account's seat is "Deleted player" and an unset name "New player", as 02 §5 and 04 say; every seated row gets one of these, so "Seat n" isn't used. 03 §7 agrees. The web app is unchanged (the owner files its divergence separately). Test. | `sweep/nudges.ts`, 03 §7 |
 | A6-P2-4 | Fixed, with one deviation. 09 §3 states the per-statement arithmetic: at most 5 statements per run and 10 per nudge, counting each statement of a batch as a query. At the requested 5 nudges a run comes to 55, over the Free plan's per-invocation limit of 50 (check the current Cloudflare limits), so the Worker sends 4 per run (45). | `apps/worker/src/index.ts`, 09 §3, `docs/deploy.md`, 10 |
@@ -49,3 +49,16 @@ Round 2 verified every round 1 resolution. Its new findings, with the owner's de
 | A6-P2-6 | Fixed. The Cron Trigger's outcome lives in `runScheduled`, unit-tested: a clean or capped run ends cleanly; a failed step, a failed nudge or a Worker that couldn't be built fails the invocation and calls `noRetry`. | `apps/worker/src/scheduled.ts`, `scheduled.test.ts` |
 | A6-P2-7 | Fixed. A capped run reports and logs no `due` count. | `sweep/nudges.ts`, `sweep/sweep.ts` |
 | A6-P2-8 | Fixed. 05's `PATCH /api/v1/me` row lists the `400`. | 05 §Auth & account |
+
+## Round 3
+
+Round 3 verified every round 2 resolution except one, A6-P3-1, and accepted the Worker's four
+nudges per run (A6-P2-4).
+
+| ID | Outcome | Where |
+|---|---|---|
+| A6-P3-1 | Fixed (owner decision). `due` returns at most one seat per recipient per page (`row_number()` over each recipient), and orders recipients by their most recent nudge in any game, then the seat's own last nudge, its wait and its id; window functions run on both drivers (repository contract on D1). Tests: a recipient at their own cap with two never-nudged seats waiting longest no longer keeps another recipient waiting, with two seats a run and with one; one seat per recipient and the recipient order on both drivers. 03 §7, Q27. | `db/nudge-repos.ts`, `db/nudge-contract.ts`, `apps/node/src/nudges.test.ts` |
+| A6-P3-2 | Fixed. `suppress` upserts with precedence: `bounced` or `complained` replaces `unsubscribed`, never the reverse, and otherwise the first row stays; `created_at` is when the current reason was recorded (04). Repository contract test. | `db/nudge-repos.ts`, 04 |
+| A6-P3-3 | Fixed. 08 §4, Q27 and this record say "about the cap per UTC day, up to about twice the cap in any 24 hours"; Q27 shows nudges at that worst case still fit the sender's daily quota beside sign-in codes and invite emails. | 08 §4, Q27 |
+| A6-P3-4 | Fixed. The alert counter's key is `alert:<NAME>`, which no `checkLimits` key can be. | `auth/limits.ts` |
+| A6-P3-5 | Fixed. The capped-run test checks that `noRetry` isn't called. | `apps/worker/src/scheduled.test.ts` |

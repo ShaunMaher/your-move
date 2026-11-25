@@ -188,13 +188,15 @@ Tracks invitation emails (for rate limiting, expiry and abuse handling). Stores 
 Addresses that must not get our non-OTP emails. `unsubscribed` (the invites unsubscribe, 05
 §Email links, and the under-age exit) stops invite emails only: email nudges have their own
 opt-out, the setting and `users.email_id` (03 §7). `bounced` and `complained` stop every non-OTP
-email, nudges included.
+email, nudges included. One row per address: a `bounced` or `complained` row replaces an
+`unsubscribed` one (it stops more mail), never the reverse, and otherwise the first row stays;
+`created_at` is when the row's current reason was recorded.
 
 | Column | Type | Notes |
 |---|---|---|
 | email_hash | TEXT PK | the address's `emailId`: HMAC-SHA256 under the `email-id/v1` subkey (09 §1.1) of the normalised address — we don't keep the raw address of non-users |
-| reason | TEXT | `unsubscribed` · `bounced` · `complained` |
-| created_at | INTEGER | |
+| reason | TEXT | `unsubscribed` · `bounced` · `complained` (precedence below) |
+| created_at | INTEGER | when the current reason was recorded |
 
 OTP emails are transactional and still sent to suppressed addresses (the person is actively asking
 to sign in).

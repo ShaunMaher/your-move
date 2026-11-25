@@ -106,8 +106,8 @@ generated `_headers` file for static assets (03 §9). One shared definition gene
 | Join-link lookups and joins per IP (bucketed) | 60 / h | `429` |
 | Join-link creations per user | 20 / day | `429` |
 | Any authenticated write per user | 300 / min | `429` |
-| **"It's your turn" email nudges instance-wide** (alpha A6, `LIMIT_NUDGE_EMAILS_PER_DAY`) | 200 / day | silent: the sweep stops and claims nothing more, the rest wait for a later run; only claimed nudges count; alert once per window (03 §7) |
-| "It's your turn" email nudges per recipient (alpha A6, `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`) | 10 / day | silent: that recipient's other due nudges wait unclaimed; only claimed nudges count (03 §7) |
+| **"It's your turn" email nudges instance-wide** (alpha A6, `LIMIT_NUDGE_EMAILS_PER_DAY`) | 200 / day: about the cap per UTC day, up to about twice the cap in any 24 hours (a sliding window over fixed UTC days) | silent: the sweep stops and claims nothing more, the rest wait for a later run; only claimed nudges count; alert once per UTC day (03 §7) |
+| "It's your turn" email nudges per recipient (alpha A6, `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`) | 10 / day: about the cap per UTC day, up to about twice the cap in any 24 hours | silent: that recipient's other due nudges wait unclaimed; only claimed nudges count (03 §7) |
 | Requests per API token | 120 / min, 10,000 / day (the account's limits apply too) | `429` |
 | Failed bearer authentications per IP (bucketed) | 30 / h | `429` |
 | API token creations per user | 5 / day | `429` |

@@ -283,7 +283,10 @@ filesystems are unsupported for the database anyway).
   stop nudges: only the invites unsubscribe and the under-age exit write one, and nudges have
   their own opt-out (the setting, and `email_id`, which a `nudges` unsubscribe clears). Only games
   of an installed game type and rules version are looked at, in SQL, so orphaned games never take
-  a place in the queue; the least recently nudged seats come first, then the longest waiting.
+  a place in the queue. A run's page holds at most one seat per recipient (their least recently
+  nudged, then longest waiting), recipients nudged least recently in any game first, so neither
+  one recipient's many games nor a recipient held back by their own cap keeps anyone else
+  waiting; a recipient's other due games follow in later runs.
   Two daily caps apply (08 §4): instance-wide `LIMIT_NUDGE_EMAILS_PER_DAY` and per recipient
   `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`. The run reads the room left under each without counting;
   a nudge over either waits unclaimed for a later run (at the instance-wide cap the run stops),
