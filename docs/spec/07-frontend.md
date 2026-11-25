@@ -160,23 +160,27 @@ dictionaries is the shell's job and needs no change to the module contract.
   - Web Push only works once installed to home screen (iOS 16.4+); the notifications toggle explains
     this when running in Safari.
   - **Install guide** (alpha A7). `/install` is a signed-in screen (a signed-out visit is remembered
-    and restored like any other, §6): numbered steps for iOS Safari (Share, "Add to Home Screen",
-    Add), a short note for Android Chrome (menu, "Install app") and, when the app already runs
-    standalone, only an "already installed" message. Its pictures are original glyphs drawn in the
-    page's own markup (never an image file, `dangerouslySetInnerHTML` or anyone's artwork), each
-    step also saying in words what the icon looks like.
+    and restored like any other, §6): numbered steps for iOS Safari (Share, which is at the bottom
+    on iPhone and the top right on iPad, behind the three-dot button when it isn't shown; "Add to
+    Home Screen"; Add, leaving "Open as Web App" on if iOS shows it), a short note for Android
+    Chrome (menu, "Install app") and, when the app already runs standalone, only an "already
+    installed" message. Its pictures are original glyphs drawn in the page's own markup (never an
+    image file, `dangerouslySetInnerHTML` or anyone's artwork), each step also saying in words what
+    the icon looks like. The guide says Safari is the most reliable, and that other iPhone browsers
+    (iOS 16.4+) may offer Add to Home Screen in their own share menu.
   - **Install banner.** A dismissible banner, linking to `/install`, shows on the game list, the
     new-game screen and Settings (signed in, onboarded) when the browser is Safari on iOS or iPadOS
-    (a user agent with `Version/` and `Safari/` and without the token of another iOS browser or an in-app browser; iPadOS reporting a
-    Mac is recognised by touch support) **and** the app is not standalone (`navigator.standalone`
-    or `(display-mode: standalone)`); it never shows in the installed app. It is not shown on the
-    sign-in screens (the person has not decided to stay yet), on `/install` itself or on a game's
-    screen, which keeps the whole viewport for the board and leaves the update toast's corner free.
-    It sits in the page flow above the screen, never fixed. Dismissal is a per-device
-    `localStorage` key, `ym.install-dismissed`, outside the `ym.game.` prefix so it survives
-    sign-out (06 §4); every read and write is guarded, so with storage unavailable the banner shows
-    again on the next load and nothing breaks. Settings links to `/install` as well, so the guide
-    stays reachable after a dismissal. Dismissing moves focus to the screen's `h1`. The guide says Safari is the most reliable, and that other iPhone browsers (iOS 16.4+) may offer Add to Home Screen in their own share menu; the banner stays Safari-only.
+    (a user agent with `Version/` and `Safari/` and without the token of another iOS browser or an
+    in-app browser; iPadOS reporting a Mac is recognised by touch support) **and** the app is not
+    standalone (`navigator.standalone` or `(display-mode: standalone)`); it never shows in the
+    installed app. The banner stays Safari-only. It is not shown on the sign-in screens (the person
+    has not decided to stay yet), on `/install` itself or on a game's screen, which keeps the whole
+    viewport for the board and leaves the update toast's corner free. It sits in the page flow above
+    the screen, never fixed. Dismissal is a per-device `localStorage` key, `ym.install-dismissed`,
+    outside the `ym.game.` prefix so it survives sign-out (06 §4); every read and write is guarded,
+    so with storage unavailable the banner shows again on the next load and nothing breaks.
+    Dismissing moves focus to the screen's `h1`. Settings links to `/install` as well, so the guide
+    stays reachable after a dismissal.
 - Service worker (`apps/web/sw/sw.js`, emitted as `/sw.js` by a small Vite plugin that prepends the
   build's file list — a hand-written worker rather than Workbox, so the basics need no dependency;
   a prompt-style update, registered from the app's own script after load — an external file, never

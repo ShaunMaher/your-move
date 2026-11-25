@@ -101,8 +101,9 @@ export function Install({ appName }: { readonly appName: string }) {
               <li>
                 <TickGlyph />
                 <span>
-                  Tap <strong>Add</strong>, at the top right. {appName} now has an icon on your Home
-                  Screen.
+                  Tap <strong>Add</strong>, at the top right. If iOS shows{" "}
+                  <strong>Open as Web App</strong>, leave it on. {appName} now has an icon on your
+                  Home Screen.
                 </span>
               </li>
             </ol>

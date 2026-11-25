@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App.js";
 import { InstallBanner } from "./InstallBanner.js";
-import { clearClientState } from "./session-sync.js";
 import { CONFIG, fakeApi, json, ME, problem } from "./test-support.js";
 
 const IPHONE_SAFARI =
@@ -16,7 +15,7 @@ const DESKTOP_CHROME =
 function setBrowser(userAgent: string, standalone?: boolean, displayModeStandalone = false) {
   vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(userAgent);
   Object.defineProperty(window.navigator, "standalone", { value: standalone, configurable: true });
-  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+  vi.stubGlobal("matchMedia", (query: string) => ({
     matches: displayModeStandalone && query.includes("standalone"),
   }));
 }
@@ -43,11 +42,6 @@ describe("InstallBanner", () => {
 
   it.each([
     ["Chrome on iOS", IPHONE_CHROME, false, false],
-    ["Firefox on iOS", IPHONE_SAFARI.replace("Version/17.5", "FxiOS/127.0"), false, false],
-    ["Edge on iOS", IPHONE_SAFARI.replace("Version/17.5", "EdgiOS/126.0"), false, false],
-    ["an Instagram browser", `${IPHONE_SAFARI} Instagram 330.0`, false, false],
-    ["a Facebook browser", `${IPHONE_SAFARI} [FBAN/FBIOS;FBAV/450.0]`, false, false],
-    ["another in-app browser", `${IPHONE_SAFARI} Snapchat/12.0`, false, false],
     [
       "an iPhone user agent without Safari/",
       IPHONE_SAFARI.replace(" Safari/604.1", ""),
@@ -65,6 +59,30 @@ describe("InstallBanner", () => {
     ["an installed app by display mode", IPHONE_SAFARI, false, true],
   ])("is not shown for %s", (_name, ua, standalone, displayMode) => {
     setBrowser(ua, standalone, displayMode);
+    const { container } = render(<InstallBanner appName="Family Games" />);
+    expect(container.textContent).toBe("");
+  });
+
+  // Each keeps Safari's own `Version/` and `Safari/`, so only the added token tells it apart.
+  it.each([
+    "FxiOS/127.0",
+    "EdgiOS/126.0",
+    "OPiOS/16.0",
+    "GSA/300.0",
+    "DuckDuckGo/7",
+    "Instagram 330.0",
+    "[FBAN/FBIOS;FBAV/450.0]",
+    "Twitter for iPhone",
+    "LinkedInApp",
+    "Snapchat/12.0",
+    "Pinterest/12.0",
+    "MicroMessenger/8.0",
+    "musical_ly_32.0",
+    "BytedanceWebview/d8a21c6",
+    "Reddit/Version 2024.20",
+    "Line/14.0",
+  ])("is not shown in a browser whose user agent adds %s", (token) => {
+    setBrowser(`${IPHONE_SAFARI} ${token}`, false);
     const { container } = render(<InstallBanner appName="Family Games" />);
     expect(container.textContent).toBe("");
   });
@@ -169,7 +187,7 @@ describe("the install guide in the app", () => {
     expect(await screen.findByRole("link", { name: "Show me how" })).toBeTruthy();
   });
 
-  it("keeps the banner off a game's screen", async () => {
+  it("keeps the banner off a game's address, whether or not the game loads", async () => {
     setBrowser(IPHONE_SAFARI, false);
     window.history.replaceState(null, "", "/g/g1");
     render(
@@ -226,10 +244,19 @@ describe("the install guide in the app", () => {
     expect(window.location.pathname).toBe("/install");
   });
 
-  it("keeps the dismissal across sign-out while the game keys go", () => {
+  it("keeps the dismissal across a real sign-out while the game keys go", async () => {
+    setBrowser(IPHONE_SAFARI, true);
     window.localStorage.setItem("ym.install-dismissed", "1");
     window.localStorage.setItem("ym.game.words.u1.g1", "{}");
-    clearClientState();
+    window.history.replaceState(null, "", "/settings");
+    const { api } = fakeApi({
+      ...signedIn,
+      "POST /api/v1/auth/logout": new Response(null, { status: 204 }),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Settings" });
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await screen.findByRole("heading", { name: "Sign in" });
     expect(window.localStorage.getItem("ym.install-dismissed")).toBe("1");
     expect(window.localStorage.getItem("ym.game.words.u1.g1")).toBeNull();
   });
