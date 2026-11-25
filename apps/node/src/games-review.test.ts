@@ -490,3 +490,72 @@ describe("P-19: history says which transitions the server made", () => {
     expect(history.body.items.map((item) => item.via)).toEqual(["system"]);
   });
 });
+
+describe("P-15: lifecycle rules not yet covered end to end", () => {
+  it("the creator's decline before acting, in a game that continues: out as declined, never ranked", async () => {
+    const h = harness();
+    const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
+    const game = await createGame(h, a, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: b.email }, { email: c.email }],
+    });
+    await transition(h, b, game.id, "accept");
+    const started = await transition(h, c, game.id, "accept");
+    expect(started.body.game.status).toBe("active");
+    const declined = await transition(h, a, game.id, "decline");
+    expect(declined.status).toBe(200);
+    expect(declined.body.game.status).toBe("active");
+    const creator = declined.body.game.players.find((row) => row.isCreator);
+    expect(creator).toMatchObject({ state: "out", outReason: "declined" });
+    const history = await call<{ items: { kind: string; seat: number }[] }>(
+      h,
+      b,
+      "GET",
+      `/api/v1/games/${game.id}/history`,
+    );
+    expect(history.body.items).toEqual([
+      expect.objectContaining({ kind: "decline", seat: creator?.seat }),
+    ]);
+  });
+
+  it("an automatic start validateStart refuses doesn't happen; the accept still succeeds", async () => {
+    const refuse = { now: false };
+    const h = harness(
+      {},
+      {
+        games: exampleWith({
+          validateStart: () => (refuse.now ? { code: "NOT_NOW" } : { ok: true }),
+        }),
+      },
+    );
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    const game = await createGame(h, a, { gameType: "example", invitees: [{ email: b.email }] });
+    refuse.now = true;
+    const accepted = await transition(h, b, game.id, "accept");
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.game.status).toBe("lobby");
+    expect(accepted.body.game.players.find((row) => row.isYou)?.state).toBe("joined");
+    // The creator's Start is refused the same way, with the module's code.
+    const started = await transition(h, a, game.id, "start");
+    expect([started.status, started.body.error.code, started.body.error.detail]).toEqual([
+      409,
+      "INVALID_SEATS",
+      { code: "NOT_NOW" },
+    ]);
+  });
+
+  it("answers 404 to a stranger's start, accept and cancel of a lobby", async () => {
+    const h = harness();
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    const stranger = await signUp(h, "Cy");
+    const game = await createGame(h, a, { gameType: "example", invitees: [{ email: b.email }] });
+    for (const name of ["start", "accept", "cancel"] as const) {
+      const result = await transition(h, stranger, game.id, name, game.version);
+      expect([result.status, result.body.error.code], name).toEqual([404, "NOT_FOUND"]);
+    }
+    expect((await getGame(h, a, game.id)).game).toMatchObject({ status: "lobby", version: 0 });
+  });
+});
