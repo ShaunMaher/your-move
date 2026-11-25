@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { ApiError } from "../http/api-error.js";
-import { rerank } from "./lifecycle.js";
+import type { GamePlayerRecord, GameRecord } from "../db/repositories.js";
+import { accept, rerank } from "./lifecycle.js";
 import { recordedCryptoRandom } from "./random.js";
 import { createGameRegistry, GameConfigError } from "./registry.js";
 import {
@@ -261,5 +262,43 @@ describe("ApiError", () => {
       "NOT_IN_HAND",
       { card: 3 },
     ]);
+  });
+});
+
+describe("an automatic start validateStart refuses (02 §4 Start, step 2)", () => {
+  it("doesn't happen: the accept alone is written, and the game waits for the creator", () => {
+    const row = (
+      id: string,
+      state: GamePlayerRecord["state"],
+      joinedVia: GamePlayerRecord["joinedVia"],
+    ) =>
+      ({
+        id,
+        state,
+        joinedVia,
+        joinedAt: state === "joined" ? 1 : null,
+        seat: null,
+      }) as GamePlayerRecord;
+    const creator = row("a", "joined", "creator");
+    const invited = row("b", "invited", null);
+    const ctx = {
+      game: { status: "lobby", seats: 2, aiAssistance: "off", seatOrder: "join" } as GameRecord,
+      players: [creator, invited],
+      definition: {
+        validateStart: () => ({ code: "NOPE" }),
+        players: () => ({ min: 2, max: 2 }),
+      } as unknown as AnyGameDefinition,
+      options: {},
+      state: null,
+    };
+    expect(accept(ctx, invited, 5)).toEqual({
+      game: { updatedAt: 5 },
+      updatePlayers: [
+        {
+          id: "b",
+          set: { state: "joined", joinedVia: "invitation", joinedAt: 5, inviteEmail: null },
+        },
+      ],
+    });
   });
 });

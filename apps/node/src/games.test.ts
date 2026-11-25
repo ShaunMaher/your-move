@@ -519,6 +519,52 @@ describe("the lobby (02 §4)", () => {
     expect(code(again.body)).toBe("WRONG_STATUS");
   });
 
+  it("answers Start with INVALID_SEATS when validateStart refuses the joined count", async () => {
+    // The reference game, with a validateStart that refuses exactly three seats.
+    const example = installedGames.find((game) => game.manifest.type === "example");
+    const definition = example?.engines[1];
+    if (example === undefined || definition === undefined) throw new Error("no example game");
+    const picky = createHarness(
+      { ...PROD_ENV, ENABLED_GAMES: "example" },
+      {
+        games: [
+          {
+            ...example,
+            engines: {
+              1: {
+                ...definition,
+                validateStart: (options: unknown, seats: number) =>
+                  seats === 3
+                    ? { code: "DECK_TOO_SMALL" }
+                    : definition.validateStart(options, seats),
+              },
+            },
+          },
+        ],
+      },
+    );
+    try {
+      const [a, b, c] = [
+        await signUp(picky, "Ada"),
+        await signUp(picky, "Bo"),
+        await signUp(picky, "Cy"),
+      ];
+      const game = await createGame(picky, a, {
+        gameType: "example",
+        seats: 4,
+        invitees: [{ email: b.email }, { email: c.email }, { email: freshEmail() }],
+      });
+      await transition(picky, b, game.id, "accept");
+      await transition(picky, c, game.id, "accept");
+      const refused = await transition(picky, a, game.id, "start");
+      expect(refused.status).toBe(409);
+      expect(refused.body.error.detail).toEqual({ code: "DECK_TOO_SMALL" });
+      expect((await getGame(picky, a, game.id)).game.status).toBe("lobby");
+    } finally {
+      picky.close();
+    }
+  });
+
   it("refuses a stale expectedVersion with STALE_GAME", async () => {
     const a = await signUp(h, "Ada");
     const b = await signUp(h, "Bo");
