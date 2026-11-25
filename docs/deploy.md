@@ -172,8 +172,8 @@ the app trusts it only from the tunnel's own address.
 - `front` is an **internal** network (no route out) holding only the app and `cloudflared`; its
   subnet is pinned to `172.30.99.0/28`, `cloudflared` has the pinned address `172.30.99.2` and the
   app `172.30.99.3`. The Docker host has an address on `front` too (the bridge gateway,
-  `172.30.99.1`), so the app's `TRUST_PROXY_PEERS` is exactly `172.30.99.2/32` plus loopback (the
-  container's own health check), not the subnet. A request from any other address, or without a
+  `172.30.99.1`), so the app's `TRUST_PROXY_PEERS` is exactly `172.30.99.2/32` (the
+  container's own health check needs no client address, so loopback is not trusted), not the subnet. A request from any other address, or without a
   valid `CF-Connecting-IP`, is answered `400` on every route that needs the client's address, and
   `X-Forwarded-For` is never read. If you change an address, change `TRUST_PROXY_PEERS` and the
   tunnel's route to match.
@@ -259,7 +259,10 @@ route points at `app-front:8080`. If a container fails to start with a permissio
 **Things to know.** The app's port is reachable from the Docker host itself (a bridge network's
 gateway is the host), but the host's address on `front` is not in `TRUST_PROXY_PEERS`, so a request
 from it gets `400`. Anyone with Docker access on the host controls the whole stack anyway, so treat
-the host as trusted and don't give other users Docker access. Data lives in the named volumes `data` and
+the host as trusted and don't give other users Docker access: access to Docker on the host is
+enough to impersonate the tunnel. Don't add private-network (CIDR) or WARP routes to this
+tunnel: they would let other machines send requests from the tunnel's address, which the app
+trusts to name the client. Data lives in the named volumes `data` and
 `blobs`; backup documentation arrives with M4. Rotating `APP_SECRET` is unsupported (above).
 
 ## Cloudflare Workers

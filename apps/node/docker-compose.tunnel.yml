@@ -12,8 +12,9 @@
 # - `front` is internal (no route out) and holds only the app and `cloudflared`. Only the services
 #   in this file are attached to it, but the Docker host itself has an address on it (its
 #   gateway), so the app does not rely on the network alone: TRUST_PROXY_PEERS is exactly
-#   cloudflared's pinned address plus loopback (the container's own health check), so a request
-#   from any other peer, the host's gateway included, is refused (08 §4.1). The subnet and both
+#   cloudflared's pinned address and nothing else (the container's health check needs no client
+#   address, so loopback is not trusted), so a request from any other peer, the host's gateway
+#   included, is refused (08 §4.1). The subnet and both
 #   addresses are pinned; if you change one, change TRUST_PROXY_PEERS and the tunnel's route.
 # - `egress` is an ordinary bridge for outbound calls: the app's (Gmail) and the tunnel's.
 # - Every secret is a Docker secret read through `<NAME>_FILE`, so none shows in `docker inspect`
@@ -40,7 +41,7 @@ services:
       EMAIL_FROM: ${EMAIL_FROM:?set EMAIL_FROM to "Name" <address>}
       GMAIL_SENDER: ${GMAIL_SENDER:?set GMAIL_SENDER to the sender user's address (EMAIL_FROM's address)}
       TRUST_PROXY: cloudflare
-      TRUST_PROXY_PEERS: 172.30.99.2/32,127.0.0.0/8,::1/128
+      TRUST_PROXY_PEERS: 172.30.99.2/32
       APP_SECRET_FILE: /run/secrets/app_secret
       GMAIL_CLIENT_ID_FILE: /run/secrets/gmail_client_id
       GMAIL_CLIENT_SECRET_FILE: /run/secrets/gmail_client_secret

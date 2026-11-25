@@ -31,7 +31,7 @@ equal.
 | `MIN_AGE` | no | `13` | Integer ≥ 13 (refuse to start otherwise). Minimum age confirmed at onboarding (06 §5); set 16 where GDPR Art. 8 requires it. Raising it makes users who confirmed a lower value confirm again |
 | `TRUST_PROXY` | no | `false` | Node only; where the client IP comes from: `false` (socket address), `xff` (`X-Forwarded-For`, right-to-left by `TRUST_PROXY_HOPS`) or `cloudflare` (`CF-Connecting-IP`, for a Cloudflare Tunnel) (08 §4.1) |
 | `TRUST_PROXY_HOPS` | no | `1` | Node only, with `TRUST_PROXY=xff`; number of trusted proxies in front of the app |
-| `TRUST_PROXY_PEERS` | no | private ranges + loopback (fallback; the compose files set the proxy's pinned address + loopback, §4) | Node only, with `xff`/`cloudflare`: CIDR list the socket peer must be in, else `400` (08 §4.1) |
+| `TRUST_PROXY_PEERS` | no | private ranges + loopback (fallback; the compose files set the proxy's pinned address, §4) | Node only, with `xff`/`cloudflare`: CIDR list the socket peer must be in, else `400` (08 §4.1) |
 | `PORT` | no | `8080` | Node only |
 | `DATABASE_PATH` | Node | `/data/app.sqlite` | An absolute file path; `:memory:` and relative paths are refused outside local-dev mode. The file is created 0600 in a 0700 directory, with its single-instance lock beside it (`<DATABASE_PATH>.lock`, 03 §5.3). An existing directory keeps its mode, and startup logs a warning if group or others have any permission on it |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | no | | Enables Turnstile on OTP request (manually or via the circuit breaker). On Cloudflare the web build also needs `TURNSTILE_ENABLED=true` for the static CSP (03 §9). |
@@ -241,8 +241,8 @@ that work on both runtimes, plus SMTP for Node only.
     connecting directly; `TRUST_PROXY_PEERS` is the second line of defence, 08 §4.1). Its subnet is
     **pinned with IPAM** in both compose files (e.g. `172.30.99.0/28`), and so is the proxy's
     address on it. The Docker host has an address on `front` too (the bridge gateway), so the
-    compose files set `TRUST_PROXY_PEERS` to exactly **the proxy's pinned address** plus loopback
-    (loopback keeps the container's own health check working), never the whole subnet. The tunnel
+    compose files set `TRUST_PROXY_PEERS` to exactly **the proxy's pinned address**
+    (the container's own health check needs no client address, so loopback is not trusted), never the whole subnet. The tunnel
     reaches the app through a front-only alias (`app-front`): Docker resolves the service name to
     every network the app is on, including `egress`, a peer outside `TRUST_PROXY_PEERS`, so a route to the service name would be
     refused. The private-ranges default of `TRUST_PROXY_PEERS` is only a fallback for

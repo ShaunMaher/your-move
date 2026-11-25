@@ -87,11 +87,9 @@ describe("docker-compose.tunnel.yml (09 §4)", () => {
     expect(deploy).not.toMatch(/URL `app:8080`/u);
   });
 
-  it("trusts exactly cloudflared's pinned address plus loopback, behind Cloudflare (A5-S-2)", () => {
+  it("trusts exactly cloudflared's pinned address and not loopback, behind Cloudflare (A5-S-2, A5-S2-2)", () => {
     expect(app.environment?.["TRUST_PROXY"]).toBe("cloudflare");
-    expect(app.environment?.["TRUST_PROXY_PEERS"]?.split(",").sort()).toEqual(
-      [`${TUNNEL_ADDRESS}/32`, "127.0.0.0/8", "::1/128"].sort(),
-    );
+    expect(app.environment?.["TRUST_PROXY_PEERS"]).toBe(`${TUNNEL_ADDRESS}/32`);
   });
 
   it("bounds both containers' logs, processes and memory (A5-S-10)", () => {
