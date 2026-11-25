@@ -1,15 +1,22 @@
 /**
  * The parts of `/settings` (07 §1) built so far: who is signed in, notifications on this device
- * (07 §4, alpha A8), the email nudges toggle (03 §7, alpha A6), sign out, and sign out everywhere
+ * (07 §4, alpha A8), the email nudges toggle (03 §7, alpha A6), the theme choice (07 §5, alpha A9), sign out, and sign out everywhere
  * with the choice to revoke API tokens too (06 §4). The rest of the screen arrives with its
  * features.
  */
 import type { ApiClient } from "@your-move/api-client";
 import { useEffect, useRef, useState } from "react";
 
-import { type Me, saveEmailNudges, signOutEverywhere } from "../auth-api.js";
+import {
+  type Me,
+  type Outcome,
+  saveEmailNudges,
+  saveTheme,
+  signOutEverywhere,
+} from "../auth-api.js";
 import { type PushChange, pushState, type PushState, turnOffPush, turnOnPush } from "../push.js";
 import { Link } from "../router.js";
+import type { Theme } from "../theme.js";
 import { useSignOut } from "../use-sign-out.js";
 import { Page } from "./Page.js";
 import { Problem } from "./Problem.js";
@@ -27,21 +34,22 @@ interface SettingsProps {
   readonly onSignedOut: () => void;
 }
 
-/** The email nudges toggle (03 §7): saved at once, shown as the server's answer. */
-function EmailNudges({
-  api,
-  me,
-  onMeChanged,
-  onSessionLost,
-}: Pick<SettingsProps, "api" | "me" | "onMeChanged" | "onSessionLost">) {
+/**
+ * Saving one setting at once: the screen shows the server's answer, so a failed save leaves the
+ * control as it was, with the reason beside it.
+ */
+function useSettingSave<T>(
+  save: (value: T) => Promise<Outcome<Me>>,
+  { onMeChanged, onSessionLost }: Pick<SettingsProps, "onMeChanged" | "onSessionLost">,
+) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function change(emailNudges: boolean) {
+  async function change(value: T) {
     if (pending) return;
     setPending(true);
     setError(null);
-    const outcome = await saveEmailNudges(api, emailNudges);
+    const outcome = await save(value);
     setPending(false);
     if (outcome.ok) {
       onMeChanged(outcome.data);
@@ -57,6 +65,20 @@ function EmailNudges({
         : "Your setting wasn't saved. Please try again.",
     );
   }
+  return { pending, error, change };
+}
+
+/** The email nudges toggle (03 §7): saved at once, shown as the server's answer. */
+function EmailNudges({
+  api,
+  me,
+  onMeChanged,
+  onSessionLost,
+}: Pick<SettingsProps, "api" | "me" | "onMeChanged" | "onSessionLost">) {
+  const { pending, error, change } = useSettingSave(
+    (value: boolean) => saveEmailNudges(api, value),
+    { onMeChanged, onSessionLost },
+  );
 
   return (
     <section className="card stack" aria-labelledby="email-heading">
@@ -76,6 +98,49 @@ function EmailNudges({
         each game. Every email has a link to turn this off.
       </p>
       <Problem id="email-nudges-problem" message={error} />
+    </section>
+  );
+}
+
+const THEMES: readonly { value: Theme; label: string }[] = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+];
+
+/** The colour theme (07 §5, alpha A9): saved at once; the app applies the server's answer. */
+function Appearance({
+  api,
+  me,
+  onMeChanged,
+  onSessionLost,
+}: Pick<SettingsProps, "api" | "me" | "onMeChanged" | "onSessionLost">) {
+  const { pending, error, change } = useSettingSave((value: Theme) => saveTheme(api, value), {
+    onMeChanged,
+    onSessionLost,
+  });
+
+  return (
+    <section className="card stack" aria-labelledby="appearance-heading">
+      <h2 id="appearance-heading">Appearance</h2>
+      <div role="radiogroup" aria-labelledby="appearance-heading" className="stack">
+        {THEMES.map(({ value, label }) => (
+          <label key={value} className="check">
+            <input
+              type="radio"
+              name="theme"
+              value={value}
+              checked={me.settings.theme === value}
+              disabled={pending}
+              aria-describedby="theme-problem"
+              onChange={() => void change(value)}
+            />
+            {label}
+          </label>
+        ))}
+      </div>
+      <p>System follows your device&apos;s light or dark setting.</p>
+      <Problem id="theme-problem" message={error} />
     </section>
   );
 }
@@ -248,6 +313,7 @@ export function Settings({
         pushKey={pushKey}
         onSessionLost={onSessionLost}
       />
+      <Appearance api={api} me={me} onMeChanged={onMeChanged} onSessionLost={onSessionLost} />
       <EmailNudges api={api} me={me} onMeChanged={onMeChanged} onSessionLost={onSessionLost} />
       <section className="card stack" aria-labelledby="signout-heading">
         <h2 id="signout-heading">Sign out</h2>

@@ -9,6 +9,7 @@
   --color-accent: #1f5f8b;
   --color-accent-fg: #ffffff;
   --color-danger: #a4262c;
+  --color-danger-fg: #ffffff;
   --color-danger-bg: #fdecea;
   --space: 1rem;
   --radius: 0.75rem;
@@ -17,8 +18,13 @@
   line-height: 1.5;
 }
 
+/*
+ * Dark tokens, under two selectors because CSS can't share a declaration list between a media
+ * query and an attribute: the device's setting unless the person chose light, and their choice of
+ * dark (07 §5). `color-scheme` follows, so form controls and scrollbars match.
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --color-bg: #151515;
     --color-surface: #1f2124;
     --color-fg: #ececec;
@@ -27,8 +33,27 @@
     --color-accent: #8cc2e8;
     --color-accent-fg: #0b1b27;
     --color-danger: #ff9b95;
+    --color-danger-fg: #1b0f0e;
     --color-danger-bg: #3a1f1e;
   }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #151515;
+  --color-surface: #1f2124;
+  --color-fg: #ececec;
+  --color-muted: #b4b8bd;
+  --color-border: #43474c;
+  --color-accent: #8cc2e8;
+  --color-accent-fg: #0b1b27;
+  --color-danger: #ff9b95;
+  --color-danger-fg: #1b0f0e;
+  --color-danger-bg: #3a1f1e;
 }
 
 body {
@@ -195,15 +220,9 @@ input[aria-invalid="true"] {
 }
 
 .button.danger {
-  color: var(--color-accent-fg);
+  color: var(--color-danger-fg);
   background: var(--color-danger);
   border-color: var(--color-danger);
-}
-
-@media (prefers-color-scheme: dark) {
-  .button.danger {
-    color: #1b0f0e;
-  }
 }
 
 .button:disabled {

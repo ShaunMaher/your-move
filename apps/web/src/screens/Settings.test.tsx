@@ -86,6 +86,98 @@ describe("the email nudges toggle", () => {
   });
 });
 
+describe("the theme choice (07 §5, alpha A9)", () => {
+  const radio = (name: string) => screen.getByRole<HTMLInputElement>("radio", { name });
+  const themed = (call: { body?: unknown }) =>
+    json({
+      ...ME,
+      settings: { ...ME.settings, ...(call.body as { settings: object }).settings },
+    });
+
+  afterEach(() => {
+    document.documentElement.removeAttribute("data-theme");
+    window.localStorage.clear();
+  });
+
+  it("shows the saved theme, saves a change at once, and applies and remembers it", async () => {
+    const { api, calls } = routes(themed);
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Settings" });
+    expect(radio("System").checked).toBe(true);
+    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+    fireEvent.click(radio("Dark"));
+    await waitFor(() => {
+      expect(radio("Dark").checked).toBe(true);
+    });
+    expect(calls.at(-1)).toMatchObject({
+      method: "PATCH",
+      path: "/api/v1/me",
+      body: { settings: { theme: "dark" } },
+    });
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(window.localStorage.getItem("ym.theme")).toBe("dark");
+    fireEvent.click(radio("System"));
+    await waitFor(() => {
+      expect(radio("System").checked).toBe(true);
+    });
+    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+    expect(window.localStorage.getItem("ym.theme")).toBe("system");
+  });
+
+  it("starts from the theme the server has for the person", async () => {
+    const { api } = fakeApi({
+      "GET /api/v1/config": json(CONFIG),
+      "GET /api/v1/me": json({ ...ME, settings: { ...ME.settings, theme: "light" } }),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Settings" });
+    expect(radio("Light").checked).toBe(true);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+  });
+
+  it("works when storage throws", async () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    const { api } = routes(themed);
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Settings" });
+    fireEvent.click(radio("Dark"));
+    await waitFor(() => {
+      expect(radio("Dark").checked).toBe(true);
+    });
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    vi.restoreAllMocks();
+  });
+
+  it("says so and keeps the old theme when the save fails", async () => {
+    const { api } = routes(problem(500, "INTERNAL"));
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Settings" });
+    fireEvent.click(radio("Light"));
+    await screen.findByText("Your setting wasn't saved. Please try again.");
+    expect(radio("System").checked).toBe(true);
+    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+  });
+
+  it("keeps the device's theme after sign-out", async () => {
+    const { api } = fakeApi({
+      "GET /api/v1/config": json(CONFIG),
+      "GET /api/v1/me": json({ ...ME, settings: { ...ME.settings, theme: "dark" } }),
+      "POST /api/v1/auth/logout": json({}),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Settings" });
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await screen.findByRole("heading", { name: "Sign in" });
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(window.localStorage.getItem("ym.theme")).toBe("dark");
+  });
+});
+
 describe("notifications on this device (07 §4, alpha A8)", () => {
   const PUSH_LABEL = "Notify me on this device";
   const SAVED = new Response(null, { status: 204 });

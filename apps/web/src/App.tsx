@@ -28,6 +28,7 @@ import {
   onBecameVisible,
   watchSession,
 } from "./session-sync.js";
+import { applyTheme } from "./theme.js";
 import { UpdateToast } from "./UpdateToast.js";
 
 type Boot =
@@ -112,6 +113,11 @@ export function App({ api }: AppProps) {
   }, [config]);
 
   const me = boot.status === "ready" ? boot.me : null;
+  // The signed-in person's theme; signed out, the device keeps showing the last one (06 §4).
+  const theme = me?.settings.theme;
+  useEffect(() => {
+    if (theme !== undefined) applyTheme(theme);
+  }, [theme]);
   const place = boot.status === "ready" ? placeFor(me, path, boot.returnTo) : path;
   // Arrived at a real destination: the remembered path has been used, so state forgets it too
   // (adjusting state during render, from state and props only, never from storage).

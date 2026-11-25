@@ -17,7 +17,7 @@ export const ME = {
   kind: "human" as const,
   email: "sam@example.org",
   displayName: "Sam",
-  settings: { whoCanAddMe: "pastOpponents" as const, emailNudges: false },
+  settings: { whoCanAddMe: "pastOpponents" as const, emailNudges: false, theme: "system" as const },
   ageAttested: true,
   needsOnboarding: false,
   isAdmin: false,

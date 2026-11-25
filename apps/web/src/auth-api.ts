@@ -6,6 +6,8 @@
  */
 import type { ApiClient, Schema } from "@your-move/api-client";
 
+import type { Theme } from "./theme.js";
+
 export type Me = Schema<"Me">;
 export type ClientConfig = Schema<"ClientConfig">;
 
@@ -101,6 +103,15 @@ export async function saveDisplayName(api: ApiClient, displayName: string): Prom
 /** Turns the "It's your turn" email nudges on or off (03 §7); answers the updated user. */
 export async function saveEmailNudges(api: ApiClient, emailNudges: boolean): Promise<Outcome<Me>> {
   const outcome = await settle(api.PATCH("/api/v1/me", { body: { settings: { emailNudges } } }));
+  if (!outcome.ok) return outcome;
+  return outcome.data === undefined
+    ? { ok: false, failure: "failed" }
+    : { ok: true, data: outcome.data };
+}
+
+/** Sets the colour theme (07 §5); answers the updated user. */
+export async function saveTheme(api: ApiClient, theme: Theme): Promise<Outcome<Me>> {
+  const outcome = await settle(api.PATCH("/api/v1/me", { body: { settings: { theme } } }));
   if (!outcome.ok) return outcome;
   return outcome.data === undefined
     ? { ok: false, failure: "failed" }
