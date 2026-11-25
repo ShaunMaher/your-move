@@ -246,12 +246,14 @@ transition's public `record` and stored `describe` text; `HistoryItem` renders t
 back to the `describe` text for any record it can't render. Module views never carry history.
 
 The **game shell** (framework UI) supplies everything around the board: the header, the menu
-(resign, rules, history, game info), lobby screens, the result card of a finished game (ranks,
-scores, how it ended), error notices, the stale-state refetch, and the realtime refresh. Each piece
+(resign, rules, history, game info), lobby screens, the result card of a finished game (ranks
+and how it ended), error notices, the stale-state refetch, and the realtime refresh. Each piece
 of game state has **one owner on screen**: while a module's board is shown, the *board* draws the
 scores and whose turn it is, with its own live status, and the shell adds neither (no player chips,
 no turn line, no second live region); the shell's player list and turn line appear only in place
-of a board that can't be shown (loading, unsupported version). The board is kept above the fold on
+of a board that can't be shown (loading, unsupported version). A finished game's Results card owns
+the ranks and how the game ended; the board's final summary is the module's own breakdown (every
+score, final adjustments, what was left), so the card lists scores only when no board is drawn. The board is kept above the fold on
 a 320 px phone. The history drawer hands each entry to the module's `HistoryItem` together with
 the stored `describe` text, and shows nothing else for it: the module chooses between its own
 drawing and the fallback. A game module never talks to the

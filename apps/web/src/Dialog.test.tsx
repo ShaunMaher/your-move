@@ -7,11 +7,7 @@ import { Dialog } from "./Dialog.js";
 
 afterEach(cleanup);
 
-function Page(props: {
-  onClose?: () => void;
-  inside?: React.ReactNode;
-  dismissible?: boolean;
-}) {
+function Page(props: { onClose?: () => void; inside?: React.ReactNode; dismissible?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <div>

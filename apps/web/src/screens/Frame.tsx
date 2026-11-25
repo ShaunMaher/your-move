@@ -6,7 +6,8 @@
  * Who draws what: while a board is on screen it draws the scores and whose turn it is (and its own
  * live status), and the frame adds neither, so nothing is said twice. The frame's player list and
  * turn line stand in only while there is no board to do it (loading, unsupported). A finished game
- * is the frame's Results card: ranks, scores and how it ended.
+ * is the frame's Results card: ranks and how it ended (and the scores, if no board is drawn); the
+ * board's own final summary is the module's breakdown of the scores.
  */
 import type { ApiClient } from "@your-move/api-client";
 import type { BoardProps, GameClientModule } from "@your-move/sdk/client";
@@ -64,8 +65,17 @@ function PlayerChip({ player, acting }: { player: Player; acting: boolean }) {
   );
 }
 
-/** The finished game's result: ranks when there are any, and how it ended. */
-function Results({ game }: { readonly game: GameEnvelope }) {
+/**
+ * The finished game's result: ranks when there are any, and how it ended. Scores are the board's
+ * (its final summary has every player's), so they appear here only when no board is drawn.
+ */
+function Results({
+  game,
+  showScores,
+}: {
+  readonly game: GameEnvelope;
+  readonly showScores: boolean;
+}) {
   const seated = game.players
     .filter((player) => player.seat !== null)
     .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99) || (a.seat ?? 0) - (b.seat ?? 0));
@@ -89,7 +99,9 @@ function Results({ game }: { readonly game: GameEnvelope }) {
             <li key={player.seat}>
               <span className="rank">{player.rank === undefined ? "–" : String(player.rank)}</span>
               <span className="grow">{seatLabel(player)}</span>
-              {player.score === undefined ? null : <strong>{String(player.score)}</strong>}
+              {showScores && player.score !== undefined ? (
+                <strong>{String(player.score)}</strong>
+              ) : null}
               {player.outReason === "resigned" ? <span className="hint">resigned</span> : null}
             </li>
           ))}
@@ -186,7 +198,7 @@ export function Frame(props: FrameProps) {
             {notice}
           </p>
         )}
-        {over ? <Results game={game} /> : null}
+        {over ? <Results game={game} showScores={!drawn} /> : null}
         {over || drawn ? null : (
           <>
             <ul className="chips" aria-label="Players">
@@ -291,12 +303,7 @@ export function Frame(props: FrameProps) {
             >
               {pending ? "Resigning…" : "Resign"}
             </button>
-            <button
-              type="button"
-              className="button secondary"
-              disabled={pending}
-              onClick={close}
-            >
+            <button type="button" className="button secondary" disabled={pending} onClick={close}>
               Keep playing
             </button>
           </div>

@@ -127,7 +127,11 @@ export function Dialog(props: DialogProps) {
       pressedBackdrop.current = event.target === element;
     };
     const onClick = (event: Event) => {
-      if (event.target === element && pressedBackdrop.current && latest.current.dismissible !== false) {
+      if (
+        event.target === element &&
+        pressedBackdrop.current &&
+        latest.current.dismissible !== false
+      ) {
         latest.current.onClose();
       }
       pressedBackdrop.current = false;

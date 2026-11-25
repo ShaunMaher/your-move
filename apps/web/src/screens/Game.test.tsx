@@ -545,7 +545,7 @@ describe("resigning", () => {
     expect(posts(calls, "resign")[0]?.body).toEqual({ expectedVersion: 3 });
     expect(screen.queryByRole("dialog")).toBeNull();
     const rows = within(screen.getByRole("list", { name: "" })).getAllByRole("listitem");
-    expect(rows.map((row) => row.textContent)).toEqual(["1Alex55", "2You40resigned"]);
+    expect(rows.map((row) => row.textContent)).toEqual(["1Alex", "2Youresigned"]);
   });
 
   it("does nothing if you keep playing", async () => {
@@ -677,7 +677,7 @@ describe("a finished game", () => {
       within(results)
         .getAllByRole("listitem")
         .map((row) => row.textContent),
-    ).toEqual(["1You212", "2Alex187"]);
+    ).toEqual(["1You", "2Alex"]);
     expect(within(results).getByRole("link", { name: "Back to games" }).getAttribute("href")).toBe(
       "/",
     );
@@ -686,6 +686,27 @@ describe("a finished game", () => {
     expect(screen.queryByText("Game over")).toBeNull();
     expect(screen.queryByRole("list", { name: "Players" })).toBeNull();
     expect(document.querySelector(".turn")).toBeNull();
+  });
+
+  it("lists the scores in the card only when no board is drawn", async () => {
+    open({
+      "GET /api/v1/games/g1": withView(
+        envelope({
+          status: "finished",
+          endReason: "out",
+          yourTurn: false,
+          toAct: [],
+          players: [player({ rank: 1, score: 212 }), alex({ rank: 2, score: 187 })],
+        }),
+        null,
+      ),
+    });
+    const results = await screen.findByRole("region", { name: "Final result" });
+    expect(
+      within(results)
+        .getAllByRole("listitem")
+        .map((row) => row.textContent),
+    ).toEqual(["1You212", "2Alex187"]);
   });
 
   it("says 'Declined, no result' for a declined game, which has no ranks", async () => {
