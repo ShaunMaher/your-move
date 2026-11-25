@@ -54,3 +54,34 @@ history line). Owner decisions are marked.
 - oasdiff against `main` reports no breaking change. Against this slice's first round it flags
   history's new `via` value (A2-P-19) as `response-property-enum-value-added`; the history
   endpoint has never shipped, so nothing depends on the narrower set.
+
+# Round 2
+
+Round 2 of the review of the same slice: the security review (S2, merge with lows) and the picky
+review (P2, changes required). Owner decisions are marked. Accepted risks are in
+`docs/security/findings.md` (F-15 to F-18).
+
+## Security review (S2)
+
+| ID | Outcome | Where |
+|---|---|---|
+| A2-S2-1 | Accepted risk (owner decision), F-17: the stranger allowance counts creations, so cancelled invitations still use slots. The planned fix counts live `invites` rows (Q3-safe); reviewed at M4, before invitation emails ship. The app's Hidden invitations section arrives with slice A4. | `docs/security/findings.md` |
+| A2-S2-2 | Accepted risk (owner decision), F-18: the Worker's answer to a missing `/assets/*` file. Not changed now; the fix and the test change it needs are written down; reviewed before the first Workers deployment. | `docs/security/findings.md` |
+| A2-S2-3 | Recorded: F-15 (the live-game caps race, A2-S-7), F-16 (the lazy-expiry residual of A2-S-4), with F-17 and F-18 above. | `docs/security/findings.md` |
+| A2-S2-4 | Fixed. The secrecy test repeats the same preview and the same illegal action as each viewer in every read round, before and after the perturbation, and requires identical bodies. A negative control wraps the example game with a view that leaks the other seat's hand and requires `unchangedByHiddenState` to fail. Typed addresses are checked per game: every `invitedAs` must match an `invite_email` that game's own rows hold and be shown to its creator, and every address in a body must be one of them (bodies containing `invitedAs` are no longer skipped). | `apps/node/src/games-secrecy.test.ts` |
+| A2-S2-5 | Fixed. `start` and `accept` refuse (`WRONG_STATUS`) when `now` is at or past `createdAt` plus the lobby lifetime, whatever the stored status says. Tests: both at the boundary and one moment before it. | `packages/server/src/games/lifecycle.ts`, `units.test.ts`, 03 §8 |
+| A2-S2-6 | Fixed, by wrapping. The fault boundary also wraps `parse`, `safeParse` and their async forms on a definition's schema members, so an exception from a refinement is an `EngineFault` (logged without its message). Tests: a throwing action schema, a well-behaved schema, a function member. | `packages/server/src/games/engine-fault.ts`, `units.test.ts` |
+
+## Picky review (P2)
+
+| ID | Outcome | Where |
+|---|---|---|
+| A2-P2-1 | Fixed. The contract test no longer assumes a rack spells a word: it tries up to 25 fresh games (new players, so no pair limit) until one does, and fails with a clear message otherwise. The same assumption in the secrecy suite's words test is gone too (an opening that can't play passes and later turns make up the plays), which a repeat run showed failing about 1 in 16. | `tests/contract/src/suite.ts`, `apps/node/src/games-secrecy.test.ts` |
+| A2-P2-2 | Fixed. 06 §6.4 says the inbound cap is counted once, at creation, for every typed address; the M4 claim reads the stored `delivery` and counts nothing again. | 06 §6.4 |
+| A2-P2-3 | Fixed. Lazy expiry applies only when the caller holds a row in the game; a stranger's `404` never writes. 03 §8 now says expiry bumps the version (members see the game unread; a request in flight with the earlier `expectedVersion` gets `STALE_GAME`) and the per-request bound is 20 overdue lobbies, oldest first. Tests: a stranger's read leaves the row unchanged and a member's read expires it; the batch bound (20 of 50 expired by one create). | `packages/server/src/games/expiry.ts`, `routes.ts`, `apps/node/src/games-review.test.ts`, 03 §8 |
+| A2-P2-4 | Recorded, not changed (owner decision): commit subjects over 72 characters and `f196c64` not typechecking on its own stay as history. | this record |
+| A2-P2-5 | Fixed. A `@ts-expect-error` case assigns a drifted pair to the check, so a check that stopped rejecting would leave an unused directive and fail `tsc`. | `packages/api-client/src/sdk-types.test.ts` |
+| A2-P2-6 | Fixed. 03 §4 says `@your-move/server/testing` and `@your-move/node/db` are test-only exports; the Node adapter's header says so at its `./db` export (JSON has no comments). | 03 §4, `apps/node/src/db/sqlite.ts` |
+| A2-P2-7 | Fixed. A `GAME_SEED` that is not an integer throws a clear error. Test: `12abc` refused, `42` replayed. | `apps/node/src/games-support.ts`, `games-review.test.ts` |
+| A2-P2-8 | Fixed. The `§` in `tests/contract/package.json` is as it was on `main`. | `tests/contract/package.json` |
+| A2-P2-9 | Noted. The example kit test's 60 s budget was measured locally; it is to be re-measured from a CI run and the comment's figures replaced. | `games/example/src/kit.test.ts`, ADR 0004 |
