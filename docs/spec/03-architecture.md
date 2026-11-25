@@ -135,7 +135,9 @@ never touches a Drizzle database object. Instead:
 - A shared repository contract test suite (`@your-move/server/testing`) runs against **both**
   adapters: Node in-process on a real file; D1 in workerd, migrated with
   `wrangler d1 migrations apply --local` and reached through Wrangler's `getPlatformProxy` (in
-  CI's arm64 `test:worker` job, 11 §9).
+  CI's arm64 `test:worker` job, 11 §9). `@your-move/server/testing` (the suite and test helpers
+  such as `createSession`) and `@your-move/node/db` (the Node adapter, for the contract tests) are
+  exports for tests only: production code reaches the adapter by path and never imports either.
 
 **Randomness.** Production randomness always comes from WebCrypto (`crypto.getRandomValues`,
 `crypto.randomUUID`). The engine receives it as an explicit `RandomSource` argument (02 §2); the

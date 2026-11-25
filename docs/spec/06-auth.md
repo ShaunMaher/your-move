@@ -255,7 +255,9 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    to play — Accept / Decline"), with the same checks as a new invitation:
    - the full §6.1 block rule against the creator **and every other row** in the game (a block in
      either direction → `inert`);
-   - the inbound cap (§6.7; over it → `hidden`), counted atomically with the claim.
+   - the inbound cap (§6.7; over it → `hidden`). The cap is counted once, when the game is created
+     and for every typed address (§6.7); the claim reads the `delivery` stored on the seat then,
+     and counts nothing again.
 
    An `inert` seat is never claimed and never becomes deliverable.
 
