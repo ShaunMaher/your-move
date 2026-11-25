@@ -47,12 +47,17 @@ async function run(
   } = {},
 ) {
   const printed: string[] = [];
-  const requests: { url: string; body: URLSearchParams }[] = [];
+  const requests: {
+    url: string;
+    body: URLSearchParams;
+    redirect?: string | undefined;
+  }[] = [];
   let browserDone: Promise<void> = Promise.resolve();
   const fake = (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = input instanceof Request ? input.url : input.toString();
     requests.push({
       url,
+      redirect: init?.redirect,
       body: new URLSearchParams(
         typeof init?.body === "string" || init?.body instanceof URLSearchParams ? init.body : "",
       ),
@@ -224,6 +229,19 @@ describe("gmail:authorize (09 §2)", () => {
       expect(revoked?.body.get("token")).toBe(FAKE_TOKEN);
       expect(printed.join("\n")).not.toContain(FAKE_TOKEN);
     });
+  });
+
+  it("never follows a redirect on the revoke request either (A5-S2-6)", async () => {
+    const { requests } = await run({
+      token: {
+        refresh_token: FAKE_TOKEN,
+        access_token: "x",
+        scope: "wrong",
+        id_token: jwt(goodClaims),
+      },
+    });
+    const revoked = requests.find((request) => request.url.endsWith("/revoke"));
+    expect(revoked?.redirect).toBe("error");
   });
 
   it("says so when revocation fails, and when it works", async () => {

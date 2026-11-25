@@ -102,6 +102,7 @@ async function revoke(options: AuthorizeOptions, token: string): Promise<boolean
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ token }),
       signal: AbortSignal.timeout(15_000),
+      redirect: "error",
     });
     await response.body?.cancel();
     return response.ok;
