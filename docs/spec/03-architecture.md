@@ -281,11 +281,12 @@ filesystems are unsupported for the database anyway).
 exception: **lazy lobby expiry**. A read or write of a game by a member first applies the expiry
 transition if it is a lobby past its 14 days (a stranger's `404` never writes), and listing or
 creating games first expires the caller's overdue lobbies (at most 20 per request, oldest first,
-the rest on the next request), so no overdue lobby is shown, accepted, started or counted as live,
-and its typed addresses are cleared (06 §6.5) as soon as anyone involved comes back. It's a
+the rest on the next request), so no overdue lobby is accepted or started (both refuse it whatever
+its status says), and its typed addresses are cleared (06 §6.5) as soon as anyone involved comes back. It's a
 transition like any other (§5.2), so it bumps the game's version: a member sees the game unread,
 and a request in flight with the earlier `expectedVersion` gets `STALE_GAME`. `start` and `accept`
-also refuse a lobby at or past its expiry whatever its status says. The alpha has no sweep at all;
+also refuse a lobby at or past its expiry. Past the 20-per-request bound a list may still show
+some overdue lobbies as open until a later request expires them. The alpha has no sweep at all;
 once the sweep exists it expires the lobbies no one comes back to.)
 
 One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * * *`) or a Node
