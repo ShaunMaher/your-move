@@ -271,6 +271,10 @@ tests are green in CI.
   account, and a copy review that nothing markets the service to children.
 - Web Push (VAPID); optional email nudges ("It's your turn" from alpha A6; the invitation email
   to users with nudges on, 06 §6.2).
+- With bounce/complaint handling (09 §2): Settings tells a user with email nudges on when their
+  address is suppressed as `bounced` or `complained`, so the toggle isn't silently ineffective.
+  The alpha writes no such rows; turning nudges on lifts only an `unsubscribed` row (alpha A6
+  review P-3, 2026-11-25).
 - Install guide banner, update toast, dark mode, accessibility pass.
 - Docker deployment: `apps/node/docker-compose.tunnel.yml` (the proof-of-concept deployment behind a
   Cloudflare Tunnel, Q6) and `docker-compose.caddy.yml`, with the two-network layout and `*_FILE`
@@ -409,4 +413,6 @@ the CI deploy job (11 §9 stage 7, 09 §6): deploy `dist/worker` from the stage-
 `--no-bundle`; wrangler from a lockfile-pinned, `--ignore-scripts` install carried as an artifact;
 configuration generated from CI variables; no `pnpm install` in the job; `games:check-db` against
 D1 first, as a self-contained bundle built in stage 3 and carried in the artifact. The D1- and
-Workers-specific commands `pnpm cf:migrate` and `pnpm cf:deploy` arrive with it.
+Workers-specific commands `pnpm cf:migrate` and `pnpm cf:deploy` arrive with it. It also
+re-measures what one Cron Trigger invocation of the sweep spends (subrequests, D1 queries, CPU)
+and sets the Worker's nudges-per-run cap from that (10 until then; 09 §3, alpha A6 review P-4).

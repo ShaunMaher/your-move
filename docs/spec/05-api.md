@@ -345,7 +345,7 @@ changes nothing and answers the same page.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/v1/email/unsubscribe?t=` **public** | Server-rendered HTML page (`text/html`, shared security headers, `Cache-Control: no-store`) with a confirm button. **Never changes state.** Invalid token → the same page with a generic message |
-| POST | `/api/v1/email/unsubscribe?t=` **public** | Form-encoded (`List-Unsubscribe=One-Click` per RFC 8058, or the page's button); the body isn't needed or read, the token is the authority. Adds the `emailId` to `email_suppressions` (`invites`; an existing row keeps its reason) or turns off email nudges for that user (`nudges`). Idempotent. Exempt from the Origin and JSON rules (mail clients post cross-origin). Always `200` with the same page: "done" for a valid token whatever it changed, the generic message for an invalid one |
+| POST | `/api/v1/email/unsubscribe?t=` **public** | Form-encoded (`List-Unsubscribe=One-Click` per RFC 8058, or the page's button); the body isn't needed or read, the token is the authority. Adds the `emailId` to `email_suppressions` (`invites`; an existing row keeps its reason) or turns off email nudges for that user and clears `users.email_id` (`nudges`). Idempotent. Not rate-limited, deliberately (08 §4). Exempt from the Origin and JSON rules (mail clients post cross-origin). Always `200` with the same page: "done" for a valid token whatever it changed, the generic message for an invalid one |
 
 ## API tokens and AI accounts (06 §8, 02 §9) — session only
 

@@ -76,7 +76,10 @@ curl http://127.0.0.1:8080/api/health
 
 The server also runs the scheduled sweep itself, every 15 minutes (03 §8). For now its only job is
 the "It's your turn" email nudges: off by default, each person turns them on in Settings, and every
-nudge carries a one-click unsubscribe link (05 §Email links). Nothing needs configuring for it.
+nudge carries a one-click unsubscribe link (05 §Email links). It sends at most 100 per run and 200
+a day across the instance (`LIMIT_NUDGE_EMAILS_PER_DAY`, so nudges can't use up the sender's
+daily quota that sign-in codes need); at the cap it stops with a `NUDGE_EMAILS_PER_DAY` alert in
+the log and the rest wait.
 
 The Cloudflare Tunnel compose file is below; the Caddy one arrives in M4 (09 §4).
 
@@ -188,6 +191,10 @@ the app trusts it only from the tunnel's own address.
   passes, since it needs no client address).
 - Each container's log is capped (`json-file`, 3 files of 10 MB) and each has a process and memory
   limit, so a fault can't fill the host's disk or take the host down.
+- Keep `cloudflared` at its default log level: at `debug` it logs request URLs, and the unsubscribe
+  link's `?t=` token (which never expires) would land in its log (09 §5). The same goes for any
+  log in front of the server: it must not keep the query string of `/api/v1/email/unsubscribe`.
+  The server itself logs the route pattern only.
 - `egress` is an ordinary bridge for outbound calls: Gmail, and the tunnel to Cloudflare.
 - Every secret is a Docker secret read through `<NAME>_FILE`; the tunnel token is read with
   `--token-file`. None appears in `docker inspect`.
@@ -282,7 +289,10 @@ migrations (`packages/server/migrations`, the same files the Node server applies
 deploy with `wrangler d1 migrations apply DB --remote --config apps/worker/wrangler.toml`, then
 check for orphaned games with `pnpm games:check-db --d1 <database>`. The example configuration's
 Cron Trigger (`*/15 * * * *`) runs the sweep (03 §8); keep it in your copy, or no email nudges go
-out.
+out. One invocation has a small budget of subrequests and D1 queries, so the Worker sends at most
+10 nudges per run (09 §3); a run with a failed step or nudge shows as a failed invocation in the
+trigger's history. Check that Workers Logs and Logpush don't keep the query string of
+`/api/v1/email/unsubscribe` (09 §5).
 
 There is no CI deploy job for Workers yet. It arrives with the first Workers deployment
 (09 §6, 10), built to deploy the build artifact (`dist/worker`, `--no-bundle`) with a

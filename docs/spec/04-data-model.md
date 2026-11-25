@@ -34,7 +34,7 @@ Conventions:
 | kind | TEXT NOT NULL DEFAULT 'human' | `human` · `agent` (an AI account, 02 §9.2) |
 | owner_user_id | TEXT NULL FK → users ON DELETE CASCADE | set exactly when `kind = 'agent'`: the human who owns it (≤ 3 per owner) |
 | email | TEXT UNIQUE NULL | normalised; NOT NULL exactly when `kind = 'human'` (agents have no email and can't sign in) |
-| email_id | TEXT UNIQUE NULL | the address's `emailId` (09 §1.1), set when the user turns email nudges on, so a `nudges` unsubscribe token, which carries only the `emailId` (05 §Email links), can find the account; set whenever `settings.emailNudges` is true |
+| email_id | TEXT UNIQUE NULL | the address's `emailId` (09 §1.1), set exactly while `settings.emailNudges` is true — written when the user turns email nudges on, cleared when they are turned off (in Settings or by an unsubscribe) — so a `nudges` unsubscribe token, which carries only the `emailId` (05 §Email links), can find the account |
 | display_name | TEXT NULL | NULL until onboarding completed (06 §5). Wherever a name is shown (UI, push, email) and it is NULL, the fallback label "New player" is used |
 | settings | TEXT NOT NULL DEFAULT '{}' | JSON: `{ emailNudges: boolean (default false, 03 §7), whoCanAddMe: "pastOpponents" \| "nobody" (default "pastOpponents", 06 §6.2), lastGameType?: string, lastOptions?: { [gameType]: unknown }, ... }` |
 | age_attested_at | INTEGER NULL | when the user confirmed they meet `MIN_AGE` (06 §5); NULL until onboarding completed |

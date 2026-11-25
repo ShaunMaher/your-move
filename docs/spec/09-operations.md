@@ -35,7 +35,7 @@ equal.
 | `PORT` | no | `8080` | Node only |
 | `DATABASE_PATH` | Node | `/data/app.sqlite` | An absolute file path; `:memory:` and relative paths are refused outside local-dev mode. The file is created 0600 in a 0700 directory, with its single-instance lock beside it (`<DATABASE_PATH>.lock`, 03 §5.3). An existing directory keeps its mode, and startup logs a warning if group or others have any permission on it |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | no | | Enables Turnstile on OTP request (manually or via the circuit breaker). On Cloudflare the web build also needs `TURNSTILE_ENABLED=true` for the static CSP (03 §9). |
-| `LIMIT_*` | no | see 08 §4 | Overrides for rate limits / instance-wide caps, as positive whole numbers. Each `LIMIT_<NAME>` is listed here; an unknown name refuses to start. Sign-in (M2): `LIMIT_OTP_REQUEST_EMAIL_HOUR` (5), `LIMIT_OTP_REQUEST_EMAIL_DAY` (10), `LIMIT_OTP_REQUEST_IP_HOUR` (20), `LIMIT_OTP_VERIFY_FAIL_EMAIL_HOUR` (10), `LIMIT_OTP_VERIFY_IP_HOUR` (50), `LIMIT_OTP_EMAIL_GLOBAL_HOUR` (200), `LIMIT_OTP_EMAIL_GLOBAL_DAY` (1000), `LIMIT_OTP_VERIFY_FAIL_GLOBAL_HOUR` (500), `LIMIT_NEW_ACCOUNTS_IP_DAY` (10), `LIMIT_DISPLAY_NAME_CHANGES_30D` (3), `LIMIT_STEP_UP_USER_HOUR` (5), `LIMIT_STEP_UP_USER_DAY` (10). Games (alpha A2): `LIMIT_WRITES_USER_MINUTE` (300, every game write), `LIMIT_MOVES_USER_MINUTE` (120), `LIMIT_PREVIEWS_USER_MINUTE` (300), `LIMIT_GAMES_CREATED_USER_DAY` (30), `LIMIT_GAMES_CREATED_PAIR_DAY` (5), `LIMIT_EMAIL_INVITEES_USER_HOUR` (5), `LIMIT_EMAIL_INVITEES_USER_DAY` (10), and the inbound invitation cap `LIMIT_INVITATIONS_RECEIVED_PAIR_DAY` (1, per target and creator) and `LIMIT_INVITATIONS_RECEIVED_DAY` (3, per target); IP limits scale 4× and 10× for the wider IPv6 buckets (08 §4.1). Also `LIMIT_DICT_TOTAL_BYTES` (below). Later milestones add the rest of 08 §4 |
+| `LIMIT_*` | no | see 08 §4 | Overrides for rate limits / instance-wide caps, as positive whole numbers. Each `LIMIT_<NAME>` is listed here; an unknown name refuses to start. Sign-in (M2): `LIMIT_OTP_REQUEST_EMAIL_HOUR` (5), `LIMIT_OTP_REQUEST_EMAIL_DAY` (10), `LIMIT_OTP_REQUEST_IP_HOUR` (20), `LIMIT_OTP_VERIFY_FAIL_EMAIL_HOUR` (10), `LIMIT_OTP_VERIFY_IP_HOUR` (50), `LIMIT_OTP_EMAIL_GLOBAL_HOUR` (200), `LIMIT_OTP_EMAIL_GLOBAL_DAY` (1000), `LIMIT_OTP_VERIFY_FAIL_GLOBAL_HOUR` (500), `LIMIT_NEW_ACCOUNTS_IP_DAY` (10), `LIMIT_DISPLAY_NAME_CHANGES_30D` (3), `LIMIT_STEP_UP_USER_HOUR` (5), `LIMIT_STEP_UP_USER_DAY` (10). Games (alpha A2): `LIMIT_WRITES_USER_MINUTE` (300, every game write), `LIMIT_MOVES_USER_MINUTE` (120), `LIMIT_PREVIEWS_USER_MINUTE` (300), `LIMIT_GAMES_CREATED_USER_DAY` (30), `LIMIT_GAMES_CREATED_PAIR_DAY` (5), `LIMIT_EMAIL_INVITEES_USER_HOUR` (5), `LIMIT_EMAIL_INVITEES_USER_DAY` (10), and the inbound invitation cap `LIMIT_INVITATIONS_RECEIVED_PAIR_DAY` (1, per target and creator) and `LIMIT_INVITATIONS_RECEIVED_DAY` (3, per target). Email nudges (alpha A6): `LIMIT_NUDGE_EMAILS_PER_DAY` (200, instance-wide). IP limits scale 4× and 10× for the wider IPv6 buckets (08 §4.1). Also `LIMIT_DICT_TOTAL_BYTES` (below). Later milestones add the rest of 08 §4 |
 | `ENABLED_GAMES` | no | every installed package not marked `enabled: false` in `instance.config.ts` | Comma-separated game types offered for **new** games (02 §7.3). Must name installed types only (refuse to start otherwise). Type ids match `^[a-z][a-z0-9]{1,31}$` |
 | `ADMIN_EMAILS` | no | (none) | Comma-separated addresses of admins (05 §Admin API). Matched against the normalised email of the human an admin token belongs to, on every admin request (admin access is by admin token only); an empty list disables the Admin API |
 | `ALLOW_ORPHAN_GAMES` | no | (none) | Node only: the 12-character digest the refusal to start printed for the `lobby`/`active` games of removed game types or rules versions; it accepts orphaning exactly that set (02 §7.3) and matches no other. Otherwise the server refuses to start while any exist |
@@ -71,7 +71,12 @@ HMAC-SHA256 key), each with a distinct, versioned `info` label:
 Rotation procedure (documented in `docs/deploy.md`): introduce `APP_SECRET_PREVIOUS`; derive `v1`
 keys from the previous secret for verification of `unsub` and for `email-id` lookups while a
 one-off job re-hashes `email_suppressions` and `users.email_id` (and new `v2` labels are used for
-writes). Until that job exists, **rotating `APP_SECRET` is unsupported** and the docs say so.
+writes). That job must keep every `nudges` unsubscribe link already sent resolvable: the tokens
+don't expire and carry the `v1` `emailId`, so while it runs and afterwards the unsubscribe route
+also looks accounts up by the `v1` `emailId` of each nudged user's stored `users.email` (or keeps a
+`v1` column beside the new one) — a valid old link must still turn nudges off. Its page stays the
+same whether or not it found an account (no oracle), so the requirement is the lookup, not the
+answer. Until that job exists, **rotating `APP_SECRET` is unsupported** and the docs say so.
 
 ### 1.2 Admin commands
 
@@ -192,6 +197,13 @@ that work on both runtimes, plus SMTP for Node only.
 
 - Worker with: Static Assets (built SPA), D1 binding `DB`, Durable Object binding `USER_CHANNEL`
   (SQLite-backed DO class, declared in migrations), Cron Trigger `*/15 * * * *`.
+- The Cron Trigger runs the sweep (03 §8). One invocation has a bounded budget of subrequests and
+  D1 queries, and every email nudge spends several of each (the cap counter, the claim, the
+  game's players, their names and the last move, then the provider's request), so the Worker
+  sends at most 10 nudges per invocation (Node: 100); the rest wait 15 minutes for the next one.
+  A run with a failed step or a failed nudge ends the invocation as failed (not retried), so it
+  shows in the trigger's history. Re-measure the per-invocation cost at the first Workers
+  deployment (10).
 - `apps/worker/wrangler.example.toml` is committed with no account-specific IDs; operators copy it to
   `wrangler.toml` (git-ignored) or pass `--config`. CI generates its config from non-secret CI
   variables (D1 database id, route/custom domain).
@@ -260,7 +272,11 @@ that work on both runtimes, plus SMTP for Node only.
   log OTPs, tokens, cookies, the `Authorization` header, request bodies, emails in any form other
   than the HMAC `emailId`, or game secrets. Edge logs must exclude `Authorization` too: the Caddy
   compose's log config drops it, and on Workers the operator checks that Workers Logs/Logpush don't
-  record request headers (to be verified in M3, when tokens arrive).
+  record request headers (to be verified in M3, when tokens arrive). They must also leave out the
+  query string of `/api/v1/email/unsubscribe` (its `t=` token turns nudges off or suppresses an
+  address, and never expires, 05 §Email links): the app logs the route pattern only, Caddy's log
+  config and the tunnel/edge logs drop or redact it, and on Workers the operator checks that the
+  logged URL fields don't keep it.
 - Validation and module errors are logged by code and path only, never with input values
   (e.g. strip Zod's `received`). Unhandled exceptions log the error class, message and stack, and
   the client gets `500 INTERNAL` with no detail (05 §Errors).

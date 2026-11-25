@@ -177,7 +177,9 @@ Every `games` row has an integer `version` and a `write_token`. **Every** state 
 action, join, accept, remove, start, resign, decline, leave, cancel, expiry, timeout (02 §4) — is a
 *transition* applied like this. (Invite claims update only the claimed `game_players` row, guarded by
 its state, `delivery <> 'inert'`, the claimant holding no other row in the game, and the game
-`version` being unchanged since it was loaded — checked but deliberately not bumped, 02 §4.)
+`version` being unchanged since it was loaded — checked but deliberately not bumped, 02 §4. The
+email-nudge throttle `game_players.last_nudged_at` is not game state either: one conditional
+update of that row, re-checking everything that made the nudge due, with no version bump, §7.)
 
 1. Load game state + version.
 2. Compute the new state with the game module (pure), with recorded randomness and pre-loaded
@@ -277,14 +279,24 @@ filesystems are unsupported for the database anyway).
   `active` game whose `to_act_since` is at least 24 h old ("idle": in `toAct` that long without
   acting) and whose `last_nudged_at` is unset or at least 24 h old, if its user is a human with
   `settings.emailNudges` true, onboarded, not suspended or being deleted, whose `email_id` is set
-  and not in `email_suppressions`; a game whose type or rules version isn't installed is skipped.
-  `last_nudged_at` is claimed with one conditional update **before** the email is sent (so two
-  sweeps can't both send, and a failed send isn't retried that day), and it is a notification
-  throttle, not game state: it is not a transition (§5.2) and doesn't bump `version`. The email
-  is a fixed template: the game type's name, the other seated players' display names, the last
-  public `describe` text (names filled in, "You" for the recipient), a link to the game, and the
-  unsubscribe link and headers (05 §Email links) — never state, options, scores or addresses
-  (08 T18). At most 100 nudges per sweep run; the rest wait for the next run.
+  and not in `email_suppressions`. Only games of an installed game type and rules version are
+  looked at, in SQL, so orphaned games never take a place in the queue. Each nudge is first
+  counted against the instance-wide daily cap `LIMIT_NUDGE_EMAILS_PER_DAY` (08 §4): at the cap
+  the run stops without claiming the rest (they wait for a later run) and the crossing is
+  alerted once. Then `last_nudged_at` is claimed with one conditional update that re-checks
+  everything above — the seat, the game being `active` and the user's eligibility — **before**
+  the email is sent (so two sweeps can't both send, an unsubscribe or a move in between stops it,
+  and a failed send isn't retried that day). It is a notification throttle, not game state: it is
+  not a transition (§5.2) and doesn't bump `version`. The email is a fixed template: the game
+  type's name, the other seated players' display names ("Seat n" for a seat without one, as the
+  game screens show it), the last public `describe` text (names filled in, "You" for the
+  recipient), a link to the game, and the unsubscribe link and headers (05 §Email links) — never
+  state, options, totals or standings (a move's points only as its `describe` text gives them),
+  nor addresses (08 T18). A run sends at most a per-runtime number of nudges, bounded by what one
+  invocation may spend (100 on Node; 10 on Workers, 09 §3); the rest wait for the next run.
+  Turning nudges on in a signed-in session removes an `unsubscribed` suppression of the address
+  (that explicit consent outranks an earlier link click); `bounced` and `complained` rows stay
+  and keep suppressing (surfacing them in Settings is M4's, with bounce handling).
 
 ## 8. Scheduled work
 
