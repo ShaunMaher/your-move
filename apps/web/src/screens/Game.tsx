@@ -131,6 +131,7 @@ export function Game({ api, appName, id, onSessionLost, loadClient = loadGameCli
    */
   const refetch = useCallback(
     async (queued = false) => {
+      const wantsAnother = () => again.current;
       if (fetching.current) {
         if (queued) again.current = true;
         return;
@@ -141,7 +142,7 @@ export function Game({ api, appName, id, onSessionLost, loadClient = loadGameCli
           again.current = false;
           const result = await getGame(api, id);
           settle(result);
-        } while (again.current && mounted.current);
+        } while (wantsAnother() && mounted.current);
       } finally {
         fetching.current = false;
       }

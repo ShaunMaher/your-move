@@ -145,7 +145,7 @@ describe("the table", () => {
     // A tile's face reads "A 1" (letter, space, points), inside its name "A, 1 point".
     const tiles = screen.getAllByRole("button", { name: /, \d+ points?/u });
     for (const el of tiles.filter((t) => t.querySelector("small") !== null)) {
-      const face = (el.textContent ?? "").replace(/\s+/gu, " ").trim();
+      const face = el.textContent.replace(/\s+/gu, " ").trim();
       const spoken = (el.getAttribute("aria-label") ?? "").replace(/[^\p{L}\p{N}]+/gu, " ");
       expect(spoken.toLowerCase()).toContain(face.toLowerCase());
     }

@@ -128,7 +128,7 @@ describe("caching a game's public word lists", () => {
   it("runs overlapping calls one after another, so they can't trim the same listing twice", async () => {
     const texts = ["p\n", "q\n", "r\n", "s\n", "t\n"];
     const urls = await Promise.all(texts.map((text, i) => nameFor(text, `l${String(i)}`)));
-    fetcher.mockImplementation((path: string) =>
+    vi.stubGlobal("fetch", (path: string) =>
       Promise.resolve(new Response(texts[urls.indexOf(path)] ?? "")),
     );
     await Promise.all(

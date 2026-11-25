@@ -78,9 +78,9 @@ describe("Dialog", () => {
             <details>
               <summary>More</summary>
             </details>
-            <div tabIndex={0} role="group" aria-label="Scrolling">
+            <span tabIndex={0} role="button" aria-label="Scrolling">
               scroll
-            </div>
+            </span>
             <div tabIndex={-1}>not tabbable</div>
             <button type="button" hidden>
               Hidden
@@ -92,7 +92,7 @@ describe("Dialog", () => {
     open();
     expect(document.activeElement).toBe(screen.getByRole("link", { name: "Link" }));
     tab(true);
-    expect(document.activeElement).toBe(screen.getByRole("group", { name: "Scrolling" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Scrolling" }));
     tab();
     expect(document.activeElement).toBe(screen.getByRole("link", { name: "Link" }));
   });
@@ -117,7 +117,7 @@ describe("Dialog", () => {
     render(<Page onClose={onClose} />);
     open();
     const sheet = screen.getByRole("dialog");
-    const scrim = sheet.parentElement as HTMLElement;
+    const scrim = sheet.parentElement!;
     fireEvent.pointerDown(sheet);
     fireEvent.click(sheet);
     expect(onClose).not.toHaveBeenCalled();

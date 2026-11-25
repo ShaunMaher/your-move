@@ -63,7 +63,9 @@ export function History({ api, game, client, onClose, onSessionLost }: HistoryPr
 
   const loaded = items !== null;
   useEffect(() => {
-    if (loaded) newest.current?.scrollIntoView?.({ block: "end" });
+    // Down to the newest entry: the sheet is the scrolling box.
+    const sheet = newest.current?.closest<HTMLElement>('[role="dialog"]');
+    if (loaded && sheet) sheet.scrollTop = sheet.scrollHeight;
   }, [loaded]);
 
   return (

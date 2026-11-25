@@ -97,7 +97,7 @@ export async function expectOnlyShellAndWordLists(
   const build = JSON.parse(/^const BUILD = (.*);$/mu.exec(source)?.[1] ?? "null") as {
     precache: string[];
   };
-  const caches = await page.evaluate(async () => {
+  const stored = await page.evaluate(async () => {
     const found: Record<string, string[]> = {};
     for (const name of await caches.keys()) {
       found[name] = (await (await caches.open(name)).keys())
@@ -106,7 +106,7 @@ export async function expectOnlyShellAndWordLists(
     }
     return found;
   });
-  const shell = Object.entries(caches).filter(([name]) => name !== "dictionaries-v1");
+  const shell = Object.entries(stored).filter(([name]) => name !== "dictionaries-v1");
   expect(shell.flatMap(([, paths]) => paths).sort()).toEqual([...build.precache].sort());
-  for (const path of caches["dictionaries-v1"] ?? []) expect(path).toMatch(WORD_LIST_PATH);
+  for (const path of stored["dictionaries-v1"] ?? []) expect(path).toMatch(WORD_LIST_PATH);
 }

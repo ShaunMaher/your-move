@@ -6,7 +6,7 @@
  * It renders into its own container on `document.body`, beside the app's root, so the root can be
  * made inert without making the dialog inert with it.
  */
-import { type PointerEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 const FOCUSABLE = [
@@ -80,7 +80,7 @@ export function Dialog(props: DialogProps) {
     };
   }, []);
 
-  // A native listener on the backdrop: keys pressed elsewhere aren't this dialog's business.
+  // Native listeners on the backdrop: keys pressed elsewhere aren't this dialog's business.
   useEffect(() => {
     const element = scrim.current;
     if (element === null) return undefined;
@@ -105,25 +105,27 @@ export function Dialog(props: DialogProps) {
         first.focus();
       }
     };
+    // A tap on the backdrop itself closes the dialog; a press that began inside the sheet and
+    // ended on the backdrop (selecting text) does not.
+    const onPointerDown = (event: Event) => {
+      pressedBackdrop.current = event.target === element;
+    };
+    const onClick = (event: Event) => {
+      if (event.target === element && pressedBackdrop.current) latest.current.onClose();
+      pressedBackdrop.current = false;
+    };
     element.addEventListener("keydown", onKeyDown);
+    element.addEventListener("pointerdown", onPointerDown);
+    element.addEventListener("click", onClick);
     return () => {
       element.removeEventListener("keydown", onKeyDown);
+      element.removeEventListener("pointerdown", onPointerDown);
+      element.removeEventListener("click", onClick);
     };
   }, []);
 
   return createPortal(
-    <div
-      ref={scrim}
-      className="scrim"
-      data-variant={variant}
-      onPointerDown={(event: PointerEvent) => {
-        pressedBackdrop.current = event.target === event.currentTarget;
-      }}
-      onClick={(event) => {
-        if (event.target === event.currentTarget && pressedBackdrop.current) props.onClose();
-        pressedBackdrop.current = false;
-      }}
-    >
+    <div ref={scrim} className="scrim" data-variant={variant}>
       <div
         ref={sheet}
         className="sheet stack"
