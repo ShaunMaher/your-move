@@ -266,8 +266,8 @@ filesystems are unsupported for the database anyway).
   recipient per day (06 §6.2). Every other lobby event (joins by others, accepts, declines,
   leaves, removals) and lobby endings (`cancelled`, `expired`, `declined` from the lobby, including
   cancels caused by account deletion) send realtime invalidations only — no push, no email (02 §4). iOS supports this only for home-screen web apps (16.4+) and only
-  after a user gesture grants permission — the UI asks after the first game is created, not at
-  sign-in.
+  after a user gesture grants permission — the UI asks after the first game is created or the
+  first invitation is accepted (Q28), not at sign-in.
 - Push text is built only from public `describe` text (02 §5) and display names, never from state
   (e.g. "Alex played QUIZ for 64. Your turn."). The auto-join push is "<creator> added you to a
   game"; the invitation push names nobody (06 §6.2).
@@ -286,14 +286,18 @@ filesystems are unsupported for the database anyway).
   email nudge) as a sentence followed by "Your turn." or "The game is over."; a start, which has
   no `describe` text, says "Your game with <the other players> has started. Your turn.", and a
   framework-only `declined` ending "<name> declined the game, so it's over."; the body is cut to
-  240 characters; `url` is the game's path `/g/<id>` and `tag` is `game-<id>`, so a newer
+  240 code points (never splitting a character); `url` is the game's path `/g/<id>` and `tag` is `game-<id>`, so a newer
   notification for a game replaces an older one. Each request carries `TTL: 86400` (the email
   nudge covers a longer wait) and `Urgency: normal`. A push service's `2xx` sets
   `last_success_at`, `404`/`410` deletes the subscription, and anything else (a redirect, another
   status, a network error or the 5 s timeout, 08 T12) is logged by status or error class only,
-  never the endpoint (a capability URL) or the text. At most 40 subscriptions are sent to per
-  transition (a Worker invocation's subrequest budget, 09 §3), and the delivery marks and
-  deletions are one statement each.
+  never the endpoint (a capability URL) or the text. Only subscriptions whose session is live
+  are sent to (the session check's own expiry rules, 06 §4: a session past its expiry is deleted
+  only at its next use, and until then gets nothing). At most 40 subscriptions are sent to per
+  transition (a Worker invocation's subrequest budget, 09 §3), taken in turn by recipient (each
+  one's first device, then each one's second, a recipient's devices most recently useful first),
+  so no recipient's devices crowd out another's; the delivery marks and deletions are one
+  statement each.
 - Optional email nudge (default off, per-user setting): "It's your turn" after 24 h idle, max one
   per game per day; and at most one email per normal invitation, sent when it's created or claimed
   (06 §6.2), not by the sweep. Precisely (alpha A6): the sweep nudges a `playing` seat of an
