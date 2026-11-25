@@ -9,6 +9,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { address, authRepositoryContract } from "./auth-contract.js";
+import { nudgeRepositoryContract } from "./nudge-contract.js";
 import type {
   GamePlayerRecord,
   GameWriteSet,
@@ -118,6 +119,7 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
     });
 
     authRepositoryContract(() => target);
+    nudgeRepositoryContract(() => target);
 
     describe("users", () => {
       it("creates and finds a user by id and by email", async () => {

@@ -6,13 +6,15 @@
  * M2a provided users and games, enough for the `write_token` transition (03 §5.2) and the orphan
  * check (02 §7.3); M2b adds what sign-in needs: OTP challenges, sessions, rate limits, auth events
  * and API-token revocation; the alpha's framework core (A2) what one game needs: its resources and
- * invites, the game list, history, unread markers and past opponents.
+ * invites, the game list, history, unread markers and past opponents; alpha A6 the email-nudge
+ * setting, the seats due a nudge and the suppression list.
  */
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
 import type { NormalisedEmail } from "../accounts/email.js";
 import type {
   AUTH_EVENT_TYPES,
+  emailSuppressions,
   GAME_STATUSES,
   gameActions,
   gamePlayers,
@@ -64,6 +66,20 @@ export interface UserRepo {
     id: string,
     remember: { gameType: string; input: string | null; updatedAt: number },
   ): Promise<void>;
+  /**
+   * Sets `settings.emailNudges`, leaving every other key as it is now in the database. Turning
+   * nudges on also records the address's `emailId` in `users.email_id` (04), which a `nudges`
+   * unsubscribe token looks the account up by (05 §Email links).
+   */
+  setEmailNudges(
+    id: string,
+    change: { enabled: boolean; emailId: string | null; updatedAt: number },
+  ): Promise<void>;
+  /**
+   * Turns email nudges off for the account whose `users.email_id` is `emailId`, if there is one
+   * (a `nudges` unsubscribe, 05 §Email links). Repeating it changes nothing more.
+   */
+  disableNudgesByEmailId(emailId: string, updatedAt: number): Promise<void>;
   /**
    * Deletes an account that holds no game rows (04 §Account deletion steps 1, 3, 4 and 5): its
    * sessions and API tokens, its OTP challenges, blocks and past-opponent rows, the
@@ -362,10 +378,60 @@ export interface GameRepo {
   liveGames(): Promise<LiveGameRow[]>;
 }
 
+type SuppressionReason = InferSelectModel<typeof emailSuppressions>["reason"];
+
+export interface EmailSuppressionRepo {
+  /**
+   * Adds an `emailId` to `email_suppressions` (04); an address already there keeps its row and
+   * reason, so repeating it changes nothing.
+   */
+  suppress(emailHash: string, reason: SuppressionReason, createdAt: number): Promise<void>;
+}
+
+/** A seat whose user may be sent an "It's your turn" email (03 §7). */
+export interface DueNudge {
+  /** The `game_players` row. */
+  readonly playerId: string;
+  readonly gameId: string;
+  readonly gameType: string;
+  readonly gameVersion: number;
+  readonly seat: number;
+  readonly userId: string;
+  readonly email: NormalisedEmail;
+  /** The user's `users.email_id`. */
+  readonly emailId: string;
+}
+
+/** When a nudge is due (03 §7): both times are cut-offs, inclusive. */
+export interface NudgeWindow {
+  /** The seat has been in `toAct` since at or before this time. */
+  readonly idleSince: number;
+  /** The seat was last nudged at or before this time, or never. */
+  readonly nudgedBefore: number;
+}
+
+export interface NudgeRepo {
+  /**
+   * Up to `limit` seats due a nudge (03 §7), longest waiting first: a `playing` seat in `toAct`
+   * of an `active` game, idle and not nudged within the window, whose user is an onboarded human,
+   * not suspended or being deleted, with `settings.emailNudges` true and an `email_id` that isn't
+   * suppressed.
+   */
+  due(window: NudgeWindow, limit: number): Promise<DueNudge[]>;
+  /**
+   * Claims one seat's nudge: sets `last_nudged_at` to `now` only if the seat is still in `toAct`
+   * and still due by `window`. True only for the one call that changed the row. Not a game
+   * transition: the game's `version` is untouched (03 §7).
+   */
+  claim(playerId: string, now: number, window: NudgeWindow): Promise<boolean>;
+}
+
 /** All repositories a runtime provides through `Platform.repos`. */
 export interface Repositories {
   readonly users: UserRepo;
   readonly games: GameRepo;
+  readonly nudges: NudgeRepo;
+  readonly emailSuppressions: EmailSuppressionRepo;
   readonly otp: OtpRepo;
   readonly sessions: SessionRepo;
   readonly rateLimits: RateLimitRepo;

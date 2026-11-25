@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,12 @@ import { SecretFileError } from "./env.js";
 import { isRefusal, startup, verifyEmail } from "./startup.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
+/** Every committed migration: a new database applies them all. */
+const KNOWN = (
+  JSON.parse(readFileSync(join(MIGRATIONS, "meta", "_journal.json"), "utf8")) as {
+    entries: unknown[];
+  }
+).entries.length;
 const INSTALLED: Installed = {};
 
 let dir: string;
@@ -67,7 +73,7 @@ describe("startup (02 §7.3, M2a review S-6)", () => {
       migrationsFolder: MIGRATIONS,
     });
     expect(started.env["APP_SECRET"]).toBe(APP_SECRET);
-    expect(started.storage.migrations).toEqual({ applied: 1, known: 1 });
+    expect(started.storage.migrations).toEqual({ applied: KNOWN, known: KNOWN });
     started.storage.close();
   });
 

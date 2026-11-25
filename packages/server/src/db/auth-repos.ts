@@ -36,6 +36,12 @@ function asUser(row: typeof users.$inferSelect | undefined): UserRecord | null {
   return (row as UserRecord | undefined) ?? null;
 }
 
+/** `users.settings` as a JSON object: settings that aren't one count as empty. */
+const SETTINGS_OBJECT = sql`(CASE WHEN json_valid(${users.settings}) AND json_type(${users.settings}) = 'object' THEN ${users.settings} ELSE '{}' END)`;
+
+/** The user has email nudges on: `settings.emailNudges` is JSON `true`, nothing else (03 §7). */
+export const NUDGES_ON = sql`json_type(${SETTINGS_OBJECT}, '$.emailNudges') = 'true'`;
+
 export function userRepo(db: Database): UserRepo {
   return {
     async create(user) {
@@ -79,8 +85,8 @@ export function userRepo(db: Database): UserRepo {
     },
     async rememberGameOptions(id, remember) {
       // Only the two keys change, in SQL, so a concurrent change to any other setting survives
-      // (A2 review S-3). Settings that aren't a JSON object count as empty.
-      const base = sql`(CASE WHEN json_valid(${users.settings}) AND json_type(${users.settings}) = 'object' THEN ${users.settings} ELSE '{}' END)`;
+      // (A2 review S-3).
+      const base = SETTINGS_OBJECT;
       const lastOptions = sql`(CASE WHEN json_type(${base}, '$.lastOptions') = 'object' THEN json_extract(${base}, '$.lastOptions') ELSE '{}' END)`;
       const type = remember.gameType;
       const settings =
@@ -91,6 +97,26 @@ export function userRepo(db: Database): UserRepo {
         .update(users)
         .set({ settings, updatedAt: remember.updatedAt })
         .where(eq(users.id, id));
+    },
+    async setEmailNudges(id, change) {
+      // One key, in SQL, like rememberGameOptions: other settings survive a concurrent change.
+      await db
+        .update(users)
+        .set({
+          settings: sql`json_set(${SETTINGS_OBJECT}, '$.emailNudges', json(${change.enabled ? "true" : "false"}))`,
+          updatedAt: change.updatedAt,
+          ...(change.emailId === null ? {} : { emailId: change.emailId }),
+        })
+        .where(eq(users.id, id));
+    },
+    async disableNudgesByEmailId(emailId, updatedAt) {
+      await db
+        .update(users)
+        .set({
+          settings: sql`json_set(${SETTINGS_OBJECT}, '$.emailNudges', json('false'))`,
+          updatedAt,
+        })
+        .where(and(eq(users.emailId, emailId), NUDGES_ON));
     },
     async deleteAccount(user, event) {
       // Agents go with their owner (owner_user_id cascades), and their sessions and tokens with

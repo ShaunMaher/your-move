@@ -6,7 +6,9 @@
 import type {
   ApiTokenRepo,
   AuthEventRepo,
+  EmailSuppressionRepo,
   GameRepo,
+  NudgeRepo,
   OtpRepo,
   RateLimitRepo,
   Repositories,
@@ -36,6 +38,8 @@ const METHODS = {
     pastOpponentsOf: true,
     update: true,
     rememberGameOptions: true,
+    setEmailNudges: true,
+    disableNudgesByEmailId: true,
     deleteAccount: true,
   } satisfies Record<keyof UserRepo, true>,
   otp: { issue: true, live: true, attempt: true, consume: true } satisfies Record<
@@ -52,6 +56,8 @@ const METHODS = {
   rateLimits: { hit: true } satisfies Record<keyof RateLimitRepo, true>,
   authEvents: { record: true } satisfies Record<keyof AuthEventRepo, true>,
   apiTokens: { revokeAll: true } satisfies Record<keyof ApiTokenRepo, true>,
+  nudges: { due: true, claim: true } satisfies Record<keyof NudgeRepo, true>,
+  emailSuppressions: { suppress: true } satisfies Record<keyof EmailSuppressionRepo, true>,
   games: {
     create: true,
     get: true,
@@ -88,6 +94,8 @@ export function detachedRepositories(): Repositories {
   return {
     users: detached("users", METHODS.users),
     games: detached("games", METHODS.games),
+    nudges: detached("nudges", METHODS.nudges),
+    emailSuppressions: detached("emailSuppressions", METHODS.emailSuppressions),
     otp: detached("otp", METHODS.otp),
     sessions: detached("sessions", METHODS.sessions),
     rateLimits: detached("rateLimits", METHODS.rateLimits),

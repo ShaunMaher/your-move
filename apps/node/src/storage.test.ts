@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,12 @@ import { MigrationError } from "./db/migrate.js";
 import { openStorage, orphanDigest, StartupRefusal } from "./storage.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
+/** Every committed migration: a new database applies them all. */
+const KNOWN = (
+  JSON.parse(readFileSync(join(MIGRATIONS, "meta", "_journal.json"), "utf8")) as {
+    entries: unknown[];
+  }
+).entries.length;
 
 const INSTALLED: Installed = {
   words: { package: "@x/game-words", version: "1.0.0", rulesVersions: [1], enabledByDefault: true },
@@ -70,7 +76,7 @@ describe("openStorage", () => {
       installed: INSTALLED,
       allowOrphanGames: null,
     });
-    expect(storage.migrations).toEqual({ applied: 1, known: 1 });
+    expect(storage.migrations).toEqual({ applied: KNOWN, known: KNOWN });
     expect(storage.acceptedOrphans).toEqual([]);
     storage.close();
   });

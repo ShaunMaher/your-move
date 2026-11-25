@@ -37,6 +37,11 @@ export const users = sqliteTable(
       onDelete: "cascade",
     }),
     email: text("email").unique(),
+    /**
+     * The address's `emailId` (09 §1.1), set when email nudges are turned on, so a `nudges`
+     * unsubscribe token can find the account (05 §Email links).
+     */
+    emailId: text("email_id").unique(),
     displayName: text("display_name"),
     settings: text("settings").notNull().default("{}"),
     ageAttestedAt: integer("age_attested_at"),
