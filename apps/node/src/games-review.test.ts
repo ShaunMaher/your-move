@@ -177,3 +177,29 @@ describe("P-1: an invitation is one only while its lobby is open", () => {
     expect(await list(h, b, "?invitations=hidden")).toEqual([]);
   });
 });
+
+describe("P-6: unread markers", () => {
+  it("shows a new invitation unread, and never one's own transitions", async () => {
+    const h = harness();
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    const game = await createGame(h, a, { gameType: "example", invitees: [{ email: b.email }] });
+    const unread = async (player: Player) =>
+      (await list(h, player)).find((row) => row.id === game.id)?.unread;
+    expect(await unread(a)).toBe(false);
+    expect(await unread(b)).toBe(true);
+    const accepted = await transition(h, b, game.id, "accept");
+    expect(accepted.body.game.status).toBe("active");
+    expect(await unread(b)).toBe(false);
+    expect(await unread(a)).toBe(true);
+    const seat = accepted.body.game.toAct[0];
+    const mover = accepted.body.game.players.find((row) => row.seat === seat)?.userId;
+    const player = mover === a.id ? a : b;
+    const other = player === a ? b : a;
+    const { view } = await getGame(h, player, game.id);
+    const card = (view as { seats: { hand: number[] | null }[] }).seats[seat ?? 0]?.hand?.[0];
+    expect((await act(h, player, game.id, { card })).status).toBe(200);
+    expect(await unread(player)).toBe(false);
+    expect(await unread(other)).toBe(true);
+  });
+});

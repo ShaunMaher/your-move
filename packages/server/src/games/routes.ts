@@ -214,9 +214,27 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     };
   };
 
-  /** Applies a write set from the version it was computed at; `409 STALE_GAME` if it lost. */
-  const commit = async (loaded: LoadedGame, writes: GameWriteSet): Promise<void> => {
-    const result = await repos.games.applyTransition(loaded.game.id, loaded.game.version, writes);
+  /**
+   * Applies a write set from the version it was computed at; `409 STALE_GAME` if it lost. The
+   * actor has seen what they did: their own unread marker moves to the new version (A2 review
+   * P-6), in the same transition.
+   */
+  const commit = async (
+    loaded: LoadedGame,
+    writes: GameWriteSet,
+    actor: GamePlayerRecord,
+  ): Promise<void> => {
+    const seen = { lastSeenVersion: loaded.game.version + 1 };
+    const updates = writes.updatePlayers ?? [];
+    const own = updates.some((update) => update.id === actor.id);
+    const result = await repos.games.applyTransition(loaded.game.id, loaded.game.version, {
+      ...writes,
+      updatePlayers: own
+        ? updates.map((update) =>
+            update.id === actor.id ? { id: update.id, set: { ...update.set, ...seen } } : update,
+          )
+        : [...updates, { id: actor.id, set: seen }],
+    });
     if (result === "stale") throw ApiError.of("STALE_GAME");
   };
 
@@ -240,7 +258,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     if (loaded.game.version !== expectedVersion) throw ApiError.of("STALE_GAME");
     const outcome = run(ctx, viewer, now());
     if (isRefusal(outcome)) throw refusal(outcome);
-    await commit(loaded, isModuleOutcome(outcome) ? outcome.writes : outcome);
+    await commit(loaded, isModuleOutcome(outcome) ? outcome.writes : outcome, viewer);
     return gameWithViewIfMember(gameId, user);
   };
 
@@ -444,7 +462,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       run: (rng) => ctx.definition.apply(ctx.state, seat, action, rng),
       now: now(),
     });
-    await commit(loaded, outcome.writes);
+    await commit(loaded, outcome.writes, viewer);
     const after = await gameWithView(id, user);
     return c.json(
       {

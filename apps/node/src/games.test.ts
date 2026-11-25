@@ -917,12 +917,17 @@ describe("GET /api/v1/games", () => {
     }>(h, b, "GET", "/api/v1/games");
     expect(list.status).toBe(200);
     expect(list.body.games.map((game) => game.id)).toEqual([second.id, first.id]);
+    // b started the second game by accepting: their own transition, so already seen.
     expect(list.body.games[0]).toMatchObject({
       yourTurn: true,
       yourInvitation: null,
+      unread: false,
+    });
+    expect(list.body.games[1]).toMatchObject({
+      yourTurn: false,
+      yourInvitation: "normal",
       unread: true,
     });
-    expect(list.body.games[1]).toMatchObject({ yourTurn: false, yourInvitation: "normal" });
     expect(list.body.games[1]?.summary.headline).toEqual(["Waiting for 1 player"]);
     expect(list.body.nextCursor).toBeNull();
     const invitations = await call<{ games: { id: string }[] }>(
@@ -932,8 +937,8 @@ describe("GET /api/v1/games", () => {
       "/api/v1/games?invitations=true",
     );
     expect(invitations.body.games.map((game) => game.id)).toEqual([first.id]);
-    const seen = await call(h, b, "POST", `/api/v1/games/${second.id}/seen`, {
-      version: second.version,
+    const seen = await call(h, b, "POST", `/api/v1/games/${first.id}/seen`, {
+      version: first.version,
     });
     expect(seen.status).toBe(204);
     const after = await call<{ games: { id: string; unread: boolean }[] }>(
@@ -942,7 +947,7 @@ describe("GET /api/v1/games", () => {
       "GET",
       "/api/v1/games",
     );
-    expect(after.body.games.find((game) => game.id === second.id)?.unread).toBe(false);
+    expect(after.body.games.find((game) => game.id === first.id)?.unread).toBe(false);
   });
 
   it("pages with a cursor, 50 at a time", async () => {

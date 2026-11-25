@@ -32,6 +32,8 @@ const LOBBY_LIFETIME_MS = 14 * DAY;
 /** `TOO_MANY_GAMES` (05): live games a user created, in total and per invitee. */
 const MAX_LIVE_CREATED = 50;
 const MAX_LIVE_CREATED_PER_PAIR = 5;
+/** `last_seen_version` of a row its user has never seen (04): below every game version. */
+const NEVER_SEEN = -1;
 
 export interface CreateDeps {
   readonly platform: Platform;
@@ -184,6 +186,8 @@ export async function createGame(
         inviteEmail: email,
         state: "invited",
         delivery: "normal",
+        // Never seen: a new invitation is unread (A2 review P-6).
+        lastSeenVersion: NEVER_SEEN,
       };
     }),
   ];
