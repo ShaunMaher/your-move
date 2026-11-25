@@ -72,6 +72,13 @@ describe("the SDK's API types and the generated client's (02 §7.4)", () => {
     expect(checks.every(Boolean)).toBe(true);
   });
 
+  it("fail to compile when a pair drifts: the check itself is checked at typecheck", () => {
+    // If the check stopped rejecting a drifted pair, this directive would be unused and tsc fails.
+    // @ts-expect-error optional against required is drift
+    assertMutual<Mutual<{ a?: number }, { a: number }>>(true);
+    expect(true).toBe(true);
+  });
+
   it("are not trivially so: optionality and readonly arrays are told apart", () => {
     const caught = [
       assertMutual<Mutual<{ a?: unknown }, { a: unknown }> extends false ? true : never>(true),
