@@ -238,6 +238,21 @@ describe("the game frame", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it("names a seat without a display name by why it has none: New player, or Deleted player", async () => {
+    const game = envelope({
+      players: [
+        player(),
+        player({ seat: 1, userId: "u2", displayName: null, isYou: false, isCreator: false }),
+        player({ seat: 2, userId: null, displayName: null, isYou: false, isCreator: false }),
+      ],
+    });
+    open({ "GET /api/v1/games/g1": withView(game) }, { client: null });
+    const chips = within(await screen.findByRole("list", { name: "Players" })).getAllByRole(
+      "listitem",
+    );
+    expect(chips.map((chip) => chip.textContent)).toEqual(["You", "New player", "Deleted player"]);
+  });
+
   it("marks what it has shown as seen, once per version", async () => {
     const { calls } = open();
     await screen.findByRole("region", { name: "Fake board" });
