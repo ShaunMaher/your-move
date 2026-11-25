@@ -19,7 +19,7 @@ equal.
 | `PUBLIC_URL` | yes | `https://play.example.org` | Canonical origin; used for links, Origin checks, cookie mode. Must be `https`, except the local-dev origins (`http://localhost`, `127.0.0.1`, `[::1]`, 06 §4); no credentials, path, query or fragment |
 | `APP_SECRET` | yes (secret) | base64 of ≥ 32 random bytes (validated after decoding) | Root secret for HKDF subkeys — see §1.1 before ever rotating it. The public value in `config/local-dev.env` is refused outside local-dev mode |
 | `EMAIL_PROVIDER` | yes | `gmail` · `smtp` · `resend` · `postmark` · `ses` · `cloudflare` · `console` | `console` only in local-dev mode (`isLocalDev`, 06 §4); `smtp` only on Node and `cloudflare` only on Workers; refuse to start otherwise. See §2 |
-| `EMAIL_FROM` | yes | `"Your Move" <no-reply@example.org>` | |
+| `EMAIL_FROM` | yes | `"Your Move" <no-reply@example.org>` | An address sign-in would accept (04 conventions), except with `console`; refuse to start otherwise |
 | `EMAIL_API_KEY` | per provider (secret) | | Required for `resend`, `postmark` and `ses` (how SES credentials are given is settled with the SES provider) |
 | `SMTP_URL` | if `smtp` (secret) | `smtp://user:pass@mail.example.org:587` (STARTTLS) or `smtps://user:pass@host:465` | Node only; for operators with their own SMTP relay |
 | `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` | if `gmail` (secret) | | The Internal OAuth client (§2); both runtimes |

@@ -216,7 +216,7 @@ function crossFieldIssues(raw: RawEnv, options: ParseConfigOptions): string[] {
   if (!from) {
     issues.push('EMAIL_FROM: must be an address or "Name" <address>, on one line');
   } else if (raw.EMAIL_PROVIDER !== "console" && !isSendableAddress(from.address)) {
-    issues.push("EMAIL_FROM: the address must be plain ASCII that mail can be sent from");
+    issues.push("EMAIL_FROM: the address must be one mail can be sent to and from (04)");
   }
 
   switch (raw.EMAIL_PROVIDER) {

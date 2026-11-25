@@ -50,3 +50,10 @@ Both round-2 verdicts were MERGE; these are the follow-ups taken before merging.
 | A5-P2-3 | Fixed. Round trips for 0 to 5 bytes, `+` and `/` mapped to `-` and `_`, unpadded input accepted, invalid input throws. | `packages/server/src/base64.test.ts` |
 | A5-P2-4 | Fixed. The script's usage comment states its assumptions: no spaces in paths, a Linux host with a native engine, and that `000` means no connection, never a pass. | `check-tunnel-routing.sh` |
 | A5-P2-6 | Recorded: roadmap bookkeeping is the owner's edit at merge. | owner, at merge |
+
+## Round 3
+
+| ID | Resolution | Where |
+|---|---|---|
+| A5-R3-1 | Left: one commit subject is 73 characters; commitlint's limit is 100 and the branch history stays as is. | — |
+| A5-R3-2 | Fixed. 09 §1 states the `EMAIL_FROM` startup rule, and the message says the address must be one mail can be sent to and from. | `docs/spec/09-operations.md`, `packages/server/src/config/parse.ts` |
