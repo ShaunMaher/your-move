@@ -78,7 +78,12 @@ export function GameList({ api, onSessionLost }: GameListProps) {
   const [games, setGames] = useState<readonly GameSummary[] | null>(null);
   const [more, setMore] = useState<string | null>(null);
   /** Hidden invitations (06 §6.7): fetched apart, first page only; never badged or unread. */
-  const [hidden, setHidden] = useState<readonly GameSummary[]>([]);
+  const [hidden, setHidden] = useState<{ games: readonly GameSummary[]; full: boolean }>({
+    games: [],
+    full: false,
+  });
+  /** The newest hidden-invitations request: an older answer arriving later is dropped. */
+  const hiddenRequest = useRef(0);
   const [types, setTypes] = useState<ReadonlyMap<string, CatalogGame>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const loading = useRef(false);
@@ -95,8 +100,12 @@ export function GameList({ api, onSessionLost }: GameListProps) {
   const refresh = useCallback(() => {
     if (loading.current) return;
     loading.current = true;
+    hiddenRequest.current += 1;
+    const mine = hiddenRequest.current;
     void listGames(api, undefined, "hidden").then((result) => {
-      if (mounted.current && result.ok) setHidden(result.data.games);
+      if (mounted.current && mine === hiddenRequest.current && result.ok) {
+        setHidden({ games: result.data.games, full: result.data.nextCursor !== null });
+      }
     });
     void listGames(api).then((result) => {
       loading.current = false;
@@ -192,15 +201,18 @@ export function GameList({ api, onSessionLost }: GameListProps) {
           </ul>
         </details>
       )}
-      {hidden.length === 0 ? null : (
+      {hidden.games.length === 0 ? null : (
         <details className="card stack">
-          <summary>Hidden invitations ({String(hidden.length)})</summary>
+          <summary>
+            Hidden invitations ({String(hidden.games.length)}
+            {hidden.full ? "+" : ""})
+          </summary>
           <p className="hint">
             Invitations from people you haven&apos;t played before, over the daily limit. You can
             still accept or decline them.
           </p>
           <ul className="plain">
-            {hidden.map((game) => (
+            {hidden.games.map((game) => (
               <Row key={game.id} game={game} type={types.get(game.gameType)} />
             ))}
           </ul>

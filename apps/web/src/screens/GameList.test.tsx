@@ -205,6 +205,54 @@ describe("the game list", () => {
     expect(calls.filter((call) => call.search === "?invitations=hidden")).toHaveLength(1);
   });
 
+  it("says 50+ when the hidden list is a full page", async () => {
+    const { api } = fakeApi({
+      "GET /api/v1/games": list(summary({ id: "a" })),
+      "GET /api/v1/games?invitations=hidden": json({
+        games: [summary({ id: "h1", yourInvitation: "hidden" })],
+        nextCursor: "more",
+      }),
+      "GET /api/v1/catalog": json(CATALOG),
+    });
+    render(<GameList api={api} onSessionLost={vi.fn()} />);
+    expect(await screen.findByText(/Hidden invitations \(1\+\)/u)).toBeDefined();
+  });
+
+  it("drops an older hidden-invitations answer that arrives after a newer one", async () => {
+    let release: (answer: Response) => void = () => undefined;
+    const slow = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    let asked = 0;
+    const hiddenGame = (id: string, name: string) =>
+      summary({
+        id,
+        status: "lobby",
+        yourTurn: false,
+        yourInvitation: "hidden",
+        players: [
+          player({ isYou: false, displayName: name, isCreator: true, state: "joined" }),
+          player({ seat: null, state: "invited" }),
+        ],
+      });
+    const { api } = fakeApi({
+      "GET /api/v1/games": list(summary({ id: "a" })),
+      "GET /api/v1/games?invitations=hidden": () => {
+        asked += 1;
+        return asked === 1 ? slow : list(hiddenGame("new", "Newer"));
+      },
+      "GET /api/v1/catalog": json(CATALOG),
+    });
+    render(<GameList api={api} onSessionLost={vi.fn()} />);
+    await screen.findByRole("link", { name: /Alex/u });
+    fireEvent.focus(window);
+    await screen.findByText(/Hidden invitations \(1\)/u);
+    release(list(hiddenGame("old", "Older"), hiddenGame("old2", "Older too")));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.getByText(/Hidden invitations \(1\)/u)).toBeDefined();
+    expect(screen.queryByRole("link", { name: /Older/u })).toBeNull();
+  });
+
   it("shows no hidden-invitations section when there are none", async () => {
     render(<GameList api={fakeApi(routes([summary()])).api} onSessionLost={vi.fn()} />);
     await screen.findByRole("link", { name: /Alex/u });

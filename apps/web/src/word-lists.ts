@@ -58,7 +58,8 @@ let running: Promise<void> = Promise.resolve();
  */
 export function cacheWordLists(resources: GameEnvelope["resources"]): Promise<void> {
   const run = running.then(() => cacheAll(resources));
-  running = run;
+  // The chain never rejects: one failed run must not stop the next from starting.
+  running = run.catch(() => undefined);
   return run;
 }
 

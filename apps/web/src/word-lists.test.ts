@@ -137,6 +137,18 @@ describe("caching a game's public word lists", () => {
     expect([...(storage.stores.get(WORD_LIST_CACHE)?.keys() ?? [])]).toEqual(urls.slice(2));
   });
 
+  it("still runs the next call after one that failed outright", async () => {
+    const url = await nameFor(TEXT);
+    const broken = {
+      get distribution(): never {
+        throw new Error("broken resource");
+      },
+    };
+    await expect(cacheWordLists([broken as never])).rejects.toThrow("broken resource");
+    await cacheWordLists([list(url)]);
+    expect(storage.stores.get(WORD_LIST_CACHE)?.has(url)).toBe(true);
+  });
+
   it("keeps the three most recently added lists", async () => {
     const names: string[] = [];
     for (const id of ["one", "two", "three", "four"]) {
