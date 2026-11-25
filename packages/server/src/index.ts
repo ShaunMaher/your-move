@@ -25,14 +25,18 @@ export {
   type CapturedEmail,
   type EmailMessage,
   type EmailSender,
+  markAlerted,
+  wasAlerted,
 } from "./email/sender.js";
+export { toBase64Url } from "./base64.js";
 export { coreEmailSender, type CoreEmailSender } from "./email/providers.js";
 export {
   GMAIL_SEND_SCOPE,
   GmailTokenRefused,
   grantedScopes,
   idTokenClaims,
-  isSendOnly,
+  isExpectedScopes,
+  REQUIRED_SCOPES,
 } from "./email/gmail.js";
 export { DEFAULT_APP_NAME } from "./config/defaults.js";
 export { isLocalDev, isLocalDevUrl } from "./config/local-dev.js";

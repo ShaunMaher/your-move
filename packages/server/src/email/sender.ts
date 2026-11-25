@@ -24,6 +24,22 @@ export class EmailHeaderError extends Error {
   override readonly name = "EmailHeaderError";
 }
 
+const alerted = new WeakSet<object>();
+
+/**
+ * Marks a send failure whose provider has already logged its alert, so the caller logs nothing
+ * more (09 §2); returns the error for `throw markAlerted(...)`.
+ */
+export function markAlerted<T extends Error>(error: T): T {
+  alerted.add(error);
+  return error;
+}
+
+/** Whether the provider already alerted for `error` ({@link markAlerted}). */
+export function wasAlerted(error: unknown): boolean {
+  return typeof error === "object" && error !== null && alerted.has(error);
+}
+
 /**
  * Refuses a message whose header values contain a line break or other control character, so no
  * template mistake or unexpected input can inject headers (08 T14). Every provider calls it.

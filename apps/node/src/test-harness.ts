@@ -13,6 +13,7 @@ import {
   createApp,
   createConsoleEmailSender,
   createJsonLogger,
+  type EmailSender,
   type Env,
   parseConfig,
   type Platform,
@@ -105,6 +106,8 @@ export interface HarnessOptions {
   readonly nodeConfig?: Pick<NodeConfig, "trustProxy" | "trustProxyHops" | "trustProxyPeers">;
   /** Wraps the repositories, e.g. to slow one path down in a test of the timing test itself. */
   readonly wrapRepos?: (repos: Repositories) => Repositories;
+  /** Replaces the capturing email sender (e.g. one that fails). */
+  readonly sender?: EmailSender;
 }
 
 export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {}): Harness {
@@ -131,7 +134,7 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     },
     log,
     now,
-    smtp: capture,
+    smtp: options.sender ?? capture,
   });
   const app = createApp({ platform, games: [] });
   const background = createBackgroundTracker();

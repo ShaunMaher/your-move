@@ -9,10 +9,10 @@ import {
   GmailTokenRefused,
   grantedScopes,
   idTokenClaims,
-  isSendOnly,
+  isExpectedScopes,
 } from "./gmail.js";
 import { coreEmailSender } from "./providers.js";
-import { EmailHeaderError } from "./sender.js";
+import { EmailHeaderError, wasAlerted } from "./sender.js";
 import { signInCodeEmail } from "./templates.js";
 
 const FAKE = {
@@ -41,6 +41,11 @@ function jwt(claims: Record<string, unknown>): string {
   return `h.${btoa(JSON.stringify(claims)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")}.s`;
 }
 
+const GOOD_ID_TOKEN = jwt({
+  email: "No-Reply@example.org",
+  email_verified: true,
+  aud: FAKE.clientId,
+});
 const GOOD_SCOPE = `openid https://www.googleapis.com/auth/userinfo.email ${GMAIL_SEND_SCOPE}`;
 
 interface Call {
@@ -78,7 +83,7 @@ function fakeGoogle(
           expires_in: 3600,
           scope: GOOD_SCOPE,
           token_type: "Bearer",
-          id_token: jwt({ email: "No-Reply@example.org" }),
+          id_token: GOOD_ID_TOKEN,
         });
       return Promise.resolve(response);
     }
@@ -274,7 +279,7 @@ describe("gmail sender", () => {
     expectNoSecrets(lines);
   });
 
-  it("does not follow redirects and bounds each request", async () => {
+  it("never follows redirects (`manual`, which workerd supports) and bounds each request", async () => {
     let init: RequestInit | undefined;
     const now = () => new Date(0);
     const sender = createGmailEmailSender({
@@ -287,14 +292,92 @@ describe("gmail sender", () => {
       log: createJsonLogger({ level: "error", now, sink: () => undefined }),
     });
     await expect(sender.send(message)).rejects.toThrow();
-    expect(init?.redirect).toBe("error");
+    expect(init?.redirect).toBe("manual");
     expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it.each([301, 302, 303, 307, 308])(
+    "a %i from the token endpoint or from send is a failure, and nothing is followed",
+    async (status) => {
+      const redirect = () =>
+        new Response(null, { status, headers: { location: "https://evil.example/collect" } });
+      for (const script of [{ token: redirect }, { send: redirect }]) {
+        const { sender, calls, lines, sends } = setup(script);
+        await expect(sender.send(message)).rejects.toThrow();
+        expect(calls.every((call) => !call.url.includes("evil"))).toBe(true);
+        expect(sends().length).toBeLessThanOrEqual(1);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toMatchObject({ alert: "email_send_failed" });
+        expectNoSecrets(lines);
+      }
+    },
+  );
+
+  it("treats an opaque redirect (what a runtime may report for `manual`) as a failure", async () => {
+    const opaque = Object.defineProperty(new Response(null, { status: 200 }), "type", {
+      value: "opaqueredirect",
+    });
+    const { sender } = setup({ token: () => opaque });
+    await expect(sender.send(message)).rejects.toThrow();
+  });
+
+  it("every failure it rejects with is marked as already alerted (09 §2)", async () => {
+    const failures = [
+      setup({ send: () => new Response("{}", { status: 500 }) }),
+      setup({ token: () => Response.json({ error: "invalid_grant" }, { status: 400 }) }),
+      setup(withScopeFor("https://mail.google.com/")),
+    ];
+    for (const { sender, lines } of failures) {
+      const error = await sender.send(message).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(Error);
+      expect(wasAlerted(error)).toBe(true);
+      expect(lines).toHaveLength(1);
+    }
+    const header = setup();
+    const error = await header.sender
+      .send({ ...message, subject: "x\r\ny" })
+      .catch((caught: unknown) => caught);
+    expect(wasAlerted(error)).toBe(true);
+  });
+
+  it("releases the body of a response it won't read", async () => {
+    let cancelled = 0;
+    const body = () =>
+      new ReadableStream({
+        cancel() {
+          cancelled += 1;
+        },
+      });
+    const { sender } = setup({
+      send: (call) => new Response(body(), { status: call === 0 ? 401 : 500 }),
+    });
+    await expect(sender.send(message)).rejects.toThrow();
+    expect(cancelled).toBe(2);
   });
 });
 
+function withScopeFor(scope: string) {
+  return {
+    token: () =>
+      Response.json({
+        access_token: FAKE.access,
+        expires_in: 3600,
+        scope,
+        id_token: GOOD_ID_TOKEN,
+      }),
+  };
+}
+
 describe("token scope and account (09 §2, 08 T15)", () => {
   const withScope = (scope: string, extra: Record<string, unknown> = {}) => ({
-    token: () => Response.json({ access_token: FAKE.access, expires_in: 3600, scope, ...extra }),
+    token: () =>
+      Response.json({
+        access_token: FAKE.access,
+        expires_in: 3600,
+        scope,
+        id_token: GOOD_ID_TOKEN,
+        ...extra,
+      }),
   });
 
   it.each([
@@ -302,6 +385,9 @@ describe("token scope and account (09 §2, 08 T15)", () => {
     `${GMAIL_SEND_SCOPE} https://mail.google.com/`,
     `${GMAIL_SEND_SCOPE} https://www.googleapis.com/auth/gmail.modify`,
     "openid email",
+    GMAIL_SEND_SCOPE,
+    `email ${GMAIL_SEND_SCOPE}`,
+    `${GOOD_SCOPE} https://www.googleapis.com/auth/userinfo.profile`,
     "",
   ])("refuses to send with scope %j", async (scope) => {
     const { sender, sends, lines } = setup(withScope(scope));
@@ -311,22 +397,44 @@ describe("token scope and account (09 §2, 08 T15)", () => {
     expectNoSecrets(lines);
   });
 
-  it.each([GMAIL_SEND_SCOPE, `openid email ${GMAIL_SEND_SCOPE}`, GOOD_SCOPE])(
-    "accepts scope %j",
-    async (scope) => {
-      const { sender, sends } = setup(withScope(scope));
-      await sender.send(message);
-      expect(sends()).toHaveLength(1);
-    },
-  );
+  it.each([`openid email ${GMAIL_SEND_SCOPE}`, GOOD_SCOPE])("accepts scope %j", async (scope) => {
+    const { sender, sends } = setup(withScope(scope));
+    await sender.send(message);
+    expect(sends()).toHaveLength(1);
+  });
 
-  it("refuses a token whose id_token names another account", async () => {
-    const { sender, sends, lines } = setup(
-      withScope(GOOD_SCOPE, { id_token: jwt({ email: "admin@example.org" }) }),
-    );
+  const ok = { email: "no-reply@example.org", email_verified: true, aud: FAKE.clientId };
+  it.each([
+    ["another account", jwt({ ...ok, email: "admin@example.org" })],
+    ["no id_token", undefined],
+    ["an unparseable id_token", "not-a-jwt"],
+    ["an id_token with no email", jwt({ email_verified: true, aud: FAKE.clientId })],
+    ["another client", jwt({ ...ok, aud: "someone-else" })],
+    ["no audience", jwt({ email: ok.email, email_verified: true })],
+    ["an unverified email", jwt({ ...ok, email_verified: false })],
+    ["no email_verified", jwt({ email: ok.email, aud: FAKE.clientId })],
+  ])("refuses a token with %s, and sends nothing", async (_name, id_token) => {
+    const { sender, sends, lines } = setup(withScope(GOOD_SCOPE, { id_token }));
     await expect(sender.send(message)).rejects.toThrow(GmailTokenRefused);
     expect(sends()).toHaveLength(0);
     expect(lines[0]).toMatchObject({ alert: "email_token_account" });
+    expectNoSecrets(lines);
+  });
+
+  it("accepts Google's string email_verified", async () => {
+    const { sender, sends } = setup(
+      withScope(GOOD_SCOPE, { id_token: jwt({ ...ok, email_verified: "true" }) }),
+    );
+    await sender.send(message);
+    expect(sends()).toHaveLength(1);
+  });
+
+  it("logs only the scope names it knows, and a count of the others (A5-S-8)", async () => {
+    const hostile = "https://evil.example/x\nsam@example.org";
+    const { sender, lines } = setup(withScope(`${GOOD_SCOPE} ${hostile}`));
+    await expect(sender.send(message)).rejects.toThrow(GmailTokenRefused);
+    expect(lines[0]).toMatchObject({ alert: "email_token_scope", otherScopes: 2 });
+    expect(JSON.stringify(lines)).not.toContain("evil");
     expectNoSecrets(lines);
   });
 
@@ -336,7 +444,7 @@ describe("token scope and account (09 §2, 08 T15)", () => {
     ).rejects.toThrow(GmailTokenRefused);
     await expect(
       setup(
-        withScope(GOOD_SCOPE, { id_token: jwt({ email: "other@example.org" }) }),
+        withScope(GOOD_SCOPE, { id_token: jwt({ ...ok, email: "other@example.org" }) }),
       ).sender.verifyCredentials(),
     ).rejects.toThrow(GmailTokenRefused);
   });
@@ -355,9 +463,11 @@ describe("token scope and account (09 §2, 08 T15)", () => {
   });
 
   it("helpers: scope sets and id_token claims", () => {
-    expect(isSendOnly(grantedScopes(GOOD_SCOPE))).toBe(true);
-    expect(isSendOnly(grantedScopes("openid email"))).toBe(false);
-    expect(isSendOnly(grantedScopes(undefined))).toBe(false);
+    expect(isExpectedScopes(grantedScopes(GOOD_SCOPE))).toBe(true);
+    expect(isExpectedScopes(grantedScopes(`openid email ${GMAIL_SEND_SCOPE}`))).toBe(true);
+    expect(isExpectedScopes(grantedScopes("openid email"))).toBe(false);
+    expect(isExpectedScopes(grantedScopes(GMAIL_SEND_SCOPE))).toBe(false);
+    expect(isExpectedScopes(grantedScopes(undefined))).toBe(false);
     expect(idTokenClaims(jwt({ email: "a@b.c" }))).toEqual({ email: "a@b.c" });
     for (const bad of ["", "a", "a.!!!.c", "a.e30.c".replace("e30", btoa("[1]"))]) {
       expect(idTokenClaims(bad)).toBeNull();

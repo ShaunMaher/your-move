@@ -4,23 +4,32 @@
  *
  * An access token comes from the refresh token (cached until shortly before it expires); each
  * message is raw MIME from the shared builder, sent with `users.messages.send` as the one user
- * who granted the token. The token's scope must be `gmail.send` (plus `openid`/`email`): on every
- * refresh anything else, or a token that belongs to another account, is refused, so a wrongly
- * authorised token can't send.
+ * who granted the token. The token check fails closed: on every refresh the scope must be exactly
+ * what the authorize helper requests, and the `id_token` must be present, for this client, and
+ * carry GMAIL_SENDER's verified address; anything else is refused, so a wrongly authorised token
+ * can't send.
  *
  * Failures reject and log one error-level alert with fixed fields: never a secret, an address, a
  * message or Google's response text.
  */
+import { fromBase64Url, toBase64Url } from "../base64.js";
 import { parseMailbox } from "../config/email.js";
 import type { EmailConfig } from "../config/parse.js";
 import type { Logger } from "../log.js";
 import { buildMime } from "./mime.js";
-import { EmailHeaderError, type EmailMessage, type EmailSender } from "./sender.js";
+import { EmailHeaderError, type EmailMessage, type EmailSender, markAlerted } from "./sender.js";
 
 export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 const USERINFO_EMAIL_SCOPE = "https://www.googleapis.com/auth/userinfo.email";
-/** Scopes a token may carry besides `gmail.send` (what the authorize helper requests). */
-const HARMLESS_SCOPES = ["openid", "email", USERINFO_EMAIL_SCOPE];
+/**
+ * The scopes the authorize helper requests and a token must carry, exactly (Google reports `email`
+ * as its `userinfo.email` URL).
+ */
+export const REQUIRED_SCOPES: readonly string[] = [
+  "openid",
+  USERINFO_EMAIL_SCOPE,
+  GMAIL_SEND_SCOPE,
+];
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
@@ -38,6 +47,11 @@ export class GmailTokenRefused extends Error {
 /** A failure that has already been logged as an alert. */
 class LoggedFailure extends Error {
   override readonly name = "LoggedFailure";
+}
+
+/** A redirect answer: never followed (a token or a message must go only where the URL says). */
+class RedirectRefused extends Error {
+  override readonly name = "RedirectRefused";
 }
 
 /** What the sender returns beyond `send`: a check the Node startup runs (09 §2 step 3). */
@@ -62,9 +76,7 @@ export function idTokenClaims(idToken: string): Record<string, unknown> | null {
   const payload = idToken.split(".")[1];
   if (payload === undefined) return null;
   try {
-    const base64 = payload.replaceAll("-", "+").replaceAll("_", "/");
-    const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
-    const claims: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    const claims: unknown = JSON.parse(new TextDecoder().decode(fromBase64Url(payload)));
     return typeof claims === "object" && claims !== null && !Array.isArray(claims)
       ? (claims as Record<string, unknown>)
       : null;
@@ -80,13 +92,28 @@ export function grantedScopes(scope: unknown): Set<string> {
   return new Set(scopes.map((value) => (value === "email" ? USERINFO_EMAIL_SCOPE : value)));
 }
 
-/** Whether `scopes` is `gmail.send` plus at most the harmless identity scopes. */
-export function isSendOnly(scopes: ReadonlySet<string>): boolean {
-  const allowed = new Set([
-    GMAIL_SEND_SCOPE,
-    ...HARMLESS_SCOPES.map((value) => (value === "email" ? USERINFO_EMAIL_SCOPE : value)),
-  ]);
-  return scopes.has(GMAIL_SEND_SCOPE) && [...scopes].every((value) => allowed.has(value));
+/** Whether `scopes` is exactly {@link REQUIRED_SCOPES}: no more, no fewer. */
+export function isExpectedScopes(scopes: ReadonlySet<string>): boolean {
+  return scopes.size === REQUIRED_SCOPES.length && REQUIRED_SCOPES.every((s) => scopes.has(s));
+}
+
+/** The names in `scopes` that are ours to log, and how many others there were (never Google's text). */
+function describeScopes(scopes: ReadonlySet<string>): { scope: string; otherScopes: number } {
+  const known = REQUIRED_SCOPES.filter((name) => scopes.has(name));
+  return { scope: known.join(" "), otherScopes: scopes.size - known.length };
+}
+
+/** Whether `idToken` is for this client and carries the sender's verified address. */
+function idTokenIsSenders(idToken: unknown, clientId: string, sender: string): boolean {
+  const claims = typeof idToken === "string" ? idTokenClaims(idToken) : null;
+  const email = claims?.["email"];
+  return (
+    claims !== null &&
+    claims["aud"] === clientId &&
+    (claims["email_verified"] === true || claims["email_verified"] === "true") &&
+    typeof email === "string" &&
+    email.toLowerCase() === sender
+  );
 }
 
 /** An OAuth error code such as `invalid_grant`, if the body has one in the fixed vocabulary. */
@@ -102,12 +129,19 @@ export function createGmailEmailSender(options: GmailOptions): GmailEmailSender 
   let cached: { token: string; expiresAt: number } | null = null;
   let refreshing: Promise<string> | null = null;
 
-  const post = (url: string, init: RequestInit): Promise<Response> =>
-    options.fetch(url, {
+  /** Posts without following redirects (`error` is unsupported on Workers); a redirect is a failure. */
+  async function post(url: string, init: RequestInit): Promise<Response> {
+    const response = await options.fetch(url, {
       ...init,
-      redirect: "error",
+      redirect: "manual",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
+    if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
+      await discard(response);
+      throw new RedirectRefused("gmail answered with a redirect");
+    }
+    return response;
+  }
 
   async function refresh(): Promise<string> {
     const response = await post(TOKEN_URL, {
@@ -138,26 +172,24 @@ export function createGmailEmailSender(options: GmailOptions): GmailEmailSender 
       id_token?: unknown;
     } | null;
     const scopes = grantedScopes(fields?.scope);
-    if (!isSendOnly(scopes)) {
-      log.error("the gmail token's scope is not gmail.send only: refusing to send with it", {
+    if (!isExpectedScopes(scopes)) {
+      log.error("the gmail token's scopes are not exactly openid, email and gmail.send: refusing", {
         alert: "email_token_scope",
         provider: "gmail",
-        scope: [...scopes].join(" "),
+        ...describeScopes(scopes),
       });
-      throw new GmailTokenRefused("the Gmail refresh token must grant gmail.send and nothing else");
+      throw new GmailTokenRefused(
+        "the Gmail refresh token must grant exactly openid, email and gmail.send",
+      );
     }
-    if (typeof fields?.id_token === "string") {
-      const claims = idTokenClaims(fields.id_token);
-      const email = typeof claims?.["email"] === "string" ? claims["email"].toLowerCase() : null;
-      if (email !== null && email !== config.sender) {
-        log.error("the gmail token belongs to another account than GMAIL_SENDER", {
-          alert: "email_token_account",
-          provider: "gmail",
-        });
-        throw new GmailTokenRefused(
-          "the Gmail refresh token belongs to an account other than GMAIL_SENDER",
-        );
-      }
+    if (!idTokenIsSenders(fields?.id_token, config.clientId, config.sender)) {
+      log.error("the gmail token is not GMAIL_SENDER's verified account for this client", {
+        alert: "email_token_account",
+        provider: "gmail",
+      });
+      throw new GmailTokenRefused(
+        "the Gmail refresh token does not belong to GMAIL_SENDER (id_token missing, unverified, or for another account or client)",
+      );
     }
     if (typeof fields?.access_token !== "string" || typeof fields.expires_in !== "number") {
       log.error("gmail token response is malformed", {
@@ -188,7 +220,7 @@ export function createGmailEmailSender(options: GmailOptions): GmailEmailSender 
     return post(SEND_URL, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ raw: toBase64Url(raw) }),
+      body: JSON.stringify({ raw: toBase64Url(new TextEncoder().encode(raw)) }),
     });
   }
 
@@ -208,9 +240,11 @@ export function createGmailEmailSender(options: GmailOptions): GmailEmailSender 
         if (response.status === 401) {
           // The cached token was revoked or expired early: one fresh one, then give up.
           cached = null;
+          await discard(response);
           response = await sendRaw(raw, await accessToken());
         }
         if (!response.ok) {
+          await discard(response);
           log.error("gmail rejected the message: it was not sent", {
             alert: "email_send_failed",
             provider: "gmail",
@@ -218,21 +252,25 @@ export function createGmailEmailSender(options: GmailOptions): GmailEmailSender 
           });
           throw new LoggedFailure(`gmail send failed with status ${response.status.toString()}`);
         }
+        await discard(response);
       } catch (error) {
-        // Token failures and rejections logged their own alert; the rest are logged here.
-        if (error instanceof GmailTokenRefused || error instanceof LoggedFailure) throw error;
+        // Whatever fails, one alert has been logged by the end of this block (token failures and
+        // rejections logged their own); the error is marked so the caller logs nothing more (09 §2).
+        if (error instanceof GmailTokenRefused || error instanceof LoggedFailure) {
+          throw markAlerted(error);
+        }
         if (error instanceof EmailHeaderError) {
           log.error("the message has an unsafe header: it was not sent", {
             alert: "email_send_failed",
             provider: "gmail",
           });
-          throw error;
+          throw markAlerted(error);
         }
         log.error("gmail could not be reached: the message was not sent", {
           alert: "email_send_failed",
           provider: "gmail",
         });
-        throw new Error("gmail could not be reached");
+        throw markAlerted(new Error("gmail could not be reached"));
       }
     },
     async verifyCredentials(): Promise<void> {
@@ -253,9 +291,11 @@ export function createGmailEmailSender(options: GmailOptions): GmailEmailSender 
   };
 }
 
-function toBase64Url(value: string): string {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+/** Releases a response body nobody will read (the connection can then be reused or closed). */
+async function discard(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // Nothing to release.
+  }
 }
