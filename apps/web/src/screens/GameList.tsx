@@ -64,7 +64,7 @@ function Row({
           {game.yourTurn && game.status === "active" ? (
             <span className="badge">Your turn</span>
           ) : null}
-          {game.yourInvitation !== null && game.status === "lobby" ? (
+          {game.yourInvitation === "normal" && game.status === "lobby" ? (
             <span className="badge">Invitation</span>
           ) : null}
           {game.unread ? <span className="badge quiet">New</span> : null}
@@ -77,6 +77,8 @@ function Row({
 export function GameList({ api, onSessionLost }: GameListProps) {
   const [games, setGames] = useState<readonly GameSummary[] | null>(null);
   const [more, setMore] = useState<string | null>(null);
+  /** Hidden invitations (06 §6.7): fetched apart, first page only; never badged or unread. */
+  const [hidden, setHidden] = useState<readonly GameSummary[]>([]);
   const [types, setTypes] = useState<ReadonlyMap<string, CatalogGame>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const loading = useRef(false);
@@ -93,6 +95,9 @@ export function GameList({ api, onSessionLost }: GameListProps) {
   const refresh = useCallback(() => {
     if (loading.current) return;
     loading.current = true;
+    void listGames(api, undefined, "hidden").then((result) => {
+      if (mounted.current && result.ok) setHidden(result.data.games);
+    });
     void listGames(api).then((result) => {
       loading.current = false;
       if (!mounted.current) return;
@@ -182,6 +187,20 @@ export function GameList({ api, onSessionLost }: GameListProps) {
           <summary>Finished ({String(finished.length)})</summary>
           <ul className="plain">
             {finished.map((game) => (
+              <Row key={game.id} game={game} type={types.get(game.gameType)} />
+            ))}
+          </ul>
+        </details>
+      )}
+      {hidden.length === 0 ? null : (
+        <details className="card stack">
+          <summary>Hidden invitations ({String(hidden.length)})</summary>
+          <p className="hint">
+            Invitations from people you haven&apos;t played before, over the daily limit. You can
+            still accept or decline them.
+          </p>
+          <ul className="plain">
+            {hidden.map((game) => (
               <Row key={game.id} game={game} type={types.get(game.gameType)} />
             ))}
           </ul>

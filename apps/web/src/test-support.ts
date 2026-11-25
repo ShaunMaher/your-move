@@ -25,6 +25,8 @@ export const ME = {
 interface Call {
   readonly method: string;
   readonly path: string;
+  /** The query string, with its `?`, or an empty string. */
+  readonly search: string;
   readonly body: unknown;
 }
 
@@ -49,9 +51,21 @@ export function fakeApi(routes: Routes) {
       const method = request.method;
       const path = new URL(request.url).pathname;
       const text = await request.clone().text();
-      const call = { method, path, body: text === "" ? undefined : (JSON.parse(text) as unknown) };
+      const call = {
+        method,
+        path,
+        search: new URL(request.url).search,
+        body: text === "" ? undefined : (JSON.parse(text) as unknown),
+      };
       calls.push(call);
-      const route: Handler | Response | Error | undefined = routes[`${method} ${path}`];
+      // A route may name a query (`GET /api/v1/games?invitations=hidden`); the hidden-invitation
+      // list is empty unless a test says otherwise.
+      const search = new URL(request.url).search;
+      const route: Handler | Response | Error | undefined =
+        routes[`${method} ${path}${search}`] ??
+        (search === "?invitations=hidden" && path === "/api/v1/games"
+          ? json({ games: [], nextCursor: null })
+          : routes[`${method} ${path}`]);
       const answer = typeof route === "function" ? await route(call) : route;
       // A body can be read once; the same route may be asked again.
       if (answer instanceof Response) return answer.clone();

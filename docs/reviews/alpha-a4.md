@@ -38,3 +38,9 @@ are in v0.9.17 (the README history line).
 | ID | Outcome | Where |
 |---|---|---|
 | A4-A3-1 | Fixed. axe's `label-content-name-mismatch` (WCAG 2.5.3) rejected the board: a premium square's face reads "3W" while its name said "triple word", and a tile's face reads "A1" while its name said "A, 1 point". A premium square's name now starts with its face text ("Row 1, column 3, 3W, triple word, empty") and a tile's face has a space between letter and points (not drawn: the tile is a flex box) so it reads "A 1". Tests: every square's name contains its face text, and every tile's. The e2e skip (`BOARD_LABELS`) is removed. | `games/words/src/client/BoardGrid.tsx`, `Tile.tsx`, `Board.test.tsx`, `tests/e2e/src/game.spec.ts` |
+
+## Hidden invitations (A4-A2-1)
+
+| ID | Outcome | Where |
+|---|---|---|
+| A4-A2-1 | Done (owner addition, from the A2 security review). The game list has a collapsed "Hidden invitations" section, shown only when there are any, fetched apart with `?invitations=hidden` (06 §6.7, 07 §1), with the line "Invitations from people you haven't played before, over the daily limit" and rows that open the lobby, where Accept and Decline work as for normal invitations. A hidden invitation has no badge (the "Invitation" badge is for `yourInvitation: "normal"` only). The generated client on this branch already types the `invitations: "true" \| "hidden"` query, so no string workaround was needed. Only the first page (50) is fetched; no "show more" for hidden ones. Tests: the section is collapsed, explained, badge-free, links to the lobby, is not among the invitations, and is absent when empty. | `apps/web/src/screens/GameList.tsx`, `game-api.ts`, `GameList.test.tsx`, `test-support.ts` |

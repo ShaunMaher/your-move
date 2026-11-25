@@ -136,7 +136,8 @@ describe("the game list", () => {
     });
     render(<GameList api={api} onSessionLost={vi.fn()} />);
     await screen.findByRole("link", { name: /Alex/u });
-    const fetched = () => calls.filter((call) => call.path === "/api/v1/games").length;
+    const fetched = () =>
+      calls.filter((call) => call.path === "/api/v1/games" && call.search === "").length;
     expect(fetched()).toBe(1);
     // Nothing is waiting on anyone else, and a new invitation still turns up by itself.
     games = [
@@ -162,7 +163,8 @@ describe("the game list", () => {
     });
     render(<GameList api={api} onSessionLost={vi.fn()} />);
     await screen.findByRole("link", { name: /Alex/u });
-    const fetched = () => calls.filter((call) => call.path === "/api/v1/games").length;
+    const fetched = () =>
+      calls.filter((call) => call.path === "/api/v1/games" && call.search === "").length;
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
     await vi.advanceTimersByTimeAsync(60_000);
     expect(fetched()).toBe(1);
@@ -172,6 +174,41 @@ describe("the game list", () => {
       expect(fetched()).toBe(2);
     });
     visibility.mockRestore();
+  });
+
+  it("collects hidden invitations in a collapsed section with no badge, and they can be opened", async () => {
+    const hiddenOne = summary({
+      id: "h1",
+      status: "lobby",
+      yourTurn: false,
+      yourInvitation: "hidden",
+      players: [
+        player({ isYou: false, displayName: "Robin", isCreator: true, state: "joined" }),
+        player({ seat: null, state: "invited" }),
+      ],
+    });
+    const { api, calls } = fakeApi({
+      "GET /api/v1/games": list(summary({ id: "a", yourTurn: true })),
+      "GET /api/v1/games?invitations=hidden": list(hiddenOne),
+      "GET /api/v1/catalog": json(CATALOG),
+    });
+    render(<GameList api={api} onSessionLost={vi.fn()} />);
+    const summaryLine = await screen.findByText(/Hidden invitations \(1\)/u);
+    const section = summaryLine.closest("details") as HTMLDetailsElement;
+    expect(section.open).toBe(false);
+    expect(within(section).getByText(/haven.t played before, over the daily limit/u)).toBeDefined();
+    const row = within(section).getByRole("link", { name: /Robin/u });
+    expect(within(row).queryByText("Invitation")).toBeNull();
+    expect(row.getAttribute("href")).toBe("/g/h1");
+    // They are not in the invitations section, and the default list never asked for them.
+    expect(screen.queryByRole("region", { name: /Invitations/u })).toBeNull();
+    expect(calls.filter((call) => call.search === "?invitations=hidden")).toHaveLength(1);
+  });
+
+  it("shows no hidden-invitations section when there are none", async () => {
+    render(<GameList api={fakeApi(routes([summary()])).api} onSessionLost={vi.fn()} />);
+    await screen.findByRole("link", { name: /Alex/u });
+    expect(screen.queryByText(/Hidden invitations/u)).toBeNull();
   });
 
   it("loads more when there are more pages", async () => {
@@ -185,7 +222,11 @@ describe("the game list", () => {
     render(<GameList api={api} onSessionLost={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Show more games" }));
     await waitFor(() => {
-      expect(calls.filter((call) => call.path === "/api/v1/games")).toHaveLength(2);
+      expect(
+        calls.filter(
+          (call) => call.path === "/api/v1/games" && call.search !== "?invitations=hidden",
+        ),
+      ).toHaveLength(2);
     });
   });
 });

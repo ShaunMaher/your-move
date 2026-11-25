@@ -70,8 +70,18 @@ async function settle<T>(request: Promise<Settled<T>>): Promise<Call<T>> {
   }
 }
 
-export const listGames = (api: ApiClient, cursor?: string) =>
-  settle(api.GET("/api/v1/games", { params: { query: cursor === undefined ? {} : { cursor } } }));
+/** `invitations: "hidden"` lists only the collapsed hidden invitations (06 §6.7), excluded otherwise. */
+export const listGames = (api: ApiClient, cursor?: string, invitations?: "hidden") =>
+  settle(
+    api.GET("/api/v1/games", {
+      params: {
+        query: {
+          ...(cursor === undefined ? {} : { cursor }),
+          ...(invitations === undefined ? {} : { invitations }),
+        },
+      },
+    }),
+  );
 
 export const loadCatalogFrom = (api: ApiClient) => settle(api.GET("/api/v1/catalog"));
 
