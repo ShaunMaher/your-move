@@ -790,6 +790,9 @@ importers:
       '@your-move/game-example':
         specifier: workspace:*
         version: link:../../games/example
+      '@your-move/node':
+        specifier: workspace:*
+        version: link:../../apps/node
       '@your-move/server':
         specifier: workspace:*
         version: link:../../packages/server

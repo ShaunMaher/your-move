@@ -3,7 +3,8 @@
  * fetched from the static-assets binding, where the build publishes the dictionaries' served
  * layout under `/assets/dictionaries/` (the same files clients download). The index is read once
  * per isolate, when the app is built; each word list on first use, the whole body inside the load
- * (10 M3). The core adds the timeout and the brief negative cache around `loadText`.
+ * (10 M3). The core adds the timeout around `loadText`, and the brief negative cache around the
+ * whole load, its size and hash check included.
  */
 import { type BuiltinDictionaries, parseIndex, servedFileName } from "@your-move/server";
 

@@ -6,7 +6,8 @@
   "license": "BSD-2-Clause",
   "type": "module",
   "exports": {
-    ".": "./src/server.ts"
+    ".": "./src/server.ts",
+    "./db": "./src/db/sqlite.ts"
   },
   "scripts": {
     "dev": "pnpm --filter @your-move/web --filter @your-move/dictionary build && DATABASE_PATH=\"$(cd ../.. && pwd)/data/dev.sqlite\" node --disallow-code-generation-from-strings --env-file=../../config/local-dev.env --import tsx src/main.ts --static ../web/dist --migrations ../../packages/server/migrations --dictionaries ../../packages/dictionary/generated/served",

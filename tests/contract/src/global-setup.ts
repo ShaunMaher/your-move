@@ -19,6 +19,8 @@ import { CONTRACT_SECRETS, CONTRACT_VARS } from "./env.js";
 declare module "vitest" {
   export interface ProvidedContext {
     nodeUrl: string;
+    /** The Node build's database file, for seeding signed-in players (no email is readable). */
+    nodeDb: string;
   }
 }
 
@@ -72,6 +74,7 @@ export default async function setup(project: TestProject): Promise<() => void> {
   const port = await freePort();
   // A fresh database, migrated by the Node build at startup.
   const data = mkdtempSync(join(tmpdir(), "contract-db-"));
+  const database = join(data, "app.sqlite");
   const child = spawn(process.execPath, ["--disallow-code-generation-from-strings", NODE_MAIN], {
     env: {
       ...process.env,
@@ -79,7 +82,7 @@ export default async function setup(project: TestProject): Promise<() => void> {
       ...CONTRACT_SECRETS,
       PORT: String(port),
       LOG_LEVEL: "warn",
-      DATABASE_PATH: join(data, "app.sqlite"),
+      DATABASE_PATH: database,
     },
     stdio: ["ignore", "inherit", "inherit"],
   });
@@ -93,6 +96,7 @@ export default async function setup(project: TestProject): Promise<() => void> {
     throw error;
   }
   project.provide("nodeUrl", url);
+  project.provide("nodeDb", database);
   return () => {
     child.kill("SIGTERM");
     rmSync(data, { recursive: true, force: true });

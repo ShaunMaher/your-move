@@ -5,13 +5,21 @@
 import { readFileSync } from "node:fs";
 
 import { createApiClient } from "@your-move/api-client";
-import { securityHeaders } from "@your-move/server";
+import { normaliseAddress, type Repositories, securityHeaders } from "@your-move/server";
+import { createSession } from "@your-move/server/testing";
 import { ClientConfigSchema, ErrorResponseSchema } from "@your-move/shared";
 import { describe, expect, it } from "vitest";
+
+import { CONTRACT_VARS } from "./env.js";
 
 export interface Target {
   /** Sends a request to the runtime under test. */
   fetch(request: Request): Promise<Response>;
+  /**
+   * The runtime's own database, for seeding signed-in players: the contract configuration sends
+   * no email, so no sign-in code can be read.
+   */
+  repos(): Promise<Repositories>;
 }
 
 /** Every runtime is configured with an https PUBLIC_URL and no Turnstile. */
@@ -31,6 +39,48 @@ export function expectSecurityHeaders(response: Response): void {
   for (const [name, value] of Object.entries(EXPECTED_HEADERS)) {
     expect(response.headers.get(name), name).toBe(value);
   }
+}
+
+/** The instance's own origin, which cookie requests must send (08 §3). */
+const CONTRACT_ORIGIN = new URL(CONTRACT_VARS.PUBLIC_URL).origin;
+
+/** The built-in `enable` list, as the dictionary build publishes it. */
+function enableWords(): string[] {
+  const served = new URL("../../../packages/dictionary/generated/served/", import.meta.url);
+  const index = JSON.parse(readFileSync(new URL("index.json", served), "utf8")) as {
+    dictionaries: { id: string; version: number; wordsSha256: string }[];
+  };
+  const manifest = index.dictionaries.find((entry) => entry.id === "enable");
+  if (manifest === undefined) throw new Error("no built-in enable list");
+  const name = `${manifest.id}-v${String(manifest.version)}.${manifest.wordsSha256.slice(0, 16)}.txt`;
+  return readFileSync(new URL(name, served), "utf8").split("\n");
+}
+
+/**
+ * An opening play: a word of the built-in list spelled from the rack (blanks standing in), across
+ * the centre. A rack of seven always spells one.
+ */
+function openingPlay(size: number, rack: readonly string[]) {
+  const centre = Math.floor(size / 2);
+  for (const word of enableWords()) {
+    if (word.length < 2 || word.length > rack.length) continue;
+    const left = [...rack];
+    const tiles: { tile: string; letter?: string }[] = [];
+    for (const letter of word) {
+      const own = left.indexOf(letter);
+      const blank = left.indexOf("?");
+      const index = own >= 0 ? own : blank;
+      if (index < 0) break;
+      left.splice(index, 1);
+      tiles.push(own >= 0 ? { tile: letter } : { tile: "?", letter });
+    }
+    if (tiles.length !== word.length) continue;
+    return {
+      type: "play" as const,
+      placements: tiles.map((tile, i) => ({ row: centre, col: centre + i, ...tile })),
+    };
+  }
+  throw new Error("the rack spells no word");
 }
 
 export function contractSuite(name: string, target: () => Target): void {
@@ -103,6 +153,68 @@ export function contractSuite(name: string, target: () => Target): void {
         expect((await response.text()).length).toBe(manifest.bytes);
         expect(response.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
       });
+    });
+
+    it("plays a word from the built-in list: the runtime's dictionary loader runs (A2 review P-8)", async () => {
+      const repos = await target().repos();
+      const now = Date.now();
+      const player = async (name: string) => {
+        const id = crypto.randomUUID();
+        const email = normaliseAddress(`contract-${id}@example.org`);
+        if (email === null) throw new Error("not an address");
+        await repos.users.createOrGetByEmail({
+          id,
+          email,
+          displayName: name,
+          onboardedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+        const token = await createSession(repos, id, now, undefined);
+        return { id, email, cookie: `__Host-sid=${token}` };
+      };
+      const [a, b] = [await player("Ada"), await player("Bo")];
+      const as = (who: { cookie: string }) => ({
+        Cookie: who.cookie,
+        Origin: CONTRACT_ORIGIN,
+      });
+      const created = await client().POST("/api/v1/games", {
+        body: { gameType: "words", invitees: [{ email: b.email }] },
+        headers: as(a),
+      });
+      expect(created.response.status).toBe(201);
+      const gameId = created.data?.game.id ?? "";
+      const accepted = await client().POST("/api/v1/games/{id}/accept", {
+        params: { path: { id: gameId } },
+        body: { expectedVersion: created.data?.game.version ?? 0 },
+        headers: as(b),
+      });
+      expect(accepted.data?.game.status).toBe("active");
+      const seat = accepted.data?.game.toAct[0];
+      const mover =
+        accepted.data?.game.players.find((row) => row.seat === seat)?.userId === a.id ? a : b;
+      const read = await client().GET("/api/v1/games/{id}", {
+        params: { path: { id: gameId } },
+        headers: as(mover),
+      });
+      const view = read.data?.view as {
+        board: unknown[][];
+        yourRack: string[];
+      };
+      const action = openingPlay(view.board.length, view.yourRack);
+      const preview = await client().POST("/api/v1/games/{id}/preview", {
+        params: { path: { id: gameId } },
+        body: { action },
+        headers: as(mover),
+      });
+      expect(preview.response.status).toBe(200);
+      const played = await client().POST("/api/v1/games/{id}/actions", {
+        params: { path: { id: gameId } },
+        body: { expectedVersion: read.data?.game.version ?? 0, action },
+        headers: as(mover),
+      });
+      expect(played.response.status).toBe(200);
+      expect((played.data?.record as { type: string }).type).toBe("play");
     });
 
     it("GET /api/v1/openapi.json serves the committed document", async () => {

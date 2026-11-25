@@ -6,6 +6,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { d1Repositories } from "@your-move/worker/d1";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestHarness, type TestHarness } from "wrangler";
 
@@ -88,6 +89,13 @@ async function send(
 }
 
 contractSuite("Worker", () => ({
+  // The Worker's own D1 binding, through the harness.
+  repos: async () => {
+    const env = (await harness.getWorker().getEnv()) as {
+      DB: Parameters<typeof d1Repositories>[0];
+    };
+    return d1Repositories(env.DB);
+  },
   fetch: async (request) => {
     const url = new URL(request.url);
     return send(url.pathname + url.search, {
