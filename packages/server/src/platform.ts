@@ -9,10 +9,11 @@ import type { Repositories } from "./db/repositories.js";
 import type { CoreEmailSender } from "./email/providers.js";
 import type { BuiltinDictionaries } from "./games/resources.js";
 import type { Logger } from "./log.js";
+import type { PushSender } from "./push/sender.js";
 
 /**
  * What the runtime provides to the core. Storage arrived in M2a, email and the client address in
- * M2b, the built-in dictionaries in A2; realtime and push join in M3/M4, blobs in M6.
+ * M2b, the built-in dictionaries in A2, Web Push in alpha A8; realtime joins in M3, blobs in M6.
  *
  * Background work (`waitUntil`) is per request, not per isolate: on Workers it is the request's
  * `ctx.waitUntil`, which the runtime hands to `app.fetch(request, env, ctx)`; Node passes an
@@ -26,6 +27,11 @@ export interface Platform {
   readonly log: Logger;
   /** Sends email (09 §2); called only in the background (06 §3.2). */
   readonly email: CoreEmailSender;
+  /**
+   * Sends Web Push messages (03 §7), built by the core's `corePushSender`; called only in the
+   * background. Disabled when VAPID isn't configured.
+   */
+  readonly push: PushSender;
   /**
    * The client address of a request (08 §4.1): `CF-Connecting-IP` on Workers; on Node by
    * `TRUST_PROXY`. `env` is what the runtime passed to `app.fetch`.

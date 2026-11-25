@@ -36,4 +36,11 @@ paths = [
 # accepts it only when PUBLIC_URL is http://localhost. Only this exact value is allowed.
 regexes = [
   '''bG9jYWwtZGV2LW9ubHktbm90LWEtc2VjcmV0LWRvLW5vdC11c2U=''',
+  # RFC 8291 Appendix A's example keys (both private keys, the application server's public key)
+  # and auth secret, published in the RFC: the Web Push tests check the encryption against its
+  # worked example and use the application server pair as test VAPID keys. Never a deployment's.
+  '''BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8''',
+  '''yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw''',
+  '''q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94''',
+  '''BTBZMqHH6r4Tts7J_aSIgg''',
 ]

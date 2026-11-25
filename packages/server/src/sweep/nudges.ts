@@ -9,15 +9,13 @@
  * The email carries only the game type's name, display names and the last public `describe` text
  * (08 T18): the game's state, options and scores are never read here.
  */
-import { formatText } from "@your-move/sdk";
-import { TextSchema } from "@your-move/shared";
-
 import { alertOncePerWindow, checkLimits } from "../auth/limits.js";
 import type { Subkeys } from "../crypto/subkeys.js";
 import type { DueNudge, NudgeWindow, Repositories } from "../db/repositories.js";
 import { wasAlerted } from "../email/sender.js";
 import { nudgeEmail } from "../email/templates.js";
 import { unsubscribeToken, unsubscribeUrl } from "../email/unsubscribe-token.js";
+import { namesBySeat, playerName, renderStoredText, seatedRows } from "../games/names.js";
 import type { GameRegistry } from "../games/registry.js";
 import type { Platform } from "../platform.js";
 
@@ -54,35 +52,12 @@ export interface NudgeStepOptions {
   readonly perRun: number;
 }
 
-/** A stored `describe` text with the names filled in (02 §5), or null if it can't be read. */
-function renderDescribe(stored: string, names: readonly string[]): string | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stored);
-  } catch {
-    return null;
-  }
-  const text = TextSchema.safeParse(parsed);
-  return text.success ? formatText(text.data, names) : null;
-}
-
-/** A seat whose account was deleted (02 §5, 04 §Account deletion). */
-const DELETED_PLAYER = "Deleted player";
-/** A display name that isn't set (04 `users.display_name`). */
-const NEW_PLAYER = "New player";
-
-/**
- * Names by seat (02 §5): "You" for the recipient, a seated player's display name, "New player" for
- * one without a name and "Deleted player" for a deleted account. Every seated row gets one.
- */
+/** Names by seat and the other seated players' names (02 §5), for the recipient's seat. */
 async function seatNames(
   repos: Repositories,
   nudge: DueNudge,
 ): Promise<{ names: string[]; opponents: string[] }> {
-  const players = await repos.games.players(nudge.gameId);
-  const seated = players.filter(
-    (row) => row.seat !== null && (row.state === "playing" || row.state === "out"),
-  );
+  const seated = seatedRows(await repos.games.players(nudge.gameId));
   const users = new Map(
     (
       await repos.users.findByIds(
@@ -90,19 +65,10 @@ async function seatNames(
       )
     ).map((user) => [user.id, user]),
   );
-  const names: string[] = [];
-  const opponents: string[] = [];
-  for (const row of seated) {
-    if (row.seat === null) continue;
-    if (row.seat === nudge.seat) {
-      names[row.seat] = "You";
-      continue;
-    }
-    const user = row.userId === null ? undefined : users.get(row.userId);
-    const name = user === undefined ? DELETED_PLAYER : (user.displayName ?? NEW_PLAYER);
-    names[row.seat] = name;
-    opponents.push(name);
-  }
+  const names = namesBySeat(seated, users, nudge.seat);
+  const opponents = seated
+    .filter((row) => row.seat !== nudge.seat)
+    .map((row) => playerName(row, users));
   return { names, opponents };
 }
 
@@ -119,7 +85,7 @@ async function buildNudge(
     appName: options.appName,
     gameName: options.gameName,
     opponents,
-    lastMove: last === undefined ? null : renderDescribe(last.describe, names),
+    lastMove: last === undefined ? null : renderStoredText(last.describe, names),
     gameUrl: new URL(`/g/${encodeURIComponent(nudge.gameId)}`, options.publicUrl).toString(),
     settingsUrl: new URL("/settings", options.publicUrl).toString(),
     unsubscribeUrl: unsubscribeUrl(options.publicUrl, token),

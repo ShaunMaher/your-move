@@ -15,6 +15,7 @@ import {
 } from "./auth-repos.js";
 import { type Database, runBatch, type Statement } from "./database.js";
 import { emailSuppressionRepo, nudgeRepo } from "./nudge-repos.js";
+import { pushSubscriptionRepo } from "./push-repos.js";
 import { transitionStatements } from "./queries/transition.js";
 import type {
   GameRepo,
@@ -276,6 +277,7 @@ export function createRepositories(db: Database): Repositories {
     games: gameRepo(db),
     nudges: nudgeRepo(db),
     emailSuppressions: emailSuppressionRepo(db),
+    pushSubscriptions: pushSubscriptionRepo(db),
     otp: otpRepo(db),
     sessions: sessionRepo(db),
     rateLimits: rateLimitRepo(db),

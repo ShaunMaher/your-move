@@ -1,7 +1,7 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { LOCAL_ENV, PROD_ENV } from "../test-support.js";
+import { LOCAL_ENV, PROD_ENV, TEST_VAPID } from "../test-support.js";
 import { DEFAULT_APP_NAME } from "./defaults.js";
 import { LOCAL_DEV_APP_SECRET } from "./local-dev.js";
 import {
@@ -97,8 +97,8 @@ describe("parseConfig: valid configurations", () => {
         APP_NAME: "Family Games",
         APP_SHORT_NAME: "Games",
         MIN_AGE: "16",
-        VAPID_PUBLIC_KEY: "vapid-public",
-        VAPID_PRIVATE_KEY: "vapid-private",
+        VAPID_PUBLIC_KEY: TEST_VAPID.publicKey,
+        VAPID_PRIVATE_KEY: TEST_VAPID.privateKey,
         VAPID_SUBJECT: "mailto:ops@example.org",
         ADMIN_EMAILS: " Admin@Example.org ,other@example.org,admin@example.org",
         DICTIONARIES_ENABLED: "enable",
@@ -117,8 +117,8 @@ describe("parseConfig: valid configurations", () => {
       appShortName: "Games",
       minAge: 16,
       vapid: {
-        publicKey: "vapid-public",
-        privateKey: "vapid-private",
+        publicKey: TEST_VAPID.publicKey,
+        privateKey: TEST_VAPID.privateKey,
         subject: "mailto:ops@example.org",
       },
       turnstile: null,
@@ -292,11 +292,31 @@ describe("parseConfig: invalid configurations", () => {
       "bad VAPID_SUBJECT",
       {
         ...PROD_ENV,
-        VAPID_PUBLIC_KEY: "k",
-        VAPID_PRIVATE_KEY: "p",
+        VAPID_PUBLIC_KEY: TEST_VAPID.publicKey,
+        VAPID_PRIVATE_KEY: TEST_VAPID.privateKey,
         VAPID_SUBJECT: "ops@example.org",
       },
       "VAPID_SUBJECT: must be a mailto: or https:// URL",
+    ],
+    [
+      "VAPID keys not a P-256 pair",
+      {
+        ...PROD_ENV,
+        VAPID_PUBLIC_KEY: "k",
+        VAPID_PRIVATE_KEY: "p",
+        VAPID_SUBJECT: "mailto:ops@example.org",
+      },
+      "VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY: must be an unpadded base64url P-256 key pair",
+    ],
+    [
+      "VAPID keys swapped",
+      {
+        ...PROD_ENV,
+        VAPID_PUBLIC_KEY: TEST_VAPID.privateKey,
+        VAPID_PRIVATE_KEY: TEST_VAPID.publicKey,
+        VAPID_SUBJECT: "mailto:ops@example.org",
+      },
+      "VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY: must be an unpadded base64url P-256 key pair",
     ],
     ["partial Turnstile", { ...PROD_ENV, TURNSTILE_SITE_KEY: "k" }, "set both to enable Turnstile"],
     [

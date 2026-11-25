@@ -8,7 +8,7 @@
  * never `403`.
  */
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import { isGameError, type ResourceMeta } from "@your-move/sdk";
+import { isGameError, type ResourceMeta, type Text } from "@your-move/sdk";
 import {
   acceptInvitationRoute,
   cancelGameRoute,
@@ -32,7 +32,9 @@ import { requireSession } from "../auth/require-session.js";
 import type { Subkeys } from "../crypto/subkeys.js";
 import type { GamePlayerRecord, GameWriteSet, LoadedGame, UserRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
+import { background } from "../http/background.js";
 import type { AppEnv, Platform } from "../platform.js";
+import { sendTransitionPushes } from "../push/notify.js";
 import { createGame } from "./create.js";
 import { expireOverdueLobbies, loadCurrent } from "./expiry.js";
 import {
@@ -219,12 +221,15 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
   /**
    * Applies a write set from the version it was computed at; `409 STALE_GAME` if it lost. The
    * actor has seen what they did: their own unread marker moves to the new version (A2 review
-   * P-6), in the same transition.
+   * P-6), in the same transition. A transition that won sends its pushes in the background
+   * (03 §7), after the response and never failing it.
    */
   const commit = async (
+    c: Context<AppEnv>,
     loaded: LoadedGame,
     writes: GameWriteSet,
     actor: GamePlayerRecord,
+    describe: Text | null,
   ): Promise<void> => {
     const seen = { lastSeenVersion: loaded.game.version + 1 };
     const updates = writes.updatePlayers ?? [];
@@ -238,6 +243,16 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
         : [...updates, { id: actor.id, set: seen }],
     });
     if (result === "stale") throw ApiError.of("STALE_GAME");
+    if (platform.push.enabled) {
+      background(c, platform, () =>
+        sendTransitionPushes(platform, {
+          before: loaded,
+          writes,
+          actorUserId: userOf(c).id,
+          describe,
+        }),
+      );
+    }
   };
 
   /** A lifecycle transition (05 §Lifecycle transitions) from `expectedVersion`. */
@@ -260,7 +275,13 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     if (loaded.game.version !== expectedVersion) throw ApiError.of("STALE_GAME");
     const outcome = run(ctx, viewer, now());
     if (isRefusal(outcome)) throw refusal(outcome);
-    await commit(loaded, isModuleOutcome(outcome) ? outcome.writes : outcome, viewer);
+    await commit(
+      c,
+      loaded,
+      isModuleOutcome(outcome) ? outcome.writes : outcome,
+      viewer,
+      isModuleOutcome(outcome) ? outcome.describe : null,
+    );
     return gameWithViewIfMember(gameId, user);
   };
 
@@ -461,7 +482,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       run: (rng) => ctx.definition.apply(ctx.state, seat, action, rng),
       now: now(),
     });
-    await commit(loaded, outcome.writes, viewer);
+    await commit(c, loaded, outcome.writes, viewer, outcome.describe);
     const after = await gameWithView(id, user);
     return c.json(
       {

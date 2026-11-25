@@ -205,6 +205,53 @@
         "required": ["code"],
         "additionalProperties": false
       },
+      "PushSubscription": {
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "The subscription's endpoint: an `https` URL at an allow-listed push service (08 T12), as `PushSubscription.endpoint` gives it.",
+            "example": "https://fcm.googleapis.com/fcm/send/abc123"
+          },
+          "keys": {
+            "type": "object",
+            "properties": {
+              "p256dh": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "description": "Unpadded base64url of the 65-byte uncompressed P-256 public key."
+              },
+              "auth": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "description": "Unpadded base64url of the 16-byte auth secret."
+              }
+            },
+            "required": ["p256dh", "auth"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["endpoint", "keys"],
+        "additionalProperties": false
+      },
+      "PushUnsubscribe": {
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "The subscription's endpoint: an `https` URL at an allow-listed push service (08 T12), as `PushSubscription.endpoint` gives it.",
+            "example": "https://fcm.googleapis.com/fcm/send/abc123"
+          }
+        },
+        "required": ["endpoint"],
+        "additionalProperties": false
+      },
       "Catalog": {
         "type": "object",
         "properties": {
@@ -1400,6 +1447,126 @@
           },
           "429": {
             "description": "Too many step-up codes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/push/subscriptions": {
+      "post": {
+        "operationId": "subscribePush",
+        "x-scope": "session",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Push"],
+        "summary": "Save this device's push subscription",
+        "description": "Session only. An idempotent upsert bound to the current session: an endpoint already stored moves to this account and session. At most 10 per account; the oldest is evicted. The subscription is deleted with its session.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/PushSubscription" } }
+          }
+        },
+        "responses": {
+          "204": { "description": "Saved." },
+          "400": {
+            "description": "Invalid request, or an endpoint or keys that 08 T12 refuses (`BAD_REQUEST`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many writes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "unsubscribePush",
+        "x-scope": "session",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Push"],
+        "summary": "Remove a push subscription",
+        "description": "Session only. Removes the subscription with this endpoint if it belongs to you; otherwise does nothing.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/PushUnsubscribe" } }
+          }
+        },
+        "responses": {
+          "204": { "description": "Removed, or there was nothing of yours to remove." },
+          "400": {
+            "description": "Invalid request, or an endpoint or keys that 08 T12 refuses (`BAD_REQUEST`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many writes (`RATE_LIMITED`).",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
             }

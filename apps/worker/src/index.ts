@@ -7,6 +7,7 @@
 import {
   ConfigError,
   coreEmailSender,
+  corePushSender,
   createApp,
   createJsonLogger,
   createSweep,
@@ -81,6 +82,7 @@ async function build(env: Readonly<Record<string, unknown>>): Promise<Built> {
     log,
     now,
     email: coreEmailSender(config, log, now),
+    push: corePushSender(config, log, now),
     // Workers always sit behind Cloudflare, which sets CF-Connecting-IP (08 §4.1).
     clientIp: (request: Request) =>
       resolveClientIp(request.headers, {

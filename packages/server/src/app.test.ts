@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "./app.js";
 import { securityHeaders } from "./http/security-headers.js";
 import { createJsonLogger } from "./log.js";
-import { PROD_ENV, testPlatform } from "./test-support.js";
+import { PROD_ENV, TEST_VAPID, testPlatform } from "./test-support.js";
 
 function setup(env = PROD_ENV) {
   const platform = testPlatform(env);
@@ -29,8 +29,8 @@ describe("GET /api/v1/config", () => {
     const { app } = setup({
       ...PROD_ENV,
       APP_NAME: "Family Games",
-      VAPID_PUBLIC_KEY: "vapid-public",
-      VAPID_PRIVATE_KEY: "vapid-private-secret",
+      VAPID_PUBLIC_KEY: TEST_VAPID.publicKey,
+      VAPID_PRIVATE_KEY: TEST_VAPID.privateKey,
       VAPID_SUBJECT: "mailto:ops@example.org",
     });
     const res = await app.request("/api/v1/config");
@@ -41,11 +41,12 @@ describe("GET /api/v1/config", () => {
       appShortName: "Family Games",
       operatorContact: "ops@example.org",
       minAge: 13,
-      vapidPublicKey: "vapid-public",
+      vapidPublicKey: TEST_VAPID.publicKey,
 
       uploadsEnabled: true,
     });
-    expect(body).not.toMatch(/vapid-private-secret|smtp:\/\//u);
+    expect(body).not.toContain(TEST_VAPID.privateKey);
+    expect(body).not.toMatch(/smtp:\/\//u);
   });
 
   it("omits optional keys that are not configured", async () => {
@@ -90,6 +91,7 @@ describe("GET /api/v1/openapi.json", () => {
       "/api/v1/health",
       "/api/v1/me",
       "/api/v1/me/delete/otp",
+      "/api/v1/push/subscriptions",
     ]);
   });
 });

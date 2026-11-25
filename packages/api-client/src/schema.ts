@@ -168,6 +168,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/push/subscriptions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Save this device's push subscription
+     * @description Session only. An idempotent upsert bound to the current session: an endpoint already stored moves to this account and session. At most 10 per account; the oldest is evicted. The subscription is deleted with its session.
+     */
+    post: operations["subscribePush"];
+    /**
+     * Remove a push subscription
+     * @description Session only. Removes the subscription with this endpoint if it belongs to you; otherwise does nothing.
+     */
+    delete: operations["unsubscribePush"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/catalog": {
     parameters: {
       query?: never;
@@ -532,6 +556,26 @@ export interface components {
        * @example 1234 5678
        */
       code: string;
+    };
+    PushSubscription: {
+      /**
+       * @description The subscription's endpoint: an `https` URL at an allow-listed push service (08 T12), as `PushSubscription.endpoint` gives it.
+       * @example https://fcm.googleapis.com/fcm/send/abc123
+       */
+      endpoint: string;
+      keys: {
+        /** @description Unpadded base64url of the 65-byte uncompressed P-256 public key. */
+        p256dh: string;
+        /** @description Unpadded base64url of the 16-byte auth secret. */
+        auth: string;
+      };
+    };
+    PushUnsubscribe: {
+      /**
+       * @description The subscription's endpoint: an `https` URL at an allow-listed push service (08 T12), as `PushSubscription.endpoint` gives it.
+       * @example https://fcm.googleapis.com/fcm/send/abc123
+       */
+      endpoint: string;
     };
     Catalog: {
       games: {
@@ -1554,6 +1598,176 @@ export interface operations {
         };
       };
       /** @description Too many step-up codes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  subscribePush: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PushSubscription"];
+      };
+    };
+    responses: {
+      /** @description Saved. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid request, or an endpoint or keys that 08 T12 refuses (`BAD_REQUEST`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many writes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  unsubscribePush: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PushUnsubscribe"];
+      };
+    };
+    responses: {
+      /** @description Removed, or there was nothing of yours to remove. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid request, or an endpoint or keys that 08 T12 refuses (`BAD_REQUEST`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many writes (`RATE_LIMITED`). */
       429: {
         headers: {
           [name: string]: unknown;

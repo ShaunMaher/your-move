@@ -25,6 +25,7 @@ import { webManifest } from "./http/manifest.js";
 import { apiBodyLimit, requestRules } from "./http/request-rules.js";
 import { API_CACHE_CONTROL, securityHeadersMiddleware } from "./http/security-headers.js";
 import type { AppEnv, Platform } from "./platform.js";
+import { registerPushRoutes } from "./push/routes.js";
 
 export type { AppEnv, Platform } from "./platform.js";
 export type { InstalledGame } from "./games/registry.js";
@@ -228,6 +229,7 @@ export function createApp(options: AppOptions): App {
   const keys = (): Promise<Subkeys> => (subkeys ??= deriveSubkeys(config.appSecret));
   registerAuthRoutes(app, { platform, keys });
   registerUnsubscribeRoutes(app, { platform, keys });
+  registerPushRoutes(app, platform);
   registerGameRoutes(app, {
     platform,
     registry,

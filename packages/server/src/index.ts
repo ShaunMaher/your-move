@@ -32,6 +32,15 @@ export {
 export { toBase64Url } from "./base64.js";
 export { coreEmailSender, type CoreEmailSender } from "./email/providers.js";
 export {
+  corePushSender,
+  DISABLED_PUSH_SENDER,
+  type PushMessage,
+  type PushOutcome,
+  type PushSender,
+  type PushTarget,
+} from "./push/sender.js";
+export { VapidKeyError } from "./push/vapid.js";
+export {
   GMAIL_SEND_SCOPE,
   GmailTokenRefused,
   grantedScopes,

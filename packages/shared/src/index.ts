@@ -64,6 +64,12 @@ export {
   TransitionBodySchema,
 } from "./games.js";
 export {
+  PushSubscriptionBodySchema,
+  PushUnsubscribeBodySchema,
+  subscribePushRoute,
+  unsubscribePushRoute,
+} from "./push.js";
+export {
   API_V1,
   ClientConfigSchema,
   configRoute,

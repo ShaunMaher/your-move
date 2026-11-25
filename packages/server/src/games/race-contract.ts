@@ -22,6 +22,7 @@ import { parseConfig } from "../config/parse.js";
 import type { GamePlayerRecord, LoadedGame, Repositories } from "../db/repositories.js";
 import { createConsoleEmailSender } from "../email/sender.js";
 import { createJsonLogger } from "../log.js";
+import { DISABLED_PUSH_SENDER } from "../push/sender.js";
 import type { InstalledGame } from "./registry.js";
 import { replayState } from "./replay.js";
 import { NO_DICTIONARIES } from "./resources.js";
@@ -156,6 +157,7 @@ export function gameRaceContract(
           ),
           log,
           email: createConsoleEmailSender(log, now),
+          push: DISABLED_PUSH_SENDER,
           // No game route uses the client address.
           clientIp: () => ({ ok: false, reason: "missing" }),
           dictionaries: NO_DICTIONARIES,

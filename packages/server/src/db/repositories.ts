@@ -7,7 +7,7 @@
  * check (02 §7.3); M2b adds what sign-in needs: OTP challenges, sessions, rate limits, auth events
  * and API-token revocation; the alpha's framework core (A2) what one game needs: its resources and
  * invites, the game list, history, unread markers and past opponents; alpha A6 the email-nudge
- * setting, the seats due a nudge and the suppression list.
+ * setting, the seats due a nudge and the suppression list; alpha A8 the push subscriptions.
  */
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
@@ -22,6 +22,7 @@ import type {
   games,
   invites,
   otpChallenges,
+  pushSubscriptions,
   sessions,
   users,
 } from "./schema.js";
@@ -445,12 +446,37 @@ export interface NudgeRepo {
   claim(playerId: string, now: number, window: NudgeWindow): Promise<boolean>;
 }
 
+/** A stored Web Push subscription (04 `push_subscriptions`). */
+type PushSubscriptionRecord = InferSelectModel<typeof pushSubscriptions>;
+/** A subscription to save; `last_success_at` starts unset. */
+export type NewPushSubscription = Omit<PushSubscriptionRecord, "lastSuccessAt">;
+
+export interface PushSubscriptionRepo {
+  /**
+   * Saves a subscription bound to its session (05 §Push subscriptions), then keeps only the user's
+   * newest `maxPerUser` (04: oldest evicted), in one atomic batch. An endpoint already stored is
+   * reassigned to this user, session and keys (an idempotent upsert, keeping its id); its
+   * `created_at` and `last_success_at` are kept when the user is the same and start afresh when
+   * the endpoint changes hands. The saved subscription is never the one evicted.
+   */
+  save(subscription: NewPushSubscription, maxPerUser: number): Promise<void>;
+  /** Deletes the user's subscription with this endpoint, if it is theirs. */
+  remove(userId: string, endpoint: string): Promise<void>;
+  /** Every subscription of these users. */
+  forUsers(userIds: readonly string[]): Promise<PushSubscriptionRecord[]>;
+  /** Deletes subscriptions whose push service answered 404 or 410 (04), in one statement. */
+  delete(ids: readonly string[]): Promise<void>;
+  /** Records deliveries the push services accepted, in one statement. */
+  delivered(ids: readonly string[], at: number): Promise<void>;
+}
+
 /** All repositories a runtime provides through `Platform.repos`. */
 export interface Repositories {
   readonly users: UserRepo;
   readonly games: GameRepo;
   readonly nudges: NudgeRepo;
   readonly emailSuppressions: EmailSuppressionRepo;
+  readonly pushSubscriptions: PushSubscriptionRepo;
   readonly otp: OtpRepo;
   readonly sessions: SessionRepo;
   readonly rateLimits: RateLimitRepo;

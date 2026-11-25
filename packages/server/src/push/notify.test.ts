@@ -1,0 +1,319 @@
+/**
+ * Who a transition pushes to, and what the push says (03 §7, 02 §8, 08 T18): "your turn" for seats
+ * whose clock started, "game over" when an `active` game ends, never the actor, never a lobby
+ * event; text from `describe` and display names only.
+ */
+import type { Text } from "@your-move/sdk";
+import { describe, expect, it } from "vitest";
+
+import type { GamePlayerRecord, GameRecord, GameWriteSet, LoadedGame } from "../db/repositories.js";
+import { type PushedTransition, pushMessage, transitionPushes } from "./notify.js";
+
+const T0 = Date.UTC(2026, 0, 1);
+
+function game(status: GameRecord["status"]): GameRecord {
+  return {
+    id: "game-1",
+    gameType: "words",
+    gameVersion: 1,
+    options: "{}",
+    status,
+    createdBy: "alice",
+    seats: 3,
+    turnTimeoutDays: 3,
+    seatOrder: "join",
+    aiAssistance: "off",
+    state: '{"secret":"QUIZ rack"}',
+    setupRng: null,
+    finalViews: null,
+    version: 4,
+    writeToken: null,
+    actionCount: 3,
+    lastActionAt: T0,
+    endReason: null,
+    createdAt: T0,
+    updatedAt: T0,
+    startedAt: T0,
+    endedAt: null,
+  };
+}
+
+function row(id: string, overrides: Partial<GamePlayerRecord>): GamePlayerRecord {
+  return {
+    id,
+    gameId: "game-1",
+    seat: null,
+    userId: id,
+    inviteEmail: null,
+    state: "playing",
+    outReason: null,
+    joinedVia: "added",
+    delivery: "normal",
+    removedAt: null,
+    joinedAt: T0,
+    toAct: 0,
+    toActSince: null,
+    actedOnce: 1,
+    rank: null,
+    score: null,
+    lastSeenVersion: 0,
+    lastNudgedAt: null,
+    timeoutRemindersSent: 0,
+    ...overrides,
+  };
+}
+
+/** Alice (seat 0, to act), Bob (seat 1) and Cara (seat 2) in an active game. */
+const ACTIVE: LoadedGame = {
+  game: game("active"),
+  players: [
+    row("alice", { seat: 0, toAct: 1, toActSince: T0, joinedVia: "creator" }),
+    row("bob", { seat: 1 }),
+    row("cara", { seat: 2 }),
+  ],
+};
+
+const PLAYED: Text = [{ seat: 0 }, " played QUIZ for 64"];
+
+function transition(
+  before: LoadedGame,
+  writes: GameWriteSet,
+  actorUserId: string,
+  describe: Text | null = null,
+): PushedTransition {
+  return { before, writes, actorUserId, describe };
+}
+
+/** Alice moves; the turn passes to Bob. */
+const MOVE = transition(
+  ACTIVE,
+  {
+    game: { updatedAt: T0 + 1 },
+    updatePlayers: [
+      { id: "alice", set: { toAct: 0, toActSince: null } },
+      { id: "bob", set: { toAct: 1, toActSince: T0 + 1, timeoutRemindersSent: 0 } },
+    ],
+  },
+  "alice",
+  PLAYED,
+);
+
+const USERS = new Map([
+  ["alice", { displayName: "Alice" }],
+  ["bob", { displayName: "Bob" }],
+  ["cara", { displayName: null }],
+]);
+
+describe("transitionPushes", () => {
+  it("tells the seat whose clock started that it's their turn, and nobody else", () => {
+    expect(transitionPushes(MOVE)).toEqual([{ userId: "bob", seat: 1, kind: "turn" }]);
+  });
+
+  it("never pushes to the actor, even when their own clock restarts (a phase)", () => {
+    const restart = transition(
+      ACTIVE,
+      {
+        game: { updatedAt: T0 + 1 },
+        updatePlayers: [
+          { id: "alice", set: { toAct: 1, toActSince: T0 + 1 } },
+          { id: "cara", set: { toAct: 1, toActSince: T0 + 1 } },
+        ],
+      },
+      "alice",
+      PLAYED,
+    );
+    expect(transitionPushes(restart)).toEqual([{ userId: "cara", seat: 2, kind: "turn" }]);
+  });
+
+  it("doesn't push to a seat that stays in toAct with its clock running", () => {
+    const stays = transition(
+      {
+        ...ACTIVE,
+        players: ACTIVE.players.map((p) =>
+          p.id === "cara" ? { ...p, toAct: 1, toActSince: T0 } : p,
+        ),
+      },
+      {
+        game: { updatedAt: T0 + 1 },
+        updatePlayers: [{ id: "alice", set: { toAct: 0, toActSince: null } }],
+      },
+      "alice",
+      PLAYED,
+    );
+    expect(transitionPushes(stays)).toEqual([]);
+  });
+
+  it("tells every seated player but the actor when an active game finishes", () => {
+    const finish = transition(
+      {
+        ...ACTIVE,
+        players: [
+          ...ACTIVE.players.slice(0, 2),
+          row("cara", { seat: 2, state: "out", outReason: "resigned" }),
+        ],
+      },
+      {
+        game: { status: "finished", endReason: "outOfTiles", updatedAt: T0 + 1 },
+        updatePlayers: [{ id: "alice", set: { toAct: 0, toActSince: null } }],
+      },
+      "alice",
+      PLAYED,
+    );
+    expect(transitionPushes(finish)).toEqual([
+      { userId: "bob", seat: 1, kind: "ended" },
+      { userId: "cara", seat: 2, kind: "ended" },
+    ]);
+  });
+
+  it("tells the others when a decline before a first action ends the game", () => {
+    const declined = transition(
+      ACTIVE,
+      {
+        game: { status: "declined", endReason: "declined", updatedAt: T0 + 1 },
+        updatePlayers: [{ id: "bob", set: { state: "out", outReason: "declined" } }],
+      },
+      "bob",
+    );
+    expect(transitionPushes(declined).map((push) => [push.userId, push.kind])).toEqual([
+      ["alice", "ended"],
+      ["cara", "ended"],
+    ]);
+  });
+
+  it("at the start, pushes to the first seat to act unless it started the game", () => {
+    const lobby: LoadedGame = {
+      game: game("lobby"),
+      players: [
+        row("alice", { joinedVia: "creator", state: "joined" }),
+        row("bob", { state: "joined" }),
+      ],
+    };
+    const start = (actor: string) =>
+      transition(
+        lobby,
+        {
+          game: { status: "active", updatedAt: T0 + 1 },
+          updatePlayers: [
+            { id: "alice", set: { seat: 0, state: "playing", toAct: 1, toActSince: T0 + 1 } },
+            { id: "bob", set: { seat: 1, state: "playing", toAct: 0, toActSince: null } },
+          ],
+        },
+        actor,
+      );
+    // Bob's accept started it: Alice, first to act, is told.
+    expect(transitionPushes(start("bob"))).toEqual([{ userId: "alice", seat: 0, kind: "turn" }]);
+    // Alice pressed Start herself.
+    expect(transitionPushes(start("alice"))).toEqual([]);
+  });
+
+  it.each([
+    [
+      "an accept that doesn't start",
+      {
+        game: { updatedAt: T0 + 1 },
+        updatePlayers: [{ id: "bob", set: { state: "joined" as const } }],
+      },
+    ],
+    [
+      "a cancel",
+      { game: { status: "cancelled" as const, endReason: "cancelled", updatedAt: T0 + 1 } },
+    ],
+    [
+      "a lobby decline",
+      {
+        game: { status: "declined" as const, endReason: "declined", updatedAt: T0 + 1 },
+        updatePlayers: [{ id: "bob", set: { state: "declined" as const } }],
+      },
+    ],
+    [
+      "an expiry",
+      { game: { status: "expired" as const, endReason: "expired", updatedAt: T0 + 1 } },
+    ],
+  ])("sends nothing for a lobby event: %s", (_name, writes: GameWriteSet) => {
+    const lobby: LoadedGame = {
+      game: game("lobby"),
+      players: [
+        row("alice", { joinedVia: "creator", state: "joined" }),
+        row("bob", { state: "invited" }),
+        row("cara", { state: "joined" }),
+      ],
+    };
+    expect(transitionPushes(transition(lobby, writes, "bob"))).toEqual([]);
+  });
+
+  it("skips a seat whose account was deleted", () => {
+    const deleted = transition(
+      {
+        ...ACTIVE,
+        players: ACTIVE.players.map((p) => (p.id === "bob" ? { ...p, userId: null } : p)),
+      },
+      MOVE.writes,
+      "alice",
+      PLAYED,
+    );
+    expect(transitionPushes(deleted)).toEqual([]);
+  });
+});
+
+describe("pushMessage (08 T18)", () => {
+  it("is the describe text with names, then 'Your turn.', linking to the game", () => {
+    expect(
+      pushMessage(MOVE, { userId: "bob", seat: 1, kind: "turn" }, USERS, "Family Games"),
+    ).toEqual({
+      title: "Family Games",
+      body: "Alice played QUIZ for 64. Your turn.",
+      url: "/g/game-1",
+      tag: "game-game-1",
+    });
+  });
+
+  it("calls the recipient 'You' and a nameless player 'New player'", () => {
+    const text: Text = [{ seat: 2 }, " passed, then ", { seat: 1 }, " looked"];
+    expect(
+      pushMessage({ ...MOVE, describe: text }, { userId: "bob", seat: 1, kind: "turn" }, USERS, "G")
+        .body,
+    ).toBe("New player passed, then You looked. Your turn.");
+  });
+
+  it("names a deleted account 'Deleted player'", () => {
+    const users = new Map([["bob", { displayName: "Bob" }]]);
+    expect(pushMessage(MOVE, { userId: "bob", seat: 1, kind: "turn" }, users, "G").body).toBe(
+      "Deleted player played QUIZ for 64. Your turn.",
+    );
+  });
+
+  it("says the game is over when it ended", () => {
+    expect(pushMessage(MOVE, { userId: "cara", seat: 2, kind: "ended" }, USERS, "G").body).toBe(
+      "Alice played QUIZ for 64. The game is over.",
+    );
+  });
+
+  it("names the other players at the start, which has no describe text", () => {
+    const start = transition(ACTIVE, MOVE.writes, "bob");
+    expect(pushMessage(start, { userId: "alice", seat: 0, kind: "turn" }, USERS, "G").body).toBe(
+      "Your game with Bob and New player has started. Your turn.",
+    );
+  });
+
+  it("names whoever declined when a decline ended the game", () => {
+    const declined = transition(ACTIVE, { game: { status: "declined", updatedAt: T0 } }, "bob");
+    expect(
+      pushMessage(declined, { userId: "alice", seat: 0, kind: "ended" }, USERS, "G").body,
+    ).toBe("Bob declined the game, so it's over.");
+  });
+
+  it("never carries state, and cuts long text", () => {
+    const long: Text = [{ seat: 0 }, ` said ${"word ".repeat(100)}`];
+    const message = pushMessage(
+      { ...MOVE, describe: long },
+      { userId: "bob", seat: 1, kind: "turn" },
+      USERS,
+      "G",
+    );
+    expect(message.body.length).toBeLessThanOrEqual(240);
+    expect(message.body.endsWith("…")).toBe(true);
+    expect(
+      JSON.stringify(pushMessage(MOVE, { userId: "bob", seat: 1, kind: "turn" }, USERS, "G")),
+    ).not.toContain("rack");
+  });
+});

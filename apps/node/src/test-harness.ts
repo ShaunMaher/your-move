@@ -87,6 +87,8 @@ export interface Harness {
   request(method: string, path: string, body?: unknown, options?: SendOptions): Promise<Response>;
   /** How many background tasks (`waitUntil` calls) requests have scheduled so far. */
   backgroundScheduled(): number;
+  /** Settles once every background task started so far has finished. */
+  drain(): Promise<void>;
   /** Captured emails, after all background work has finished. */
   emails(): Promise<readonly CapturedEmail[]>;
   /** The newest email to `to`, or undefined. */
@@ -137,6 +139,8 @@ export interface HarnessOptions {
   readonly games?: readonly InstalledGame[];
   /** The games' randomness; WebCrypto by default, a seeded source in the game tests. */
   readonly random?: RandomFactory;
+  /** Where Web Push requests go (with VAPID configured); the tests never reach a push service. */
+  readonly pushFetch?: typeof fetch;
 }
 
 export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {}): Harness {
@@ -173,6 +177,9 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     // Without games nothing reads a word list, so the tests of sign-in need no dictionary build.
     dictionaries: games.length === 0 ? NO_DICTIONARIES : nodeDictionaries(DICTIONARIES),
     smtp: options.sender ?? options.wrapSender?.(capture) ?? capture,
+    pushFetch:
+      options.pushFetch ??
+      (() => Promise.reject(new Error("a test reached for the network to send a push"))),
   });
   const app = createApp({
     platform,
@@ -236,6 +243,7 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     },
     request,
     backgroundScheduled: () => scheduled,
+    drain: () => background.drain(),
     emails,
     lastEmail,
     async requestCode(email, options) {

@@ -7,6 +7,7 @@ import { detachedRepositories } from "./db/detached.js";
 import { createConsoleEmailSender } from "./email/sender.js";
 import { NO_DICTIONARIES } from "./games/resources.js";
 import { createJsonLogger } from "./log.js";
+import { DISABLED_PUSH_SENDER } from "./push/sender.js";
 
 /** A minimal valid local-dev environment. */
 export const LOCAL_ENV: Env = {
@@ -27,6 +28,16 @@ export const PROD_ENV: Env = {
   OPERATOR_CONTACT: "ops@example.org",
 };
 
+/**
+ * A VAPID key pair for tests: RFC 8291 Appendix A's application server keys, published in the RFC
+ * and never used by any deployment.
+ */
+export const TEST_VAPID = {
+  publicKey:
+    "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8",
+  privateKey: "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw",
+} as const;
+
 export interface TestPlatform extends Platform {
   /** Every log line written, parsed. */
   readonly lines: Record<string, unknown>[];
@@ -45,6 +56,7 @@ export function testPlatform(env: Env = LOCAL_ENV): TestPlatform {
     config: parseConfig(env, { runtime: "node", installedGames: [] }),
     log,
     email: createConsoleEmailSender(log, now),
+    push: DISABLED_PUSH_SENDER,
     clientIp: (request) =>
       resolveClientIp(request.headers, {
         mode: "xff",

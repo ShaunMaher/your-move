@@ -33,7 +33,7 @@ import { DictionariesError, nodeDictionaries } from "./dictionaries.js";
 import { scrubSecrets } from "./env.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
 import { createNodeApp } from "./server.js";
-import { isRefusal, startup, type Started, verifyEmail } from "./startup.js";
+import { isRefusal, startup, type Started, verifyEmail, verifyPush } from "./startup.js";
 import { NODE_NUDGES_PER_RUN, startSweeper } from "./sweeper.js";
 
 function exitWith(message: string): never {
@@ -134,6 +134,7 @@ const platform = createNodePlatform({
 });
 try {
   await verifyEmail(platform.email);
+  await verifyPush(platform.push);
 } catch (error) {
   if (isRefusal(error)) exitWith(`Refusing to start: ${error.message}`);
   throw error;

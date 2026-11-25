@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { isSendableAddress, normaliseAddress, type NormalisedEmail } from "../accounts/email.js";
 import { RATE_LIMIT_NAMES } from "../auth/limits.js";
+import { vapidKeyShapes } from "../push/vapid.js";
 import { DEFAULT_APP_NAME } from "./defaults.js";
 import { isEmailAddress, normaliseEmail, parseMailbox } from "./email.js";
 import { isLocalDevUrl, LOCAL_DEV_APP_SECRET } from "./local-dev.js";
@@ -278,6 +279,15 @@ function crossFieldIssues(raw: RawEnv, options: ParseConfigOptions): string[] {
   }
   if (raw.VAPID_SUBJECT !== undefined && !/^(mailto:|https:\/\/)\S+$/u.test(raw.VAPID_SUBJECT)) {
     issues.push("VAPID_SUBJECT: must be a mailto: or https:// URL");
+  }
+  if (
+    raw.VAPID_PUBLIC_KEY !== undefined &&
+    raw.VAPID_PRIVATE_KEY !== undefined &&
+    !vapidKeyShapes(raw.VAPID_PUBLIC_KEY, raw.VAPID_PRIVATE_KEY)
+  ) {
+    issues.push(
+      "VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY: must be an unpadded base64url P-256 key pair as `pnpm gen:vapid` writes it (a 65-byte public point and a 32-byte private key)",
+    );
   }
 
   if (raw.TURNSTILE_SITE_KEY !== undefined || raw.TURNSTILE_SECRET !== undefined) {
