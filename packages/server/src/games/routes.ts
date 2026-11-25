@@ -2,7 +2,7 @@
  * The game framework's endpoints (docs/spec/05-api.md §Games, §Catalog): catalog and rules,
  * creating and listing games, one game's envelope and history, actions and previews, and the
  * lifecycle transitions. Every state change goes through the `write_token` transition (03 §5.2);
- * GET handlers never write game state.
+ * GET handlers never write game state, except the lazy expiry of an overdue lobby (03 §8).
  *
  * Membership decides access (04 §Membership): a game the viewer isn't a member of is `404`,
  * never `403`.
@@ -34,6 +34,7 @@ import type { GamePlayerRecord, GameWriteSet, LoadedGame, UserRecord } from "../
 import { ApiError } from "../http/api-error.js";
 import type { AppEnv, Platform } from "../platform.js";
 import { createGame } from "./create.js";
+import { expireOverdueLobbies, loadCurrent } from "./expiry.js";
 import {
   accept,
   cancel,
@@ -153,7 +154,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     gameId: string,
     user: UserRecord,
   ): Promise<{ loaded: LoadedGame; viewer: GamePlayerRecord }> => {
-    const loaded = await repos.games.load(gameId);
+    const loaded = await loadCurrent(repos, gameId, now());
     const viewer = loaded === null ? undefined : memberRow(loaded.players, user.id);
     if (loaded === null || viewer === undefined) throw ApiError.of("NOT_FOUND");
     return { loaded, viewer };
@@ -191,7 +192,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
 
   /** As {@link gameWithView}, or null once the viewer is no longer a member (a lobby decline). */
   const gameWithViewIfMember = async (gameId: string, user: UserRecord) => {
-    const loaded = await repos.games.load(gameId);
+    const loaded = await loadCurrent(repos, gameId, now());
     const viewer = loaded === null ? undefined : memberRow(loaded.players, user.id);
     if (loaded === null || viewer === undefined) return null;
     const input = await presentInput(loaded, viewer);
@@ -347,6 +348,8 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     const query = c.req.valid("query");
     const at = now();
     const after = parseListCursor(query.cursor);
+    // No overdue lobby is listed as open (lazy expiry).
+    await expireOverdueLobbies(repos, user.id, at);
     const rows = await repos.games.listForUser({
       userId: user.id,
       ...(query.status === undefined ? {} : { status: query.status }),

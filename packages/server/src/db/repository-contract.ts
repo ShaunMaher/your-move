@@ -307,6 +307,30 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         return id;
       };
 
+      it("finds a user's overdue lobbies, oldest first (lazy expiry)", async () => {
+        const user = await human();
+        const other = await human();
+        const make = async (
+          createdAt: number,
+          status: NewGame["status"],
+          rows: NewGamePlayer[],
+        ) => {
+          const game = newGame({ createdAt, status, createdBy: other });
+          await repos.games.create(game, rows);
+          return game.id;
+        };
+        const older = await make(T0 - 2, "lobby", [
+          player({ userId: user, state: "invited", joinedAt: null }),
+        ]);
+        // Any row of the user's counts, one giving no access included.
+        const old = await make(T0 - 1, "lobby", [player({ userId: user, state: "declined" })]);
+        await make(T0 + 1, "lobby", [player({ userId: user })]); // not overdue yet
+        await make(T0 - 3, "cancelled", [player({ userId: user })]); // not a lobby
+        await make(T0 - 4, "lobby", [player({ userId: other })]); // not the user's
+        expect(await repos.games.overdueLobbies(user, T0, 10)).toEqual([older, old]);
+        expect(await repos.games.overdueLobbies(user, T0, 1)).toEqual([older]);
+      });
+
       it("creates resources and invites with the game, and reads the game with its players at once", async () => {
         const creator = await human();
         const game = newGame({ createdBy: creator });

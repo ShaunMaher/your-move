@@ -20,15 +20,14 @@ import { emailId, type Subkeys } from "../crypto/subkeys.js";
 import type { NewGamePlayer, UserRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
 import type { Platform } from "../platform.js";
+import { expireOverdueLobbies } from "./expiry.js";
+import { LOBBY_LIFETIME_MS } from "./lifecycle.js";
 import type { GameType } from "./registry.js";
 import type { ResourceProvider } from "./resources.js";
 import { lastOptionsOf, mergeOptions, rememberedInput } from "./settings.js";
 
 type CreateGameBody = z.infer<typeof CreateGameBodySchema>;
 
-const DAY = 86_400_000;
-/** Lobbies expire 14 days after creation (02 §4); `invites` rows expire with them. */
-const LOBBY_LIFETIME_MS = 14 * DAY;
 /** `TOO_MANY_GAMES` (05): live games a user created, in total and per invitee. */
 const MAX_LIVE_CREATED = 50;
 const MAX_LIVE_CREATED_PER_PAIR = 5;
@@ -140,6 +139,8 @@ export async function createGame(
   }
 
   const emailIds = await Promise.all(emails.map((email) => emailId(keys, email)));
+  // An overdue lobby isn't live: expire the creator's before counting them (lazy expiry).
+  await expireOverdueLobbies(repos, creator.id, platform.now().getTime());
   const live = await repos.games.countLiveCreated(creator.id);
   const perPair = await Promise.all(
     emailIds.map((hash) => repos.games.countLiveCreatedWithInvite(creator.id, hash)),

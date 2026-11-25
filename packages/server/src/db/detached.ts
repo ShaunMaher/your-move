@@ -63,6 +63,7 @@ const METHODS = {
     lastActions: true,
     listForUser: true,
     markSeen: true,
+    overdueLobbies: true,
     countLiveCreated: true,
     countLiveCreatedWithInvite: true,
     applyTransition: true,

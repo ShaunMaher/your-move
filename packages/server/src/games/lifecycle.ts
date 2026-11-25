@@ -394,6 +394,36 @@ function clearAddresses(players: readonly GamePlayerRecord[], except?: string) {
     .map((row) => ({ id: row.id, set: { inviteEmail: null } }));
 }
 
+/** Lobbies expire 14 days after creation, not extended by joins (02 §4); `invites` with them. */
+export const LOBBY_LIFETIME_MS = 14 * DAY;
+
+/** When the lobby expires (02 §4). */
+export function lobbyExpiresAt(game: GameRecord): number {
+  return game.createdAt + LOBBY_LIFETIME_MS;
+}
+
+/**
+ * The expiry transition (02 §4) of a lobby past its expiry, or null for any other game: the lobby
+ * ends `expired` and every typed address is cleared (06 §6.5). It ended when it fell due, which is
+ * what `ended_at` records, however late it is noticed.
+ */
+export function expire(
+  game: GameRecord,
+  players: readonly GamePlayerRecord[],
+  now: number,
+): GameWriteSet | null {
+  if (game.status !== "lobby" || now < lobbyExpiresAt(game)) return null;
+  return {
+    game: {
+      status: "expired",
+      endReason: "expired",
+      endedAt: lobbyExpiresAt(game),
+      updatedAt: now,
+    },
+    updatePlayers: clearAddresses(players),
+  };
+}
+
 /** `POST /cancel`: the creator, in the lobby (02 §4). */
 export function cancel(
   ctx: GameContext,

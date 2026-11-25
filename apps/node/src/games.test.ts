@@ -22,7 +22,7 @@ import {
   signUp,
   transition,
 } from "./games-support.js";
-import { createHarness, DAY, type Harness, PROD_ENV } from "./test-harness.js";
+import { createHarness, DAY, type Harness, PROD_ENV, T0 } from "./test-harness.js";
 
 let h: Harness;
 beforeEach(() => {
@@ -954,10 +954,12 @@ describe("GET /api/v1/games", () => {
     const a = await signUp(h, "Ada");
     for (let i = 0; i < 52; i++) {
       h.exec(
-        "INSERT INTO games (id, game_type, game_version, options, status, created_by, seats, turn_timeout_days, seat_order, ai_assistance, last_action_at, created_at, updated_at) VALUES (?, 'words', 1, '{}', 'lobby', ?, 2, 14, 'join', 'off', ?, 0, 0)",
+        "INSERT INTO games (id, game_type, game_version, options, status, created_by, seats, turn_timeout_days, seat_order, ai_assistance, last_action_at, created_at, updated_at) VALUES (?, 'words', 1, '{}', 'lobby', ?, 2, 14, 'join', 'off', ?, ?, ?)",
         crypto.randomUUID(),
         a.id,
         i,
+        T0,
+        T0,
       );
     }
     h.exec(

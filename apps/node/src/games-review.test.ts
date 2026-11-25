@@ -18,7 +18,7 @@ import {
   signUp,
   transition,
 } from "./games-support.js";
-import { createHarness, type Harness, PROD_ENV } from "./test-harness.js";
+import { createHarness, DAY, type Harness, PROD_ENV, T0 } from "./test-harness.js";
 
 const open: Harness[] = [];
 afterEach(() => {
@@ -201,5 +201,111 @@ describe("P-6: unread markers", () => {
     expect((await act(h, player, game.id, { card })).status).toBe(200);
     expect(await unread(player)).toBe(false);
     expect(await unread(other)).toBe(true);
+  });
+});
+
+describe("S-4: an overdue lobby expires when it is next read or written", () => {
+  const LIFETIME = 14 * DAY;
+
+  it("is still a lobby a moment before its 14 days, and expired on the next read after", async () => {
+    const h = harness();
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    const game = await createGame(h, a, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: b.email }, { email: "nobody-yet@example.org" }],
+    });
+    h.advance(LIFETIME - 1);
+    expect((await getGame(h, a, game.id)).game.status).toBe("lobby");
+    h.advance(1);
+    const expired = await getGame(h, b, game.id);
+    expect(expired.game).toMatchObject({
+      status: "expired",
+      endReason: "expired",
+      version: game.version + 1,
+      yourInvitation: null,
+    });
+    // Typed addresses are cleared at once (06 §6.5): no row keeps one.
+    expect(h.query("SELECT invite_email FROM game_players WHERE game_id = ?", game.id)).toEqual([
+      { invite_email: null },
+      { invite_email: null },
+      { invite_email: null },
+    ]);
+    expect(h.query("SELECT ended_at FROM games WHERE id = ?", game.id)).toEqual([
+      { ended_at: game.createdAt + LIFETIME },
+    ]);
+  });
+
+  it("can't be accepted or started once overdue, whichever version the client sends", async () => {
+    const h = harness();
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    const c = await signUp(h, "Cy");
+    const game = await createGame(h, a, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: b.email }, { email: c.email }],
+    });
+    expect((await transition(h, b, game.id, "accept", game.version)).status).toBe(200);
+    h.advance(LIFETIME);
+    const accepted = await transition(h, c, game.id, "accept", game.version + 1);
+    expect([accepted.status, accepted.body.error.code]).toEqual([409, "STALE_GAME"]);
+    const started = await transition(h, a, game.id, "start");
+    expect([started.status, started.body.error.code]).toEqual([409, "WRONG_STATUS"]);
+    expect((await getGame(h, a, game.id)).game.status).toBe("expired");
+  });
+
+  it("is listed as expired, and no longer as an invitation", async () => {
+    const h = harness();
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    const game = await createGame(h, a, { gameType: "words", invitees: [{ email: b.email }] });
+    h.advance(LIFETIME);
+    expect(await list(h, b, "?invitations=true")).toEqual([]);
+    const listed = await call<{ games: { id: string; status: string }[] }>(
+      h,
+      a,
+      "GET",
+      "/api/v1/games?status=lobby",
+    );
+    expect(listed.body.games).toEqual([]);
+    expect(
+      (await call<{ games: { id: string; status: string }[] }>(h, a, "GET", "/api/v1/games")).body
+        .games,
+    ).toEqual([expect.objectContaining({ id: game.id, status: "expired" })]);
+  });
+
+  it("no longer counts toward the creator's live games", async () => {
+    const h = harness();
+    const a = await signUp(h, "Ada");
+    for (let i = 0; i < 50; i++) {
+      const id = crypto.randomUUID();
+      h.exec(
+        "INSERT INTO games (id, game_type, game_version, options, status, created_by, seats, turn_timeout_days, seat_order, ai_assistance, last_action_at, created_at, updated_at) VALUES (?, 'words', 1, '{}', 'lobby', ?, 2, 14, 'join', 'off', ?, ?, ?)",
+        id,
+        a.id,
+        T0,
+        T0,
+        T0,
+      );
+      h.exec(
+        "INSERT INTO game_players (id, game_id, user_id, state, joined_via, joined_at) VALUES (?, ?, ?, 'joined', 'creator', ?)",
+        crypto.randomUUID(),
+        id,
+        a.id,
+        T0,
+      );
+    }
+    const refused = await call<{ error: { code: string } }>(h, a, "POST", "/api/v1/games", {
+      gameType: "words",
+      invitees: [],
+    });
+    expect([refused.status, refused.body.error.code]).toEqual([409, "TOO_MANY_GAMES"]);
+    h.advance(LIFETIME);
+    await createGame(h, a, { gameType: "words", invitees: [] });
+    expect(h.query("SELECT count(*) AS n FROM games WHERE status = 'expired'")).toEqual([
+      { n: 50 },
+    ]);
   });
 });

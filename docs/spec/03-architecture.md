@@ -275,7 +275,13 @@ filesystems are unsupported for the database anyway).
 
 ## 8. Scheduled work
 
-(Turn timeouts are applied here and nowhere else; GET handlers never write game state.)
+(Turn timeouts are applied here and nowhere else. GET handlers never write game state, with one
+exception: **lazy lobby expiry**. Any read or write of a game first applies the expiry transition
+if it is a lobby past its 14 days, and listing or creating games first expires the caller's overdue
+lobbies (at most 100 per request), so no overdue lobby is shown, accepted, started or counted as
+live, and its typed addresses are cleared (06 §6.5) as soon as anyone involved comes back. It's a
+transition like any other (§5.2), so it waits for no sweep; the alpha has no sweep at all, and once
+the sweep exists it expires the lobbies no one comes back to.)
 
 One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * * *`) or a Node
 `setInterval`. Every step is idempotent and uses the same transition mechanism as actions:
@@ -290,7 +296,7 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
   seat order, reloading and re-checking `toAct` and the deadline before each (02 §4).
 - Send timeout reminders (50 % and 24 h before, 02 §4; tracked in `timeout_reminders_sent`, which
   every clock restart resets to 0).
-- Expire lobbies 14 days after creation.
+- Expire lobbies 14 days after creation (reads and writes also expire them lazily, above).
 - Send due email nudges.
 - Purge blobs of deleted dictionaries no `lobby`/`active` game references (`game_resources`), and
   delete row-less upload blobs older than 1 h (words §9.5).

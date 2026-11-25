@@ -3,7 +3,7 @@
  * adapter's {@link Database} (docs/spec/03-architecture.md §4). Multi-statement writes go through
  * one atomic batch; nothing here opens an interactive transaction.
  */
-import { and, asc, count, desc, eq, gte, inArray, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
 
 import {
   apiTokenRepo,
@@ -188,6 +188,22 @@ function gameRepo(db: Database): GameRepo {
           lastSeenVersion: sql`max(${gamePlayers.lastSeenVersion}, min(${version}, (SELECT ${games.version} FROM ${games} WHERE ${games.id} = ${gameId})))`,
         })
         .where(and(eq(gamePlayers.gameId, gameId), eq(gamePlayers.userId, userId)));
+    },
+    async overdueLobbies(userId, createdBefore, limit) {
+      const rows = await db
+        .select({ id: games.id })
+        .from(gamePlayers)
+        .innerJoin(games, eq(games.id, gamePlayers.gameId))
+        .where(
+          and(
+            eq(gamePlayers.userId, userId),
+            eq(games.status, "lobby"),
+            lte(games.createdAt, createdBefore),
+          ),
+        )
+        .orderBy(asc(games.createdAt), asc(games.id))
+        .limit(limit);
+      return rows.map((row) => row.id);
     },
     async countLiveCreated(userId) {
       const row = await db
