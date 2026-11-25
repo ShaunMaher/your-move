@@ -131,7 +131,9 @@ describe("caching a game's public word lists", () => {
     fetcher.mockImplementation((path: string) =>
       Promise.resolve(new Response(texts[urls.indexOf(path)] ?? "")),
     );
-    await Promise.all(urls.map((url, i) => cacheWordLists([{ ...list(url), id: `l${String(i)}` }])));
+    await Promise.all(
+      urls.map((url, i) => cacheWordLists([{ ...list(url), id: `l${String(i)}` }])),
+    );
     expect([...(storage.stores.get(WORD_LIST_CACHE)?.keys() ?? [])]).toEqual(urls.slice(2));
   });
 

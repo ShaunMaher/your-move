@@ -23,16 +23,24 @@ import {
 } from "../game-api.js";
 import { loadGameClient } from "../games.js";
 import { navigate, Link } from "../router.js";
-import { useRefresh } from "../use-refresh.js";
+import { useRefresh, useVisible } from "../use-refresh.js";
 import { cacheWordLists } from "../word-lists.js";
 import { Frame } from "./Frame.js";
 import { Lobby, type LobbyAction } from "./Lobby.js";
 import { Page } from "./Page.js";
 
 const POLL_MS = 5000;
+const OFFLINE_NOTICE = "You seem to be offline. We'll keep trying.";
+const SERVER_NOTICE = "The server isn't answering right now. We'll keep trying.";
 
 /** The answers that mean the game is not as the client last saw it: refetch (05 §actions). */
-const MOVED_ON = new Set(["STALE_GAME", "NOT_YOUR_TURN", "GAME_NOT_ACTIVE", "WRONG_STATUS"]);
+const MOVED_ON = new Set([
+  "STALE_GAME",
+  "NOT_YOUR_TURN",
+  "GAME_NOT_ACTIVE",
+  "WRONG_STATUS",
+  "GAME_UNAVAILABLE",
+]);
 
 const LOBBY_PROBLEMS: Readonly<Record<string, string>> = {
   STALE_GAME: "The game changed while you were looking. Check it and try again.",
@@ -46,6 +54,7 @@ const LOBBY_PROBLEMS: Readonly<Record<string, string>> = {
 const RESIGN_PROBLEMS: Readonly<Record<string, string>> = {
   STALE_GAME: "The game changed while you were looking. Check it and try again.",
   WRONG_STATUS: "The game is no longer in progress.",
+  GAME_UNAVAILABLE: "This game is no longer available.",
 };
 
 function failureText(
@@ -75,13 +84,18 @@ interface GameProps {
 
 export function Game({ api, appName, id, onSessionLost, loadClient = loadGameClient }: GameProps) {
   const [load, setLoad] = useState<Load>({ status: "loading" });
-  const [offline, setOffline] = useState(false);
+  /** Why the screen may be out of date (offline, a failing server), or `null` when it is current. */
+  const [notice, setNotice] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<{
     readonly type: string;
     readonly module: GameClientModule | null;
   } | null>(null);
   const [names, setNames] = useState<ReadonlyMap<string, string>>(new Map());
   const fetching = useRef(false);
+  /** A refetch asked for while one was in flight: one more runs when it ends. */
+  const again = useRef(false);
+  const mounted = useRef(true);
+  const visible = useVisible();
   /** The newest game the screen has shown: an older answer arriving late must not replace it. */
   const newest = useRef(-1);
 
@@ -95,43 +109,58 @@ export function Game({ api, appName, id, onSessionLost, loadClient = loadGameCli
   /** Applies what a fetch of the game answered. */
   const settle = useCallback(
     (result: Awaited<ReturnType<typeof getGame>>) => {
+      if (!mounted.current) return;
       if (result.ok) {
-        setOffline(false);
+        setNotice(null);
         apply(result.data);
       } else if (result.status === 401) onSessionLost();
       else if (result.status === 404) setLoad({ status: "missing" });
-      else if (result.status === 0) {
-        setOffline(true);
-        setLoad((now) => (now.status === "loading" ? { status: "failed", offline: true } : now));
-      } else {
-        setLoad((now) => (now.status === "loading" ? { status: "failed", offline: false } : now));
+      else {
+        const offline = result.status === 0;
+        setNotice(offline ? OFFLINE_NOTICE : SERVER_NOTICE);
+        setLoad((now) => (now.status === "loading" ? { status: "failed", offline } : now));
       }
     },
     [apply, onSessionLost],
   );
 
-  const refetch = useCallback(async () => {
-    if (fetching.current) return;
-    fetching.current = true;
-    const result = await getGame(api, id);
-    fetching.current = false;
-    settle(result);
-  }, [api, id, settle]);
+  /**
+   * Fetches the game again, one request at a time. A poll or focus event that arrives while one is
+   * in flight is dropped; a `queued` one (the game moved on under an action) runs once more after
+   * it, because the answer in flight may predate the change.
+   */
+  const refetch = useCallback(
+    async (queued = false) => {
+      if (fetching.current) {
+        if (queued) again.current = true;
+        return;
+      }
+      fetching.current = true;
+      try {
+        do {
+          again.current = false;
+          const result = await getGame(api, id);
+          settle(result);
+        } while (again.current && mounted.current);
+      } finally {
+        fetching.current = false;
+      }
+    },
+    [api, id, settle],
+  );
 
   useEffect(() => {
-    let live = true;
-    void getGame(api, id).then((result) => {
-      if (live) settle(result);
-    });
+    mounted.current = true;
+    void refetch();
     return () => {
-      live = false;
+      mounted.current = false;
     };
-  }, [api, id, settle]);
+  }, [refetch]);
 
   function retry() {
     newest.current = -1;
     setLoad({ status: "loading" });
-    void refetch();
+    void refetch(true);
   }
 
   const game = load.status === "ready" ? load.game : null;
@@ -164,10 +193,12 @@ export function Game({ api, appName, id, onSessionLost, loadClient = loadGameCli
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the lists' content
   }, [listKey, game?.status]);
 
-  // Looking at a version of the game marks it read (not a transition).
+  // Looking at a version of a game under way, in a tab that is showing, marks it read (not a
+  // transition). A hidden tab has seen nothing, and a lobby has no moves to read.
+  const started = game !== null && game.status !== "lobby";
   useEffect(() => {
-    if (version !== null) void markSeen(api, id, version);
-  }, [api, id, version]);
+    if (version !== null && started && visible) void markSeen(api, id, version);
+  }, [api, id, version, started, visible]);
 
   const submit = useCallback(
     async (action: unknown): Promise<SubmitResult> => {
@@ -179,7 +210,7 @@ export function Game({ api, appName, id, onSessionLost, loadClient = loadGameCli
       }
       if (result.status === 0) throw new Error("offline");
       if (result.status === 401) onSessionLost();
-      if (MOVED_ON.has(result.code)) void refetch();
+      if (MOVED_ON.has(result.code)) void refetch(true);
       return {
         ok: false,
         error: {
@@ -218,7 +249,7 @@ export function Game({ api, appName, id, onSessionLost, loadClient = loadGameCli
       }
       if (result.status === 401) onSessionLost();
       if (result.status === 404) setLoad({ status: "missing" });
-      if (MOVED_ON.has(result.code)) void refetch();
+      if (MOVED_ON.has(result.code)) void refetch(true);
       return failureText(
         result.status,
         result.code,
@@ -274,7 +305,7 @@ export function Game({ api, appName, id, onSessionLost, loadClient = loadGameCli
         gameName={gameName}
         game={load.game}
         onAction={act}
-        offline={offline}
+        notice={notice}
       />
     );
   }
@@ -290,7 +321,7 @@ export function Game({ api, appName, id, onSessionLost, loadClient = loadGameCli
       preview={preview}
       onResign={() => act("resign")}
       onSessionLost={onSessionLost}
-      offline={offline}
+      notice={notice}
     />
   );
 }

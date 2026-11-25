@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * Calls `refresh` when the page regains focus or becomes visible and, if `pollMs` is set, every
@@ -23,4 +23,19 @@ export function useRefresh(refresh: () => void, pollMs: number | null): void {
       if (timer !== undefined) clearInterval(timer);
     };
   }, [pollMs]);
+}
+
+/** Whether the tab is showing: a hidden one polls nothing and has seen nothing. */
+export function useVisible(): boolean {
+  const [visible, setVisible] = useState(document.visibilityState === "visible");
+  useEffect(() => {
+    const update = () => {
+      setVisible(document.visibilityState === "visible");
+    };
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, []);
+  return visible;
 }

@@ -404,7 +404,7 @@ summary {
   cursor: pointer;
 }
 
-/* The game frame: a header, the players, whose turn it is, then the module's board. */
+/* The game frame: a header, then the module's board (the player list and turn line only stand in for a board that is not there). */
 .frame-bar {
   gap: 0.5rem;
 }

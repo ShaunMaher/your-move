@@ -1,7 +1,12 @@
 /**
- * The frame around every game (07 §1, 02 §3): the header with the players and whose turn it is,
- * the menu (rules, history, game info, resign), the results of a finished game, and the module's
- * own board. The board reaches the server only through the `submit` and `preview` it is given.
+ * The frame around every game (07 §1, 02 §3): the header, the menu (rules, history, game info,
+ * resign), the results of a finished game, and the module's own board. The board reaches the
+ * server only through the `submit` and `preview` it is given.
+ *
+ * Who draws what: while a board is on screen it draws the scores and whose turn it is (and its own
+ * live status), and the frame adds neither, so nothing is said twice. The frame's player list and
+ * turn line stand in only while there is no board to do it (loading, unsupported). A finished game
+ * is the frame's Results card: ranks, scores and how it ended.
  */
 import type { ApiClient } from "@your-move/api-client";
 import type { BoardProps, GameClientModule } from "@your-move/sdk/client";
@@ -28,7 +33,8 @@ interface FrameProps {
   /** Resigns; resolves to what went wrong, or `null` when it worked. */
   readonly onResign: () => Promise<string | null>;
   readonly onSessionLost: () => void;
-  readonly offline: boolean;
+  /** Why the screen may be out of date (offline, a failing server), or `null`. */
+  readonly notice: string | null;
 }
 
 const OUT_TEXT: Readonly<Record<string, string>> = {
@@ -38,36 +44,22 @@ const OUT_TEXT: Readonly<Record<string, string>> = {
   cancelled: "cancelled",
 };
 
+/** Whose turn it is, for a game under way. */
 function turnText(game: GameEnvelope): string {
-  switch (game.status) {
-    case "active": {
-      if (game.yourTurn) return "Your turn";
-      const waiting = game.players
-        .filter((player) => player.seat !== null && game.toAct.includes(player.seat))
-        .map(seatLabel);
-      return waiting.length === 0 ? "Waiting" : `Waiting for ${waiting.join(" and ")}`;
-    }
-    case "finished":
-      return "Game over";
-    case "declined":
-      return "Declined: no result";
-    case "cancelled":
-      return "Cancelled";
-    default:
-      return "Expired";
-  }
+  if (game.yourTurn) return "Your turn";
+  const waiting = game.players
+    .filter((player) => player.seat !== null && game.toAct.includes(player.seat))
+    .map(seatLabel);
+  return waiting.length === 0 ? "Waiting" : `Waiting for ${waiting.join(" and ")}`;
 }
 
-function PlayerChip({ player, acting, over }: { player: Player; acting: boolean; over: boolean }) {
+function PlayerChip({ player, acting }: { player: Player; acting: boolean }) {
   const note = player.outReason === undefined ? "" : OUT_TEXT[player.outReason];
   return (
     <li className="chip" aria-current={acting ? "true" : undefined}>
       <span>{seatLabel(player)}</span>
       {player.score === undefined ? null : <strong>{String(player.score)}</strong>}
       {note === undefined || note === "" ? null : <span className="hint">{note}</span>}
-      {over && player.rank !== undefined ? (
-        <span className="badge quiet">#{String(player.rank)}</span>
-      ) : null}
     </li>
   );
 }
@@ -111,7 +103,7 @@ function Results({ game }: { readonly game: GameEnvelope }) {
 }
 
 export function Frame(props: FrameProps) {
-  const { api, game, view, client, gameName, offline } = props;
+  const { api, game, view, client, gameName, notice } = props;
   const [panel, setPanel] = useState<Panel>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -138,6 +130,7 @@ export function Frame(props: FrameProps) {
   }
 
   let board;
+  let drawn = false;
   if (!game.available) board = <p className="card">This game is no longer available.</p>;
   else if (client === "loading") board = <p role="status">Loading the board…</p>;
   else if (client === null) {
@@ -156,6 +149,7 @@ export function Frame(props: FrameProps) {
     board = over ? null : <p role="status">Loading the board…</p>;
   } else {
     board = <client.Board game={game} view={view} submit={props.submit} preview={props.preview} />;
+    drawn = true;
   }
 
   return (
@@ -179,20 +173,28 @@ export function Frame(props: FrameProps) {
         <h1 tabIndex={-1} className="visually-hidden">
           {gameName} game
         </h1>
-        <ul className="chips" aria-label="Players">
-          {seated.map((player) => (
-            <PlayerChip
-              key={player.seat}
-              player={player}
-              acting={player.seat !== null && game.toAct.includes(player.seat)}
-              over={over}
-            />
-          ))}
-        </ul>
-        <p role="status" className="turn" data-yours={game.yourTurn}>
-          {offline ? "You seem to be offline. We'll keep trying." : turnText(game)}
-        </p>
+        {notice === null ? null : (
+          <p role="status" className="turn">
+            {notice}
+          </p>
+        )}
         {over ? <Results game={game} /> : null}
+        {over || drawn ? null : (
+          <>
+            <ul className="chips" aria-label="Players">
+              {seated.map((player) => (
+                <PlayerChip
+                  key={player.seat}
+                  player={player}
+                  acting={player.seat !== null && game.toAct.includes(player.seat)}
+                />
+              ))}
+            </ul>
+            <p className="turn" data-yours={game.yourTurn}>
+              {turnText(game)}
+            </p>
+          </>
+        )}
         {board}
       </main>
 

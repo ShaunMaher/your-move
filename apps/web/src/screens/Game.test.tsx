@@ -42,7 +42,10 @@ afterEach(() => {
 
 /** Renders the game screen over a fake API; later routes win over the defaults. */
 function open(
-  routes: Record<string, Response | Error | ((call: never) => Response | Error)> = {},
+  routes: Record<
+    string,
+    Response | Error | ((call: never) => Response | Error | Promise<Response | Error>)
+  > = {},
   options: { client?: typeof fakeClient | null } = {},
 ) {
   const fake = fakeApi({
@@ -175,15 +178,28 @@ describe("the lobby", () => {
 });
 
 describe("the game frame", () => {
-  it("names the players, whose turn it is, and gives the module's board the view", async () => {
+  it("gives the module's board the view and leaves the scores and the turn to it", async () => {
     open();
     expect(await screen.findByRole("region", { name: "Fake board" })).toBeDefined();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Words game");
+    expect(screen.getByText(`Board v3: ${JSON.stringify(VIEW)}`)).toBeDefined();
+    // One owner for each thing: with a board on screen the frame draws no player chips, no turn
+    // line and no status of its own.
+    expect(screen.queryByRole("list", { name: "Players" })).toBeNull();
+    expect(document.querySelector(".turn")).toBeNull();
+    expect(screen.queryByText("Your turn")).toBeNull();
+    expect(screen.getAllByRole("status").map((el) => el.textContent)).toEqual([""]);
+  });
+
+  it("stands in with the players and the turn, said once and not live, while there is no board", async () => {
+    open({}, { client: null });
+    expect(await screen.findByText(/can't be shown by this version of the app/u)).toBeDefined();
     const chips = within(screen.getByRole("list", { name: "Players" })).getAllByRole("listitem");
     expect(chips.map((chip) => chip.textContent)).toEqual(["You", "Alex"]);
     expect(chips[0]?.getAttribute("aria-current")).toBe("true");
-    expect(screen.getAllByRole("status").some((el) => el.textContent === "Your turn")).toBe(true);
-    expect(screen.getByText(`Board v3: ${JSON.stringify(VIEW)}`)).toBeDefined();
+    const turn = screen.getByText("Your turn");
+    expect(turn.getAttribute("role")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("marks what it has shown as seen, once per version", async () => {
@@ -213,9 +229,6 @@ describe("the game frame", () => {
       action: { type: "play" },
     });
     expect(screen.getByText("sent")).toBeDefined();
-    expect(screen.getAllByRole("status").some((el) => el.textContent === "Waiting for Alex")).toBe(
-      true,
-    );
   });
 
   it.each(["STALE_GAME", "NOT_YOUR_TURN"])(
@@ -281,11 +294,10 @@ describe("the game frame", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let game = envelope({ yourTurn: false, toAct: [1] });
     open({ "GET /api/v1/games/g1": () => withView(game) });
-    await screen.findByText("Waiting for Alex", { selector: ".turn" });
+    await screen.findByText(/Board v3/u);
     game = envelope({ version: 4 });
     await vi.advanceTimersByTimeAsync(5000);
-    expect(await screen.findByText("Your turn", { selector: ".turn" })).toBeDefined();
-    expect(screen.getByText(/Board v4/u)).toBeDefined();
+    expect(await screen.findByText(/Board v4/u)).toBeDefined();
   });
 
   it("keeps the last state and says so when a refresh can't reach the server", async () => {
@@ -300,6 +312,106 @@ describe("the game frame", () => {
     window.dispatchEvent(new Event("focus"));
     await waitFor(() => {
       expect(screen.queryByText(/You seem to be offline/u)).toBeNull();
+    });
+  });
+
+  it("runs one more refetch when the game moves on under a refetch already in flight", async () => {
+    let gets = 0;
+    const releases: ((answer: Response) => void)[] = [];
+    open({
+      "GET /api/v1/games/g1": () => {
+        gets += 1;
+        if (gets === 2) return new Promise<Response>((resolve) => releases.push(resolve));
+        return withView(
+          gets === 1 ? envelope() : envelope({ version: 5, yourTurn: false, toAct: [1] }),
+        );
+      },
+      "POST /api/v1/games/g1/actions": problem(409, "STALE_GAME"),
+    });
+    await screen.findByText(/Board v3/u);
+    // A focus refetch is in flight (its answer predates the other player's move) ...
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => {
+      expect(releases).toHaveLength(1);
+    });
+    // ... when a move is refused as stale: that must not be swallowed by the one in flight.
+    click("Play");
+    expect(await screen.findByText("refused STALE_GAME")).toBeDefined();
+    releases[0]?.(withView(envelope()));
+    expect(await screen.findByText(/Board v5/u)).toBeDefined();
+    expect(gets).toBe(3);
+  });
+
+  it("never lets an older answer arriving late replace a newer one", async () => {
+    let gets = 0;
+    const releases: ((answer: Response) => void)[] = [];
+    open({
+      "GET /api/v1/games/g1": () => {
+        gets += 1;
+        if (gets === 2) return new Promise<Response>((resolve) => releases.push(resolve));
+        return withView();
+      },
+      "POST /api/v1/games/g1/actions": json({
+        game: envelope({ version: 4, yourTurn: false, toAct: [1] }),
+        view: { board: "moved" },
+        describe: [],
+      }),
+    });
+    await screen.findByText(/Board v3/u);
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => {
+      expect(releases).toHaveLength(1);
+    });
+    click("Play");
+    await screen.findByText(/Board v4/u);
+    releases[0]?.(withView(envelope()));
+    await waitFor(() => {
+      expect(gets).toBe(2);
+    });
+    await Promise.resolve();
+    expect(screen.getByText(/Board v4/u)).toBeDefined();
+    expect(screen.queryByText(/Board v3/u)).toBeNull();
+  });
+
+  it("does not poll, or mark the game seen, while the tab is hidden", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    const { calls } = open({
+      "GET /api/v1/games/g1": withView(envelope({ yourTurn: false, toAct: [1] })),
+    });
+    await screen.findByText(/Board v3/u);
+    const gets = () => calls.filter((c) => c.method === "GET" && c.path === "/api/v1/games/g1");
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(gets()).toHaveLength(1);
+    expect(posts(calls, "seen")).toHaveLength(0);
+    visibility.mockReturnValue("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => {
+      expect(posts(calls, "seen")).toHaveLength(1);
+    });
+    expect(gets()).toHaveLength(2);
+    visibility.mockRestore();
+  });
+
+  it("does not mark a lobby seen", async () => {
+    const { calls } = open({ "GET /api/v1/games/g1": json({ game: lobby(), view: null }) });
+    await screen.findByRole("button", { name: "Start game" });
+    await Promise.resolve();
+    expect(posts(calls, "seen")).toHaveLength(0);
+  });
+
+  it("keeps the board and says so when a refresh gets a server error, then stops saying it", async () => {
+    let answer: Response = withView();
+    open({ "GET /api/v1/games/g1": () => answer });
+    await screen.findByText(/Board v3/u);
+    answer = problem(500, "INTERNAL");
+    window.dispatchEvent(new Event("focus"));
+    expect(await screen.findByText(/server isn't answering/u)).toBeDefined();
+    expect(screen.getByRole("region", { name: "Fake board" })).toBeDefined();
+    answer = withView();
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => {
+      expect(screen.queryByText(/server isn't answering/u)).toBeNull();
     });
   });
 
@@ -332,7 +444,7 @@ describe("the game frame", () => {
     });
     await screen.findByRole("region", { name: "Fake board" });
     await waitFor(() => {
-      expect(fetcher).toHaveBeenCalledWith(url, { credentials: "omit" });
+      expect(fetcher).toHaveBeenCalledWith(url, { credentials: "omit", redirect: "error" });
     });
     expect(fetcher).toHaveBeenCalledOnce();
   });
@@ -419,6 +531,15 @@ describe("resigning", () => {
     click("Keep playing");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(posts(calls, "resign")).toHaveLength(0);
+  });
+
+  it("says so when the game's engine has gone", async () => {
+    open({ "POST /api/v1/games/g1/resign": problem(409, "GAME_UNAVAILABLE") });
+    await screen.findByRole("region", { name: "Fake board" });
+    click("Menu");
+    click("Resign…");
+    click("Resign");
+    expect((await screen.findByRole("alert")).textContent).toContain("no longer available");
   });
 
   it("says when the game changed under it, and when it can't reach the server", async () => {
@@ -508,6 +629,10 @@ describe("a finished game", () => {
       "/",
     );
     expect(await screen.findByText(/Board v3: .*final/u)).toBeDefined();
+    // "Game over" is the results card's business alone: no player list or turn line beside it.
+    expect(screen.queryByText("Game over")).toBeNull();
+    expect(screen.queryByRole("list", { name: "Players" })).toBeNull();
+    expect(document.querySelector(".turn")).toBeNull();
   });
 
   it("says 'Declined, no result' for a declined game, which has no ranks", async () => {

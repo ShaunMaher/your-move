@@ -19,7 +19,8 @@ interface LobbyProps {
   readonly gameName: string;
   readonly game: GameEnvelope;
   readonly onAction: (action: LobbyAction) => Promise<string | null>;
-  readonly offline: boolean;
+  /** Why the screen may be out of date, or `null`. */
+  readonly notice: string | null;
 }
 
 const STATE_TEXT: Readonly<Record<Player["state"], string>> = {
@@ -38,7 +39,7 @@ function whoText(player: Player): string {
   return player.displayName ?? player.invitedAs ?? "Invited player";
 }
 
-export function Lobby({ appName, gameName, game, onAction, offline }: LobbyProps) {
+export function Lobby({ appName, gameName, game, onAction, notice }: LobbyProps) {
   const [pending, setPending] = useState<LobbyAction | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -69,7 +70,7 @@ export function Lobby({ appName, gameName, game, onAction, offline }: LobbyProps
   return (
     <Page appName={appName} nav={<Link to="/">Home</Link>}>
       <h1 tabIndex={-1}>{gameName} lobby</h1>
-      <p role="status">{offline ? "You seem to be offline. We'll keep trying." : status}</p>
+      <p role="status">{notice ?? status}</p>
       <section className="card stack" aria-labelledby="lobby-players">
         <h2 id="lobby-players">Players</h2>
         <ul className="plain">
