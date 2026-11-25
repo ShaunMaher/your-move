@@ -108,7 +108,7 @@ GameEnvelope = {
               outReason?: "eliminated" | "resigned" | "timed_out" | "declined" | "cancelled", rank?: number, score?: number,
               deadline?: number /* when this seat times out, if in toAct */, isYou: boolean, isCreator: boolean }],
   yourSeat: number | null, toAct: number[], yourTurn: boolean,
-  yourInvitation: "normal" | "hidden" | null, // you hold an `invited` seat (accept/decline); hidden ones never badge
+  yourInvitation: "normal" | "hidden" | null, // you hold an `invited` seat in a `lobby` (accept/decline); null once the lobby ended; hidden ones never badge
   joinLink?: { active: boolean, expiresAt: number | null },  // creator only, lobby only; the URL is shown only on create/rotate
   canAddPlayers?: { userId, displayName }[], // creator only, finished games: link joiners who acted and aren't yet past opponents — blocked ones are still listed so the prompt reveals nothing; add-player is a no-op for them (02 §4)
   createdAt, lastActionAt
@@ -139,7 +139,7 @@ The viewer's games (membership as in 04), newest activity first: all `lobby`/`ac
 from the last 90 days; `declined`/`cancelled`/`expired` from the last 7 days. Cursor-paginated
 (`?cursor=`, 50 per page; `nextCursor`). **Hidden invitations are excluded by default.** Filters:
 `?status=`, `?gameType=`, `?invitations=true` (normal invitations), `?invitations=hidden` (the
-collapsed *Hidden invitations*, 06 §6.7).
+collapsed *Hidden invitations*, 06 §6.7); both list only invitations whose lobby is still open.
 `403 ONBOARDING_REQUIRED` until onboarding is complete.
 
 ### `POST /api/v1/games`

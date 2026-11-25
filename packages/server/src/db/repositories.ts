@@ -257,8 +257,8 @@ export interface GameListQuery {
   readonly status?: GameStatus;
   readonly gameType?: string;
   /**
-   * `normal` or `hidden`: only the user's invitations with that delivery. Otherwise every game
-   * the user is a member of, except hidden invitations.
+   * `normal` or `hidden`: only the user's open invitations (in a `lobby`) with that delivery.
+   * Otherwise every game the user is a member of, except hidden invitations.
    */
   readonly invitations?: "normal" | "hidden";
   /** `finished` games ended at or after this time are listed. */

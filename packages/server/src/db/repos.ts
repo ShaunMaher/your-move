@@ -141,7 +141,12 @@ function gameRepo(db: Database): GameRepo {
         query.invitations === undefined
           ? // Hidden invitations only in their own list (06 §6.7).
             or(ne(gamePlayers.state, "invited"), ne(gamePlayers.delivery, "hidden"))
-          : and(eq(gamePlayers.state, "invited"), eq(gamePlayers.delivery, query.invitations));
+          : // Open invitations only: an ended lobby's can't be accepted (A2 review P-1).
+            and(
+              eq(gamePlayers.state, "invited"),
+              eq(gamePlayers.delivery, query.invitations),
+              eq(games.status, "lobby"),
+            );
       const rows = await db
         .select({ game: games, member: gamePlayers })
         .from(gamePlayers)

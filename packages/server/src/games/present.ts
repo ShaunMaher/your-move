@@ -113,6 +113,20 @@ export function engineOf(input: Pick<PresentInput, "game" | "type">) {
   return input.type?.engine(input.game.gameVersion);
 }
 
+/**
+ * The viewer's open invitation: an `invited` row they can see, while the lobby is still open. An
+ * ended lobby's invitation can no longer be accepted, so it isn't one (A2 review P-1).
+ */
+export function invitationOf(
+  game: GameRecord,
+  viewer: GamePlayerRecord,
+): GameEnvelope["yourInvitation"] {
+  if (game.status !== "lobby" || viewer.state !== "invited" || viewer.delivery === "inert") {
+    return null;
+  }
+  return viewer.delivery;
+}
+
 /** The game envelope for one member (05 §Common types). */
 export function envelope(input: PresentInput): GameEnvelope {
   const { game, viewer } = input;
@@ -138,8 +152,7 @@ export function envelope(input: PresentInput): GameEnvelope {
     yourSeat,
     toAct,
     yourTurn: yourSeat !== null && toAct.includes(yourSeat),
-    yourInvitation:
-      viewer.state === "invited" && viewer.delivery !== "inert" ? viewer.delivery : null,
+    yourInvitation: invitationOf(game, viewer),
     createdAt: game.createdAt,
     lastActionAt: game.lastActionAt,
   };

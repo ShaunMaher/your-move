@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { installedGames } from "../../../generated/server-registry.js";
 import {
   act,
+  call,
   createGame,
   gameHarness,
   getGame,
@@ -136,5 +137,43 @@ describe("S-3: creating a game changes only the remembered options in users.sett
       lastOptions: { example: { lives: 2 } },
       lastGameType: "example",
     });
+  });
+});
+
+interface Listed {
+  readonly id: string;
+  readonly yourInvitation: string | null;
+  readonly unread: boolean;
+}
+
+async function list(h: Harness, player: Player, query = ""): Promise<Listed[]> {
+  const listed = await call<{ games: Listed[] }>(h, player, "GET", `/api/v1/games${query}`);
+  expect(listed.status).toBe(200);
+  return listed.body.games;
+}
+
+describe("P-1: an invitation is one only while its lobby is open", () => {
+  it("drops yourInvitation and the invitations filter once the lobby is cancelled", async () => {
+    const h = harness();
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    const game = await createGame(h, a, { gameType: "words", invitees: [{ email: b.email }] });
+    expect((await list(h, b, "?invitations=true")).map((row) => row.id)).toEqual([game.id]);
+    expect((await transition(h, a, game.id, "cancel")).status).toBe(200);
+    expect((await getGame(h, b, game.id)).game.yourInvitation).toBeNull();
+    expect(await list(h, b, "?invitations=true")).toEqual([]);
+    // Still listed among b's games for a week, as an ending, not an invitation.
+    expect((await list(h, b)).find((row) => row.id === game.id)?.yourInvitation).toBeNull();
+  });
+
+  it("drops a hidden one from the hidden list too", async () => {
+    const h = harness();
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    const game = await createGame(h, a, { gameType: "words", invitees: [{ email: b.email }] });
+    h.exec("UPDATE game_players SET delivery = 'hidden' WHERE user_id = ?", b.id);
+    expect((await list(h, b, "?invitations=hidden")).map((row) => row.id)).toEqual([game.id]);
+    expect((await transition(h, a, game.id, "cancel")).status).toBe(200);
+    expect(await list(h, b, "?invitations=hidden")).toEqual([]);
   });
 });
