@@ -180,7 +180,7 @@ The project's foundation, built to 11 (engineering standards) from the first com
 - `rng` stores `[max, value]` pairs so replay detects a changed draw range (`game_actions.rng`
   and `games.setup_rng`, 04; M1 review P-20).
 - Words client module: board UI — drag & drop + tap-to-place, zoom, blank picker, live preview, shuffle/recall,
-  swap/pass/resign dialogs. The words engine exports a view-level play analysis for the board UI,
+  swap/pass dialogs (resign is the shell's menu, 02 §3). The words engine exports a view-level play analysis for the board UI,
   so local previews work from the `View` alone (the engine's own analysis takes the secret state).
 - Realtime: `UserChannel` DO + Node hub; refetch on visibility.
 - Built-in dictionaries served through `DictionaryProvider` (03 §10): the asset-fetch `loadText`

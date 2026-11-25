@@ -249,6 +249,12 @@ error toasts, the stale-state refetch, and the realtime refresh. A game module n
 API directly; it only calls `submit` and `preview`. The client may import the module's pure engine
 to compute previews locally (e.g. word scores), but it is always non-authoritative.
 
+A client module ships **no stylesheet file** (its built output is JavaScript, §7.1.1) and the page's
+CSP allows no inline styles (08 §3): it installs its CSS as a constructable stylesheet
+(`document.adoptedStyleSheets`), which that policy doesn't restrict, with a `<style>` element only
+as the fallback for a browser without them. Positions and transforms set through the DOM's style
+object are likewise fine.
+
 ## 4. Game lifecycle (all games)
 
 ```
