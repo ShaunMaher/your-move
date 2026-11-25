@@ -672,6 +672,8 @@ describe("a finished game", () => {
       ),
     });
     expect(await screen.findByRole("heading", { level: 2, name: "Final result" })).toBeDefined();
+    // The scores wait for the board (the card shows them only while none is drawn).
+    expect(await screen.findByText(/Board v3: .*final/u)).toBeDefined();
     const results = screen.getByRole("region", { name: "Final result" });
     expect(
       within(results)
