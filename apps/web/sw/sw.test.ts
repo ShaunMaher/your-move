@@ -79,24 +79,24 @@ function load(options: { caches?: ReturnType<typeof fakeCaches>; fetch?: typeof 
 }
 
 /** Delivers a fetch event; resolves to the response the worker gave, or null if it passed. */
-async function dispatch(
+function dispatch(
   worker: ReturnType<typeof load>,
   url: string,
   init: { method?: string; mode?: string } = {},
 ): Promise<Response | null> {
-  let answer: Promise<Response> | null = null;
+  const given: { answer: Promise<Response> | null } = { answer: null };
   const request = {
-    url: `${ORIGIN}${url}`,
+    url: url.startsWith("https://") ? url : `${ORIGIN}${url}`,
     method: init.method ?? "GET",
     mode: init.mode ?? "cors",
   };
   worker.listeners.get("fetch")?.({
     request,
-    respondWith: (given: Promise<Response>) => {
-      answer = given;
+    respondWith: (answer: Promise<Response>) => {
+      given.answer = answer;
     },
   });
-  return answer;
+  return Promise.resolve(given.answer);
 }
 
 beforeEach(() => {
@@ -156,17 +156,7 @@ describe("fetch ignores what is not the shell's", () => {
 
   it("another origin", async () => {
     const worker = load();
-    const outcome = await new Promise<Response | null>((resolve) => {
-      let answer: Promise<Response> | null = null;
-      worker.listeners.get("fetch")?.({
-        request: { url: "https://elsewhere.example/assets/app-1.js", method: "GET", mode: "cors" },
-        respondWith: (given: Promise<Response>) => {
-          answer = given;
-        },
-      });
-      resolve(answer);
-    });
-    expect(outcome).toBeNull();
+    expect(await dispatch(worker, "https://elsewhere.example/assets/app-1.js")).toBeNull();
   });
 
   it("but not a path that only starts like a server path", async () => {
