@@ -5,8 +5,10 @@
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo",
     // Node types for the tests (kit-words.test.ts reads and writes its generated file). No DOM
-    // library: the engine and everything beside it compile without `window`, `document` or
-    // `crypto` typings, so a DOM use in the engine is a type error, not just a lint finding.
+    // library, so `window`, `document` and the other DOM globals are type errors in the engine.
+    // The Node types do declare `crypto`, `fetch`, `process` and `localStorage`-like globals, so
+    // those are NOT caught here: the engine lint's allow-list and the architecture rules (11 §5)
+    // are what keep them out of `src/engine`.
     "types": ["node"],
     "lib": ["ES2023"]
   },
