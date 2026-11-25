@@ -8,6 +8,6 @@ export default defineProject({
     environment: "jsdom",
     // The whole suite runs in parallel; a slow machine gets a wide margin.
     testTimeout: 20_000,
-    include: ["src/**/*.test.{ts,tsx}", "build/**/*.test.ts", "sw/**/*.test.ts"],
+    include: ["src/**/*.test.{ts,tsx}", "vite-plugin/**/*.test.ts", "sw/**/*.test.ts"],
   },
 });

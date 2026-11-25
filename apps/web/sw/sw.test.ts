@@ -4,7 +4,7 @@ import vm from "node:vm";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { type BuildInfo, renderWorker } from "../build/service-worker.js";
+import { type BuildInfo, renderWorker } from "../vite-plugin/service-worker.js";
 
 const ORIGIN = "https://games.example";
 const BUILD: BuildInfo = {

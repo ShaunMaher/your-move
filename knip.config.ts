@@ -38,7 +38,7 @@ const config: KnipConfig = {
     },
     "apps/web": {
       project: ["src/**/*.{ts,tsx}", "sw/**/*.ts"],
-      // Imported by the build (vite.config.ts, via build/service-worker.ts) for the server paths.
+      // Imported by the build (vite.config.ts, via vite-plugin/service-worker.ts) for the server paths.
       ignoreDependencies: ["@your-move/shared"],
     },
     scripts: { entry: ["src/bin/*.ts"], project: ["src/**/*.ts"] },

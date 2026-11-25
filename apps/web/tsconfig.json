@@ -14,7 +14,7 @@
   },
   "include": [
     "src",
-    "build",
+    "vite-plugin",
     "sw",
     "vite.config.ts",
     "vitest.config.ts",
