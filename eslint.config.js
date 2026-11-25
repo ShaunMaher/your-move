@@ -55,6 +55,11 @@ export default config(
     extends: [tsConfigs.disableTypeChecked],
     languageOptions: { globals: globals.node },
   },
+  {
+    // The service worker runs in a worker scope, not Node (07 §4); the build prepends `BUILD`.
+    files: ["apps/web/sw/**/*.js"],
+    languageOptions: { globals: globals.serviceworker },
+  },
   importX.flatConfigs.recommended,
   importX.flatConfigs.typescript,
   {

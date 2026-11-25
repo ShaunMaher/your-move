@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import react from "@vitejs/plugin-react";
@@ -33,11 +34,35 @@ function recordInputs(): Plugin {
 }
 
 /**
+ * Emits `sw.js` (07 §4): `sw/sw.js` with the build's file list in front. Precached: the shell at
+ * `/` and every file Vite emitted (hashed, so the list identifies the build), plus the icon.
+ * Workbox would do the same; this is the part of it the app needs, with no dependency.
+ */
+function serviceWorker(): Plugin {
+  return {
+    name: "service-worker",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      const precache = ["/", "/icon.svg", ...Object.keys(bundle).map((file) => `/${file}`)]
+        .filter((path) => !path.endsWith(".map"))
+        .sort();
+      const version = createHash("sha256").update(precache.join("\n")).digest("hex").slice(0, 12);
+      const template = readFileSync(new URL("sw/sw.js", import.meta.url), "utf8");
+      this.emitFile({
+        type: "asset",
+        fileName: "sw.js",
+        source: `const BUILD = ${JSON.stringify({ version, precache })};\n${template}`,
+      });
+    },
+  };
+}
+
+/**
  * The SPA build (07 §4 CSP compatibility): no inlined assets (`data:` scripts or fonts would
  * break the CSP) and hashed output under /assets/ (cached immutably, 03 §9).
  */
 export default defineConfig({
-  plugins: [react(), recordInputs()],
+  plugins: [react(), recordInputs(), serviceWorker()],
   build: {
     assetsInlineLimit: 0,
     assetsDir: "assets",

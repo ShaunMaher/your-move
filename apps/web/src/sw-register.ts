@@ -1,0 +1,65 @@
+/**
+ * Registers the service worker and reports when an updated one is waiting (07 §4, `registerType:
+ * "prompt"`): the app shows "New version available" and only reloads when the person agrees, so
+ * a game in progress is never replaced under them.
+ */
+
+export interface UpdateWatch {
+  /** Activates the waiting worker; the page reloads when it takes over. */
+  readonly apply: () => void;
+}
+
+/**
+ * Watches a registration for a worker that finishes installing while another controls the page.
+ * `container` is `navigator.serviceWorker`; it is a parameter so tests can fake it.
+ */
+export function watchForUpdates(
+  container: ServiceWorkerContainer,
+  registration: ServiceWorkerRegistration,
+  onUpdate: (watch: UpdateWatch) => void,
+  reload: () => void,
+): void {
+  const offer = (worker: ServiceWorker) => {
+    onUpdate({
+      apply: () => {
+        worker.postMessage("SKIP_WAITING");
+      },
+    });
+  };
+  // A worker already waiting from an earlier visit.
+  if (registration.waiting !== null && container.controller !== null) offer(registration.waiting);
+  registration.addEventListener("updatefound", () => {
+    const installing = registration.installing;
+    if (installing === null) return;
+    installing.addEventListener("statechange", () => {
+      if (installing.state === "installed" && container.controller !== null) offer(installing);
+    });
+  });
+  let reloading = false;
+  container.addEventListener("controllerchange", () => {
+    if (reloading) return;
+    reloading = true;
+    reload();
+  });
+}
+
+/** Registers `/sw.js` in a production build; a no-op in development and where unsupported. */
+export function registerServiceWorker(onUpdate: (watch: UpdateWatch) => void): void {
+  if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
+  const container = navigator.serviceWorker;
+  window.addEventListener("load", () => {
+    void container.register("/sw.js").then(
+      (registration) => {
+        watchForUpdates(container, registration, onUpdate, () => {
+          window.location.reload();
+        });
+        // A long-lived home-screen app is resumed, not reloaded: look for a new version then.
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible")
+            void registration.update().catch(() => undefined);
+        });
+      },
+      () => undefined,
+    );
+  });
+}
