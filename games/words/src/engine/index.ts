@@ -17,6 +17,7 @@ export { findRuleset, latestRuleset, RULESETS, type RulesetRegistry } from "./ru
 export {
   BLANK,
   premiumCounts,
+  totalTiles,
   type Premium,
   type Ruleset,
   type RulesetData,
@@ -31,6 +32,7 @@ export {
   type Action,
   type Catalog,
   type Options,
+  type Placement,
   type PreviewResult,
   type PublicRecord,
   type View,

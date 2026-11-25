@@ -43,7 +43,8 @@ describe("words manifest (02 §7.2)", () => {
     expect(new Set(elements)).toEqual(new Set(["svg", "rect", "circle"]));
   });
 
-  it("has no client module until the board UI (M3)", () => {
-    expect(client).toBeNull();
+  it("has a client module for the manifest's type that renders every engine version", () => {
+    expect(client.type).toBe(manifest.type);
+    expect(new Set(client.versions)).toEqual(new Set(Object.keys(engines).map(Number)));
   });
 });

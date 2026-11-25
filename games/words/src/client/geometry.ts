@@ -10,8 +10,8 @@ export interface Viewport {
   readonly y: number;
 }
 
-export const MIN_SCALE = 1;
-export const MAX_SCALE = 4;
+const MIN_SCALE = 1;
+const MAX_SCALE = 4;
 /** The zoom a double tap or a hovering drag goes to. */
 export const TAP_SCALE = 2.5;
 
