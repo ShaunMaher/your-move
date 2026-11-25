@@ -36,6 +36,8 @@ repositoryContract("node:sqlite", () => {
   migrate(sqlite, MIGRATIONS);
   return Promise.resolve({
     repos: nodeRepositories(sqlite),
+    sql: (statement: string, ...params: (string | number | null)[]) =>
+      Promise.resolve(sqlite.prepare(statement).all(...params) as Record<string, unknown>[]),
     close: () => {
       sqlite.close();
       return Promise.resolve();

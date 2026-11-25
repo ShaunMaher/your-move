@@ -50,7 +50,9 @@ app, the MCP server (02 §9.4) and anyone else's tools are clients of the same A
   can't call it; scripts, CLIs and the MCP server (which aren't browsers) use tokens.
 - State-changing requests (`POST`/`PATCH`/`DELETE`) **authenticated by cookie** MUST carry an
   `Origin` header equal to `PUBLIC_URL`'s origin, else `403 BAD_ORIGIN` (CSRF defence, 08).
-  Bearer-token requests are exempt from the Origin rule: browsers never attach them automatically,
+  Any other state-changing request whose `Origin` names a different origin also gets
+  `403 BAD_ORIGIN` (with no CORS no legitimate browser sends one; scripts without `Origin` are
+  unaffected). Bearer-token requests are exempt from the Origin rule: browsers never attach them automatically,
   so they can't be forged cross-site. Requests **with a body** MUST be
   `Content-Type: application/json`, else `415`. Body-less `DELETE`s are allowed (Origin still
   required). Endpoints that take no input accept an empty body or `{}`.

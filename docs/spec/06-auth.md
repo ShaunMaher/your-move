@@ -33,7 +33,9 @@ hard requirement, not a preference.
   burns the oldest. This prevents an attacker invalidating the victim's freshly received code by
   requesting another (sign-in DoS).
 - Rate limits (all via `rate_limits`, full table in 08 §4; IP bucketing rules in 08 §4.1):
-  - per email: 5 code requests / hour, 10 / day; 10 failed verifies / hour across challenges.
+  - per email: 5 code requests / hour, 10 / day; 10 failed verifies / hour across challenges, one
+    counter shared by sign-in and step-up codes (§7). A request refused for its IP counts towards
+    none of the per-email limits.
   - per IP: 20 code requests / hour, 50 verify attempts / hour.
   - Exceeding a per-email request limit: **no challenge is created, no existing challenge is
     touched, no email is sent**, and the response is still `202` (avoids enumeration and
@@ -75,7 +77,8 @@ Attempt counting, consumption and rate limiting must be race-free under parallel
 
 ### 3.3 Email and input
 
-- Email: subject `"<code> is your <APP_NAME> sign-in code"`; body repeats the code, says it expires
+- Email: subject `"<code> is your <APP_NAME> sign-in code"` with the 8 digits ungrouped (one-time-code
+  autofill reads the subject); body repeats the code in two groups, says it expires
   in 10 minutes, "We will never ask you for this code — don't share it with anyone", "If you didn't
   request this, ignore this email", and the approximate request time. A link to the app is fine;
   it must not carry the code.
@@ -171,10 +174,14 @@ Verify on a real device during M2.
 
 ### 5.1 Display-name rules
 
-- Normalise: Unicode NFC, trim, collapse internal whitespace to single spaces.
+- Normalise: Unicode NFC, trim, collapse runs of space separators to single spaces.
 - 1–24 graphemes **and** ≤ 64 code points after normalisation; ≤ 2 combining marks per grapheme.
-- Reject: control characters, bidi override/isolate characters (U+202A–202E, U+2066–2069),
-  zero-width characters (U+200B–200F, U+FEFF), anything containing `://`, `www.` or `@`, anything
+- Reject: control characters (tabs and line breaks included: refused, not collapsed), the
+  Unicode line and paragraph separators (U+2028, U+2029),
+  bidi override/isolate characters (U+202A–202E, U+2066–2069),
+  zero-width characters (U+200B–200F, U+FEFF; the joiner U+200D only when it isn't between two
+  emoji code points, so emoji sequences such as families and flags work), anything containing
+  `://`, `www.` or `@`, anything
   that looks like a domain (`\p{L}\.\p{L}{2,}`, case-insensitive) or contains a run of ≥ 7 digits,
   and (case-insensitively) the configured `APP_NAME`, "admin", "support", "official", "staff".
   (Discourages spam via invite emails/push and impersonation.)

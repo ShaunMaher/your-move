@@ -3,7 +3,16 @@
  * document generator (`pnpm api:generate`) and tests of HTTP behaviour alone. Every call rejects,
  * so accidental use fails loudly instead of pretending to succeed.
  */
-import type { GameRepo, Repositories, UserRepo } from "./repositories.js";
+import type {
+  ApiTokenRepo,
+  AuthEventRepo,
+  GameRepo,
+  OtpRepo,
+  RateLimitRepo,
+  Repositories,
+  SessionRepo,
+  UserRepo,
+} from "./repositories.js";
 
 export class DetachedStorageError extends Error {
   override readonly name = "DetachedStorageError";
@@ -18,7 +27,28 @@ export class DetachedStorageError extends Error {
  * so a method added to an interface can't be left undefined here.
  */
 const METHODS = {
-  users: { create: true, findById: true, findByEmail: true } satisfies Record<keyof UserRepo, true>,
+  users: {
+    create: true,
+    createOrGetByEmail: true,
+    findById: true,
+    findByEmail: true,
+    update: true,
+    deleteAccount: true,
+  } satisfies Record<keyof UserRepo, true>,
+  otp: { issue: true, live: true, attempt: true, consume: true } satisfies Record<
+    keyof OtpRepo,
+    true
+  >,
+  sessions: {
+    create: true,
+    findByTokenHash: true,
+    touch: true,
+    delete: true,
+    deleteAll: true,
+  } satisfies Record<keyof SessionRepo, true>,
+  rateLimits: { hit: true } satisfies Record<keyof RateLimitRepo, true>,
+  authEvents: { record: true } satisfies Record<keyof AuthEventRepo, true>,
+  apiTokens: { revokeAll: true } satisfies Record<keyof ApiTokenRepo, true>,
   games: {
     create: true,
     get: true,
@@ -45,5 +75,10 @@ export function detachedRepositories(): Repositories {
   return {
     users: detached("users", METHODS.users),
     games: detached("games", METHODS.games),
+    otp: detached("otp", METHODS.otp),
+    sessions: detached("sessions", METHODS.sessions),
+    rateLimits: detached("rateLimits", METHODS.rateLimits),
+    authEvents: detached("authEvents", METHODS.authEvents),
+    apiTokens: detached("apiTokens", METHODS.apiTokens),
   };
 }

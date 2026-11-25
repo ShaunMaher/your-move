@@ -1,6 +1,8 @@
 import { isGameType } from "@your-move/sdk";
 import { z } from "zod";
 
+import { normaliseAddress, type NormalisedEmail } from "../accounts/email.js";
+import { RATE_LIMIT_NAMES } from "../auth/limits.js";
 import { DEFAULT_APP_NAME } from "./defaults.js";
 import { isEmailAddress, normaliseEmail, parseMailbox } from "./email.js";
 import { isLocalDevUrl, LOCAL_DEV_APP_SECRET } from "./local-dev.js";
@@ -76,7 +78,7 @@ export interface AppConfig {
   /** Game types offered for new games (`ENABLED_GAMES`, or the instance default). */
   readonly enabledGames: readonly string[];
   /** Normalised admin addresses; empty disables the Admin API. */
-  readonly adminEmails: readonly string[];
+  readonly adminEmails: readonly NormalisedEmail[];
   /** Built-in dictionary ids offered for new games; `null` means all bundled ones. */
   readonly dictionariesEnabled: readonly string[] | null;
   readonly dictionaryUploads: boolean;
@@ -120,9 +122,9 @@ const LIMIT_NAME = /^LIMIT_([A-Z][A-Z0-9_]*)$/u;
 /**
  * The limits an operator may override (`LIMIT_<NAME>`, 09 §1). An unknown name refuses to start,
  * like an unknown `GAMES_<TYPE>_*`, so a typo never silently leaves a limit at its default. The
- * rate limits of 08 §4 add their names here with the rate limiter (M2).
+ * sign-in rate limits of 08 §4 come from the rate limiter (`auth/limits.ts`).
  */
-const KNOWN_LIMITS: ReadonlySet<string> = new Set(["DICT_TOTAL_BYTES"]);
+const KNOWN_LIMITS: ReadonlySet<string> = new Set(["DICT_TOTAL_BYTES", ...RATE_LIMIT_NAMES]);
 const GAMES_NAME = /^GAMES_([A-Z][A-Z0-9]*)_([A-Z0-9_]+)$/u;
 
 function required(message = "is required") {
@@ -276,6 +278,13 @@ function crossFieldIssues(raw: RawEnv, options: ParseConfigOptions): string[] {
     issues.push("VAPID_SUBJECT: must be a mailto: or https:// URL");
   }
 
+  if (raw.TURNSTILE_SITE_KEY !== undefined || raw.TURNSTILE_SECRET !== undefined) {
+    // Until enforcement lands, keys would publish a site key and widen the CSP while nothing is
+    // verified (M2b review S-3); refuse rather than give a false sense of protection.
+    issues.push(
+      "TURNSTILE_SITE_KEY, TURNSTILE_SECRET: Turnstile enforcement is not built yet (docs/spec/10-roadmap.md M2); unset both",
+    );
+  }
   if ((raw.TURNSTILE_SITE_KEY === undefined) !== (raw.TURNSTILE_SECRET === undefined)) {
     issues.push("TURNSTILE_SITE_KEY, TURNSTILE_SECRET: set both to enable Turnstile, or neither");
   }
@@ -294,8 +303,8 @@ function crossFieldIssues(raw: RawEnv, options: ParseConfigOptions): string[] {
   }
 
   for (const address of list(raw.ADMIN_EMAILS) ?? []) {
-    if (!isEmailAddress(address)) {
-      issues.push("ADMIN_EMAILS: each entry must be a plain email address");
+    if (normaliseAddress(address) === null) {
+      issues.push("ADMIN_EMAILS: each entry must be an email address sign-in accepts (04)");
     }
   }
 
@@ -409,7 +418,13 @@ function toConfig(raw: RawEnv, options: ParseConfigOptions): AppConfig {
         : null,
     limits,
     enabledGames: [...new Set(enabledGames)],
-    adminEmails: [...new Set((list(raw.ADMIN_EMAILS) ?? []).map(normaliseEmail))],
+    adminEmails: [
+      ...new Set(
+        (list(raw.ADMIN_EMAILS) ?? [])
+          .map(normaliseAddress)
+          .filter((address): address is NormalisedEmail => address !== null),
+      ),
+    ],
     dictionariesEnabled: list(raw.DICTIONARIES_ENABLED),
     dictionaryUploads: raw.DICTIONARY_UPLOADS !== "false",
     dictionariesExtra: list(raw.DICTIONARIES_EXTRA) ?? [],

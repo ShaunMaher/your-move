@@ -10,6 +10,7 @@ import {
 } from "@your-move/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { createNodePlatform } from "./platform.js";
 import { createNodeApp } from "./server.js";
 
 let staticRoot: string;
@@ -40,12 +41,13 @@ function app() {
     { runtime: "node", installedGames: [] },
   );
   return createNodeApp({
-    platform: {
+    platform: createNodePlatform({
       repos: detachedRepositories(),
       config,
+      nodeConfig: { trustProxy: "false", trustProxyHops: 1, trustProxyPeers: [] },
       now,
       log: createJsonLogger({ level: "error", now, sink: () => undefined }),
-    },
+    }),
     games: [],
     staticRoot,
   });

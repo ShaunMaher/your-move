@@ -1,28 +1,19 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { GameManifest } from "@your-move/sdk";
-import { configRoute, healthRoute, type ErrorCode } from "@your-move/shared";
+import { configRoute, healthRoute, SESSION_COOKIE_SCHEME, type ErrorCode } from "@your-move/shared";
 import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { matchedRoutes } from "hono/route";
 
-import type { AppConfig } from "./config/parse.js";
-import type { Repositories } from "./db/repositories.js";
+import { registerAuthRoutes } from "./auth/routes.js";
+import { readSessionCookie } from "./auth/session.js";
+import { isLocalDev } from "./config/local-dev.js";
+import { deriveSubkeys, type Subkeys } from "./crypto/subkeys.js";
+import { apiBodyLimit, requestRules } from "./http/request-rules.js";
 import { API_CACHE_CONTROL, securityHeadersMiddleware } from "./http/security-headers.js";
-import type { Logger } from "./log.js";
+import type { AppEnv, Platform } from "./platform.js";
 
-/**
- * What the runtime provides to the core (docs/spec/03-architecture.md §4). Storage arrived in M2a;
- * email and `waitUntil` join with their first users in M2b, realtime and push in M3/M4, blobs in
- * M6.
- */
-export interface Platform {
-  /** Async repository interfaces, never a Drizzle object (03 §4). */
-  readonly repos: Repositories;
-  readonly config: AppConfig;
-  readonly log: Logger;
-  /** Injectable clock: tests control time through it. */
-  now(): Date;
-}
+export type { AppEnv, Platform } from "./platform.js";
 
 /**
  * One installed game package, as the generated server registry lists it (02 §7.3). `engines` maps
@@ -38,11 +29,6 @@ export interface AppOptions {
   readonly platform: Platform;
   /** The generated registry, injected by the runtime; the core never imports it (02 §7.3). */
   readonly games: readonly InstalledGame[];
-}
-
-/** Hono environment of the app: per-request variables. */
-export interface AppEnv {
-  Variables: { requestId: string };
 }
 
 /** The HTTP application `createApp` returns. */
@@ -92,6 +78,34 @@ function stackFrames(error: Error): string {
     .join("\n");
 }
 
+/**
+ * What a server fault's log entry may say (09 §5). Errors that wrap another — a database driver's
+ * query error carries the SQL and its parameters (addresses, token hashes) in its message — and
+ * parse errors, whose message quotes the parsed text, are logged by class, stack frames and the
+ * cause's class or code only. Other errors keep their message.
+ */
+function faultFields(error: Error): Record<string, string | undefined> {
+  const cause: unknown = error.cause;
+  if (cause !== undefined || error instanceof SyntaxError) {
+    const causeCode =
+      typeof cause === "object" && cause !== null && "code" in cause ? cause.code : undefined;
+    return {
+      // The constructor name tells a wrapped driver error (`DrizzleQueryError`) apart.
+      errorClass: error.constructor.name,
+      stack: stackFrames(error),
+      ...(cause instanceof Error ? { causeClass: cause.name } : {}),
+      ...(typeof causeCode === "string" ? { causeCode } : {}),
+    };
+  }
+  return { errorClass: error.name, errorMessage: error.message, stack: error.stack };
+}
+
+const REQUEST_RULE_MESSAGES = {
+  BAD_REQUEST: "Send a session cookie or a bearer token, not both.",
+  BAD_ORIGIN: "Cross-origin request refused.",
+  UNSUPPORTED_MEDIA_TYPE: "Send JSON.",
+} as const;
+
 /** The route pattern that answered, never the raw path (09 §5). */
 function respondedRoute(c: Context): string {
   return matchedRoutes(c)[c.req.routeIndex]?.path ?? "(unmatched)";
@@ -139,6 +153,21 @@ export function createApp(options: AppOptions): App {
     c.res.headers.set("Cache-Control", API_CACHE_CONTROL);
   });
 
+  const localDev = isLocalDev(config);
+  app.use("/api/*", apiBodyLimit());
+  app.use(
+    "/api/*",
+    requestRules({
+      origin: new URL(config.publicUrl).origin,
+      hasSessionCookie: (header) => readSessionCookie(header, localDev) !== null,
+      reject: (status, code) =>
+        new Response(JSON.stringify(errorBody(code, REQUEST_RULE_MESSAGES[code])), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        }),
+    }),
+  );
+
   // Unversioned, for load balancers and container health checks (05 §Versioning).
   app.get("/api/health", (c) => c.json({ ok: true as const }, 200));
 
@@ -159,6 +188,26 @@ export function createApp(options: AppOptions): App {
     ),
   );
 
+  let subkeys: Promise<Subkeys> | null = null;
+  registerAuthRoutes(app, {
+    platform,
+    keys: () => (subkeys ??= deriveSubkeys(config.appSecret)),
+  });
+
+  // Dev only (06 §4, 09 §2, 08 T19): registered only in local-dev mode, so a production config
+  // answers 404 from the catch-all below.
+  if (localDev) {
+    // Only for requests addressed to PUBLIC_URL's own host, so a page on another name that
+    // resolves here (DNS rebinding) can't read codes (M2b review S-8).
+    const devHost = new URL(config.publicUrl).host;
+    app.get("/__dev/emails", (c) =>
+      (c.req.header("Host") ?? devHost) === devHost
+        ? c.json({ emails: platform.email.captured?.() ?? [] }, 200)
+        : c.json(errorBody("NOT_FOUND", "Not found."), 404),
+    );
+  }
+
+  app.openAPIRegistry.registerComponent("securitySchemes", "sessionCookie", SESSION_COOKIE_SCHEME);
   const document = openApiDocument(app, config.appName);
   app.get("/api/v1/openapi.json", (c) => c.json(document, 200));
 
@@ -185,13 +234,7 @@ export function createApp(options: AppOptions): App {
     // and a SyntaxError from parsing something other than the request (stored JSON, an engine).
     // V8's JSON.parse messages quote the text being parsed, which may be input or game secrets, so
     // a SyntaxError is logged by class and stack frames only (09 §5).
-    log.error("unhandled error", {
-      ...context,
-      errorClass: error.name,
-      ...(error instanceof SyntaxError
-        ? { stack: stackFrames(error) }
-        : { errorMessage: error.message, stack: error.stack }),
-    });
+    log.error("unhandled error", { ...context, ...faultFields(error) });
     return c.json(errorBody("INTERNAL", "Something went wrong."), 500);
   });
 

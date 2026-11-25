@@ -43,6 +43,131 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/auth/otp/request": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Email a sign-in code
+     * @description Public. Always `202 {}`, whether or not the address has an account, is rate-limited or suspended (06 §3). Only a rate-limited client IP is reported (`429`).
+     */
+    post: operations["requestOtp"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/otp/verify": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sign in with an emailed code
+     * @description Public. On success, creates the account if new, sets the session cookie and answers the user. A wrong, expired, consumed or unknown code is `400 INVALID_CODE`, indistinguishably (06 §3).
+     */
+    post: operations["verifyOtp"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/logout": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sign out this session
+     * @description Session only. Deletes this session and clears the cookie.
+     */
+    post: operations["logout"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/logout-all": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sign out everywhere
+     * @description Session only. Deletes every session of the user and clears the cookie.
+     */
+    post: operations["logoutAll"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/me": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The signed-in user */
+    get: operations["getMe"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete the account
+     * @description Session only, with a fresh `delete_account` code (06 §7). Immediate and irreversible; clears the cookie and emails a confirmation.
+     */
+    delete: operations["deleteMe"];
+    options?: never;
+    head?: never;
+    /**
+     * Change the display name; completes onboarding
+     * @description Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`).
+     */
+    patch: operations["updateMe"];
+    trace?: never;
+  };
+  "/api/v1/me/delete/otp": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Email a code to delete the account
+     * @description Session only. Emails a `delete_account` step-up code (06 §7).
+     */
+    post: operations["requestDeleteAccountCode"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -74,6 +199,68 @@ export interface components {
       turnstileSiteKey?: string;
       /** @description Whether players may upload word lists (DICTIONARY_UPLOADS). */
       uploadsEnabled: boolean;
+    };
+    EmptyObject: Record<string, never>;
+    OtpRequest: {
+      /**
+       * @description The address to sign in with. Normalised by the server.
+       * @example sam@example.org
+       */
+      email: string;
+    };
+    OtpVerifyResponse: {
+      user: components["schemas"]["Me"];
+      needsOnboarding: boolean;
+    };
+    Me: {
+      id: string;
+      /** @enum {string} */
+      kind: "human" | "agent";
+      /** @description Null for an AI account. */
+      email: string | null;
+      /** @description Null until onboarding. */
+      displayName: string | null;
+      settings: components["schemas"]["UserSettings"];
+      /** @description Whether the age confirmation for the current MIN_AGE is given. */
+      ageAttested: boolean;
+      /** @description True until onboarding is complete (06 §5); gated endpoints answer 403 until then. */
+      needsOnboarding: boolean;
+      /** @description Lets the client show admin links; grants nothing. */
+      isAdmin: boolean;
+    };
+    UserSettings: {
+      /**
+       * @description Who can add me to games (06 §6.2).
+       * @enum {string}
+       */
+      whoCanAddMe: "pastOpponents" | "nobody";
+    };
+    OtpVerify: {
+      /**
+       * @description The address to sign in with. Normalised by the server.
+       * @example sam@example.org
+       */
+      email: string;
+      /**
+       * @description The 8-digit code from the email; spaces and dashes are ignored.
+       * @example 1234 5678
+       */
+      code: string;
+    };
+    LogoutAll: {
+      /** @description Also revoke every API token of the user and their AI accounts (06 §4). */
+      revokeTokens?: boolean;
+    };
+    PatchMe: {
+      /** @description 1–24 characters; no links, addresses, long digit runs or reserved words (06 §5.1). Setting it completes onboarding. */
+      displayName?: string;
+    };
+    DeleteMe: {
+      /**
+       * @description The 8-digit code from the email; spaces and dashes are ignored.
+       * @example 1234 5678
+       */
+      code: string;
     };
   };
   responses: never;
@@ -129,6 +316,631 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ClientConfig"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  requestOtp: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OtpRequest"];
+      };
+    };
+    responses: {
+      /** @description Accepted; a code is emailed if the address may receive one. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EmptyObject"];
+        };
+      };
+      /** @description Invalid request or address (`BAD_REQUEST`), or a client IP is required but missing. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description This client IP has made too many requests (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  verifyOtp: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OtpVerify"];
+      };
+    };
+    responses: {
+      /** @description Signed in; the response sets the session cookie. */
+      200: {
+        headers: {
+          /** @description `__Host-sid=…; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=34560000` (`sid` without `Secure` in local-dev mode, 06 §4). */
+          "Set-Cookie": string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OtpVerifyResponse"];
+        };
+      };
+      /** @description `INVALID_CODE` or `BAD_REQUEST`. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many attempts for this address or client IP (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  logout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["EmptyObject"];
+      };
+    };
+    responses: {
+      /** @description Signed out. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid request (`BAD_REQUEST`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  logoutAll: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["LogoutAll"];
+      };
+    };
+    responses: {
+      /** @description Signed out everywhere. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid request (`BAD_REQUEST`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getMe: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The user. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Me"];
+        };
+      };
+      /** @description A session cookie and a bearer token together (`BAD_REQUEST`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  deleteMe: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DeleteMe"];
+      };
+    };
+    responses: {
+      /** @description The account is deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description `INVALID_CODE` or `BAD_REQUEST`. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many attempts (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  updateMe: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PatchMe"];
+      };
+    };
+    responses: {
+      /** @description The updated user. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Me"];
+        };
+      };
+      /** @description A display name breaking the rules, or an invalid request (`BAD_REQUEST`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many display-name changes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  requestDeleteAccountCode: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["EmptyObject"];
+      };
+    };
+    responses: {
+      /** @description Accepted; the code is emailed. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EmptyObject"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many step-up codes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
       /** @description Unexpected error. */

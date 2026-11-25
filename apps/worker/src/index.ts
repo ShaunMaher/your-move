@@ -5,11 +5,13 @@
  */
 import {
   ConfigError,
+  coreEmailSender,
   createApp,
   createJsonLogger,
   installedSchema,
   parseConfig,
   registryMismatches,
+  resolveClientIp,
 } from "@your-move/server";
 
 import installedJson from "../../../generated/installed.json" with { type: "json" };
@@ -23,7 +25,11 @@ class StartupError extends Error {
   override readonly name = "StartupError";
 }
 
-/** Builds the app once per isolate from the Worker's vars, secrets and bindings. */
+/**
+ * Builds the app once per isolate from the Worker's vars, secrets and bindings. Nothing
+ * request-scoped is captured here: background work goes through each request's own `ctx`
+ * (`waitUntil`), which `fetch` below hands to the app.
+ */
 function build(env: Readonly<Record<string, unknown>>): App {
   const db = env["DB"];
   if (db === undefined || db === null || typeof db !== "object") {
@@ -55,7 +61,21 @@ function build(env: Readonly<Record<string, unknown>>): App {
     },
   });
   return createApp({
-    platform: { repos: d1Repositories(db as D1Database), config, log, now },
+    platform: {
+      repos: d1Repositories(db as D1Database),
+      config,
+      log,
+      now,
+      email: coreEmailSender(config, log, now),
+      // Workers always sit behind Cloudflare, which sets CF-Connecting-IP (08 §4.1).
+      clientIp: (request) =>
+        resolveClientIp(request.headers, {
+          mode: "cloudflare",
+          socketAddress: null,
+          hops: 1,
+          trustedPeers: [],
+        }),
+    },
     games,
   });
 }

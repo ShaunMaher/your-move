@@ -94,6 +94,10 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
   quarantined with an issue, never retried silently. Slow test infrastructure gets deliberate time
   budgets instead, sized from measurements and documented where they are set: in e2e, a browser's
   launch and its first page each have their own budget, so neither is charged to a test's timeout.
+  Statistical timing tests (06 §3.2) are measurements, the one exception to determinism: they run
+  in a CI job of their own, never alongside another suite, are run locally before any change to
+  the paths they time is handed off, and are re-measured rather than retried when they fail
+  (ADR 0006).
 - Every bug fix lands with a test that failed before the fix.
 
 ## 5. Architecture rules
