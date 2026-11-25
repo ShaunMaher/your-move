@@ -332,10 +332,10 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
 ## 10. Dictionary at runtime
 
 - Server: a `DictionaryProvider` loads dictionaries lazily by id and caches them per
-  isolate/process. Each compact sorted word list is either bundled into the Worker / Node build as a
-  text module or, on Cloudflare once the total exceeds the bundle budget, fetched once per isolate
-  from the static-assets binding (Node reads it from disk). Since alpha A2 the Worker always
-  fetches them, so it and the clients share one copy of each list (the served layout below). Lookup is a binary search directly over
+  isolate/process. Each compact sorted word list is read from disk on Node and fetched once per
+  isolate from the static-assets binding on Cloudflare, so the Worker and the clients share one
+  copy of each list (the served layout below; bundling the lists into the Worker as text modules
+  was the plan until alpha A2). Lookup is a binary search directly over
   the text (no parse), or any index is built outside request handling, never inside a request.
   Memory < 25 MB per loaded dictionary. Measure Worker startup time and per-lookup CPU in M1 and
   record the numbers (M1, in `packages/dictionary/README.md`: under 1 µs CPU per ENABLE lookup,

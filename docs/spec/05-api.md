@@ -195,6 +195,13 @@ rejects the merged input, the server retries once with the request input alone (
 the rest); only if that fails too is `INVALID_OPTIONS` returned, so a since-deleted upload or
 disabled ruleset in the remembered choices never breaks game creation.
 
+**Until email invites (alpha, M4).** Only an address that belongs to an onboarded account can be
+played with: its invitation works as above. An email-invite seat (no account, or an account that
+hasn't finished onboarding) is created and answered exactly the same (Q3), but nothing claims it
+until onboarding claims exist (06 §6.4, M4), so it stays unfilled until the lobby is started
+without it, cancelled or expires. Clients tell the creator that the other person must have signed
+in first.
+
 ### `GET /api/v1/games/:id`
 `200 { game: GameEnvelope, view: <module View> | null }`. `view` is `view(state, yourSeat)` while
 active, null in the lobby (and for invitations), and `final_views.seats[yourSeat].view` for any
@@ -292,7 +299,7 @@ creator's game caps. Joining always requires an explicit tap on Join (07 §1).
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/v1/config` **public** | `{ appName, appShortName, operatorContact, minAge, vapidPublicKey?, turnstileSiteKey?, uploadsEnabled }` — non-sensitive values only (`uploadsEnabled` = framework `DICTIONARY_UPLOADS`) |
-| GET | `/api/v1/catalog` | `{ games: [{ type, version, name, description, icon, players, defaultTurnTimeoutDays, defaults, catalog }] }` for enabled game types (`name`, `description`, the sanitised `icon` and the overall `players` bounds come from the manifest, 02 §7.2, so the game picker needs no client chunk). `defaults` follows the create path's rule: the viewer's `lastOptions[type]` if `resolveOptions` accepts it against the current `ctx.resources`, otherwise `{}` (module defaults), so a deleted upload or disabled ruleset is never offered. `catalog` = module `catalog(ctx)` with `ctx.resources` = built-in and operator resources that are enabled (`DICTIONARIES_ENABLED`, `DICTIONARIES_EXTRA`) plus the **viewer's own** non-deleted uploads; it never contains `blob_key`, `sha256` or `size_bytes`. Public dictionaries carry their versioned, hashed download URL |
+| GET | `/api/v1/catalog` | `{ games: [{ type, version, name, description, icon, players, defaultTurnTimeoutDays, defaults, catalog }] }` for enabled game types (`name`, `description`, the sanitised `icon` and the overall `players` bounds come from the manifest, 02 §7.2, so the game picker needs no client chunk). `defaults` follows the create path's rule: the viewer's `lastOptions[type]` if `resolveOptions` accepts it against the current `ctx.resources`, otherwise `{}` (module defaults), so a deleted upload or disabled ruleset is never offered. `catalog` = module `catalog(ctx)` with `ctx.resources` = built-in and operator resources that are enabled (`DICTIONARIES_ENABLED`, `DICTIONARIES_EXTRA`) plus the **viewer's own** non-deleted uploads; it never contains `blob_key`, `sha256` or `size_bytes`, and no download URL (a game's word list is downloaded from its envelope's `resources[].downloadUrl`; nothing is previewed before a game exists, words §9.4). `icon` is SVG markup the server has sanitised; clients render it only as an image from a `data:` URL (`<img src="data:image/svg+xml,…">`), never inline in the page |
 | GET | `/api/health` and `/api/v1/health` **public** | `200 { ok: true }` — no version or config details |
 | GET | `/manifest.webmanifest` **public** | Generated from config (07 §4) |
 
