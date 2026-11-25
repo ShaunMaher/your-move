@@ -353,6 +353,27 @@ describe("rate limits (08 §4)", () => {
     expect(h.logs.some((line) => line["alert"] === "OTP_EMAIL_GLOBAL_HOUR")).toBe(true);
   });
 
+  it("instance-wide OTP email cap: requests that send nothing don't use it up", async () => {
+    h.close();
+    h = createHarness({
+      ...PROD_ENV,
+      LIMIT_NEW_ACCOUNTS_IP_DAY: "1",
+      LIMIT_OTP_EMAIL_GLOBAL_HOUR: "2",
+    });
+    const known = fresh();
+    await h.signIn(known);
+    // Silent: unknown addresses from the now-full new-accounts bucket. They count under a counter
+    // of their own (so every path writes the same way, 06 §3.2), not the cap's.
+    const before = (await h.emails()).length;
+    for (let i = 0; i < 3; i++) expect((await otpRequest(fresh())).status).toBe(202);
+    expect((await h.emails()).length).toBe(before);
+    // So the cap's second email is still there, and only the third is refused.
+    await h.requestCode(known, { ip: "198.51.100.60" });
+    expect((await otpRequest(known, { ip: "198.51.100.61" })).status).toBe(202);
+    expect((await h.emails()).length).toBe(before + 1);
+    expect(h.logs.some((line) => line["alert"] === "OTP_EMAIL_GLOBAL_HOUR")).toBe(true);
+  });
+
   it("instance-wide OTP email cap per day", async () => {
     h.close();
     h = createHarness({ ...PROD_ENV, LIMIT_OTP_EMAIL_GLOBAL_DAY: "1" });

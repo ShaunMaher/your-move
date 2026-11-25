@@ -68,6 +68,12 @@ export interface IssueOutcome {
 }
 
 /**
+ * The key under which `/otp/request` counts the requests that send nothing, so every path writes
+ * the same counter row (06 §3.2). Never read.
+ */
+const SILENT_COUNTER = "silent";
+
+/**
  * Logs an instance-wide limit as an alert (08 §4) once, on the request that first crosses it, so
  * a sustained flood doesn't also flood the logs.
  */
@@ -122,9 +128,13 @@ export async function issueSignInCode(
   // bucket over the new-accounts limit: a challenge that can never verify, nothing sent (§3.2).
   const create = !emailLimited;
   const wouldSend = create && !newAccountLimited;
+  // A path that sends nothing adds 1 to a separate counter that nothing reads, rather than 0 to
+  // the real one: an upsert adding 0 changes no bytes, so SQLite writes no page and commits
+  // nothing, and the silent paths were measurably quicker (06 §3.2).
+  const counter = wouldSend ? "all" : SILENT_COUNTER;
   const global = await checkLimits(repos, config, now, [
-    { name: "OTP_EMAIL_GLOBAL_HOUR", key: "all", amount: wouldSend ? 1 : 0 },
-    { name: "OTP_EMAIL_GLOBAL_DAY", key: "all", amount: wouldSend ? 1 : 0 },
+    { name: "OTP_EMAIL_GLOBAL_HOUR", key: counter, amount: 1 },
+    { name: "OTP_EMAIL_GLOBAL_DAY", key: counter, amount: 1 },
   ]);
   const globalCapped = wouldSend && global.some((result) => result.exceeded);
   if (wouldSend) alertOnCrossing(deps.log, global);

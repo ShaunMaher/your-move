@@ -112,7 +112,11 @@ export interface RateLimitHit {
   readonly key: string;
   readonly windowStart: number;
   readonly previousWindowStart: number;
-  /** Added to the current window; 0 reads the counter through the same statements. */
+  /**
+   * Added to the current window; 0 reads the counter through the same statements. Adding 0 writes
+   * nothing, though (SQLite leaves an unchanged row's page alone), so it is quicker: use 0 only
+   * where the amount doesn't depend on the account (06 §3.2).
+   */
   readonly amount: number;
 }
 
