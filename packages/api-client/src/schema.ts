@@ -533,7 +533,7 @@ export interface components {
         version: number;
         name: string;
         description: string;
-        /** @description Sanitised SVG markup (02 §7.2). */
+        /** @description Sanitised SVG markup (02 §7.2). Render it only as an image from a `data:` URL, never inline. */
         icon: string;
         players: {
           min: number;

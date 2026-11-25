@@ -206,7 +206,10 @@
                 },
                 "name": { "type": "string" },
                 "description": { "type": "string" },
-                "icon": { "type": "string", "description": "Sanitised SVG markup (02 §7.2)." },
+                "icon": {
+                  "type": "string",
+                  "description": "Sanitised SVG markup (02 §7.2). Render it only as an image from a `data:` URL, never inline."
+                },
                 "players": {
                   "type": "object",
                   "properties": { "min": { "type": "integer" }, "max": { "type": "integer" } },

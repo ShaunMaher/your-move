@@ -92,7 +92,10 @@ export const CatalogSchema = z
           version: z.number().int().min(1).openapi({ description: "The latest rules version." }),
           name: z.string(),
           description: z.string(),
-          icon: z.string().openapi({ description: "Sanitised SVG markup (02 §7.2)." }),
+          icon: z.string().openapi({
+            description:
+              "Sanitised SVG markup (02 §7.2). Render it only as an image from a `data:` URL, never inline.",
+          }),
           players: z.object({ min: z.number().int(), max: z.number().int() }).strict(),
           defaultTurnTimeoutDays: z.number().int().min(1).max(30),
           defaults: z.unknown().openapi({
