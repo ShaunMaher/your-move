@@ -80,7 +80,7 @@ function Results({ game }: { readonly game: GameEnvelope }) {
   const ranked = seated.some((player) => player.rank !== undefined);
   const title =
     game.status === "finished"
-      ? "Game over"
+      ? "Final result"
       : game.status === "declined"
         ? "Declined, no result"
         : game.status === "cancelled"

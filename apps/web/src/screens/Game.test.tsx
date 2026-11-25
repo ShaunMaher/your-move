@@ -375,7 +375,7 @@ describe("the menu", () => {
         envelope({ status: "finished", yourTurn: false, toAct: [] }),
       ),
     });
-    await screen.findByRole("heading", { level: 2, name: "Game over" });
+    await screen.findByRole("heading", { level: 2, name: "Final result" });
     click("Menu");
     expect(screen.queryByRole("button", { name: "Resign…" })).toBeNull();
   });
@@ -404,7 +404,7 @@ describe("resigning", () => {
     expect(dialog.textContent).toContain("counts as a loss");
     expect(posts(calls, "resign")).toHaveLength(0);
     fireEvent.click(within(dialog).getByRole("button", { name: "Resign" }));
-    expect(await screen.findByRole("heading", { level: 2, name: "Game over" })).toBeDefined();
+    expect(await screen.findByRole("heading", { level: 2, name: "Final result" })).toBeDefined();
     expect(posts(calls, "resign")[0]?.body).toEqual({ expectedVersion: 3 });
     expect(screen.queryByRole("dialog")).toBeNull();
     const rows = within(screen.getByRole("list", { name: "" })).getAllByRole("listitem");
@@ -497,8 +497,8 @@ describe("a finished game", () => {
         { board: "final" },
       ),
     });
-    expect(await screen.findByRole("heading", { level: 2, name: "Game over" })).toBeDefined();
-    const results = screen.getByRole("region", { name: "Game over" });
+    expect(await screen.findByRole("heading", { level: 2, name: "Final result" })).toBeDefined();
+    const results = screen.getByRole("region", { name: "Final result" });
     expect(
       within(results)
         .getAllByRole("listitem")
