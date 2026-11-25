@@ -119,13 +119,18 @@ describe("install", () => {
 });
 
 describe("activate", () => {
-  it("deletes every other cache and takes over the open pages", async () => {
-    const caches = fakeCaches({ "shell-old": ["/"], "shell-abc": ["/"], other: [] });
+  it("deletes every other cache but the page's word lists, and takes over the open pages", async () => {
+    const caches = fakeCaches({
+      "shell-old": ["/"],
+      "shell-abc": ["/"],
+      "dictionaries-v1": ["/assets/dictionaries/enable-v1.0123456789abcdef.txt"],
+      other: [],
+    });
     const worker = load({ caches });
     const waits: Promise<unknown>[] = [];
     worker.listeners.get("activate")?.({ waitUntil: (p: Promise<unknown>) => waits.push(p) });
     await Promise.all(waits);
-    expect([...caches.stores.keys()]).toEqual(["shell-abc"]);
+    expect([...caches.stores.keys()].sort()).toEqual(["dictionaries-v1", "shell-abc"]);
     expect(worker.self.clients.claim).toHaveBeenCalledOnce();
   });
 });
