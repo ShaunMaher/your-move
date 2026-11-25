@@ -1,5 +1,5 @@
 ---
-"@your-move/sdk": minor
+"@your-move/sdk": patch
 ---
 
 `formatText` is now exported from the main entry too, so code that must not import React (the

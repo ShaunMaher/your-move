@@ -23,6 +23,7 @@
     "@your-move/dictionary": "workspace:*",
     "@your-move/web": "workspace:*",
     "tsx": "catalog:",
+    "vitest": "catalog:",
     "wrangler": "catalog:"
   }
 }

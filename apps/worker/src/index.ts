@@ -22,6 +22,7 @@ import installedJson from "../../../generated/installed.json" with { type: "json
 import { installedGames as games } from "../../../generated/server-registry.js";
 import { d1Repositories } from "./d1.js";
 import { assetDictionaries } from "./dictionaries.js";
+import { runScheduled } from "./scheduled.js";
 
 interface Built {
   readonly app: ReturnType<typeof createApp>;
@@ -96,11 +97,11 @@ async function build(env: Readonly<Record<string, unknown>>): Promise<Built> {
 }
 
 /**
- * Email nudges one Cron Trigger invocation sends at most (03 §7). Each costs several D1 queries
- * and a provider subrequest, and an invocation's subrequest budget is small (09 §3); re-measure
- * at the first Workers deployment (10).
+ * Email nudges one Cron Trigger invocation sends at most (03 §7): with 10 D1 statements per nudge
+ * and up to 5 per run, 4 keep a run at 45, inside the Free plan's per-invocation query limit
+ * (09 §3 has the arithmetic); re-measure at the first Workers deployment (10).
  */
-const WORKER_NUDGES_PER_RUN = 10;
+const WORKER_NUDGES_PER_RUN = 4;
 
 let built: Promise<Built> | null = null;
 
@@ -139,15 +140,8 @@ export default {
     }
     return worker.app.fetch(request, env, ctx);
   },
-  // The Cron Trigger (`*/15 * * * *`, wrangler.example.toml): one sweep run (03 §8). The sweep
-  // logs its own failures and never rejects; a run with any is reported as a failed invocation,
-  // so it shows in the Cron Trigger's history, and isn't retried (the next run is 15 minutes away).
+  // The Cron Trigger (`*/15 * * * *`, wrangler.example.toml): one sweep run (03 §8).
   async scheduled(controller, env) {
-    const worker = await ready(env);
-    const nudges = worker === null ? null : (await worker.sweep()).nudges;
-    if (nudges === null || nudges.failed > 0) {
-      controller.noRetry();
-      throw new Error("the sweep did not complete cleanly; its log says why");
-    }
+    await runScheduled(controller, (await ready(env))?.sweep ?? null);
   },
 } satisfies ExportedHandler<Record<string, unknown>>;
