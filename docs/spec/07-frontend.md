@@ -270,7 +270,18 @@ dictionaries is the shell's job and needs no change to the module contract.
 ## 5. Visual design
 
 - Original look — must not imitate any commercial game's colours, tile style or board artwork.
-- Light and dark themes following `prefers-color-scheme`, with a manual override in settings.
+- Light and dark themes following `prefers-color-scheme`, with a manual override in settings
+  (alpha A9): Settings → Appearance offers System, Light and Dark, saved at once as
+  `settings.theme` (04, 05). Light or Dark sets `data-theme="light"` or `"dark"` on the page's
+  root element; System removes it, and the dark tokens then apply under
+  `prefers-color-scheme: dark` unless `data-theme` is `"light"`. Every dark rule in the shell's CSS
+  follows the same override, and `color-scheme` follows it too, so form controls match. The app's
+  own module applies the choice (no inline script, 08 §3): as soon as `/api/v1/me` answers, and
+  from a per-device copy in `localStorage` (`ym.theme`, guarded like the install flag; storage that
+  throws counts as System) read when the module starts, so a launch doesn't flash the other
+  theme. The copy is a display preference with no user data, so it survives sign-out (06 §4) and
+  is rewritten whenever the server's answer differs. A game's own board palette is its module's
+  business and does not change.
 - CSS custom properties for all colours/sizes so theming later is trivial.
 - Respect `prefers-reduced-motion` (no tile fly-in animations).
 - Haptics: none (not available to iOS web apps); use subtle visual feedback instead.

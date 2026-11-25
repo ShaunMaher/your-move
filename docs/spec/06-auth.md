@@ -138,7 +138,7 @@ mostly painless.
   (`dictionaries-v1`, 07 §4) deliberately survives sign-out: it holds only public, content-addressed
   lists (each stored under the digest of its own contents) and nothing of any user. So does the shell's
   `ym.install-dismissed` flag (07 §4): per device, no user data, and kept across sign-out on
-  purpose, and the `ym.push-offered` flag (07 §4, alpha A8), for the same reasons. The device's
+  purpose, the `ym.push-offered` flag (07 §4, alpha A8) and the `ym.theme` copy of the theme choice (07 §5, alpha A9), for the same reasons. The device's
   push subscription does not survive: `clearClientState()` unsubscribes it in the browser (the
   server already deleted its row with the session), and so does a launch that finds no session,
   beside clearing the game keys (the return path is kept, as above).

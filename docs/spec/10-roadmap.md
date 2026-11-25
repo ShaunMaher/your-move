@@ -143,8 +143,8 @@ The project's foundation, built to 11 (engineering standards) from the first com
     sending provider exists (`gmail` in M4, or `smtp` once Q26 is decided) only `console` sends,
     so **M2 can't be accepted** — the real-device sign-in check needs real email — before then.
   - `GET /api/v1/me/sessions` and `DELETE /api/v1/me/sessions/:id`: M2c (with the sign-in UI).
-  - `settings` in `PATCH /api/v1/me` (`emailNudges`, `whoCanAddMe`, theme): `emailNudges` in
-    alpha A6, default off (03 §7); `whoCanAddMe` and theme in M4.
+  - `settings` in `PATCH /api/v1/me` (`emailNudges`, `whoCanAddMe`, `theme`): `emailNudges` in
+    alpha A6, default off (03 §7); `theme` in alpha A9; `whoCanAddMe` in M4.
   - Turnstile: not built; configuring `TURNSTILE_*` refuses to start until it is (M4). The global
     caps alert instead (F-12).
   - Account deletion's game steps, `deletion_requested_at` and nulling `admin_audit.target_id`
@@ -167,6 +167,7 @@ and slices without a dependency on each other are built in parallel.
 | A6 — email nudges | M4 | The optional "It's your turn" email nudge (03 §7): `settings.emailNudges` in `PATCH /api/v1/me` (default off) and its Settings toggle, `users.email_id`, the unsubscribe route with `List-Unsubscribe` and RFC 8058 one-click (05 §Email links, T17), and a `sweep()` with only its "send due email nudges" step, run by a Node `setInterval` and the Worker's Cron Trigger (03 §8); tests for the token, the one-click POST, the 24 h and once-a-day rules, suppression, provider failure and the nudge text (T18) | A2, A5 |
 | A7 — install guide | M4 | The `/install` screen (07 §1, §4): "Add to Home Screen" steps for iOS Safari, a note for Android Chrome and an "already installed" state, and the dismissible banner that points iOS Safari visitors to it; component tests and a Playwright check on the WebKit iPhone viewport | A1, A4 |
 | A8 — turn notifications | M4 | Web Push for "your turn" and "game over" (03 §7, 02 §8): RFC 8291 encryption and RFC 8292 VAPID on WebCrypto in `packages/server`, sent in the background after the transition and never to its actor; `push_subscriptions` with its 10-per-user cap and session cascade (04), the two `/api/v1/push/subscriptions` endpoints (05) with T12's endpoint allow-list and key checks, removal on `404`/`410`, `pnpm gen:vapid` and the VAPID secrets in the tunnel compose file (09 §1); in the web app the service worker's `push` and `notificationclick` handlers, the Settings toggle with its iOS Safari explanation, the once-per-device offer after a game is created, the launch re-save and the sign-out unsubscribe (07 §4). Tests: RFC 8291's example, the VAPID token, T12's allow-list table, the cap, cascade and clean-up on both adapters, who is pushed to, payloads decrypted as a device would with no hidden state (T18), and the worker's handlers; checked by hand on an iPhone with the app on the Home Screen of the proof-of-concept deployment | A2, A4, A7 |
+| A9 — theme choice | M4 | The manual light/dark override of 07 §5: `settings.theme` (`"system"`, `"light"` or `"dark"`, default `"system"`) in `PATCH /api/v1/me` (04, 05), the Settings "Appearance" choice, `data-theme` on the page's root element and the per-device `ym.theme` copy that stops a flash on launch (07 §5, 06 §4); tests for the setting on both adapters, the choice and its storage failures, and a Chromium accessibility check of the dark theme | A1, A4 |
 
 Not in the alpha, kept at their milestones: API tokens, the Admin API (operators use
 `ADMIN_EMAILS` and the database), AI assistance, realtime (the alpha refetches on focus and on a
@@ -174,7 +175,7 @@ short poll while it's someone's turn to see), turn timeouts, reminders and every
 A6's email nudges, lobby expiry, remove seat and leave, past-opponent auto-join, email invites
 (and the invitation email to users with nudges on, 06 §6.2) and join links, the auto-join and
 invitation pushes (A8 sends only "your turn" and "game over"), blocks, the
-sessions list, account deletion's game steps, `MIN_AGE`, dark mode and the polish pass. Security
+sessions list, account deletion's game steps, `MIN_AGE`, the rest of M4's settings and the polish pass (dark mode itself follows the device, and A9 adds the override). Security
 controls for what the alpha ships are not cut: every slice meets 08 for its own surface, and the
 M2 acceptance (including the iPhone home-screen check) is completed by A1 and A5.
 
@@ -279,7 +280,7 @@ tests are green in CI.
   address is suppressed as `bounced` or `complained`, so the toggle isn't silently ineffective.
   The alpha writes no such rows, and an `unsubscribed` row doesn't stop nudges (alpha A6 review
   P-3 and S2-1, 2026-11-25).
-- Dark mode, accessibility pass (the install guide banner is alpha A7; the update toast is built).
+- The dark theme's manual override is alpha A9; accessibility pass (the install guide banner is alpha A7; the update toast is built).
 - Docker deployment: `apps/node/docker-compose.tunnel.yml` (the proof-of-concept deployment behind a
   Cloudflare Tunnel, Q6) and `docker-compose.caddy.yml`, with the two-network layout and `*_FILE`
   secrets (09 §4), deploy docs (incl. the `gmail` operator setup, 09 §2), backup docs.
