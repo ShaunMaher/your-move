@@ -184,20 +184,20 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     };
   };
 
-  /** `{ game, view }` for the viewer, freshly read. */
-  const gameWithView = async (gameId: string, user: UserRecord) => {
-    const { loaded, viewer } = await loadMember(gameId, user);
-    const input = await presentInput(loaded, viewer);
-    return { game: envelope(input), view: viewOf(input) };
-  };
-
-  /** As {@link gameWithView}, or null once the viewer is no longer a member (a lobby decline). */
+  /** `{ game, view }` for the viewer, freshly read; null once they're no longer a member. */
   const gameWithViewIfMember = async (gameId: string, user: UserRecord) => {
     const loaded = await loadCurrent(repos, gameId, now());
     const viewer = loaded === null ? undefined : memberRow(loaded.players, user.id);
     if (loaded === null || viewer === undefined) return null;
     const input = await presentInput(loaded, viewer);
     return { game: envelope(input), view: viewOf(input) };
+  };
+
+  /** `{ game, view }` for a member, freshly read, or `404` (04 §Membership). */
+  const gameWithView = async (gameId: string, user: UserRecord) => {
+    const shown = await gameWithViewIfMember(gameId, user);
+    if (shown === null) throw ApiError.of("NOT_FOUND");
+    return shown;
   };
 
   /** The module context of a loaded game, or `409 GAME_UNAVAILABLE` (02 §7.3). */
@@ -467,7 +467,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       {
         ...after,
         record: outcome.record,
-        describe: plainText(ctx.definition.describe(outcome.record)),
+        describe: plainText(outcome.describe),
       },
       200,
     );

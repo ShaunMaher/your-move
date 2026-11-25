@@ -11,6 +11,7 @@ import {
   type RandomSource,
   type Seat,
   shuffle,
+  type Text,
   type Transition,
 } from "@your-move/sdk";
 
@@ -59,7 +60,7 @@ const DAY = 86_400_000;
 export interface ModuleOutcome {
   readonly writes: GameWriteSet;
   readonly record: unknown;
-  readonly describe: unknown;
+  readonly describe: Text;
 }
 
 /** Rows holding a seat, by seat number. */
