@@ -129,6 +129,31 @@ describe("the lobby", () => {
     expect(posts(calls, "cancel")).toHaveLength(1);
   });
 
+  it("can't be dismissed while the cancel request is pending", async () => {
+    let release: (answer: Response) => void = () => undefined;
+    const held = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const { calls } = open({
+      "GET /api/v1/games/g1": json({ game: lobby(), view: null }),
+      "POST /api/v1/games/g1/cancel": () => held,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel game" }));
+    const dialog = screen.getByRole("dialog", { name: "Cancel this game?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel game" }));
+    const keep = await within(dialog).findByRole("button", { name: "Keep it" });
+    expect((keep as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(keep);
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.pointerDown(dialog.parentElement!);
+    fireEvent.click(dialog.parentElement!);
+    expect(screen.getByRole("dialog", { name: "Cancel this game?" })).toBeDefined();
+    release(problem(409, "GAME_UNAVAILABLE"));
+    expect((await screen.findByRole("alert")).textContent).toContain("Something went wrong");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(posts(calls, "cancel")).toHaveLength(1);
+  });
+
   const invited = () =>
     lobby({
       yourInvitation: "normal",
@@ -531,6 +556,34 @@ describe("resigning", () => {
     click("Keep playing");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(posts(calls, "resign")).toHaveLength(0);
+  });
+
+  it("can't be dismissed while the request is pending, and shows a failure when it ends", async () => {
+    let release: (answer: Response) => void = () => undefined;
+    const held = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const { calls } = open({ "POST /api/v1/games/g1/resign": () => held });
+    await screen.findByRole("region", { name: "Fake board" });
+    click("Menu");
+    click("Resign…");
+    click("Resign");
+    const dialog = await screen.findByRole("dialog", { name: "Resign this game?" });
+    const keep = within(dialog).getByRole("button", { name: "Keep playing" });
+    expect((keep as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(keep);
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.pointerDown(dialog.parentElement!);
+    fireEvent.click(dialog.parentElement!);
+    expect(screen.getByRole("dialog", { name: "Resign this game?" })).toBeDefined();
+    release(problem(409, "GAME_UNAVAILABLE"));
+    expect((await screen.findByRole("alert")).textContent).toContain("no longer available");
+    expect(posts(calls, "resign")).toHaveLength(1);
+    // Settled, it can be dismissed again.
+    await waitFor(() => {
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
   });
 
   it("says so when the game's engine has gone", async () => {

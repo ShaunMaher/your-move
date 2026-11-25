@@ -7,7 +7,11 @@ import { Dialog } from "./Dialog.js";
 
 afterEach(cleanup);
 
-function Page(props: { onClose?: () => void; inside?: React.ReactNode }) {
+function Page(props: {
+  onClose?: () => void;
+  inside?: React.ReactNode;
+  dismissible?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div>
@@ -22,6 +26,7 @@ function Page(props: { onClose?: () => void; inside?: React.ReactNode }) {
       {open ? (
         <Dialog
           title="Sheet"
+          dismissible={props.dismissible}
           onClose={() => {
             props.onClose?.();
             setOpen(false);
@@ -128,5 +133,43 @@ describe("Dialog", () => {
     fireEvent.pointerDown(scrim);
     fireEvent.click(scrim);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores Escape and a backdrop tap while it is not dismissible", () => {
+    const onClose = vi.fn();
+    render(<Page onClose={onClose} dismissible={false} />);
+    open();
+    const sheet = screen.getByRole("dialog");
+    fireEvent.keyDown(sheet, { key: "Escape" });
+    fireEvent.pointerDown(sheet.parentElement!);
+    fireEvent.click(sheet.parentElement!);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeDefined();
+  });
+
+  it("leaves out what a closed details hides, but keeps its summary", () => {
+    render(
+      <Page
+        inside={
+          <>
+            <button type="button">Before</button>
+            <details>
+              <summary>More</summary>
+              <a href="/x">Inside</a>
+            </details>
+          </>
+        }
+      />,
+    );
+    open();
+    // Closed: the summary is the last stop; the link is not reachable.
+    tab(true);
+    expect(document.activeElement).toBe(screen.getByText("More"));
+    tab();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Before" }));
+    // Open: the link is the last stop.
+    document.querySelector("details")!.open = true;
+    tab(true);
+    expect(document.activeElement).toBe(screen.getByRole("link", { name: "Inside" }));
   });
 });

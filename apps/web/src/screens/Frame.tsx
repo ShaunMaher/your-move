@@ -10,7 +10,7 @@
  */
 import type { ApiClient } from "@your-move/api-client";
 import type { BoardProps, GameClientModule } from "@your-move/sdk/client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Dialog } from "../Dialog.js";
 import type { GameEnvelope, Player } from "../game-api.js";
@@ -108,6 +108,7 @@ export function Frame(props: FrameProps) {
   const [problem, setProblem] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
+  const returnToMenu = useRef(false);
   const over = game.status !== "active";
   const canResign = game.status === "active" && game.yourSeat !== null && game.available;
   const seated = game.players.filter((player) => player.seat !== null);
@@ -115,9 +116,16 @@ export function Frame(props: FrameProps) {
   function close() {
     setPanel(null);
     setProblem(null);
-    // The opener (a menu item) is gone by now; the menu button is where focus belongs.
-    menuButton.current?.focus();
+    // The opener (a menu item) is gone by now; the menu button is where focus belongs, once the
+    // page is no longer inert (the effect below runs after the dialog has put it back).
+    returnToMenu.current = true;
   }
+
+  useEffect(() => {
+    if (panel !== null || !returnToMenu.current) return;
+    returnToMenu.current = false;
+    menuButton.current?.focus();
+  }, [panel]);
 
   async function resign() {
     if (pending) return;
@@ -271,7 +279,7 @@ export function Frame(props: FrameProps) {
       ) : null}
 
       {panel === "resign" ? (
-        <Dialog title="Resign this game?" onClose={close}>
+        <Dialog title="Resign this game?" onClose={close} dismissible={!pending}>
           <p>Resigning ends the game for you and counts as a loss.</p>
           <Problem id="resign-problem" message={problem} />
           <div className="row">
@@ -283,7 +291,12 @@ export function Frame(props: FrameProps) {
             >
               {pending ? "Resigning…" : "Resign"}
             </button>
-            <button type="button" className="button secondary" onClick={close}>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={pending}
+              onClick={close}
+            >
               Keep playing
             </button>
           </div>

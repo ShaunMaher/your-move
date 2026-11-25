@@ -139,6 +139,7 @@ export function Lobby({ appName, gameName, game, onAction, notice }: LobbyProps)
       {confirmCancel ? (
         <Dialog
           title="Cancel this game?"
+          dismissible={pending === null}
           onClose={() => {
             setConfirmCancel(false);
           }}
@@ -156,6 +157,7 @@ export function Lobby({ appName, gameName, game, onAction, notice }: LobbyProps)
             <button
               type="button"
               className="button secondary"
+              disabled={pending !== null}
               onClick={() => {
                 setConfirmCancel(false);
               }}

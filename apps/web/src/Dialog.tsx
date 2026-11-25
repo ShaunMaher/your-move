@@ -1,7 +1,8 @@
 /**
  * A modal sheet: labelled, focus moves into it and is kept inside (Tab and Shift-Tab wrap), the
- * page behind it is `inert` while it is open, Escape or a tap on the backdrop closes it, and focus
- * returns to what had it when it opened. `variant="drawer"` slides it up from the bottom edge.
+ * page behind it is `inert` while it is open, Escape or a tap on the backdrop closes it (unless
+ * `dismissible` is false, as while a request it started is pending), and focus returns to what had
+ * it when it opened. `variant="drawer"` slides it up from the bottom edge.
  *
  * It renders into its own container on `document.body`, beside the app's root, so the root can be
  * made inert without making the dialog inert with it.
@@ -19,6 +20,17 @@ const FOCUSABLE = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(", ");
 
+/** Whether the element is hidden by a closed `<details>` (its summary stays reachable). */
+function inClosedDetails(element: HTMLElement): boolean {
+  for (let up = element.parentElement; up !== null; up = up.parentElement) {
+    if (up instanceof HTMLDetailsElement && !up.open) {
+      const summary = Array.from(up.children).find((child) => child.tagName === "SUMMARY");
+      if (!(summary !== undefined && summary.contains(element))) return true;
+    }
+  }
+  return false;
+}
+
 /** The sheet's tabbable elements, in order: not disabled, hidden or inside something that is. */
 function tabbable(sheet: HTMLElement | null): HTMLElement[] {
   if (sheet === null) return [];
@@ -26,6 +38,7 @@ function tabbable(sheet: HTMLElement | null): HTMLElement[] {
     (element) =>
       !element.matches(":disabled") &&
       element.closest("[hidden], [inert], fieldset:disabled") === null &&
+      !inClosedDetails(element) &&
       element.getAttribute("tabindex") !== "-1",
   );
 }
@@ -46,6 +59,8 @@ function isolate(container: HTMLElement): () => void {
 interface DialogProps {
   readonly title: string;
   readonly onClose: () => void;
+  /** When false (default true) Escape and a tap on the backdrop do nothing. */
+  readonly dismissible?: boolean;
   readonly variant?: "dialog" | "drawer";
   readonly children: ReactNode;
 }
@@ -54,6 +69,8 @@ export function Dialog(props: DialogProps) {
   const { title, children, variant = "dialog" } = props;
   const titleId = useId();
   const [container] = useState(() => document.createElement("div"));
+  // Read while rendering, before the page is made inert: that blurs whatever has focus.
+  const [opener] = useState(() => document.activeElement);
   const scrim = useRef<HTMLDivElement>(null);
   const sheet = useRef<HTMLDivElement>(null);
   /** Whether the press that ends in a click began on the backdrop itself. */
@@ -73,12 +90,11 @@ export function Dialog(props: DialogProps) {
   }, [container]);
 
   useEffect(() => {
-    const opener = document.activeElement;
     (tabbable(sheet.current)[0] ?? sheet.current)?.focus();
     return () => {
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
-  }, []);
+  }, [opener]);
 
   // Native listeners on the backdrop: keys pressed elsewhere aren't this dialog's business.
   useEffect(() => {
@@ -88,7 +104,7 @@ export function Dialog(props: DialogProps) {
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        latest.current.onClose();
+        if (latest.current.dismissible !== false) latest.current.onClose();
         return;
       }
       if (event.key !== "Tab") return;
@@ -111,7 +127,9 @@ export function Dialog(props: DialogProps) {
       pressedBackdrop.current = event.target === element;
     };
     const onClick = (event: Event) => {
-      if (event.target === element && pressedBackdrop.current) latest.current.onClose();
+      if (event.target === element && pressedBackdrop.current && latest.current.dismissible !== false) {
+        latest.current.onClose();
+      }
       pressedBackdrop.current = false;
     };
     element.addEventListener("keydown", onKeyDown);
