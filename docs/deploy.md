@@ -259,6 +259,10 @@ the app trusts it only from the tunnel's own address.
    want prints it. Put it in the settings file as `APP_IMAGE=<registry>/<project>/server@sha256:<digest>`,
    and `docker login` to the registry first if it is private.
 
+**Upgrading a deployment from before Web Push** (alpha A8): run `pnpm gen:vapid --out <your
+SECRETS_DIR>`, run `chmod 0444` on the secret files again, add `VAPID_SUBJECT` to your settings
+file, then `docker compose … up -d`; the compose file refuses to start without them.
+
 **Run**
 
 ```sh

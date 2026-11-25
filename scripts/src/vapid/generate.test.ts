@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -7,6 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -72,12 +74,35 @@ describe("gen:vapid (09 §1)", () => {
     }
   });
 
-  it("never overwrites an existing key", async () => {
+  it("never overwrites an existing key, and writes nothing beside one", async () => {
     const dir = join(base, "secrets");
     mkdirSync(dir);
     writeFileSync(join(dir, PRIVATE_KEY_FILE), "in use\n");
-    await expect(writeVapidKeys(dir, root)).rejects.toThrow(/EEXIST/u);
+    await expect(writeVapidKeys(dir, root)).rejects.toThrow(/already exists/u);
     expect(readFileSync(join(dir, PRIVATE_KEY_FILE), "utf8")).toBe("in use\n");
+    expect(existsSync(join(dir, PUBLIC_KEY_FILE))).toBe(false);
+  });
+
+  it("writes no private key when only the public key exists (A8-S-4)", async () => {
+    const dir = join(base, "secrets");
+    mkdirSync(dir);
+    writeFileSync(join(dir, PUBLIC_KEY_FILE), "in use\n");
+    await expect(writeVapidKeys(dir, root)).rejects.toThrow(/already exists/u);
+    expect(readFileSync(join(dir, PUBLIC_KEY_FILE), "utf8")).toBe("in use\n");
+    expect(existsSync(join(dir, PRIVATE_KEY_FILE))).toBe(false);
+  });
+
+  it("removes the private key when writing the public key fails", async () => {
+    const dir = join(base, "secrets");
+    mkdirSync(dir);
+    let writes = 0;
+    const failSecond: typeof writeFile = (file, data, options) => {
+      writes += 1;
+      return writes === 2 ? Promise.reject(new Error("disk full")) : writeFile(file, data, options);
+    };
+    await expect(writeVapidKeys(dir, root, failSecond)).rejects.toThrow("disk full");
+    expect(existsSync(join(dir, PRIVATE_KEY_FILE))).toBe(false);
+    expect(existsSync(join(dir, PUBLIC_KEY_FILE))).toBe(false);
   });
 
   it("refuses a directory inside the repository", async () => {
