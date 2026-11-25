@@ -82,9 +82,12 @@ function isRefusal(answer: Answer | null): answer is GameError {
   );
 }
 
+type Engine = (typeof engines)[keyof typeof engines];
+
 /** The engine for a game's rules version, if this app has it. */
-function engineFor(version: number): (typeof engines)[1] | undefined {
-  return Object.hasOwn(engines, version) ? engines[version as 1] : undefined;
+function engineFor(version: number): Engine | undefined {
+  const known: Readonly<Record<number, Engine>> = engines;
+  return Object.hasOwn(known, version) ? known[version] : undefined;
 }
 
 export function Board(props: Props): ReactElement {
@@ -107,7 +110,7 @@ export function Board(props: Props): ReactElement {
 function Table(
   props: Props & {
     readonly ruleset: Ruleset;
-    readonly engine: NonNullable<ReturnType<typeof engineFor>>;
+    readonly engine: Engine;
   },
 ): ReactElement {
   const { game, view, ruleset, engine } = props;
