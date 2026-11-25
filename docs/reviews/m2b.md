@@ -74,3 +74,11 @@ Round 3 reviewed HEAD 8ce3822 (both reviewers: merge). The fixes are in the foll
 | R3-S-3 | Recorded as accepted risk F-14: the known path's residual slowness, the timing gate's floor, the call-recording test as the primary control, review at M4 or if the instance grows. | `docs/security/findings.md` F-14 |
 | R3-S-4 | Fixed. The call-recording tests now also compare: the IP-limited 429 path (known against unknown address, and what it does), verify with no live challenge, verify past the per-email failure lockout, a known address that is per-email-limited, and a suspended address from a full new-accounts bucket, each with its counterpart. | `apps/node/src/auth-parity.test.ts` |
 | R3-S-5 | Fixed. `.tmp-in-memory` makes a directory of its own with `mktemp -d /dev/shm/ci-tmp.XXXXXX` (short, for tsx's socket path), after the free-space guard. | `.gitlab-ci.yml` |
+
+## Round 4 (review of the round 3 fixes)
+
+| ID | Resolution | Where |
+|---|---|---|
+| R4-1 | Fixed. The header's last observed range was truncated; it now reads −3.31% to −1.29% and says which values came from later review runs. | `apps/node/src/auth-timing.test.ts` |
+| R4-2 | Fixed (comment). The Docker executor gives each job container its own `/dev/shm`, so the per-job directory needs no clean-up. | `.gitlab-ci.yml` |
+| R4-3 | Resolved at merge: the spec version numbers of the parallel alpha branches are renumbered in merge order. | `docs/spec/README.md` |
