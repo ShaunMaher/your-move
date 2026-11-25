@@ -125,7 +125,7 @@ previews show score only.
   `APP_NAME`/`APP_SHORT_NAME`, `display: "standalone"`, `start_url: "/"`, `scope: "/"`,
   `orientation: "portrait"` (Android only; iOS ignores it — the layout must not break in landscape,
   it may simply centre the portrait column), `theme_color`, `background_color`, icons 192/512 +
-  maskable. `vite-plugin-pwa` is configured with `manifest: false` so it doesn't emit its own.
+  maskable. The build emits no manifest of its own.
 - iOS specifics:
   - `<link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png">`
   - `<meta name="apple-mobile-web-app-capable" content="yes">` and
@@ -136,8 +136,10 @@ previews show score only.
     text screens (accessibility).
   - Web Push only works once installed to home screen (iOS 16.4+); the notifications toggle explains
     this when running in Safari.
-- Service worker (Workbox via `vite-plugin-pwa`, `registerType: "prompt"`,
-  `injectRegister: "script"` — external file, never inline, for CSP):
+- Service worker (`apps/web/sw/sw.js`, emitted as `/sw.js` by a small Vite plugin that prepends the
+  build's file list — a hand-written worker rather than Workbox, so the basics need no dependency;
+  a prompt-style update, registered from the app's own script after load — an external file, never
+  inline, for CSP):
   - Precache the app shell and hashed assets.
   - Runtime cache dictionary assets (cache-first, versioned URLs, at most the 3 most recently used
     dictionaries kept).
