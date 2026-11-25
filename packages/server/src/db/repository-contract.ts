@@ -458,6 +458,51 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         expect(await repos.games.playersOf([])).toEqual([]);
       });
 
+      it("lists only the columns the list shows: the state while active, the own final summary", async () => {
+        const user = await human();
+        const at = T0 + 100;
+        const active = newGame({
+          status: "active",
+          state: '{"secret":1}',
+          setupRng: "[[2,1]]",
+          lastActionAt: at + 1,
+        });
+        await repos.games.create(active, [player({ userId: user, seat: 1, state: "playing" })]);
+        const finalViews = {
+          seats: [
+            { view: { hand: [7] }, summary: { headline: ["Seat 0's line"] } },
+            { view: { hand: [9] }, summary: { headline: ["Your line"], scores: [1, 2] } },
+          ],
+          public: { view: null, summary: { headline: ["Public"] } },
+        };
+        const finished = newGame({
+          status: "finished",
+          state: '{"secret":2}',
+          finalViews: JSON.stringify(finalViews),
+          endedAt: at,
+          lastActionAt: at,
+        });
+        await repos.games.create(finished, [player({ userId: user, seat: 1, state: "out" })]);
+        const rows = await repos.games.listForUser({
+          userId: user,
+          finishedSince: T0,
+          endedSince: T0,
+          limit: 10,
+        });
+        expect(rows.map((row) => row.game)).toEqual([
+          expect.objectContaining({ id: active.id, state: '{"secret":1}', finalSummary: null }),
+          expect.objectContaining({ id: finished.id, state: null }),
+        ]);
+        expect(JSON.parse(rows[1]?.game.finalSummary ?? "null")).toEqual(
+          finalViews.seats[1]?.summary,
+        );
+        for (const row of rows) {
+          expect(Object.keys(row.game)).not.toContain("setupRng");
+          expect(Object.keys(row.game)).not.toContain("finalViews");
+          expect(Object.keys(row.game)).not.toContain("writeToken");
+        }
+      });
+
       it("raises a user's unread marker, never past the game's version and never down", async () => {
         const user = await human();
         const game = newGame();

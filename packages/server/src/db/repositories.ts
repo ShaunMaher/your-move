@@ -275,9 +275,33 @@ export interface GameListQuery {
   readonly limit: number;
 }
 
-/** One listed game: the game row and the viewer's own `game_players` row. */
+/**
+ * The `games` columns the game list shows (05 `GameSummary`): never the secret ones, and of the
+ * state and the final views only what the viewer's summary line needs (A2 review P-16).
+ */
+export type ListedGame = Pick<
+  GameRecord,
+  | "id"
+  | "gameType"
+  | "gameVersion"
+  | "status"
+  | "endReason"
+  | "aiAssistance"
+  | "seats"
+  | "turnTimeoutDays"
+  | "startedAt"
+  | "lastActionAt"
+  | "version"
+> & {
+  /** The module state while `active`, for the module's `summary`; otherwise null. */
+  readonly state: string | null;
+  /** The viewer's own `final_views` summary (JSON) once a started game ended; otherwise null. */
+  readonly finalSummary: string | null;
+};
+
+/** One listed game: its listed columns and the viewer's own `game_players` row. */
 export interface GameListRow {
-  readonly game: GameRecord;
+  readonly game: ListedGame;
   readonly member: GamePlayerRecord;
 }
 

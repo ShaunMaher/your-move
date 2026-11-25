@@ -148,7 +148,26 @@ function gameRepo(db: Database): GameRepo {
               eq(games.status, "lobby"),
             );
       const rows = await db
-        .select({ game: games, member: gamePlayers })
+        .select({
+          game: {
+            id: games.id,
+            gameType: games.gameType,
+            gameVersion: games.gameVersion,
+            status: games.status,
+            endReason: games.endReason,
+            aiAssistance: games.aiAssistance,
+            seats: games.seats,
+            turnTimeoutDays: games.turnTimeoutDays,
+            startedAt: games.startedAt,
+            lastActionAt: games.lastActionAt,
+            version: games.version,
+            state: sql<string | null>`CASE WHEN ${games.status} = 'active' THEN ${games.state} END`,
+            finalSummary: sql<
+              string | null
+            >`CASE WHEN ${gamePlayers.seat} IS NOT NULL THEN json_extract(${games.finalViews}, '$.seats[' || ${gamePlayers.seat} || '].summary') END`,
+          },
+          member: gamePlayers,
+        })
         .from(gamePlayers)
         .innerJoin(games, eq(games.id, gamePlayers.gameId))
         .where(

@@ -10,6 +10,7 @@ import type {
   GamePlayerRecord,
   GameRecord,
   GameResourceRecord,
+  ListedGame,
   UserRecord,
 } from "../db/repositories.js";
 import { deadlineOf, type FinalViews } from "./lifecycle.js";
@@ -67,7 +68,15 @@ export interface PresentInput {
   readonly describeResource: (kind: "dictionary", id: string) => ResourceMeta | undefined;
 }
 
-function playerOf(row: ShownRow, input: PresentInput, creatorView: boolean): EnvelopePlayer {
+/** What presenting the players needs: a few game columns, the rows, their users, the viewer. */
+export interface PlayersInput {
+  readonly game: Pick<GameRecord, "status" | "startedAt" | "turnTimeoutDays">;
+  readonly players: readonly GamePlayerRecord[];
+  readonly users: ReadonlyMap<string, UserRecord>;
+  readonly viewer: GamePlayerRecord;
+}
+
+function playerOf(row: ShownRow, input: PlayersInput, creatorView: boolean): EnvelopePlayer {
   const { game, viewer } = input;
   // A row never joined shows no name or id to anyone (05 §Who sees what, Q3).
   const joined = row.joinedAt !== null;
@@ -94,7 +103,7 @@ function playerOf(row: ShownRow, input: PresentInput, creatorView: boolean): Env
 }
 
 /** The players a viewer sees: lobby rows in the lobby, seated players after start. */
-function visiblePlayers(input: PresentInput): EnvelopePlayer[] {
+export function visiblePlayers(input: PlayersInput): EnvelopePlayer[] {
   const { game, players, viewer } = input;
   const creatorView = viewer.joinedVia === "creator";
   const rows =
@@ -121,7 +130,10 @@ function resourcesOf(input: PresentInput): GameEnvelope["resources"] {
 }
 
 /** Whether this build still has the engine for the game's type and rules version (02 §7.3). */
-export function engineOf(input: Pick<PresentInput, "game" | "type">) {
+export function engineOf(input: {
+  readonly game: Pick<GameRecord, "gameVersion">;
+  readonly type: GameType | undefined;
+}) {
   return input.type?.engine(input.game.gameVersion);
 }
 
@@ -130,7 +142,7 @@ export function engineOf(input: Pick<PresentInput, "game" | "type">) {
  * ended lobby's invitation can no longer be accepted, so it isn't one (A2 review P-1).
  */
 export function invitationOf(
-  game: GameRecord,
+  game: Pick<GameRecord, "status">,
   viewer: GamePlayerRecord,
 ): GameEnvelope["yourInvitation"] {
   if (game.status !== "lobby" || viewer.state !== "invited" || viewer.delivery === "inert") {
@@ -139,14 +151,22 @@ export function invitationOf(
   return viewer.delivery;
 }
 
-/** The game envelope for one member (05 §Common types). */
-export function envelope(input: PresentInput): GameEnvelope {
-  const { game, viewer } = input;
-  const toAct = input.players
+/** The seats in `toAct`, and whether the viewer's is one of them. */
+export function turnOf(
+  players: readonly GamePlayerRecord[],
+  viewer: GamePlayerRecord,
+): { toAct: number[]; yourTurn: boolean } {
+  const toAct = players
     .filter((row) => row.toAct === 1 && row.seat !== null)
     .map((row) => row.seat ?? 0)
     .sort((a, b) => a - b);
-  const yourSeat = viewer.seat;
+  return { toAct, yourTurn: viewer.seat !== null && toAct.includes(viewer.seat) };
+}
+
+/** The game envelope for one member (05 §Common types). */
+export function envelope(input: PresentInput): GameEnvelope {
+  const { game, viewer } = input;
+  const { toAct, yourTurn } = turnOf(input.players, viewer);
   return {
     id: game.id,
     gameType: game.gameType,
@@ -161,9 +181,9 @@ export function envelope(input: PresentInput): GameEnvelope {
     available: engineOf(input) !== undefined,
     resources: resourcesOf(input),
     players: visiblePlayers(input),
-    yourSeat,
+    yourSeat: viewer.seat,
     toAct,
-    yourTurn: yourSeat !== null && toAct.includes(yourSeat),
+    yourTurn,
     yourInvitation: invitationOf(game, viewer),
     createdAt: game.createdAt,
     lastActionAt: game.lastActionAt,
@@ -195,8 +215,13 @@ const LOBBY_ENDINGS: Readonly<Record<string, string>> = {
   expired: "Expired",
 };
 
-/** The list line (05 `GameSummary.summary`). */
-export function summaryOf(input: PresentInput): ListSummary {
+/** The list line (05 `GameSummary.summary`) of one listed game. */
+export function summaryOf(input: {
+  readonly game: ListedGame;
+  readonly players: readonly GamePlayerRecord[];
+  readonly viewer: GamePlayerRecord;
+  readonly type: GameType | undefined;
+}): ListSummary {
   const { game, viewer, players } = input;
   if (game.status === "lobby") {
     const open = game.seats - players.filter((row) => row.state === "joined").length;
@@ -214,8 +239,7 @@ export function summaryOf(input: PresentInput): ListSummary {
     }
     return definition.summary(JSON.parse(game.state) as unknown, viewer.seat);
   }
-  const stored = viewer.seat === null ? undefined : storedFinalViews(game)?.seats[viewer.seat];
-  if (stored !== undefined) return stored.summary as ListSummary;
+  if (game.finalSummary !== null) return JSON.parse(game.finalSummary) as ListSummary;
   return { headline: [LOBBY_ENDINGS[game.status] ?? "Ended"] };
 }
 

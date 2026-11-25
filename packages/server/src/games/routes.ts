@@ -51,11 +51,14 @@ import {
 import {
   engineOf,
   envelope,
+  invitationOf,
   memberRow,
   plainText,
   type PresentInput,
   shownUserIds,
   summaryOf,
+  turnOf,
+  visiblePlayers,
   viewOf,
 } from "./present.js";
 import type { RandomFactory } from "./random.js";
@@ -370,27 +373,23 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       (await repos.users.findByIds(shownUserIds(players))).map((u) => [u.id, u]),
     );
     const games = page.map(({ game, member }) => {
-      const input: PresentInput = {
+      const rows = players.filter((row) => row.gameId === game.id);
+      const last = lastActions.find((action) => action.gameId === game.id);
+      const summary = summaryOf({
         game,
-        players: players.filter((row) => row.gameId === game.id),
-        resources: [],
-        users,
+        players: rows,
         viewer: member,
         type: registry.get(game.gameType),
-        describeResource,
-      };
-      const shown = envelope(input);
-      const last = lastActions.find((action) => action.gameId === game.id);
-      const summary = summaryOf(input);
+      });
       return {
         id: game.id,
         gameType: game.gameType,
         status: game.status,
         endReason: game.endReason,
         aiAssistance: game.aiAssistance,
-        yourTurn: shown.yourTurn,
-        yourInvitation: shown.yourInvitation,
-        players: shown.players,
+        yourTurn: turnOf(rows, member).yourTurn,
+        yourInvitation: invitationOf(game, member),
+        players: visiblePlayers({ game, players: rows, users, viewer: member }),
         summary: {
           headline: plainText(summary.headline),
           ...(summary.scores === undefined ? {} : { scores: [...summary.scores] }),
