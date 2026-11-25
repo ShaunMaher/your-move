@@ -1,13 +1,48 @@
 /*
- * The service worker (docs/spec/07-frontend.md §4). The build prepends `BUILD`: a version and the
- * list of files that make up the app shell. It works offline for the shell only: it never touches
- * `/api/*` or any other server-rendered path, and there is no offline move queue.
+ * The service worker (docs/spec/07-frontend.md §4). The build prepends `BUILD`: a version, the
+ * list of files that make up the app shell and the paths the server handles. It works offline for
+ * the shell only: it never touches `/api/*` or any other server-handled path, and there is no
+ * offline move queue.
  */
-/* global BUILD -- prepended by the build (vite.config.ts) */
+/* global BUILD -- prepended by the build (build/service-worker.ts) */
 
 const CACHE = `shell-${BUILD.version}`;
-// Server-rendered paths the shell must never stand in for (03 §9, 07 §4).
-const SERVER_PATHS = [/^\/api\//u, /^\/__dev\//u, /^\/manifest\.webmanifest$/u];
+
+// How long a navigation waits for the network before the cached shell is shown instead: long
+// enough for a slow mobile connection to answer, short enough that a connection that is up but
+// dead (a lie-fi) doesn't leave a blank page for the browser's own, much longer, timeout.
+const NAVIGATION_TIMEOUT_MS = 4000;
+
+/** A server path pattern is `/prefix/*` (the prefix and everything below it) or an exact path. */
+function isServerPath(pathname) {
+  return BUILD.serverPaths.some((pattern) =>
+    pattern.endsWith("/*")
+      ? pathname === pattern.slice(0, -2) || pathname.startsWith(pattern.slice(0, -1))
+      : pathname === pattern,
+  );
+}
+
+function shell() {
+  return caches.match("/", { cacheName: CACHE });
+}
+
+/**
+ * The network first, so a new deployment shows at once; the cached shell when the network fails
+ * or is slow. The app then says "You're offline" itself.
+ */
+function navigation(request) {
+  const network = fetch(request);
+  // Resolves with the shell after the timeout; with no shell it never resolves, and the network
+  // alone decides.
+  const slow = new Promise((resolve) => {
+    setTimeout(resolve, NAVIGATION_TIMEOUT_MS);
+  })
+    .then(shell)
+    .then((cached) => cached ?? new Promise(() => undefined));
+  return Promise.race([network, slow]).catch(() =>
+    shell().then((cached) => cached ?? Response.error()),
+  );
+}
 
 self.addEventListener("install", (event) => {
   // The new worker waits for the page's say-so (the "New version available" prompt) to take over.
@@ -40,16 +75,10 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  if (SERVER_PATHS.some((pattern) => pattern.test(url.pathname))) return;
+  if (isServerPath(url.pathname)) return;
 
   if (request.mode === "navigate") {
-    // The network first, so a new deployment shows at once; the cached shell when offline. The app
-    // then says "You're offline" itself.
-    event.respondWith(
-      fetch(request).catch(() =>
-        caches.match("/", { cacheName: CACHE }).then((shell) => shell ?? Response.error()),
-      ),
-    );
+    event.respondWith(navigation(request));
     return;
   }
   // Hashed build output and icons: cached, else the network.

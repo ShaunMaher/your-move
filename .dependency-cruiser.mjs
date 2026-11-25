@@ -152,7 +152,9 @@ export default {
       name: "web-only-through-api-client",
       comment: "The web app reaches the server only through @your-move/api-client (03 §1).",
       severity: "error",
-      from: { path: "^apps/web/" },
+      // The build (vite.config.ts, build/) runs in Node and takes the server-path list from
+      // @your-move/shared/server-paths; nothing of it reaches the browser bundle.
+      from: { path: "^apps/web/", pathNot: "^apps/web/(build/|vite[.]config[.]ts$)" },
       to: { path: "^packages/(server|shared)/" },
     },
   ],

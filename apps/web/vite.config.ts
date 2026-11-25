@@ -1,9 +1,10 @@
-import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+
+import { serviceWorker } from "./build/service-worker.js";
 
 /**
  * Records every module the build read in generated/bundles/web.json, for `pnpm games:check-inputs`
@@ -29,30 +30,6 @@ function recordInputs(): Plugin {
         new URL("web.json", dir),
         `${JSON.stringify({ baseDir: process.cwd(), inputs: [...new Set(inputs)] }, null, 2)}\n`,
       );
-    },
-  };
-}
-
-/**
- * Emits `sw.js` (07 §4): `sw/sw.js` with the build's file list in front. Precached: the shell at
- * `/` and every file Vite emitted (hashed, so the list identifies the build), plus the icon.
- * Workbox would do the same; this is the part of it the app needs, with no dependency.
- */
-function serviceWorker(): Plugin {
-  return {
-    name: "service-worker",
-    apply: "build",
-    generateBundle(_options, bundle) {
-      const precache = ["/", "/icon.svg", ...Object.keys(bundle).map((file) => `/${file}`)]
-        .filter((path) => !path.endsWith(".map"))
-        .sort();
-      const version = createHash("sha256").update(precache.join("\n")).digest("hex").slice(0, 12);
-      const template = readFileSync(new URL("sw/sw.js", import.meta.url), "utf8");
-      this.emitFile({
-        type: "asset",
-        fileName: "sw.js",
-        source: `const BUILD = ${JSON.stringify({ version, precache })};\n${template}`,
-      });
     },
   };
 }

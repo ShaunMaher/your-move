@@ -31,3 +31,4 @@ export {
   HealthResponseSchema,
   healthRoute,
 } from "./routes.js";
+export { SERVER_PATHS } from "./server-paths.js";

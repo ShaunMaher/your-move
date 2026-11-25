@@ -1,6 +1,12 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { GameManifest } from "@your-move/sdk";
-import { configRoute, healthRoute, SESSION_COOKIE_SCHEME, type ErrorCode } from "@your-move/shared";
+import {
+  configRoute,
+  healthRoute,
+  SERVER_PATHS,
+  SESSION_COOKIE_SCHEME,
+  type ErrorCode,
+} from "@your-move/shared";
 import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { matchedRoutes } from "hono/route";
@@ -37,9 +43,6 @@ export type App = OpenAPIHono<AppEnv>;
 
 /** An OpenAPI 3.1 document as `@hono/zod-openapi` produces it. */
 export type OpenApiDocument = ReturnType<OpenAPIHono["getOpenAPI31Document"]>;
-
-/** Paths the server always handles; on Cloudflare these run the Worker first (03 §9). */
-export const SERVER_PATHS = ["/api/*", "/manifest.webmanifest", "/__dev/*"] as const;
 
 function errorBody(code: ErrorCode, message: string) {
   return { error: { code, message } };

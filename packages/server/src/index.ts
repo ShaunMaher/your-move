@@ -7,7 +7,6 @@ export {
   type App,
   type AppEnv,
   openApiDocument,
-  SERVER_PATHS,
   type AppOptions,
   type InstalledGame,
   type OpenApiDocument,

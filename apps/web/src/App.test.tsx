@@ -49,7 +49,9 @@ describe("the instance's name", () => {
   it("comes from the config, never the build (03 §9)", async () => {
     render(<App api={fakeApi(signedOut).api} />);
     expect(await screen.findByText("Family Games")).toBeDefined();
-    expect(document.title).toBe("Family Games");
+    await waitFor(() => {
+      expect(document.title).toBe("Family Games");
+    });
     expect(
       document.head
         .querySelector('meta[name="apple-mobile-web-app-title"]')
