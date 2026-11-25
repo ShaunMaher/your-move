@@ -166,9 +166,14 @@ dictionaries is the shell's job and needs no change to the module contract.
   - Precache the app shell (`/`) and every file the build emitted except source maps. The build
     hashes the content of each precached file (the HTML and the public files too) into the cache
     name, so a change to any of them is a new version.
-  - Hashed assets: cache first, else the network. Nothing is added to the cache at runtime; the
-    dictionary-asset runtime cache (cache-first, the 3 most recently used dictionaries) arrives
-    with the first game that ships dictionaries (M3).
+  - Hashed assets: cache first, else the network. The worker adds nothing to its own cache at
+    runtime. The **word-list cache** (`dictionaries-v1`, the 3 most recently added lists) is
+    written by the page, not the worker (alpha A4): when a game is open the shell downloads each
+    public list from the envelope's `downloadUrl` (only a same-origin `/assets/dictionaries/…`
+    path of the served shape is fetched), stores it only if its content hashes to the digest in
+    its own file name, and the worker's clean-up of old shell caches leaves it alone.
+    `serverOnly` lists are never fetched. The module contract has no channel to hand the list to a
+    board, so previews still answer from the server until one is specified.
   - **Never touch server-handled paths**: the worker ignores non-GET requests, other origins and
     every path in `SERVER_PATHS` (`@your-move/shared`, the one list also behind the server's 404s
     and, by hand, Cloudflare's `run_worker_first`; 03 §9): `/api/*`, `/__dev/*` and
