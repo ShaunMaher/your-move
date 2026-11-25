@@ -24,4 +24,11 @@ describe("webCryptoRandom", () => {
     expect(webCryptoRandom.nextInt(3)).toBe(1);
     expect(spy).toHaveBeenCalledTimes(2);
   });
+
+  it("refuses a range that isn't an integer from 1 to 2^32", () => {
+    for (const bad of [0, -1, 1.5, Number.NaN, 2 ** 32 + 1]) {
+      expect(() => webCryptoRandom.nextInt(bad)).toThrow(RangeError);
+    }
+    expect(webCryptoRandom.nextInt(1)).toBe(0);
+  });
 });
