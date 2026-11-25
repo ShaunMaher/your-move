@@ -61,6 +61,14 @@ export function NewGame({ api, appName, ownEmail, onSessionLost }: NewGameProps)
   const [problem, setProblem] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
+  /** The game whose client module is wanted now: a load for any other one is ignored when it ends. */
+  const wanted = useRef<string | null>(null);
+  useEffect(
+    () => () => {
+      wanted.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -96,7 +104,10 @@ export function NewGame({ api, appName, ownEmail, onSessionLost }: NewGameProps)
     setEmails(Array.from({ length: seatCount - 1 }, () => ""));
     setProblem(null);
     setClient("loading");
-    void loadGameClient(game.type).then(setClient);
+    wanted.current = game.type;
+    void loadGameClient(game.type).then((module) => {
+      if (wanted.current === game.type) setClient(module);
+    });
     setStep("options");
   }
 

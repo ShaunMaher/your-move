@@ -1,7 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { GameClientModule } from "@your-move/sdk/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { forgetCatalog } from "../catalog.js";
+import { loadGameClient } from "../games.js";
 import { fakeClient } from "../test-client.js";
 import { CATALOG, CATALOG_GAME, fakeApi, json, problem } from "../test-support.js";
 import { NewGame } from "./NewGame.js";
@@ -43,6 +45,35 @@ async function toPlayers() {
 }
 
 describe("the new-game flow", () => {
+  it("ignores a game's module that finishes loading after another game was chosen", async () => {
+    const loader = vi.mocked(loadGameClient);
+    let finishFirst: (module: GameClientModule) => void = () => undefined;
+    loader.mockImplementationOnce(
+      () =>
+        new Promise<GameClientModule>((resolve) => {
+          finishFirst = resolve;
+        }),
+    );
+    const other = { ...CATALOG_GAME, type: "path", name: "Paths" };
+    const otherClient: GameClientModule = {
+      ...fakeClient,
+      type: "path",
+      OptionsForm: () => <p>Paths form</p>,
+    };
+    loader.mockImplementationOnce(() => Promise.resolve(otherClient));
+    view(json(created, 201), json({ games: [CATALOG_GAME, other] }));
+    fireEvent.click(await screen.findByRole("button", { name: /Words/u }));
+    click("Back");
+    fireEvent.click(await screen.findByRole("button", { name: /Paths/u }));
+    expect(await screen.findByText("Paths form")).toBeDefined();
+    await act(async () => {
+      finishFirst(fakeClient);
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Paths form")).toBeDefined();
+    expect(screen.queryByText(/Options form/u)).toBeNull();
+  });
+
   it("offers a card per game type with its icon as an image, and the module's options form with the defaults", async () => {
     view();
     const card = await screen.findByRole("button", { name: /Words/u });
