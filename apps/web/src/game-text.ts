@@ -12,8 +12,9 @@ const NEW_PLAYER = "New player";
 
 /**
  * A player's name as the shell shows it: "You" for the viewer, else the display name. Without one,
- * a member whose `userId` is gone is a deleted account and any other member has no name yet; a row
- * that never joined has no name or id for anyone (05 §Who sees what), so it is just "A player".
+ * a member whose `userId` is gone is a deleted account and any other member has no name yet; any
+ * other row (one that never joined, or one that has left) is just "A player": a row never joined
+ * has no name or id for anyone (05 §Who sees what).
  */
 export function seatLabel(player: Player): string {
   if (player.isYou) return "You";
