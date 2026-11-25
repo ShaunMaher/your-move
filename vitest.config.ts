@@ -15,7 +15,10 @@ const ROOTS = globSync(["{apps,packages,games,tests}/*/package.json", "scripts/p
 const TIMING = process.env["YM_TIMING"] === "1";
 const TIMING_FILE = "src/auth-timing.test.ts";
 
-/** Every workspace package with tests. A package with its own vitest.config.ts uses it. */
+/**
+ * Every workspace package with tests. A package with its own vitest.config.ts uses it, and must
+ * apply the timing switch itself if it holds the timing file (apps/node does).
+ */
 function projects(): (string | TestProjectInlineConfiguration)[] {
   return ROOTS.map((root) =>
     existsSync(`${root}/vitest.config.ts`)
