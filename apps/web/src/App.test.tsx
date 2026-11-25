@@ -99,7 +99,9 @@ describe("signed out", () => {
       ["/api/v1/auth/otp/request", { email: "sam@example.org" }],
       ["/api/v1/auth/otp/verify", { email: "sam@example.org", code: "12345678" }],
     ]);
-    expect(window.location.pathname).toBe("/");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/");
+    });
   });
 
   it("gives the code field the autofill attributes (06 §3.3)", async () => {
@@ -256,7 +258,9 @@ describe("onboarding", () => {
     typeInto("Display name", "Sam");
     click("Continue");
     expect(await screen.findByRole("heading", { name: "Hi, Sam" })).toBeDefined();
-    expect(window.location.pathname).toBe("/");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/");
+    });
     expect(calls.filter((call) => call.method !== "GET").at(-1)).toMatchObject({
       method: "PATCH",
       body: { displayName: "Sam" },
@@ -336,7 +340,9 @@ describe("signed in", () => {
     window.history.replaceState(null, "", "/signin");
     render(<App api={fakeApi(signedIn()).api} />);
     await screen.findByRole("heading", { name: "Hi, Sam" });
-    expect(window.location.pathname).toBe("/");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/");
+    });
   });
 
   it("says when a page doesn't exist", async () => {
@@ -354,7 +360,9 @@ describe("signed in", () => {
     await screen.findByRole("heading", { name: "Hi, Sam" });
     fireEvent.click(screen.getByRole("link", { name: "Settings" }));
     await screen.findByRole("heading", { name: "Settings" });
-    expect(window.location.pathname).toBe("/settings");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/settings");
+    });
     expect(screen.getByText("sam@example.org")).toBeDefined();
     click("Sign out");
     await screen.findByRole("heading", { name: "Sign in" });
@@ -381,7 +389,9 @@ describe("signed in", () => {
       await waitFor(() => {
         expect(alertText()).toBe("Couldn't sign out. You're still signed in. Try again.");
       });
-      expect(window.location.pathname).toBe("/settings");
+      await waitFor(() => {
+        expect(window.location.pathname).toBe("/settings");
+      });
       expect(screen.getByRole("heading", { name: "Settings" })).toBeDefined();
       expect(screen.queryByRole("heading", { name: "Sign in" })).toBeNull();
       // The button is usable again, and trying again works.
@@ -416,7 +426,9 @@ describe("signed in", () => {
       await waitFor(() => {
         expect(alertText()).toContain("Couldn't sign out. You're still signed in.");
       });
-      expect(window.location.pathname).toBe("/welcome");
+      await waitFor(() => {
+        expect(window.location.pathname).toBe("/welcome");
+      });
     });
   });
 
@@ -510,7 +522,9 @@ describe("returning to where a signed-out visit was headed", () => {
     typeInto("Sign-in code", "12345678");
     click("Sign in");
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeDefined();
-    expect(window.location.pathname).toBe("/settings");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/settings");
+    });
   });
 
   it("keeps it through onboarding, so a new person lands where they were headed", async () => {
@@ -538,7 +552,9 @@ describe("returning to where a signed-out visit was headed", () => {
     typeInto("Display name", "Sam");
     click("Continue");
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeDefined();
-    expect(window.location.pathname).toBe("/settings");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/settings");
+    });
     expect(peekReturnPath()).toBeNull();
   });
 
@@ -569,7 +585,9 @@ describe("returning to where a signed-out visit was headed", () => {
     typeInto("Display name", "Sam");
     click("Continue");
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeDefined();
-    expect(window.location.pathname).toBe("/settings");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/settings");
+    });
     expect(peekReturnPath()).toBeNull();
   });
 
@@ -593,7 +611,9 @@ describe("returning to where a signed-out visit was headed", () => {
     typeInto("Sign-in code", "12345678");
     click("Sign in");
     expect(await screen.findByRole("heading", { name: "Hi, Sam" })).toBeDefined();
-    expect(window.location.pathname).toBe("/");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/");
+    });
   });
 
   it.each([

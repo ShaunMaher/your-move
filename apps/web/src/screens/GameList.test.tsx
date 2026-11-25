@@ -90,7 +90,9 @@ describe("the game list", () => {
     });
     expect(document.querySelector("svg")).toBeNull();
     fireEvent.click(link);
-    expect(window.location.pathname).toBe("/g/a%2Fb");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/g/a%2Fb");
+    });
   });
 
   it("says so when there are no games", async () => {

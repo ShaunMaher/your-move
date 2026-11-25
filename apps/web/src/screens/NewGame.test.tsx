@@ -137,7 +137,9 @@ describe("the new-game flow", () => {
     click("Review");
     click("Create game");
     expect((await screen.findByRole("alert")).textContent).toMatch(text);
-    expect(window.location.pathname).toBe("/new");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/new");
+    });
     expect(screen.getByRole("button", { name: "Create game" })).toHaveProperty("disabled", false);
   });
 
