@@ -140,14 +140,28 @@ previews show score only.
   build's file list — a hand-written worker rather than Workbox, so the basics need no dependency;
   a prompt-style update, registered from the app's own script after load — an external file, never
   inline, for CSP):
-  - Precache the app shell and hashed assets.
-  - Runtime cache dictionary assets (cache-first, versioned URLs, at most the 3 most recently used
-    dictionaries kept).
-  - **Never cache `/api/*`** responses (network-only).
-  - `navigateFallbackDenylist: [/^\/api\//, /^\/__dev\//, /^\/manifest\.webmanifest$/]` so
-    server-rendered pages (the unsubscribe page lives at `/api/v1/email/unsubscribe`, 05) are never
-    replaced by the SPA shell.
-  - Show "New version available — reload" toast when an update is waiting.
+  - Precache the app shell (`/`) and every file the build emitted except source maps. The build
+    hashes the content of each precached file (the HTML and the public files too) into the cache
+    name, so a change to any of them is a new version.
+  - Hashed assets: cache first, else the network. Nothing is added to the cache at runtime; the
+    dictionary-asset runtime cache (cache-first, the 3 most recently used dictionaries) arrives
+    with the first game that ships dictionaries (M3).
+  - **Never touch server-handled paths**: the worker ignores non-GET requests, other origins and
+    every path in `SERVER_PATHS` (`@your-move/shared`, the one list also behind the server's 404s
+    and, by hand, Cloudflare's `run_worker_first`; 03 §9): `/api/*`, `/__dev/*` and
+    `/manifest.webmanifest`. They go straight to the network, so server-rendered pages (the
+    unsubscribe page lives at `/api/v1/email/unsubscribe`, 05) are never replaced by the SPA
+    shell, and API responses are never cached. An e2e test checks that no `/api/` response comes
+    from the worker and that Cache Storage holds exactly the precache list.
+  - Navigations go to the network first (a new deployment shows at once) and fall back to the
+    cached shell when the network fails or has not answered within 4 seconds; with no shell the
+    request fails.
+  - Show "New version available — reload" toast (an always-present live region) when an update is
+    waiting. The new worker activates only when the person agrees, and then **every open tab
+    reloads** (a tab that was controlled by the old worker reloads when the controller changes):
+    the old cache is deleted on activation, so a tab left on the old code would find its files
+    missing. The cost is that a second tab reloads without being asked; it only happens after the
+    person chose to update in the first.
   - `push` handler MUST call `showNotification` for every push (iOS revokes subscriptions that
     receive silent pushes). `notificationclick` focuses an existing window or opens `/g/:id`.
   - Safari has no `pushsubscriptionchange`, so on every app launch the client re-reads
@@ -181,6 +195,12 @@ previews show score only.
   to submit, Backspace to recall; path game: arrow keys to choose a hand tile, R to rotate, Enter to
   place).
 - Contrast ≥ WCAG AA for text and premium labels.
+- After a move to another screen, focus goes to its `h1` (`tabIndex={-1}`), unless the screen has
+  focused a field of its own. Error and notice regions are live regions that are always in the
+  page, so what fills them is announced.
+- A signed-out visit to an app path is remembered for the sign-in (in `sessionStorage`, a
+  same-origin absolute path only, never `/signin` or `/welcome`), and signing in lands there; an
+  explicit sign-out forgets it.
 
 ## 7. Testing
 

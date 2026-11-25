@@ -117,7 +117,11 @@ mostly painless.
   channel; sockets are tagged with their session id and closed with code `4401`). Sockets also have
   a 24 h maximum lifetime, so a missed revocation can't outlive a day (03 §6).
 - On sign-out the client also unsubscribes its push subscription and clears per-game local state
-  (rack order) — shared devices.
+  (rack order) — shared devices. Per-game local state lives only in `localStorage` keys under the
+  reserved prefix `ym.game.` (`ym.game.<gameType>.<userId>.<gameId>`), so one `clearClientState()`
+  removes every such key. It runs on sign-out and sign-out everywhere, in every open tab (a
+  `BroadcastChannel` message), and a tab that becomes visible checks `/api/v1/me` again, so a
+  session ended from another device clears it too.
 - **Suspension** (05 §Admin API): suspending a user deletes their sessions and revokes their tokens
   (with the same socket closing as above), cancels the lobbies they created and declines their
   pending invitations (realtime only); their active games continue and time out normally. The

@@ -31,7 +31,7 @@
 | Node SQLite driver | `node:sqlite` (Node's built-in `DatabaseSync`), WAL mode, through Drizzle's `sqlite-proxy` driver | Synchronous like better-sqlite3, but no native module: no install script, no downloaded binary, nothing added to the image (M2a) |
 | Node WebSockets | `ws` (via `@hono/node-ws` or direct) | Standard |
 | Frontend | React 18+, Vite, React Router | As requested; Vite has the best PWA tooling |
-| PWA | `vite-plugin-pwa` (Workbox) | Manifest + service worker generation |
+| PWA | A small hand-written service worker (`apps/web/sw/sw.js`) emitted by a Vite plugin; the manifest is served by the server at runtime | No `vite-plugin-pwa`/Workbox dependency (07 §4) |
 | Client state | TanStack Query for server state; small local store (Zustand or `useReducer`) for board drag state | Keep it simple |
 | Styling | CSS modules or plain CSS with custom properties | No heavy UI kit; we need full control of the board |
 | Tests | Vitest (unit + integration), fast-check (property tests), Playwright (e2e, mobile viewports) | Same test runner across packages; details in 11 §4 |
