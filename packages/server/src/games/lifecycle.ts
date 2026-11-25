@@ -398,7 +398,7 @@ function clearAddresses(players: readonly GamePlayerRecord[], except?: string) {
 export const LOBBY_LIFETIME_MS = 14 * DAY;
 
 /** When the lobby expires (02 §4). */
-export function lobbyExpiresAt(game: GameRecord): number {
+function lobbyExpiresAt(game: GameRecord): number {
   return game.createdAt + LOBBY_LIFETIME_MS;
 }
 
