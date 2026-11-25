@@ -21,6 +21,7 @@ import {
   apiTokens,
   authEvents,
   blocks,
+  emailSuppressions,
   otpChallenges,
   pastOpponents,
   rateLimits,
@@ -100,23 +101,42 @@ export function userRepo(db: Database): UserRepo {
     },
     async setEmailNudges(id, change) {
       // One key, in SQL, like rememberGameOptions: other settings survive a concurrent change.
-      await db
+      const update = db
         .update(users)
         .set({
           settings: sql`json_set(${SETTINGS_OBJECT}, '$.emailNudges', json(${change.enabled ? "true" : "false"}))`,
+          emailId: change.enabled ? change.emailId : null,
           updatedAt: change.updatedAt,
-          ...(change.emailId === null ? {} : { emailId: change.emailId }),
         })
         .where(eq(users.id, id));
+      if (!change.enabled) {
+        await update;
+        return;
+      }
+      // Signed-in consent outranks an earlier unsubscribe link; a bounce or complaint doesn't
+      // (03 §7). Only once the user row holds this emailId, so a stale id removes nothing.
+      await runBatch(db, [
+        update,
+        db
+          .delete(emailSuppressions)
+          .where(
+            and(
+              eq(emailSuppressions.emailHash, change.emailId),
+              eq(emailSuppressions.reason, "unsubscribed"),
+              sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${id} AND ${users.emailId} = ${change.emailId})`,
+            ),
+          ),
+      ]);
     },
     async disableNudgesByEmailId(emailId, updatedAt) {
       await db
         .update(users)
         .set({
           settings: sql`json_set(${SETTINGS_OBJECT}, '$.emailNudges', json('false'))`,
+          emailId: null,
           updatedAt,
         })
-        .where(and(eq(users.emailId, emailId), NUDGES_ON));
+        .where(eq(users.emailId, emailId));
     },
     async deleteAccount(user, event) {
       // Agents go with their owner (owner_user_id cascades), and their sessions and tokens with

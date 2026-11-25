@@ -13,6 +13,8 @@ const T0 = Date.UTC(2026, 0, 1);
 const DAY = 24 * 60 * 60 * 1000;
 /** Due at T0 + 1 day: idle since T0, not nudged since T0. */
 const WINDOW: NudgeWindow = { idleSince: T0, nudgedBefore: T0 };
+/** The suite's games are all of this one installed type and version. */
+const INSTALLED = [{ gameType: "contract", gameVersion: 1 }];
 
 interface NudgeTarget {
   readonly repos: Repositories;
@@ -39,7 +41,7 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
       createdAt: T0,
       updatedAt: T0,
     });
-    await repos().users.setEmailNudges(id, { enabled: nudges, emailId, updatedAt: T0 });
+    if (nudges) await repos().users.setEmailNudges(id, { enabled: true, emailId, updatedAt: T0 });
     return { id, emailId };
   }
 
@@ -48,6 +50,7 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
     userId: string,
     overrides: Partial<NewGamePlayer> = {},
     status: "active" | "finished" = "active",
+    gameVersion = 1,
   ): Promise<{ gameId: string; playerId: string }> {
     const gameId = crypto.randomUUID();
     const playerId = crypto.randomUUID();
@@ -55,7 +58,7 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
       {
         id: gameId,
         gameType: "contract",
-        gameVersion: 1,
+        gameVersion,
         options: "{}",
         status,
         seats: 2,
@@ -86,11 +89,13 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
   }
 
   async function dueIds(window: NudgeWindow = WINDOW): Promise<Set<string>> {
-    return new Set((await repos().nudges.due(window, 10_000)).map((row) => row.playerId));
+    return new Set(
+      (await repos().nudges.due(window, 10_000, INSTALLED)).map((row) => row.playerId),
+    );
   }
 
   describe("email nudges (A6)", () => {
-    it("setEmailNudges changes only that key and records email_id; disableNudgesByEmailId turns it off", async () => {
+    it("setEmailNudges changes only that key and holds email_id exactly while nudges are on", async () => {
       const id = crypto.randomUUID();
       const emailId = freshEmailId();
       await repos().users.create({
@@ -110,19 +115,46 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
         emailId,
       });
       expect((await repos().users.findById(id))?.updatedAt).toBe(T0 + 1);
-      // Turning it off keeps email_id; an emailId of null leaves it as it is.
-      await repos().users.setEmailNudges(id, { enabled: false, emailId: null, updatedAt: T0 + 2 });
+      // Turning it off clears email_id (A6-S-4).
+      await repos().users.setEmailNudges(id, { enabled: false, updatedAt: T0 + 2 });
       expect(await stored()).toEqual({
         settings: { whoCanAddMe: "nobody", emailNudges: false },
-        emailId,
+        emailId: null,
       });
-      await repos().users.setEmailNudges(id, { enabled: true, emailId: null, updatedAt: T0 + 3 });
+    });
+
+    it("disableNudgesByEmailId turns nudges off and clears email_id, once", async () => {
+      const { id, emailId } = await user();
       await repos().users.disableNudgesByEmailId(emailId, T0 + 4);
-      expect((await stored()).settings).toEqual({ whoCanAddMe: "nobody", emailNudges: false });
+      const row = await repos().users.findById(id);
+      expect(JSON.parse(row?.settings ?? "")).toEqual({ emailNudges: false });
+      expect(row?.emailId).toBeNull();
+      expect(row?.updatedAt).toBe(T0 + 4);
       // Repeating it, or an unknown emailId, changes nothing.
       await repos().users.disableNudgesByEmailId(emailId, T0 + 5);
       await repos().users.disableNudgesByEmailId(freshEmailId(), T0 + 5);
       expect((await repos().users.findById(id))?.updatedAt).toBe(T0 + 4);
+    });
+
+    it("turning nudges on lifts an unsubscribed suppression of the address, never a bounce or complaint (A6-P-3)", async () => {
+      const reasons = ["unsubscribed", "bounced", "complained"] as const;
+      const left: Record<string, unknown[]> = {};
+      for (const reason of reasons) {
+        const id = crypto.randomUUID();
+        const emailId = freshEmailId();
+        await repos().users.create({ id, email: address(id), createdAt: T0, updatedAt: T0 });
+        await repos().emailSuppressions.suppress(emailId, reason, T0);
+        await repos().users.setEmailNudges(id, { enabled: true, emailId, updatedAt: T0 });
+        left[reason] = await target().sql(
+          "SELECT reason FROM email_suppressions WHERE email_hash = ?",
+          emailId,
+        );
+      }
+      expect(left).toEqual({
+        unsubscribed: [],
+        bounced: [{ reason: "bounced" }],
+        complained: [{ reason: "complained" }],
+      });
     });
 
     it("setEmailNudges treats unreadable settings as empty", async () => {
@@ -134,8 +166,8 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
         createdAt: T0,
         updatedAt: T0,
       });
-      await repos().users.setEmailNudges(id, { enabled: true, emailId: null, updatedAt: T0 });
-      expect((await repos().users.findById(id))?.settings).toBe('{"emailNudges":true}');
+      await repos().users.setEmailNudges(id, { enabled: false, updatedAt: T0 });
+      expect((await repos().users.findById(id))?.settings).toBe('{"emailNudges":false}');
     });
 
     it("email_id is unique", async () => {
@@ -149,7 +181,7 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
     it("due lists a seat idle and un-nudged for the window, with what the email needs", async () => {
       const { id, emailId } = await user();
       const { gameId, playerId } = await seat(id);
-      const rows = (await repos().nudges.due(WINDOW, 10_000)).filter(
+      const rows = (await repos().nudges.due(WINDOW, 10_000, INSTALLED)).filter(
         (row) => row.playerId === playerId,
       );
       expect(rows).toEqual([
@@ -201,8 +233,8 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
       const suppressed = await user();
       await repos().emailSuppressions.suppress(suppressed.emailId, "complained", T0);
       await add(seat(suppressed.id));
-      // A string "true" isn't true.
-      const stringly = await user(false);
+      // A string "true" isn't true, even with an email_id.
+      const stringly = await user();
       await target().sql(
         `UPDATE users SET settings = '{"emailNudges":"true"}' WHERE id = ?`,
         stringly.id,
@@ -219,10 +251,10 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
       const earlier = await seat((await user()).id, { toActSince: T0 - 2 * DAY - 1 });
       const later = await seat((await user()).id, { toActSince: T0 - 2 * DAY });
       const window = { idleSince: T0 - 2 * DAY, nudgedBefore: T0 };
-      const rows = await repos().nudges.due(window, 10_000);
+      const rows = await repos().nudges.due(window, 10_000, INSTALLED);
       const order = rows.map((row) => row.playerId);
       expect(order.indexOf(earlier.playerId)).toBeLessThan(order.indexOf(later.playerId));
-      expect(await repos().nudges.due(window, 1)).toHaveLength(1);
+      expect(await repos().nudges.due(window, 1, INSTALLED)).toHaveLength(1);
     });
 
     it("claim sets last_nudged_at once, and only while the seat is still due", async () => {
@@ -235,16 +267,59 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
         await target().sql("SELECT last_nudged_at FROM game_players WHERE id = ?", playerId),
       ).toEqual([{ last_nudged_at: T0 + DAY }]);
       expect((await dueIds()).has(playerId)).toBe(false);
-      // A seat that has acted since is not claimed.
-      const moved = await seat((await user()).id);
-      await target().sql("UPDATE game_players SET to_act = 0 WHERE id = ?", moved.playerId);
-      expect(await repos().nudges.claim(moved.playerId, T0 + DAY, WINDOW)).toBe(false);
       // Nor is a claim of a game's version: nothing but the seat's throttle changes.
       const [game] = await target().sql(
         "SELECT g.version FROM games g JOIN game_players p ON p.game_id = g.id WHERE p.id = ?",
         playerId,
       );
       expect(game).toEqual({ version: 0 });
+    });
+
+    it("due lists only games of an installed type and version, so orphans never fill the queue (A6-P-1)", async () => {
+      const userId = (await user()).id;
+      const orphaned = await seat(userId, { toActSince: T0 - 3 * DAY }, "active", 99);
+      const normal = await seat((await user()).id);
+      const due = await dueIds();
+      expect(due.has(orphaned.playerId)).toBe(false);
+      expect(due.has(normal.playerId)).toBe(true);
+      expect(await repos().nudges.due(WINDOW, 10_000, [])).toEqual([]);
+    });
+
+    it("claim re-checks the user and the game, not only the seat (A6-S-3)", async () => {
+      const claim = (playerId: string) => repos().nudges.claim(playerId, T0 + DAY, WINDOW);
+      // Unsubscribed between due() and claim().
+      const unsubscribed = await user();
+      const a = await seat(unsubscribed.id);
+      expect((await dueIds()).has(a.playerId)).toBe(true);
+      await repos().users.disableNudgesByEmailId(unsubscribed.emailId, T0 + DAY);
+      expect(await claim(a.playerId)).toBe(false);
+      // Suppressed, suspended, being deleted, or the game no longer active.
+      const suppressed = await user();
+      const b = await seat(suppressed.id);
+      await repos().emailSuppressions.suppress(suppressed.emailId, "bounced", T0);
+      expect(await claim(b.playerId)).toBe(false);
+      for (const column of ["suspended_at", "deletion_requested_at"]) {
+        const { id } = await user();
+        const c = await seat(id);
+        await target().sql(`UPDATE users SET ${column} = ? WHERE id = ?`, T0, id);
+        expect(await claim(c.playerId), column).toBe(false);
+      }
+      const ended = await seat((await user()).id);
+      await target().sql("UPDATE games SET status = 'finished' WHERE id = ?", ended.gameId);
+      expect(await claim(ended.playerId)).toBe(false);
+      // A seat that has acted since is not claimed.
+      const moved = await seat((await user()).id);
+      await target().sql("UPDATE game_players SET to_act = 0 WHERE id = ?", moved.playerId);
+      expect(await claim(moved.playerId)).toBe(false);
+      expect(
+        await target().sql(
+          "SELECT count(*) AS n FROM game_players WHERE id IN (?, ?, ?, ?) AND last_nudged_at IS NOT NULL",
+          a.playerId,
+          b.playerId,
+          ended.playerId,
+          moved.playerId,
+        ),
+      ).toEqual([{ n: 0 }]);
     });
 
     it("suppress adds an emailId once and keeps the first reason", async () => {

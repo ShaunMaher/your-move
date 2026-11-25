@@ -35,6 +35,11 @@ export type NewUser = Omit<InferInsertModel<typeof users>, "email"> & {
   email?: NormalisedEmail | null;
 };
 
+/** Turning email nudges on (with the address's `emailId`) or off (03 §7, 04 `users.email_id`). */
+type EmailNudgesChange =
+  | { readonly enabled: true; readonly emailId: string; readonly updatedAt: number }
+  | { readonly enabled: false; readonly updatedAt: number };
+
 /** The `users` columns the account endpoints change. `updated_at` is always set. */
 export type UserUpdate = Partial<Pick<UserRecord, "displayName" | "onboardedAt">> &
   Pick<UserRecord, "updatedAt">;
@@ -67,17 +72,18 @@ export interface UserRepo {
     remember: { gameType: string; input: string | null; updatedAt: number },
   ): Promise<void>;
   /**
-   * Sets `settings.emailNudges`, leaving every other key as it is now in the database. Turning
-   * nudges on also records the address's `emailId` in `users.email_id` (04), which a `nudges`
-   * unsubscribe token looks the account up by (05 §Email links).
+   * Sets `settings.emailNudges`, leaving every other key as it is now in the database, in one
+   * atomic batch. `users.email_id` (04) is set exactly while nudges are on: turning them on
+   * records the address's `emailId`, which a `nudges` unsubscribe token looks the account up by
+   * (05 §Email links), and removes an `unsubscribed` suppression of it (signed-in consent
+   * outranks an earlier link click; `bounced` and `complained` rows stay); turning them off
+   * clears it.
    */
-  setEmailNudges(
-    id: string,
-    change: { enabled: boolean; emailId: string | null; updatedAt: number },
-  ): Promise<void>;
+  setEmailNudges(id: string, change: EmailNudgesChange): Promise<void>;
   /**
-   * Turns email nudges off for the account whose `users.email_id` is `emailId`, if there is one
-   * (a `nudges` unsubscribe, 05 §Email links). Repeating it changes nothing more.
+   * Turns email nudges off, and clears `email_id`, for the account whose `users.email_id` is
+   * `emailId`, if there is one (a `nudges` unsubscribe, 05 §Email links). Repeating it changes
+   * nothing more.
    */
   disableNudgesByEmailId(emailId: string, updatedAt: number): Promise<void>;
   /**
@@ -410,17 +416,29 @@ export interface NudgeWindow {
   readonly nudgedBefore: number;
 }
 
+/** A game type and one rules version of it that this build installs (02 §7.3). */
+interface InstalledVersion {
+  readonly gameType: string;
+  readonly gameVersion: number;
+}
+
 export interface NudgeRepo {
   /**
    * Up to `limit` seats due a nudge (03 §7), longest waiting first: a `playing` seat in `toAct`
-   * of an `active` game, idle and not nudged within the window, whose user is an onboarded human,
-   * not suspended or being deleted, with `settings.emailNudges` true and an `email_id` that isn't
-   * suppressed.
+   * of an `active` game of one of the `installed` type and version pairs (so orphaned games never
+   * take a place in the queue), idle and not nudged within the window, whose user is an onboarded
+   * human, not suspended or being deleted, with `settings.emailNudges` true and an `email_id`
+   * that isn't suppressed.
    */
-  due(window: NudgeWindow, limit: number): Promise<DueNudge[]>;
+  due(
+    window: NudgeWindow,
+    limit: number,
+    installed: readonly InstalledVersion[],
+  ): Promise<DueNudge[]>;
   /**
-   * Claims one seat's nudge: sets `last_nudged_at` to `now` only if the seat is still in `toAct`
-   * and still due by `window`. True only for the one call that changed the row. Not a game
+   * Claims one seat's nudge: sets `last_nudged_at` to `now` only if everything `due` checks
+   * still holds for it (the seat, its game and its user), so a move, an unsubscribe or a
+   * suspension in between stops it. True only for the one call that changed the row. Not a game
    * transition: the game's `version` is untouched (03 §7).
    */
   claim(playerId: string, now: number, window: NudgeWindow): Promise<boolean>;

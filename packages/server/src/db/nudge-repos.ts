@@ -22,9 +22,26 @@ function seatDue(window: NudgeWindow) {
   );
 }
 
+/**
+ * The user may be nudged (03 §7): an onboarded human, not suspended or being deleted, with nudges
+ * on and an `email_id` that isn't suppressed. Columns of `users` only, so it serves both the join
+ * in `due` and the subquery in `claim`.
+ */
+const USER_ELIGIBLE = and(
+  eq(users.kind, "human"),
+  isNotNull(users.email),
+  isNotNull(users.emailId),
+  isNotNull(users.onboardedAt),
+  isNull(users.suspendedAt),
+  isNull(users.deletionRequestedAt),
+  NUDGES_ON,
+  sql`NOT EXISTS (SELECT 1 FROM ${emailSuppressions} WHERE ${emailSuppressions.emailHash} = ${users.emailId})`,
+);
+
 export function nudgeRepo(db: Database): NudgeRepo {
   return {
-    async due(window, limit) {
+    async due(window, limit, installed) {
+      if (installed.length === 0) return [];
       const rows = await db
         .select({
           playerId: gamePlayers.id,
@@ -43,14 +60,13 @@ export function nudgeRepo(db: Database): NudgeRepo {
           and(
             seatDue(window),
             eq(games.status, "active"),
-            eq(users.kind, "human"),
-            isNotNull(users.email),
-            isNotNull(users.emailId),
-            isNotNull(users.onboardedAt),
-            isNull(users.suspendedAt),
-            isNull(users.deletionRequestedAt),
-            NUDGES_ON,
-            sql`NOT EXISTS (SELECT 1 FROM ${emailSuppressions} WHERE ${emailSuppressions.emailHash} = ${users.emailId})`,
+            // Orphaned games never take a place in the queue (02 §7.3).
+            or(
+              ...installed.map((pair) =>
+                and(eq(games.gameType, pair.gameType), eq(games.gameVersion, pair.gameVersion)),
+              ),
+            ),
+            USER_ELIGIBLE,
           ),
         )
         .orderBy(asc(gamePlayers.toActSince), asc(gamePlayers.id))
@@ -70,10 +86,18 @@ export function nudgeRepo(db: Database): NudgeRepo {
       );
     },
     async claim(playerId, now, window) {
+      // Everything due() checked, again, in the one statement that claims (A6-S-3).
       const rows = await db
         .update(gamePlayers)
         .set({ lastNudgedAt: now })
-        .where(and(eq(gamePlayers.id, playerId), seatDue(window)))
+        .where(
+          and(
+            eq(gamePlayers.id, playerId),
+            seatDue(window),
+            sql`EXISTS (SELECT 1 FROM ${games} WHERE ${games.id} = ${gamePlayers.gameId} AND ${games.status} = 'active')`,
+            sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${gamePlayers.userId} AND ${USER_ELIGIBLE})`,
+          ),
+        )
         .returning({ id: gamePlayers.id });
       return rows.length === 1;
     },
