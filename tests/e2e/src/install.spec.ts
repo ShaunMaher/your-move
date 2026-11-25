@@ -12,6 +12,8 @@ test("Safari on iPhone offers the Add to Home Screen guide, once dismissed it st
     // Desktop Chrome has no Home Screen to add to.
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Sam");
     await expect(banner).toHaveCount(0);
+    await page.goto("/install");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Add to Home Screen");
     return;
   }
 
@@ -24,6 +26,9 @@ test("Safari on iPhone offers the Add to Home Screen guide, once dismissed it st
   await expect(banner).toHaveCount(0);
   await expectAccessible(page);
 
+  // A cold load of the guide's own address (the server falls back to the shell) shows it too.
+  await page.goto("/install");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Add to Home Screen");
   await page.getByRole("link", { name: "Home" }).click();
   await banner.getByRole("button", { name: "Dismiss" }).click();
   await expect(banner).toHaveCount(0);

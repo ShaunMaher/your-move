@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App.js";
 import { InstallBanner } from "./InstallBanner.js";
-import { CONFIG, fakeApi, json, ME } from "./test-support.js";
+import { clearClientState } from "./session-sync.js";
+import { CONFIG, fakeApi, json, ME, problem } from "./test-support.js";
 
 const IPHONE_SAFARI =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
@@ -27,6 +28,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   Reflect.deleteProperty(window.navigator, "standalone");
   Reflect.deleteProperty(window.navigator, "maxTouchPoints");
 });
@@ -41,6 +43,23 @@ describe("InstallBanner", () => {
 
   it.each([
     ["Chrome on iOS", IPHONE_CHROME, false, false],
+    ["Firefox on iOS", IPHONE_SAFARI.replace("Version/17.5", "FxiOS/127.0"), false, false],
+    ["Edge on iOS", IPHONE_SAFARI.replace("Version/17.5", "EdgiOS/126.0"), false, false],
+    ["an Instagram browser", `${IPHONE_SAFARI} Instagram 330.0`, false, false],
+    ["a Facebook browser", `${IPHONE_SAFARI} [FBAN/FBIOS;FBAV/450.0]`, false, false],
+    ["another in-app browser", `${IPHONE_SAFARI} Snapchat/12.0`, false, false],
+    [
+      "an iPhone user agent without Safari/",
+      IPHONE_SAFARI.replace(" Safari/604.1", ""),
+      false,
+      false,
+    ],
+    [
+      "an iPhone user agent without Version/",
+      IPHONE_SAFARI.replace("Version/17.5 ", ""),
+      false,
+      false,
+    ],
     ["desktop Chrome", DESKTOP_CHROME, undefined, false],
     ["Safari launched from the Home Screen", IPHONE_SAFARI, true, false],
     ["an installed app by display mode", IPHONE_SAFARI, false, true],
@@ -56,6 +75,26 @@ describe("InstallBanner", () => {
     Object.defineProperty(window.navigator, "maxTouchPoints", { value: 5, configurable: true });
     render(<InstallBanner appName="Family Games" />);
     expect(screen.getByRole("link", { name: "Show me how" })).toBeTruthy();
+  });
+
+  it("is not shown on a Mac with no touch screen", () => {
+    setBrowser(IPHONE_SAFARI.replace("iPhone; CPU iPhone OS 17_5 like", "Macintosh; Intel"), false);
+    vi.spyOn(window.navigator, "platform", "get").mockReturnValue("MacIntel");
+    Object.defineProperty(window.navigator, "maxTouchPoints", { value: 0, configurable: true });
+    const { container } = render(<InstallBanner appName="Family Games" />);
+    expect(container.textContent).toBe("");
+  });
+
+  it("moves focus to the screen's heading when dismissed", () => {
+    setBrowser(IPHONE_SAFARI, false);
+    render(
+      <>
+        <h1 tabIndex={-1}>Home</h1>
+        <InstallBanner appName="Family Games" />
+      </>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Home" }));
   });
 
   it("stays dismissed on this device", () => {
@@ -121,6 +160,78 @@ describe("the install guide in the app", () => {
       await screen.findByRole("heading", { name: "Add to Home Screen", level: 1 }),
     ).toBeTruthy();
     expect(window.location.pathname).toBe("/install");
+  });
+
+  it.each(["/new", "/settings"])("puts the banner on %s", async (path) => {
+    setBrowser(IPHONE_SAFARI, false);
+    window.history.replaceState(null, "", path);
+    render(<App api={fakeApi(signedIn).api} />);
+    expect(await screen.findByRole("link", { name: "Show me how" })).toBeTruthy();
+  });
+
+  it("keeps the banner off a game's screen", async () => {
+    setBrowser(IPHONE_SAFARI, false);
+    window.history.replaceState(null, "", "/g/g1");
+    render(
+      <App api={fakeApi({ ...signedIn, "GET /api/v1/games/g1": problem(404, "NOT_FOUND") }).api} />,
+    );
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/g/g1");
+    });
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.queryByRole("link", { name: "Show me how" })).toBeNull();
+  });
+
+  it("keeps the banner off the welcome screen", async () => {
+    setBrowser(IPHONE_SAFARI, false);
+    const api = fakeApi({
+      ...signedIn,
+      "GET /api/v1/me": json({ ...ME, displayName: null, needsOnboarding: true }),
+    }).api;
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Welcome to Family Games" });
+    expect(screen.queryByRole("link", { name: "Show me how" })).toBeNull();
+  });
+
+  it("links to the guide from Settings", async () => {
+    setBrowser(IPHONE_SAFARI, true);
+    window.history.replaceState(null, "", "/settings");
+    render(<App api={fakeApi(signedIn).api} />);
+    const link = await screen.findByRole("link", { name: /How to add Family Games/u });
+    expect(link.getAttribute("href")).toBe("/install");
+  });
+
+  it("sends a signed-out visit to the guide through sign-in and back", async () => {
+    setBrowser(IPHONE_SAFARI, false);
+    window.history.replaceState(null, "", "/install");
+    const { api } = fakeApi({
+      "GET /api/v1/config": json(CONFIG),
+      "GET /api/v1/me": problem(401, "UNAUTHENTICATED"),
+      "POST /api/v1/auth/otp/request": json({}, 202),
+      "POST /api/v1/auth/otp/verify": json({ user: ME, needsOnboarding: false }),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    fireEvent.change(screen.getByLabelText("Email address"), {
+      target: { value: "sam@example.org" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Email me a code" }));
+    fireEvent.change(await screen.findByLabelText("Sign-in code"), {
+      target: { value: "12345678" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(
+      await screen.findByRole("heading", { name: "Add to Home Screen", level: 1 }),
+    ).toBeTruthy();
+    expect(window.location.pathname).toBe("/install");
+  });
+
+  it("keeps the dismissal across sign-out while the game keys go", () => {
+    window.localStorage.setItem("ym.install-dismissed", "1");
+    window.localStorage.setItem("ym.game.words.u1.g1", "{}");
+    clearClientState();
+    expect(window.localStorage.getItem("ym.install-dismissed")).toBe("1");
+    expect(window.localStorage.getItem("ym.game.words.u1.g1")).toBeNull();
   });
 
   it("does not put the banner on the sign-in screen", async () => {

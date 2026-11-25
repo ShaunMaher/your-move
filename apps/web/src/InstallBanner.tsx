@@ -19,16 +19,18 @@ export function InstallBanner({ appName }: { readonly appName: string }) {
   if (hidden) return null;
   return (
     <aside className="install-banner" aria-label="Add to Home Screen">
-      <p>
-        Add {appName} to your Home Screen to open it like an app.{" "}
-        <Link to="/install">Show me how</Link>
-      </p>
+      <p>Add {appName} to your Home Screen to open it like an app.</p>
+      <Link to="/install" className="button">
+        Show me how
+      </Link>
       <button
         type="button"
         className="button secondary"
         onClick={() => {
           dismissInstallBanner();
           setHidden(true);
+          // The button is gone: focus moves to the screen's heading, as after any move.
+          document.querySelector("h1")?.focus({ preventScroll: true });
         }}
       >
         Dismiss

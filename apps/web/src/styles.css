@@ -524,6 +524,11 @@ summary {
   flex: 1 1 14rem;
 }
 
+/* The banner sits above the shell, so the shell's full-height minimum would add a scroll. */
+.install-banner + .shell {
+  min-height: 0;
+}
+
 .steps {
   display: flex;
   flex-direction: column;

@@ -41,6 +41,21 @@ const AddGlyph = () => (
   </Glyph>
 );
 
+/** A tick. */
+const TickGlyph = () => (
+  <Glyph>
+    <path d="M7 17l6 6 12-14" />
+  </Glyph>
+);
+
+/** An arrow pointing down into a tray. */
+const InstallGlyph = () => (
+  <Glyph>
+    <path d="M16 5v14M10 13l6 6 6-6" />
+    <path d="M6 20v6h20v-6" />
+  </Glyph>
+);
+
 /** Three dots in a column. */
 const MenuGlyph = () => (
   <Glyph>
@@ -71,8 +86,9 @@ export function Install({ appName }: { readonly appName: string }) {
               <li>
                 <ShareGlyph />
                 <span>
-                  Tap the <strong>Share</strong> button: a square with an arrow pointing up, at the
-                  bottom or top of Safari.
+                  Tap the <strong>Share</strong> button: a square with an arrow pointing up. On
+                  iPhone it is at the bottom of Safari, on iPad at the top right. If you don&apos;t
+                  see it, tap the <strong>…</strong> button (three dots) first.
                 </span>
               </li>
               <li>
@@ -83,13 +99,17 @@ export function Install({ appName }: { readonly appName: string }) {
                 </span>
               </li>
               <li>
+                <TickGlyph />
                 <span>
                   Tap <strong>Add</strong>, at the top right. {appName} now has an icon on your Home
                   Screen.
                 </span>
               </li>
             </ol>
-            <p>Other browsers on iPhone can&apos;t do this: open this page in Safari.</p>
+            <p>
+              Safari is the most reliable. Other browsers on iPhone (iOS 16.4 or later) may offer
+              Add to Home Screen in their own share menu too.
+            </p>
           </section>
           <section className="card stack" aria-labelledby="android-heading">
             <h2 id="android-heading">Android (Chrome)</h2>
@@ -101,6 +121,7 @@ export function Install({ appName }: { readonly appName: string }) {
                 </span>
               </li>
               <li>
+                <InstallGlyph />
                 <span>
                   Tap <strong>Install app</strong> (or <strong>Add to Home screen</strong>), then
                   confirm.

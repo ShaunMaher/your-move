@@ -136,7 +136,8 @@ mostly painless.
   that finds no session clears the game keys too, so a session ended from another device clears
   them as well. The shell's **public word-list cache**
   (`dictionaries-v1`, 07 §4) deliberately survives sign-out: it holds only public, content-addressed
-  lists (each stored under the digest of its own contents) and nothing of any user.
+  lists (each stored under the digest of its own contents) and nothing of any user. So does the shell's
+  `ym.install-dismissed` flag (07 §4): per device, no user data, and kept across sign-out on purpose.
 - **Suspension** (05 §Admin API): suspending a user deletes their sessions and revokes their tokens
   (with the same socket closing as above), cancels the lobbies they created and declines their
   pending invitations (realtime only); their active games continue and time out normally. The

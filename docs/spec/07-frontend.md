@@ -167,7 +167,7 @@ dictionaries is the shell's job and needs no change to the module contract.
     step also saying in words what the icon looks like.
   - **Install banner.** A dismissible banner, linking to `/install`, shows on the game list, the
     new-game screen and Settings (signed in, onboarded) when the browser is Safari on iOS or iPadOS
-    (a user agent with `Safari` and without a third-party browser's token; iPadOS reporting a
+    (a user agent with `Version/` and `Safari/` and without the token of another iOS browser or an in-app browser; iPadOS reporting a
     Mac is recognised by touch support) **and** the app is not standalone (`navigator.standalone`
     or `(display-mode: standalone)`); it never shows in the installed app. It is not shown on the
     sign-in screens (the person has not decided to stay yet), on `/install` itself or on a game's
@@ -176,7 +176,7 @@ dictionaries is the shell's job and needs no change to the module contract.
     `localStorage` key, `ym.install-dismissed`, outside the `ym.game.` prefix so it survives
     sign-out (06 §4); every read and write is guarded, so with storage unavailable the banner shows
     again on the next load and nothing breaks. Settings links to `/install` as well, so the guide
-    stays reachable after a dismissal.
+    stays reachable after a dismissal. Dismissing moves focus to the screen's `h1`. The guide says Safari is the most reliable, and that other iPhone browsers (iOS 16.4+) may offer Add to Home Screen in their own share menu; the banner stays Safari-only.
 - Service worker (`apps/web/sw/sw.js`, emitted as `/sw.js` by a small Vite plugin that prepends the
   build's file list — a hand-written worker rather than Workbox, so the basics need no dependency;
   a prompt-style update, registered from the app's own script after load — an external file, never
