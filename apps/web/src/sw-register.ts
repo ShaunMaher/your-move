@@ -1,8 +1,9 @@
 /**
  * Registers the service worker and reports when an updated one is waiting (07 §4): the app shows
  * "New version available" and activates the update only when the person agrees, so a game in
- * progress is never replaced under them. Once it is activated, every open tab reloads (the old
- * worker's cache is gone, so a tab left on the old code would find its files missing).
+ * progress is never replaced under them. Once it is activated, every open tab reloads, the other
+ * tabs without being asked (the old worker's cache is gone, so a tab left on the old code would
+ * find its files missing); input not yet sent in those tabs is lost.
  */
 
 export interface UpdateWatch {

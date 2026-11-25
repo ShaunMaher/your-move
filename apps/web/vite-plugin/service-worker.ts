@@ -27,14 +27,14 @@ function filesUnder(dir: string): string[] {
 /**
  * The precache list and version of an output directory. Everything the build emitted is
  * precached (the HTML, hashed assets and the public files); the version hashes each file's
- * content, so a change to any of them, `index.html` and the icons included, is a new version
- * and installs a new cache (07 §4).
+ * content and the worker's own source (`template`), so a change to any of them, `index.html`,
+ * the icons and the worker included, is a new version and installs a new cache (07 §4).
  */
-export function buildInfo(outDir: string): BuildInfo {
+export function buildInfo(outDir: string, template: string): BuildInfo {
   const files = filesUnder(outDir)
     .filter((file) => !NOT_PRECACHED.test(file))
     .sort();
-  const hash = createHash("sha256");
+  const hash = createHash("sha256").update(template).update("\0");
   for (const file of files) {
     hash
       .update(`${file}\0`)
@@ -68,7 +68,7 @@ export function serviceWorker(): Plugin {
     },
     writeBundle() {
       const template = readFileSync(new URL("../sw/sw.js", import.meta.url), "utf8");
-      writeFileSync(join(outDir, "sw.js"), renderWorker(buildInfo(outDir), template));
+      writeFileSync(join(outDir, "sw.js"), renderWorker(buildInfo(outDir, template), template));
     },
   };
 }

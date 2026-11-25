@@ -160,8 +160,9 @@ previews show score only.
     waiting. The new worker activates only when the person agrees, and then **every open tab
     reloads** (a tab that was controlled by the old worker reloads when the controller changes):
     the old cache is deleted on activation, so a tab left on the old code would find its files
-    missing. The cost is that a second tab reloads without being asked; it only happens after the
-    person chose to update in the first.
+    missing. The cost is that a second tab reloads without being asked, so **unsent input in
+    other tabs is lost** (a half-typed code or name, a tentative move not yet saved to the
+    device); it only happens after the person chose to update in the first.
   - `push` handler MUST call `showNotification` for every push (iOS revokes subscriptions that
     receive silent pushes). `notificationclick` focuses an existing window or opens `/g/:id`.
   - Safari has no `pushsubscriptionchange`, so on every app launch the client re-reads
