@@ -166,16 +166,31 @@ dictionaries is the shell's job and needs no change to the module contract.
   - Precache the app shell (`/`) and every file the build emitted except source maps. The build
     hashes the content of each precached file (the HTML and the public files too) into the cache
     name, so a change to any of them is a new version.
-  - Hashed assets: cache first, else the network. Nothing is added to the cache at runtime; the
-    dictionary-asset runtime cache (cache-first, the 3 most recently used dictionaries) arrives
-    with the first game that ships dictionaries (M3).
+  - Hashed assets: cache first, else the network. The worker adds nothing to its own cache at
+    runtime. The **word-list cache** (`dictionaries-v1`, the 3 most recently *added* lists, in the
+    order Cache Storage keeps its keys; the lists of the game being opened are never evicted for
+    it) is written by the page, not the worker (alpha A4): when a game is open the shell downloads
+    each list whose resource says `distribution: "public"` from the envelope's `downloadUrl`
+    (only a same-origin `/assets/dictionaries/…` path of the served shape is fetched, without
+    credentials and refusing redirects), stores it only if its content hashes to the digest in its
+    own file name, and the worker's clean-up of old shell caches leaves it alone. A resource
+    without `distribution: "public"` is never fetched, whatever else it carries. Downloads run one
+    at a time. **Tracked gap:** nothing reads this cache yet. The module contract has no channel to
+    hand the list to a board (a `resources` prop on `BoardProps` is a spec change, M3), so previews
+    still answer from the server until one is specified.
+  - **Alpha refresh rates** (no realtime yet, 10 Alpha), only in a visible tab and also on focus
+    and when the tab becomes visible: an open game polls every 5 s while it waits on someone else
+    (a lobby, or another player's turn); the game list polls every 15 s whether or not anything
+    is waiting, so a new invitation appears by itself. A hidden tab polls nothing and marks
+    nothing seen.
   - **Never touch server-handled paths**: the worker ignores non-GET requests, other origins and
     every path in `SERVER_PATHS` (`@your-move/shared`, the one list also behind the server's 404s
     and, by hand, Cloudflare's `run_worker_first`; 03 §9): `/api/*`, `/__dev/*` and
     `/manifest.webmanifest`. They go straight to the network, so server-rendered pages (the
     unsubscribe page lives at `/api/v1/email/unsubscribe`, 05) are never replaced by the SPA
-    shell, and API responses are never cached. An e2e test checks that no `/api/` response comes
-    from the worker and that Cache Storage holds exactly the precache list.
+    shell, and API responses are never cached. An e2e test checks, for both players of a game, that no `/api/` response comes
+    from the worker and that Cache Storage holds the precache list plus, in `dictionaries-v1`
+    only, entries of the served word-list shape (`/assets/dictionaries/<id>-v<n>.<16 hex>.txt`).
   - Navigations go to the network first (a new deployment shows at once) and fall back to the
     cached shell when the network fails or has not answered within 4 seconds; with no shell the
     request fails.

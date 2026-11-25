@@ -30,3 +30,24 @@ export const LAUNCH_TIMEOUT_MS = 120_000;
  * and the first test then 3–4 s, where without it the first test failed at 35–38 s.
  */
 export const WARMUP_TIMEOUT_MS = 90_000;
+
+/**
+ * A test in which two people play a game (game.spec.ts): sign-ins, an invitation, several real
+ * moves each checked against the server, and a resignation, across two browser contexts. Not the
+ * 30 s of a single-page test (ADR 0004 records the exception). Measured locally in the pinned
+ * image, a warm browser and nothing else running: see the figures in the A4 review record; a
+ * loaded CI runner is several times slower, so 120 s is a guess of that margin, not a
+ * measurement. TO BE RE-MEASURED on the CI runner from the first pipeline that runs it (the
+ * owner feeds the number back); then this value and the one in the ADR are set from it.
+ */
+export const GAME_TEST_TIMEOUT_MS = 120_000;
+
+/** The part of `GAME_TEST_TIMEOUT_MS` the moves loop may use, so a stuck game fails an assertion first. */
+export const GAME_LOOP_BUDGET_MS = 60_000;
+
+/**
+ * The short game test: two sign-ins, an invitation, and a resignation straight after the start,
+ * with no moves. Between a single-page test and the full game; 60 s is twice the 30 s of the
+ * former, the same to-be-measured margin as the full game's.
+ */
+export const RESIGN_TEST_TIMEOUT_MS = 60_000;

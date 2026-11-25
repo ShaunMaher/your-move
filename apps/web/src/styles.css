@@ -287,3 +287,218 @@ input[aria-invalid="true"] {
     transition: opacity 0.15s;
   }
 }
+
+/* Links that look like buttons (the game list's "New game", result screens' "Back to games"). */
+a.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  text-decoration: none;
+}
+
+select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--target);
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  font-size: 1rem;
+  color: inherit;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+ul.plain,
+ol.plain {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* One game in the list, or one game type in the picker: icon, text, badges. */
+.game-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--target);
+  padding: 0.5rem 0;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  text-decoration: none;
+  background: none;
+  border: 0;
+}
+
+button.game-row {
+  padding: var(--space);
+  cursor: pointer;
+}
+
+.game-row > .grow {
+  display: flex;
+  flex-direction: column;
+}
+
+.row-title {
+  font-weight: 600;
+}
+
+.game-icon {
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.5rem;
+  background: var(--color-bg);
+}
+
+.badges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+/* Text badges, not colour alone: the words are the signal. */
+.badge {
+  padding: 0.1rem 0.6rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--color-accent-fg);
+  white-space: nowrap;
+  background: var(--color-accent);
+  border-radius: 1rem;
+}
+
+.badge.quiet {
+  color: var(--color-fg);
+  background: transparent;
+  border: 1px solid var(--color-border);
+}
+
+.seat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+  min-height: var(--target);
+}
+
+summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--target);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* The game frame: a header, then the module's board (the player list and turn line only stand in for a board that is not there). */
+.frame-bar {
+  gap: 0.5rem;
+}
+
+.frame-bar .button {
+  min-height: var(--target);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 1rem;
+}
+
+.chip[aria-current="true"] {
+  border: 2px solid var(--color-accent);
+}
+
+.turn {
+  font-weight: 700;
+}
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.results li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.rank {
+  width: 1.5rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding-inline-start: 1.5rem;
+}
+
+/* Dialogs and drawers. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space);
+  background: rgb(0 0 0 / 0.5);
+}
+
+.scrim[data-variant="drawer"] {
+  align-items: flex-end;
+  padding: 0;
+}
+
+.sheet {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 28rem;
+  max-height: 85dvh;
+  padding: var(--space) var(--space) calc(var(--space) + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.scrim[data-variant="drawer"] .sheet {
+  max-width: 32rem;
+  border-radius: var(--radius) var(--radius) 0 0;
+}

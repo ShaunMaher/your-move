@@ -7,6 +7,8 @@
 /* global BUILD -- prepended by the build (vite-plugin/service-worker.ts) */
 
 const CACHE = `shell-${BUILD.version}`;
+// Written by the page (src/word-lists.ts), never by this worker: it outlives shell versions.
+const WORD_LIST_CACHE = "dictionaries-v1";
 
 // How long a navigation waits for the network before the cached shell is shown instead: long
 // enough for a slow mobile connection to answer, short enough that a connection that is up but
@@ -60,7 +62,12 @@ self.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((keys) =>
-        Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))),
+        // Old shells go; the page's word-list cache (src/word-lists.ts) stays.
+        Promise.all(
+          keys
+            .filter((key) => key !== CACHE && key !== WORD_LIST_CACHE)
+            .map((key) => caches.delete(key)),
+        ),
       )
       .then(() => self.clients.claim()),
   );

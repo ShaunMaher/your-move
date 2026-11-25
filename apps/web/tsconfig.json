@@ -20,5 +20,5 @@
     "vitest.config.ts",
     "../../generated/client-games.ts"
   ],
-  "references": [{ "path": "../../packages/api-client" }]
+  "references": [{ "path": "../../packages/api-client" }, { "path": "../../packages/sdk" }]
 }

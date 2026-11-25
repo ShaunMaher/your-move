@@ -1,50 +1,5 @@
-import { AxeBuilder } from "@axe-core/playwright";
-import type { APIRequestContext, Page } from "@playwright/test";
-
 import { expect, test } from "./fixtures.js";
-
-let counter = 0;
-/** An address no other test uses, so the per-address limits never interfere. */
-function freshAddress(): string {
-  counter += 1;
-  return `player-${String(Date.now())}-${String(counter)}-${String(process.pid)}@example.org`;
-}
-
-/**
- * The code in the `n`th email sent to `address` (0-based), read from the dev email capture
- * (`/__dev/emails`, local dev only). The subject carries the code ungrouped (06 §3.3).
- */
-async function codeFrom(request: APIRequestContext, address: string, n: number): Promise<string> {
-  let code = "";
-  await expect
-    .poll(async () => {
-      const response = await request.get("/__dev/emails");
-      const { emails } = (await response.json()) as {
-        emails: { to: string; subject: string }[];
-      };
-      const subject = emails.filter((email) => email.to === address)[n]?.subject ?? "";
-      code = /^(\d{8}) is your /u.exec(subject)?.[1] ?? "";
-      return code;
-    })
-    .not.toBe("");
-  return code;
-}
-
-async function expectAccessible(page: Page): Promise<void> {
-  const results = await new AxeBuilder({ page }).analyze();
-  const serious = results.violations.filter(
-    (violation) => violation.impact === "serious" || violation.impact === "critical",
-  );
-  expect(serious.map((violation) => `${violation.id}: ${violation.nodes[0]?.html ?? ""}`)).toEqual(
-    [],
-  );
-}
-
-async function requestCodeFor(page: Page, address: string): Promise<void> {
-  await page.getByLabel("Email address").fill(address);
-  await page.getByRole("button", { name: "Email me a code" }).click();
-  await expect(page.getByLabel("Sign-in code")).toBeVisible();
-}
+import { codeFrom, expectAccessible, freshAddress, requestCodeFor } from "./helpers.js";
 
 test("a new person signs in with an emailed code, names themselves, and signs out and in again", async ({
   page,

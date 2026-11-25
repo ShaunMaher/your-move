@@ -3,6 +3,7 @@
  * one tab clears the person from all of them, and a tab that was hidden checks again when it
  * becomes visible (the session may have been ended from another device).
  */
+import { forgetCatalog } from "./catalog.js";
 import { clearReturnPath } from "./return-path.js";
 
 const CHANNEL = "session";
@@ -17,6 +18,7 @@ const GAME_STORAGE_PREFIX = "ym.game.";
  * when one ends; the remembered return path is left, because a signed-out visit needs it.
  */
 export function clearGameState(): void {
+  forgetCatalog();
   try {
     const { localStorage } = window;
     for (let index = localStorage.length - 1; index >= 0; index -= 1) {

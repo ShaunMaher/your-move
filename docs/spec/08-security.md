@@ -68,7 +68,8 @@ generated `_headers` file for static assets (03 §9). One shared definition gene
   (`connect-src 'self'` covers same-origin `wss:` in current browsers; add the explicit `wss://`
   origin if testing shows otherwise.) When Turnstile is enabled: add
   `https://challenges.cloudflare.com` to `script-src` and `frame-src`. No `unsafe-inline` or
-  `unsafe-eval` in production (07 §4 build settings).
+  `unsafe-eval` in production (07 §4 build settings): the web app runs Zod `jitless` (no compiled
+  parsers, which use `new Function`) and must never need `unsafe-eval`.
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains` when `PUBLIC_URL` is https.
 - `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`,
   `Permissions-Policy: camera=(), microphone=(), geolocation=()`,

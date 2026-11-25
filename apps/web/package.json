@@ -11,8 +11,10 @@
   },
   "dependencies": {
     "@your-move/api-client": "workspace:*",
+    "@your-move/sdk": "workspace:*",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@testing-library/dom": "catalog:",
