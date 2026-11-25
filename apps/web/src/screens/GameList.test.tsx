@@ -194,7 +194,7 @@ describe("the game list", () => {
     });
     render(<GameList api={api} onSessionLost={vi.fn()} />);
     const summaryLine = await screen.findByText(/Hidden invitations \(1\)/u);
-    const section = summaryLine.closest("details") as HTMLDetailsElement;
+    const section = summaryLine.closest("details")!;
     expect(section.open).toBe(false);
     expect(within(section).getByText(/haven.t played before, over the daily limit/u)).toBeDefined();
     const row = within(section).getByRole("link", { name: /Robin/u });
