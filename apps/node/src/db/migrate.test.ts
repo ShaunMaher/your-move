@@ -90,10 +90,7 @@ function withExtraMigration(
   return folder;
 }
 
-// Each case builds a fresh SQLite database and applies the full migration set: tens of ms here,
-// but up to ~6 s on the shared qemu64 CI runner under load (MR !13 pipeline 82267), so the
-// suite gets an explicit budget rather than Vitest's 5 s default.
-describe("migrate", { timeout: 30_000 }, () => {
+describe("migrate", () => {
   it("creates every table of the data model, then has nothing left to do", () => {
     const path = join(dir, "app.sqlite");
     const sqlite = openSqlite(path);
