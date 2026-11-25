@@ -192,3 +192,49 @@ test("the service worker serves the shell offline, which then says so", async ({
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Sign in");
 });
+
+test("with the service worker in charge, no API response comes from it and only the shell is cached", async ({
+  page,
+  request,
+}) => {
+  const address = freshAddress();
+  const fromWorker: string[] = [];
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname.startsWith("/api/") && response.fromServiceWorker()) {
+      fromWorker.push(response.url());
+    }
+  });
+
+  await page.goto("/");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Sign in");
+  // Wait until the worker controls the page, so the calls below really pass through it.
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+
+  await requestCodeFor(page, address);
+  await page.getByLabel("Sign-in code").fill(await codeFrom(request, address, 0));
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByLabel("Display name").fill("Robin");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("link", { name: "Settings" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Settings");
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(page).toHaveURL(/\/signin$/u);
+
+  expect(fromWorker).toEqual([]);
+
+  // Cache Storage holds the shell and the build's files, and nothing the app fetched since.
+  const source = await (await request.get("/sw.js")).text();
+  const build = JSON.parse(/^const BUILD = (.*);$/mu.exec(source)?.[1] ?? "null") as {
+    precache: string[];
+  };
+  const cached = await page.evaluate(async () => {
+    const paths: string[] = [];
+    for (const name of await caches.keys()) {
+      for (const entry of await (await caches.open(name)).keys()) {
+        paths.push(new URL(entry.url).pathname);
+      }
+    }
+    return paths.sort();
+  });
+  expect(cached).toEqual([...build.precache].sort());
+});
