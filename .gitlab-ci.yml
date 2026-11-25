@@ -140,6 +140,7 @@ default:
   fi
   # A directory of this job's own, not a fixed path another job on the runner could have made.
   # Kept short: tsx's socket path under it must stay under 108 bytes.
+  # The Docker executor gives each job container its own /dev/shm, so nothing outlives the job.
   TMPDIR="$(mktemp -d /dev/shm/ci-tmp.XXXXXX)"
   export TMPDIR
   echo "TMPDIR=$TMPDIR (${shm_free_kb} KB free)"

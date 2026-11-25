@@ -30,7 +30,8 @@
  * - per-email-limited known vs unknown: −0.03% to +1.63%;
  * - new-accounts-limited unknown vs known: −1.54% to −0.02%;
  * - over the global cap, known vs unknown: +0.38% to +1.21%;
- * - not asserted: per-email-limited vs unlimited known, −3.31% toX
+ * - not asserted: per-email-limited vs unlimited known, −3.31% to −1.29%.
+ * (−1.54% and −3.31% are from review runs on the same laptop after those 20.)
  * Over those runs the worst asserted equivalence was 1.46 points inside the bound (−1.54% against
  * 3%), and the weakest planted SELECT 2.08 points above it (+5.08%).
  *
