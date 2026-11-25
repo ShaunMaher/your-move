@@ -206,8 +206,13 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     const template = templateContext();
     const codeEmail = signInCodeEmail(email, outcome.code, template);
     const notice = suspendedNoticeEmail(email, template);
-    if (outcome.send?.type === "code") send(c, codeEmail);
-    else if (outcome.send?.type === "suspended") send(c, notice);
+    // The background task is scheduled on every path too, and does nothing when nothing may be
+    // sent: scheduling only when sending made the silent paths measurably quicker.
+    const message =
+      outcome.send === null ? null : outcome.send.type === "code" ? codeEmail : notice;
+    background(c, platform, () =>
+      message === null ? Promise.resolve() : platform.email.send(message),
+    );
     return c.json({}, 202);
   });
 
