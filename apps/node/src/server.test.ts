@@ -115,6 +115,12 @@ describe("Node static serving", () => {
     expect(missing.status).toBe(404);
   });
 
+  it("doesn't publish the dictionaries' unversioned index (A2 review S-8)", async () => {
+    const index = await app().request("/assets/dictionaries/index.json");
+    expect(index.status).toBe(404);
+    expect(index.headers.get("Cache-Control")).toBeNull();
+  });
+
   it("does not escape the static root", async () => {
     const res = await app().request("/..%2f..%2fetc%2fpasswd");
     expect(await res.text()).not.toContain("root:");

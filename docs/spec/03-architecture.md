@@ -348,10 +348,13 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
   (`index.json`) and each word list, with its `.gz` and `.br` copies, under its versioned, hashed
   name `<id>-v<version>.<first 16 hex digits of wordsSha256>.txt`. Clients download it at
   `/assets/dictionaries/<that name>` (the `downloadUrl` the framework sets for public lists, words
-  §9.4), cached as immutable like every hashed asset. On Cloudflare the build copies the layout
-  into the static assets, and the Worker reads the index (once per isolate, when the app is built)
-  and each list (on first use) through the `ASSETS` binding; on Node the build copies it to
-  `dist/dictionaries`, which the server reads from disk and serves at the same path. Around the
+  §9.4), cached as immutable like every hashed asset. The index is unversioned, so it is never
+  published under `/assets/`: on Cloudflare the build copies the word lists (without the `.gz` and
+  `.br` copies, as Cloudflare compresses static assets itself) into the static assets and the index
+  to `/dictionaries/index.json`, which Cloudflare's default revalidates, and the Worker reads the
+  index (once per isolate, when the app is built) and each list (on first use) through the
+  `ASSETS` binding; on Node the build copies the layout to `dist/dictionaries`, which the server
+  reads from disk, serving only the word lists (with their precompressed copies). Around the
   runtime's `loadText` the core adds a 10 s timeout, and it remembers any failure of the whole
   load (a list whose size or hash doesn't match its manifest included) for 30 s before fetching
   or hashing that list again (10 M3).

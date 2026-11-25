@@ -107,6 +107,27 @@ contractSuite("Worker", () => ({
 }));
 
 describe("Worker static assets (generated _headers)", () => {
+  it("keeps the dictionaries' index out of the immutable assets, and no precompressed copies (A2 review S-8)", async () => {
+    const index = await send("/dictionaries/index.json");
+    expect(index.status).toBe(200);
+    expect(index.headers.get("Cache-Control") ?? "").not.toMatch(/immutable/u);
+    const manifest = (
+      JSON.parse(await index.text()) as {
+        dictionaries: { id: string; version: number; wordsSha256: string }[];
+      }
+    ).dictionaries[0];
+    const name = `${manifest?.id ?? ""}-v${String(manifest?.version)}.${manifest?.wordsSha256.slice(0, 16) ?? ""}.txt`;
+    expect((await send(`/assets/dictionaries/${name}`)).status).toBe(200);
+    // Neither is published under /assets/ (a missing path there gets the SPA's answer).
+    for (const path of [`/assets/dictionaries/${name}.gz`, "/assets/dictionaries/index.json"]) {
+      const response = await send(path, { headers: { "Sec-Fetch-Mode": "cors" } });
+      expect(response.headers.get("Content-Type"), path).toMatch(/^text\/html/u);
+    }
+    expect(readdirSync(new URL("dist/assets/assets/dictionaries/", WORKER_DIR)).sort()).toEqual([
+      name,
+    ]);
+  });
+
   const asset = readdirSync(new URL("dist/assets/assets/", WORKER_DIR)).find((file) =>
     file.endsWith(".js"),
   );
