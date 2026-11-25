@@ -462,6 +462,9 @@ importers:
       '@your-move/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@your-move/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       react:
         specifier: 'catalog:'
         version: 19.3.1

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@your-move/api-client": "workspace:*",
+    "@your-move/sdk": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:"
   },

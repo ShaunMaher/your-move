@@ -1,6 +1,8 @@
 /** A fake API for the component tests: a handler table over the typed client; nothing touches the network. */
 import { createApiClient } from "@your-move/api-client";
 
+import type { GameEnvelope } from "./game-api.js";
+
 export const CONFIG = {
   appName: "Family Games",
   appShortName: "Games",
@@ -58,4 +60,83 @@ export function fakeApi(routes: Routes) {
     },
   });
   return { api, calls };
+}
+
+/** A faked words-like game type, as the catalog lists it (icon: sanitised SVG markup). */
+export const CATALOG_GAME = {
+  type: "words",
+  version: 1,
+  name: "Words",
+  description: "A crossword-tile word game.",
+  icon: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>',
+  players: { min: 2, max: 2 },
+  defaultTurnTimeoutDays: 3,
+  defaults: { rulesetId: "standard" },
+  catalog: { note: "the module's own part" },
+};
+export const CATALOG = { games: [CATALOG_GAME] };
+
+type Player = GameEnvelope["players"][number];
+
+export function player(over: Partial<Player> = {}): Player {
+  return {
+    seat: 0,
+    userId: "u1",
+    displayName: "Sam",
+    kind: "human",
+    state: "playing",
+    isYou: true,
+    isCreator: true,
+    ...over,
+  };
+}
+
+/** An active two-player game where it is the viewer's turn, unless `over` says otherwise. */
+export function envelope(over: Partial<GameEnvelope> = {}): GameEnvelope {
+  return {
+    id: "g1",
+    gameType: "words",
+    gameVersion: 1,
+    options: { rulesetId: "standard" },
+    status: "active",
+    version: 3,
+    endReason: null,
+    turnTimeoutDays: 3,
+    seatOrder: "join",
+    aiAssistance: "off",
+    available: true,
+    resources: [],
+    players: [
+      player(),
+      player({ seat: 1, userId: "u2", displayName: "Alex", isYou: false, isCreator: false }),
+    ],
+    yourSeat: 0,
+    toAct: [0],
+    yourTurn: true,
+    yourInvitation: null,
+    createdAt: 1,
+    lastActionAt: 2,
+    ...over,
+  };
+}
+
+/** A list row as `GET /api/v1/games` returns it. */
+export function summary(over: Record<string, unknown> = {}) {
+  const game = envelope();
+  return {
+    id: "g1",
+    gameType: "words",
+    status: "active",
+    endReason: null,
+    aiAssistance: "off",
+    yourTurn: true,
+    yourInvitation: null,
+    players: game.players,
+    summary: { headline: ["Your move"] },
+    lastAction: null,
+    lastActionAt: 2,
+    unread: false,
+    version: 3,
+    ...over,
+  };
 }
