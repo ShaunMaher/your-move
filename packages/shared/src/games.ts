@@ -455,6 +455,7 @@ function transitionRoute(options: {
         ...MEMBER_ERRORS,
         403: options.errors[403],
         409: options.errors[409],
+        429: "Too many game writes (`RATE_LIMITED`).",
       }),
     },
   });
@@ -469,7 +470,7 @@ export const startGameRoute = transitionRoute({
     "Creator only, with at least the minimum number of seats joined. Unfilled seats are dropped.",
   errors: {
     403: "`NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`.",
-    409: "`STALE_GAME`, `WRONG_STATUS`, `NOT_ENOUGH_PLAYERS` or `INVALID_SEATS` (`detail: { code, detail? }`).",
+    409: "`STALE_GAME`, `WRONG_STATUS`, `NOT_ENOUGH_PLAYERS`, `INVALID_SEATS` (`detail: { code, detail? }`) or `GAME_UNAVAILABLE` (this build no longer has the game's engine).",
   },
 });
 
@@ -482,7 +483,7 @@ export const acceptInvitationRoute = transitionRoute({
     "The holder of an invitation, in the lobby. The game starts by itself once every seat is joined.",
   errors: {
     403: "`ONBOARDING_REQUIRED`, `BAD_ORIGIN` or `SUSPENDED`.",
-    409: "`STALE_GAME` or `WRONG_STATUS`.",
+    409: "`STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine).",
   },
 });
 
@@ -498,7 +499,7 @@ export const declineGameRoute = transitionRoute({
   mayLeave: true,
   errors: {
     403: "`NOT_ALLOWED` (the creator in the lobby: cancel instead), `BAD_ORIGIN` or `SUSPENDED`.",
-    409: "`STALE_GAME`, `ALREADY_ACTED` or `WRONG_STATUS`.",
+    409: "`STALE_GAME`, `ALREADY_ACTED`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine).",
   },
 });
 
@@ -510,7 +511,7 @@ export const resignGameRoute = transitionRoute({
   description: "Any playing seat of an active game. A resignation is a loss.",
   errors: {
     403: "`BAD_ORIGIN` or `SUSPENDED`.",
-    409: "`STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE`.",
+    409: "`STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine).",
   },
 });
 
@@ -522,7 +523,7 @@ export const cancelGameRoute = transitionRoute({
   description: "Creator only, in the lobby.",
   errors: {
     403: "`NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`.",
-    409: "`STALE_GAME` or `WRONG_STATUS`.",
+    409: "`STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine).",
   },
 });
 
@@ -543,6 +544,10 @@ export const markSeenRoute = createRoute({
   request: { params: GameId, body: jsonBody(SeenBodySchema) },
   responses: {
     204: { description: "Marked." },
-    ...errors({ ...MEMBER_ERRORS, 403: "`BAD_ORIGIN` or `SUSPENDED`." }),
+    ...errors({
+      ...MEMBER_ERRORS,
+      403: "`BAD_ORIGIN` or `SUSPENDED`.",
+      429: "Too many game writes (`RATE_LIMITED`).",
+    }),
   },
 });

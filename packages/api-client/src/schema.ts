@@ -2319,7 +2319,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description `STALE_GAME`, `WRONG_STATUS`, `NOT_ENOUGH_PLAYERS` or `INVALID_SEATS` (`detail: { code, detail? }`). */
+      /** @description `STALE_GAME`, `WRONG_STATUS`, `NOT_ENOUGH_PLAYERS`, `INVALID_SEATS` (`detail: { code, detail? }`) or `GAME_UNAVAILABLE` (this build no longer has the game's engine). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -2339,6 +2339,15 @@ export interface operations {
       };
       /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
+      429: {
         headers: {
           [name: string]: unknown;
         };
@@ -2418,7 +2427,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description `STALE_GAME` or `WRONG_STATUS`. */
+      /** @description `STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -2438,6 +2447,15 @@ export interface operations {
       };
       /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
+      429: {
         headers: {
           [name: string]: unknown;
         };
@@ -2524,7 +2542,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description `STALE_GAME`, `ALREADY_ACTED` or `WRONG_STATUS`. */
+      /** @description `STALE_GAME`, `ALREADY_ACTED`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -2544,6 +2562,15 @@ export interface operations {
       };
       /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
+      429: {
         headers: {
           [name: string]: unknown;
         };
@@ -2623,7 +2650,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description `STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE`. */
+      /** @description `STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -2643,6 +2670,15 @@ export interface operations {
       };
       /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
+      429: {
         headers: {
           [name: string]: unknown;
         };
@@ -2722,7 +2758,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description `STALE_GAME` or `WRONG_STATUS`. */
+      /** @description `STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -2742,6 +2778,15 @@ export interface operations {
       };
       /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
+      429: {
         headers: {
           [name: string]: unknown;
         };
@@ -2830,6 +2875,15 @@ export interface operations {
       };
       /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
+      429: {
         headers: {
           [name: string]: unknown;
         };

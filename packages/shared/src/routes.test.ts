@@ -2,14 +2,23 @@ import { RESERVED_ERROR_CODES } from "@your-move/sdk";
 import { describe, expect, it } from "vitest";
 
 import {
+  acceptInvitationRoute,
   API_V1,
+  cancelGameRoute,
   ClientConfigSchema,
   configRoute,
+  createGameRoute,
+  declineGameRoute,
   ERROR_CODES,
   ERROR_STATUS,
   ErrorResponseSchema,
   HealthResponseSchema,
   healthRoute,
+  markSeenRoute,
+  previewRoute,
+  resignGameRoute,
+  startGameRoute,
+  submitActionRoute,
 } from "./index.js";
 
 describe("route definitions", () => {
@@ -63,5 +72,36 @@ describe("the framework error table (05 §Errors)", () => {
     expect(ERROR_STATUS.NOT_YOUR_TURN).toBe(409);
     expect(ERROR_STATUS.ONBOARDING_REQUIRED).toBe(403);
     expect(ERROR_STATUS.UPLOADS_FULL).toBe(503);
+  });
+});
+
+describe("the game routes' documented errors (A2 review P-11)", () => {
+  const writes = [
+    createGameRoute,
+    submitActionRoute,
+    previewRoute,
+    startGameRoute,
+    acceptInvitationRoute,
+    declineGameRoute,
+    resignGameRoute,
+    cancelGameRoute,
+    markSeenRoute,
+  ];
+
+  it("documents 429 on every rate-limited write", () => {
+    for (const route of writes) {
+      expect(Object.keys(route.responses), route.path).toContain("429");
+    }
+  });
+
+  it("names GAME_UNAVAILABLE wherever an orphaned game is refused", () => {
+    for (const route of writes.filter(
+      (route) => route !== createGameRoute && route !== markSeenRoute,
+    )) {
+      const conflict = (route.responses as Record<string, { description: string } | undefined>)[
+        "409"
+      ];
+      expect(conflict?.description, route.path).toContain("GAME_UNAVAILABLE");
+    }
   });
 });
