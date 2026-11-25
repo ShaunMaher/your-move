@@ -556,7 +556,7 @@ export interface components {
         id: string;
         gameType: string;
         gameVersion: number;
-        options?: unknown;
+        options: unknown;
         /** @enum {string} */
         status: "lobby" | "active" | "finished" | "declined" | "cancelled" | "expired";
         version: number;
@@ -698,7 +698,7 @@ export interface components {
         id: string;
         gameType: string;
         gameVersion: number;
-        options?: unknown;
+        options: unknown;
         /** @enum {string} */
         status: "lobby" | "active" | "finished" | "declined" | "cancelled" | "expired";
         version: number;
@@ -755,7 +755,7 @@ export interface components {
         lastActionAt: number | null;
       };
       /** @description The module's `view` for your seat (null in the lobby and for invitations); its shape is the installed game's `view` schema. */
-      view?: unknown;
+      view: unknown;
     };
     History: {
       items: components["schemas"]["HistoryItem"][];
@@ -767,7 +767,7 @@ export interface components {
       /** @enum {string} */
       kind: "action" | "resign" | "timeout" | "decline";
       /** @description The module's public record (02 §2.1 rule 5). */
-      record?: unknown;
+      record: unknown;
       describe: (
         | string
         | {
@@ -786,7 +786,7 @@ export interface components {
         id: string;
         gameType: string;
         gameVersion: number;
-        options?: unknown;
+        options: unknown;
         /** @enum {string} */
         status: "lobby" | "active" | "finished" | "declined" | "cancelled" | "expired";
         version: number;
@@ -843,9 +843,9 @@ export interface components {
         lastActionAt: number | null;
       };
       /** @description The module's `view` for your seat (null in the lobby and for invitations); its shape is the installed game's `view` schema. */
-      view?: unknown;
+      view: unknown;
       /** @description The transition's public record. */
-      record?: unknown;
+      record: unknown;
       describe: (
         | string
         | {

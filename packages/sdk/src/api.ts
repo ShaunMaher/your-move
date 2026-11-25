@@ -7,6 +7,11 @@ import { z } from "zod";
 
 const seat = z.number().int().min(0);
 const timestamp = z.number().int().min(0);
+/**
+ * Any value, but present: `z.unknown()` alone accepts a missing key, so an OpenAPI document
+ * generated from it would call the field optional although it is always there (02 §7.4).
+ */
+const present = () => z.unknown().refine((value): boolean => value !== undefined, "Required");
 
 /**
  * Display text: strings and `{ seat }` placeholders (02 §5).
@@ -108,7 +113,7 @@ export const gameEnvelopeSchema = z.object({
   id: z.string(),
   gameType: z.string(),
   gameVersion: z.number().int().min(1),
-  options: z.unknown(),
+  options: present(),
   status: gameStatusSchema,
   version: z.number().int().min(0),
   endReason: z.string().nullable(),

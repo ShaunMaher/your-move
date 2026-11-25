@@ -51,7 +51,10 @@ export const GameEnvelopeSchema = gameEnvelopeSchema;
 export const TextSchema = textSchema;
 const ListSummarySchema = listSummarySchema;
 
-const ModuleView = z.unknown().openapi({
+/** Any value, but always present (`z.unknown()` alone would document the field as optional). */
+const present = () => z.unknown().refine((value): boolean => value !== undefined, "Required");
+
+const ModuleView = present().openapi({
   description:
     "The module's `view` for your seat (null in the lobby and for invitations); its shape is the installed game's `view` schema.",
 });
@@ -314,7 +317,7 @@ export const HistoryItemSchema = z
     seq: z.number().int().min(1),
     seat: z.number().int().min(0),
     kind: z.enum(["action", "resign", "timeout", "decline"]),
-    record: z.unknown().openapi({ description: "The module's public record (02 §2.1 rule 5)." }),
+    record: present().openapi({ description: "The module's public record (02 §2.1 rule 5)." }),
     describe: TextSchema,
     via: z.enum(["app", "token", "system"]).openapi({
       description:
@@ -361,7 +364,7 @@ export const ActionResultSchema = z
   .object({
     game: GameEnvelopeSchema,
     view: ModuleView,
-    record: z.unknown().openapi({ description: "The transition's public record." }),
+    record: present().openapi({ description: "The transition's public record." }),
     describe: TextSchema,
   })
   .strict()

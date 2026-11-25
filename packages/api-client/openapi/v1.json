@@ -347,6 +347,7 @@
               "id",
               "gameType",
               "gameVersion",
+              "options",
               "status",
               "version",
               "endReason",
@@ -632,6 +633,7 @@
               "id",
               "gameType",
               "gameVersion",
+              "options",
               "status",
               "version",
               "endReason",
@@ -653,7 +655,7 @@
             "description": "The module's `view` for your seat (null in the lobby and for invitations); its shape is the installed game's `view` schema."
           }
         },
-        "required": ["game"],
+        "required": ["game", "view"],
         "additionalProperties": false
       },
       "History": {
@@ -693,7 +695,7 @@
           },
           "createdAt": { "type": "integer" }
         },
-        "required": ["seq", "seat", "kind", "describe", "via", "createdAt"],
+        "required": ["seq", "seat", "kind", "record", "describe", "via", "createdAt"],
         "additionalProperties": false
       },
       "ActionResult": {
@@ -798,6 +800,7 @@
               "id",
               "gameType",
               "gameVersion",
+              "options",
               "status",
               "version",
               "endReason",
@@ -834,7 +837,7 @@
             }
           }
         },
-        "required": ["game", "describe"],
+        "required": ["game", "view", "record", "describe"],
         "additionalProperties": false
       },
       "SubmitActionRequest": {
