@@ -13,24 +13,26 @@
  * about 800 µs, against about 90 µs with the CPU kept busy.
  *
  * Verdict: the Hodges–Lehmann shift of the paired differences, relative to the median request,
- * must lie within ±3% (BOUND). This is an effect-size bound, not a significance test. A z-score
- * grows with the sample for any real difference, however small, and doesn't say whether the
- * difference matters. The power check plants one extra indexed SELECT on the known-account path
- * (review P-7) and requires its shift to exceed the same bound.
+ * must lie within ±3% (BOUND). This is an effect-size bound, not a significance test. A
+ * significance test's z-score grows with the sample for any real difference, however small, and
+ * doesn't say whether the difference matters, so none is computed. The power check plants one
+ * extra indexed SELECT on the known-account path (review P-7) and requires its shift to exceed
+ * the same bound.
  *
  * Measured on a developer laptop (16 threads, otherwise idle), 600 pairs per comparison, 20
- * consecutive full runs on 2026-11-25, all passing (median request about 0.75–1.15 ms):
+ * consecutive full runs on 2026-11-25, all passing (median request about 0.75–1.15 ms). The
+ * ranges are what was observed over those runs, not guarantees: another machine or a longer
+ * series can fall outside them.
  * - planted SELECT: +5.08% to +6.84% (+57 to +76 µs);
  * - request known vs unknown: +0.08% to +1.69%;
  * - verify known vs unknown: +0.40% to +1.72%;
  * - suspended vs known: −0.81% to +0.56%;
  * - per-email-limited known vs unknown: −0.03% to +1.63%;
- * - new-accounts-limited unknown vs known: −1.42% to −0.02%;
+ * - new-accounts-limited unknown vs known: −1.54% to −0.02%;
  * - over the global cap, known vs unknown: +0.38% to +1.21%;
- * - not asserted: per-email-limited vs unlimited known, −2.49% to −1.29%. That path creates no
- *   challenge (06 §3); the gap shows the caller only what their own request count already does.
- * The worst equivalence is 1.3 points inside the bound, and the weakest planted SELECT is 2.1
- * points above it.
+ * - not asserted: per-email-limited vs unlimited known, −3.31% toX
+ * Over those runs the worst asserted equivalence was 1.46 points inside the bound (−1.54% against
+ * 3%), and the weakest planted SELECT 2.08 points above it (+5.08%).
  *
  * What remains: the known-account path is about 10 µs (about 0.9%) slower in every
  * known-vs-unknown comparison. The statements are the same, but inside them the known account's
@@ -91,22 +93,6 @@ function hodgesLehmann(differences: readonly number[]): number {
   return median(means);
 }
 
-/** Wilcoxon signed-rank z of paired differences (zeros dropped, ties get average ranks). */
-function signedRankZ(differences: readonly number[]): number {
-  const nonZero = differences.filter((d) => d !== 0).sort((x, y) => Math.abs(x) - Math.abs(y));
-  let positive = 0;
-  for (let i = 0; i < nonZero.length;) {
-    let j = i;
-    while (j + 1 < nonZero.length && Math.abs(nonZero[j + 1] ?? 0) === Math.abs(nonZero[i] ?? 0)) {
-      j++;
-    }
-    for (let k = i; k <= j; k++) if ((nonZero[k] ?? 0) > 0) positive += (i + j) / 2 + 1;
-    i = j + 1;
-  }
-  const n = nonZero.length;
-  return (positive - (n * (n + 1)) / 4) / Math.sqrt((n * (n + 1) * (2 * n + 1)) / 24);
-}
-
 const ip = (i: number): string =>
   `10.${String((i >> 16) & 255)}.${String((i >> 8) & 255)}.${String(i & 255)}`;
 
@@ -146,8 +132,6 @@ interface Comparison {
   readonly shift: number;
   readonly shiftMicros: number;
   readonly medianMicros: number;
-  /** Signed-rank z: reported, never asserted (it grows with the sample for any real shift). */
-  readonly z: number;
 }
 
 /**
@@ -205,7 +189,6 @@ async function compare(
     shift: shift / typical,
     shiftMicros: shift * 1000,
     medianMicros: typical * 1000,
-    z: signedRankZ(differences),
   };
 }
 
@@ -214,8 +197,7 @@ function report(label: string, result: Comparison): void {
   const sign = result.shift >= 0 ? "+" : "";
   process.stdout.write(
     `${label}: shift = ${sign}${(100 * result.shift).toFixed(2)}% ` +
-      `(${sign}${result.shiftMicros.toFixed(1)} µs of ${result.medianMicros.toFixed(0)} µs), ` +
-      `z = ${result.z.toFixed(2)}\n`,
+      `(${sign}${result.shiftMicros.toFixed(1)} µs of ${result.medianMicros.toFixed(0)} µs)\n`,
   );
 }
 
