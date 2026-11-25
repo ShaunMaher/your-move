@@ -355,7 +355,9 @@ export function start(
   now: number,
 ): GameWriteSet | Refusal {
   if (viewer.joinedVia !== "creator") return { refused: "NOT_ALLOWED" };
-  if (ctx.game.status !== "lobby") return { refused: "WRONG_STATUS" };
+  if (ctx.game.status !== "lobby" || now >= lobbyExpiresAt(ctx.game)) {
+    return { refused: "WRONG_STATUS" };
+  }
   const { min } = ctx.definition.players(ctx.options);
   if (lobbyCounts(ctx.players).joined < min) return { refused: "NOT_ENOUGH_PLAYERS" };
   const writes = startWrites(ctx, now);
@@ -377,7 +379,13 @@ export function accept(
   viewer: GamePlayerRecord,
   now: number,
 ): GameWriteSet | Refusal {
-  if (ctx.game.status !== "lobby" || viewer.state !== "invited") return { refused: "WRONG_STATUS" };
+  if (
+    ctx.game.status !== "lobby" ||
+    viewer.state !== "invited" ||
+    now >= lobbyExpiresAt(ctx.game)
+  ) {
+    return { refused: "WRONG_STATUS" };
+  }
   return withStart(
     ctx,
     {

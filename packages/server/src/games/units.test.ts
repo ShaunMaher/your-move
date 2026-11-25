@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import type { GamePlayerRecord, GameRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
-import { accept, rerank } from "./lifecycle.js";
+import { accept, LOBBY_LIFETIME_MS, rerank, start } from "./lifecycle.js";
 import { cryptoRandom, recorded } from "./random.js";
 import { createGameRegistry, GameConfigError } from "./registry.js";
 import {
@@ -318,5 +318,45 @@ describe("an automatic start validateStart refuses (02 §4 Start, step 2)", () =
         },
       ],
     });
+  });
+});
+
+describe("start and accept at the lobby's expiry (A2 review S2-5)", () => {
+  const row = (id: string, state: GamePlayerRecord["state"], joinedVia: "creator" | null) =>
+    ({
+      id,
+      state,
+      joinedVia,
+      joinedAt: state === "joined" ? 1 : null,
+      seat: null,
+    }) as GamePlayerRecord;
+  const creator = row("a", "joined", "creator");
+  const invited = row("b", "invited", null);
+  const ctx = {
+    game: {
+      status: "lobby",
+      createdAt: 1000,
+      seats: 2,
+      aiAssistance: "off",
+      seatOrder: "join",
+    } as GameRecord,
+    players: [creator, row("c", "joined", null), invited],
+    definition: {
+      players: () => ({ min: 2, max: 3 }),
+      validateStart: () => OK,
+    } as unknown as AnyGameDefinition,
+    options: {},
+    state: null,
+    random: cryptoRandom(),
+  };
+  const due = 1000 + LOBBY_LIFETIME_MS;
+
+  it("refuse a lobby at or past its expiry, even one still marked lobby", () => {
+    expect(start(ctx, creator, due)).toEqual({ refused: "WRONG_STATUS" });
+    expect(accept(ctx, invited, due + 5)).toEqual({ refused: "WRONG_STATUS" });
+  });
+
+  it("accept a lobby a moment before it", () => {
+    expect(accept(ctx, invited, due - 1)).not.toHaveProperty("refused");
   });
 });

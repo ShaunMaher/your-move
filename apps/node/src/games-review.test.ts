@@ -256,6 +256,27 @@ describe("S-4: an overdue lobby expires when it is next read or written", () => 
     expect((await getGame(h, a, game.id)).game.status).toBe("expired");
   });
 
+  it("is not written by a stranger's read, which is still a 404 (A2 review P2-3)", async () => {
+    const h = harness();
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    const stranger = await signUp(h, "Cy");
+    const game = await createGame(h, a, { gameType: "words", invitees: [{ email: b.email }] });
+    h.advance(LIFETIME);
+    const read = await call<{ error: { code: string } }>(
+      h,
+      stranger,
+      "GET",
+      `/api/v1/games/${game.id}`,
+    );
+    expect([read.status, read.body.error.code]).toEqual([404, "NOT_FOUND"]);
+    expect(h.query("SELECT status, version FROM games WHERE id = ?", game.id)).toEqual([
+      { status: "lobby", version: game.version },
+    ]);
+    // A member's read does expire it, and leaves it unread for the others.
+    expect((await getGame(h, b, game.id)).game.status).toBe("expired");
+  });
+
   it("is listed as expired, and no longer as an invitation", async () => {
     const h = harness();
     const a = await signUp(h, "Ada");
@@ -304,8 +325,9 @@ describe("S-4: an overdue lobby expires when it is next read or written", () => 
     expect([refused.status, refused.body.error.code]).toEqual([409, "TOO_MANY_GAMES"]);
     h.advance(LIFETIME);
     await createGame(h, a, { gameType: "words", invitees: [] });
+    // At most 20 overdue lobbies are expired per request (03 §8); the rest wait for the next.
     expect(h.query("SELECT count(*) AS n FROM games WHERE status = 'expired'")).toEqual([
-      { n: 50 },
+      { n: 20 },
     ]);
   });
 });

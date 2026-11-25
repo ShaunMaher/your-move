@@ -158,7 +158,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     gameId: string,
     user: UserRecord,
   ): Promise<{ loaded: LoadedGame; viewer: GamePlayerRecord }> => {
-    const loaded = await loadCurrent(repos, gameId, now());
+    const loaded = await loadCurrent(repos, gameId, user.id, now());
     const viewer = loaded === null ? undefined : memberRow(loaded.players, user.id);
     if (loaded === null || viewer === undefined) throw ApiError.of("NOT_FOUND");
     return { loaded, viewer };
@@ -186,7 +186,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
 
   /** `{ game, view }` for the viewer, freshly read; null once they're no longer a member. */
   const gameWithViewIfMember = async (gameId: string, user: UserRecord) => {
-    const loaded = await loadCurrent(repos, gameId, now());
+    const loaded = await loadCurrent(repos, gameId, user.id, now());
     const viewer = loaded === null ? undefined : memberRow(loaded.players, user.id);
     if (loaded === null || viewer === undefined) return null;
     const input = await presentInput(loaded, viewer);
