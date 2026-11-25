@@ -139,6 +139,34 @@ The project's foundation, built to 11 (engineering standards) from the first com
   zero CSP violations in Playwright; verified on a real iPhone home-screen install that sign-in
   persists across app restarts and that the home-screen label uses the runtime `APP_NAME`.
 
+## Alpha — the first playable release (a cut across M2–M4)
+
+The first thing a real person plays: two people who each sign in with an emailed code play a full
+words game against each other, on phones, on the proof-of-concept deployment (09 §4). The alpha is
+built **before** the rest of M3 and M4, from these slices; each is a branch with its own review,
+and slices without a dependency on each other are built in parallel.
+
+| Slice | From | Contents | Depends on |
+|---|---|---|---|
+| A1 — sign-in UI | M2 | Sign-in screens (email → code), display-name onboarding, welcome screen, sign out; PWA manifest, icons and service worker basics | M2b |
+| A2 — framework core | M3 | Games registry, game storage repositories, the lifecycle needed for one game between existing users (create with options, invite an onboarded user per `whoCanAddMe`, accept, decline, start, submit and preview, resign, finish with final views and ranking), `toAct`, the game envelope and history endpoints, catalog/config/rules endpoints, the built-in dictionaries through `DictionaryProvider`, the error table, the OpenAPI document; the M3 transition race tests and route-wide secrecy test for what this slice ships | M2b |
+| A3 — words board UI | M3 | The words `GameClientModule` (02 §3): board, rack, tap-to-place and drag, blank picker, live preview, shuffle/recall, swap/pass/resign dialogs, the view-level play analysis; built against the shell contract with component tests, so it doesn't wait for A2 | M1b |
+| A4 — shell UI | M3 | Game list, new-game flow (game picker → options → players), lobby, game frame (header, menu, history drawer, finished screen), lazy module loading; Playwright two-player words game on the WebKit iPhone viewport | A1, A2, A3 |
+| A5 — deployment | M4 | `gmail` provider and the shared MIME builder (with T14's hostile-name tests), `docker-compose.tunnel.yml` with `*_FILE` secrets and the tunnel acceptance tests, the deploy docs for both | M2b |
+
+Not in the alpha, kept at their milestones: API tokens, the Admin API (operators use
+`ADMIN_EMAILS` and the database), AI assistance, realtime (the alpha refetches on focus and on a
+short poll while it's someone's turn to see), turn timeouts, reminders and the sweep, lobby expiry,
+remove seat and leave, past-opponent auto-join, email invites and join links, push and email
+nudges, blocks, the sessions list, account deletion's game steps, `MIN_AGE`, dark mode and the
+polish pass. Security controls for what the alpha ships are not cut: every slice meets 08 for its
+own surface, and the M2 acceptance (including the iPhone home-screen check) is completed by A1
+and A5.
+
+**Accept:** two people sign in on iPhones by emailed code on the proof-of-concept deployment, one
+creates a words game and adds the other, and they play it to the end; the slices' own acceptance
+tests are green in CI.
+
 ## M3 — Framework + play words
 - Framework in `packages/server`: games registry, generic `games` / `game_players` /
   `game_actions` / `game_resources` / `past_opponents` storage, membership rules, lifecycle (lobby,
