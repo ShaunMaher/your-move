@@ -13,6 +13,7 @@ import {
   call,
   createGame,
   gameHarness,
+  gameSeed,
   getGame,
   type Player,
   signUp,
@@ -579,5 +580,20 @@ describe("P-15: lifecycle rules not yet covered end to end", () => {
       expect([result.status, result.body.error.code], name).toEqual([404, "NOT_FOUND"]);
     }
     expect((await getGame(h, a, game.id)).game).toMatchObject({ status: "lobby", version: 0 });
+  });
+});
+
+describe("GAME_SEED (A2 review P2-7)", () => {
+  it("refuses a value that is not an integer, and replays an integer", () => {
+    const before = process.env["GAME_SEED"];
+    try {
+      process.env["GAME_SEED"] = "12abc";
+      expect(() => gameSeed()).toThrow(/GAME_SEED must be an integer/u);
+      process.env["GAME_SEED"] = "42";
+      expect(gameSeed()).toBe(42);
+    } finally {
+      if (before === undefined) delete process.env["GAME_SEED"];
+      else process.env["GAME_SEED"] = before;
+    }
   });
 });
