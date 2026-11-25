@@ -101,10 +101,20 @@ by the shell for every game.)
   above the finger so the target square is visible, and snapping to the nearest empty square.
 - Placed-but-uncommitted tiles can be dragged back to the rack or to another square; "Recall"
   returns all.
-- Blank tile: dropping a `?` opens a letter picker grid (A–Z).
-- Rack order is the player's choice and persists locally per game (localStorage, best effort).
-- Premium squares show short labels (DL/TL/DW/TW) plus colour; colours are not the only signal.
-- Last move's tiles are highlighted; tapping a word on the board shows its score in the history.
+- Blank tile: placing a `?` on a square (by drop or by tap) opens a letter picker grid (A–Z);
+  dismissing it takes the blank back to the rack.
+- Rack order is the player's choice and persists locally per user and game (`localStorage`, best
+  effort), under the reserved key `ym.game.words.<userId>.<gameId>` that the shell wipes at
+  sign-out (02 §3, 06 §4). Only the permutation (positions in the sorted rack) is stored, never
+  letters; it is written only after the player reorders (shuffle or drag), never on mount, and
+  removed when the game is no longer active.
+- Premium squares show short labels (2L 3L 2W 3W) plus colour and a pattern: letter squares in
+  green with an inset border, word squares in violet with diagonal stripes; the start square shows
+  a diamond. Colours are not the only signal, and every text and background pair meets WCAG
+  contrast (4.5:1 text, 3:1 other parts; a unit test computes them).
+- Last move's tiles are highlighted (a corner notch as well as colour), and the line above the
+  board names the move. Tapping a word on the board to see its score is the history drawer's, a
+  shell feature of the alpha's A4 slice and M3, not the module's.
 - Submit button disabled when the client engine says the play is invalid; the server still
   validates.
 - **Swap and Pass are board controls**, each a dialog on the board (swap: pick the rack tiles, with
@@ -130,6 +140,10 @@ dictionaries is the shell's job and needs no change to the module contract.
 
 ## 4. PWA requirements
 
+- **Browser baseline** (01 §6): iOS and iPadOS Safari 16.4 or later, and current Chrome, Firefox
+  and Safari. That is the floor for constructable stylesheets (`document.adoptedStyleSheets`),
+  which game client modules rely on under the CSP (02 §3). A browser below it gets a visible
+  "Please update your browser to play" instead of a broken page.
 - `manifest.webmanifest`: **served by the server at runtime** (03 §9) with `name`/`short_name` from
   `APP_NAME`/`APP_SHORT_NAME`, `display: "standalone"`, `start_url: "/"`, `scope: "/"`,
   `orientation: "portrait"` (Android only; iOS ignores it — the layout must not break in landscape,

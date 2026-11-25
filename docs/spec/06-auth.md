@@ -113,8 +113,10 @@ mostly painless.
   WebSockets (the server publishes a `session.revoked` control message to the user's realtime
   channel; sockets are tagged with their session id and closed with code `4401`). Sockets also have
   a 24 h maximum lifetime, so a missed revocation can't outlive a day (03 §6).
-- On sign-out the client also unsubscribes its push subscription and clears per-game local state
-  (rack order) — shared devices.
+- On sign-out (and logout-all) the client also unsubscribes its push subscription and clears
+  per-game local state — shared devices: the shell removes every `localStorage` key starting
+  `ym.game.` (the prefix game modules keep their per-user, per-game state under, 02 §3, 07 §2),
+  and nothing else of a module's survives the session.
 - **Suspension** (05 §Admin API): suspending a user deletes their sessions and revokes their tokens
   (with the same socket closing as above), cancels the lobbies they created and declines their
   pending invitations (realtime only); their active games continue and time out normally. The
