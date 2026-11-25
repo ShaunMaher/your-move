@@ -71,11 +71,17 @@ describe("Node static serving", () => {
   });
 
   it("never serves the SPA for server paths", async () => {
-    for (const path of ["/api/nope", "/__dev/emails", "/manifest.webmanifest"]) {
+    for (const path of ["/api/nope", "/__dev/emails"]) {
       const res = await app().request(path);
       expect(res.status).toBe(404);
       expect(res.headers.get("Content-Type")).toMatch(/^application\/json/u);
     }
+  });
+
+  it("serves the manifest from the server, not a file", async () => {
+    const res = await app().request("/manifest.webmanifest");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/manifest+json");
   });
 
   it("serves the API", async () => {

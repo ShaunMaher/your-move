@@ -9,6 +9,7 @@ import { registerAuthRoutes } from "./auth/routes.js";
 import { readSessionCookie } from "./auth/session.js";
 import { isLocalDev } from "./config/local-dev.js";
 import { deriveSubkeys, type Subkeys } from "./crypto/subkeys.js";
+import { webManifest } from "./http/manifest.js";
 import { apiBodyLimit, requestRules } from "./http/request-rules.js";
 import { API_CACHE_CONTROL, securityHeadersMiddleware } from "./http/security-headers.js";
 import type { AppEnv, Platform } from "./platform.js";
@@ -186,6 +187,15 @@ export function createApp(options: AppOptions): App {
       },
       200,
     ),
+  );
+
+  // Generated from config at runtime, so a prebuilt bundle carries no name (03 §9). Revalidated
+  // like the shell: a renamed instance shows its new name on the next load.
+  app.get("/manifest.webmanifest", (c) =>
+    c.body(JSON.stringify(webManifest(config)), 200, {
+      "Content-Type": "application/manifest+json",
+      "Cache-Control": "no-cache",
+    }),
   );
 
   let subkeys: Promise<Subkeys> | null = null;
