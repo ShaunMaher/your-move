@@ -148,7 +148,7 @@ describe("the emailNudges setting (PATCH /api/v1/me)", () => {
     ]);
   });
 
-  it("turning nudges on lifts an earlier unsubscribe-link suppression, never a bounce (A6-P-3)", async () => {
+  it("turning nudges on keeps an unsubscribed row, which doesn't stop nudges; a bounce does (A6-S2-1)", async () => {
     h = gameHarness();
     const { ada, bo } = await started({});
     const keys = await deriveSubkeys(h.platform.config.appSecret);
@@ -163,7 +163,10 @@ describe("the emailNudges setting (PATCH /api/v1/me)", () => {
     );
     await setNudges(ada, true);
     await setNudges(bo, true);
-    expect(h.query("SELECT reason FROM email_suppressions")).toEqual([{ reason: "bounced" }]);
+    expect(h.query("SELECT reason FROM email_suppressions ORDER BY reason")).toEqual([
+      { reason: "bounced" },
+      { reason: "unsubscribed" },
+    ]);
     h.setTime(T0 + DAY);
     expect((await h.sweep()).nudges).toMatchObject({ due: 1, sent: 1 });
     expect(await nudgesTo(ada)).toHaveLength(1);
@@ -276,7 +279,7 @@ describe("the sweep's email nudges (03 §7)", () => {
     const { ada, gameId } = await started({ ada: true, bo: true });
     expect((await transition(h, ada, gameId, "resign")).status).toBe(200);
     h.setTime(T0 + 2 * DAY);
-    expect((await h.sweep()).nudges?.due).toBe(0);
+    expect((await h.sweep()).nudges).toMatchObject({ due: 0 });
   });
 
   it("never lets orphaned games fill the queue: 100 orphaned seats and one normal one (A6-P-1)", async () => {
@@ -317,7 +320,7 @@ describe("the sweep's email nudges (03 §7)", () => {
       );
     }
     h.setTime(T0 + DAY);
-    expect((await h.sweep()).nudges).toMatchObject({ due: 1, sent: 1, skipped: 0 });
+    expect((await h.sweep()).nudges).toMatchObject({ due: 1, sent: 1, skipped: 0, capped: false });
     const [email] = await nudgesTo(bo);
     expect(email?.text).toContain(`/g/${gameId}`);
     expect(
@@ -325,35 +328,99 @@ describe("the sweep's email nudges (03 §7)", () => {
     ).toEqual([{ n: 1 }]);
   });
 
-  it("stops at the instance-wide daily cap without claiming, and alerts once (A6-S-1)", async () => {
+  const alerts = () =>
+    h.logs.filter((line) => line["alert"] === "NUDGE_EMAILS_PER_DAY" && line["level"] === "error");
+  const counted = (key: string) =>
+    h.query("SELECT coalesce(sum(count), 0) AS n FROM rate_limits WHERE key = ?", key)[0]?.["n"];
+
+  it("stops at the instance-wide daily cap without claiming or counting the rest, and alerts once (A6-S-1, P2-2)", async () => {
     h = gameHarness({ LIMIT_NUDGE_EMAILS_PER_DAY: "1" });
     const { ada, bo } = await started({ ada: true, bo: true });
     h.setTime(T0 + DAY);
-    expect((await h.sweep()).nudges).toMatchObject({ due: 2, sent: 1, capped: true });
-    const alerts = () =>
-      h.logs.filter(
-        (line) => line["alert"] === "NUDGE_EMAILS_PER_DAY" && line["level"] === "error",
-      );
+    // Capped: how many were due isn't reported (A6-P2-7).
+    expect((await h.sweep()).nudges).toEqual({ sent: 1, failed: 0, skipped: 0, capped: true });
     expect(alerts()).toHaveLength(1);
     expect(
       h.query("SELECT count(*) AS n FROM game_players WHERE last_nudged_at IS NOT NULL"),
     ).toEqual([{ n: 1 }]);
+    // Only the claimed nudge was counted.
+    expect(counted("NUDGE_EMAILS_PER_DAY:all")).toBe(1);
     // The next run reads the cap and does nothing more, with no second alert.
     h.advance(15 * MINUTE);
-    expect((await h.sweep()).nudges).toEqual({
-      due: 0,
-      sent: 0,
-      failed: 0,
-      skipped: 0,
-      capped: true,
-    });
+    expect((await h.sweep()).nudges).toEqual({ sent: 0, failed: 0, skipped: 0, capped: true });
     expect(alerts()).toHaveLength(1);
-    const sentTo = [...(await nudgesTo(ada)), ...(await nudgesTo(bo))];
-    expect(sentTo).toHaveLength(1);
+    expect(counted("NUDGE_EMAILS_PER_DAY:all")).toBe(1);
+    expect([...(await nudgesTo(ada)), ...(await nudgesTo(bo))]).toHaveLength(1);
     // Two days on, the window has passed and the other seat gets its nudge.
     h.advance(2 * DAY);
     await h.sweep();
     expect([...(await nudgesTo(ada)), ...(await nudgesTo(bo))].length).toBeGreaterThan(1);
+  });
+
+  it("under saturation across a window boundary, sends about the cap a day and alerts once per window (A6-P2-2)", async () => {
+    h = gameHarness({ LIMIT_NUDGE_EMAILS_PER_DAY: "3" });
+    // Three games, six seats, everyone opted in: twice as many due as the cap allows.
+    for (let i = 0; i < 3; i++) await started({ ada: true, bo: true });
+    const start = T0 + DAY;
+    let sent = 0;
+    for (let at = start; at < start + DAY; at += 15 * MINUTE) {
+      h.setTime(at);
+      sent += (await h.sweep()).nudges?.sent ?? 0;
+    }
+    // A sliding window: the cap, plus at most one as the previous day's weight fades.
+    expect(sent).toBeGreaterThanOrEqual(3);
+    expect(sent).toBeLessThanOrEqual(3 + 1);
+    expect(counted("NUDGE_EMAILS_PER_DAY:all")).toBe(sent);
+    // The 24 hours span two fixed windows (midnight UTC): one alert in each, never more.
+    const days = alerts().map((line) => String(line["time"]).slice(0, 10));
+    expect(days).toEqual(["2026-01-02", "2026-01-03"]);
+  });
+
+  it("caps each recipient's nudges a day without claiming or counting the rest (A6-S2-2)", async () => {
+    h = gameHarness({ LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY: "2" });
+    const { ada, bo } = await started({ bo: true });
+    for (let i = 0; i < 2; i++) {
+      const game = await createGame(h, ada, {
+        gameType: "example",
+        invitees: [{ email: bo.email }],
+      });
+      await transition(h, bo, game.id, "accept");
+    }
+    const other = await started({ bo: true });
+    h.setTime(T0 + DAY);
+    expect((await h.sweep()).nudges).toEqual({
+      due: 4,
+      sent: 3,
+      failed: 0,
+      skipped: 1,
+      capped: false,
+    });
+    expect(await nudgesTo(bo)).toHaveLength(2);
+    expect(await nudgesTo(other.bo)).toHaveLength(1);
+    expect(counted(`NUDGE_EMAILS_PER_USER_PER_DAY:${bo.id}`)).toBe(2);
+    expect(
+      h.query(
+        "SELECT count(*) AS n FROM game_players WHERE user_id = ? AND last_nudged_at IS NOT NULL",
+        bo.id,
+      ),
+    ).toEqual([{ n: 2 }]);
+  });
+
+  it("names a deleted account's seat 'Deleted player' and a missing name 'New player' (02 §5, 04)", async () => {
+    h = gameHarness();
+    const deleted = await started({ bo: true });
+    const unnamed = await started({ bo: true });
+    h.exec("UPDATE game_players SET user_id = NULL WHERE user_id = ?", deleted.ada.id);
+    h.exec("UPDATE users SET display_name = NULL WHERE id = ?", unnamed.ada.id);
+    h.setTime(T0 + DAY);
+    await h.sweep();
+    const texts = [...(await nudgesTo(deleted.bo)), ...(await nudgesTo(unnamed.bo))].map(
+      (email) => email.text.split("\n")[0],
+    );
+    expect(texts).toEqual([
+      "It's your turn in your Example game with Deleted player. It has been waiting for you for over a day.",
+      "It's your turn in your Example game with New player. It has been waiting for you for over a day.",
+    ]);
   });
 
   it("sends nothing to a suspended user or a suppressed address", async () => {
@@ -367,7 +434,7 @@ describe("the sweep's email nudges (03 §7)", () => {
       T0,
     );
     h.setTime(T0 + 2 * DAY);
-    expect((await h.sweep()).nudges?.due).toBe(0);
+    expect((await h.sweep()).nudges).toMatchObject({ due: 0 });
   });
 
   it("builds the email from the game's name, display names and public describe text only (T18)", async () => {

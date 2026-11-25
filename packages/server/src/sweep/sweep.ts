@@ -15,7 +15,7 @@ export interface SweepOptions {
   readonly games: readonly InstalledGame[];
   /**
    * Email nudges one run sends at most (03 §7). The runtime's budget for one invocation bounds
-   * it: 100 on Node, 10 on Workers, whose subrequest and D1-query limits per Cron Trigger
+   * it: 100 on Node, 4 on Workers, whose subrequest and D1-query limits per Cron Trigger
    * invocation each nudge spends several of (09 §3).
    */
   readonly nudgesPerRun: number;
@@ -61,7 +61,7 @@ export function createSweep(options: SweepOptions): Sweep {
       ...(nudges === null
         ? { nudgesFailedStep: true }
         : {
-            nudgesDue: nudges.due,
+            ...(nudges.capped ? {} : { nudgesDue: nudges.due }),
             nudgesSent: nudges.sent,
             nudgesFailed: nudges.failed,
             nudgesSkipped: nudges.skipped,

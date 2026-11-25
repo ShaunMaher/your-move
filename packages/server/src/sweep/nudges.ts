@@ -1,9 +1,10 @@
 /**
  * The sweep's "send due email nudges" step (docs/spec/03-architecture.md §7, §8; alpha A6): an
  * "It's your turn" email to each seat that has waited 24 h in `toAct`, at most once a day per game,
- * for users who turned nudges on. Each nudge is counted against the instance-wide daily cap
- * (`LIMIT_NUDGE_EMAILS_PER_DAY`, 08 §4) and then claimed (`last_nudged_at`) before it is sent, so
- * two sweeps never both send one and a failed send isn't retried that day (Q27).
+ * for users who turned nudges on. The room left under the instance-wide and per-recipient daily
+ * caps (`LIMIT_NUDGE_EMAILS_PER_DAY`, `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`, 08 §4) is read first,
+ * a nudge is claimed (`last_nudged_at`) before it is sent, so two sweeps never both send one and a
+ * failed send isn't retried that day (Q27), and only claimed nudges are counted.
  *
  * The email carries only the game type's name, display names and the last public `describe` text
  * (08 T18): the game's state, options and scores are never read here.
@@ -11,7 +12,7 @@
 import { formatText } from "@your-move/sdk";
 import { TextSchema } from "@your-move/shared";
 
-import { alertOnCrossing, checkLimits } from "../auth/limits.js";
+import { alertOncePerWindow, checkLimits } from "../auth/limits.js";
 import type { Subkeys } from "../crypto/subkeys.js";
 import type { DueNudge, NudgeWindow, Repositories } from "../db/repositories.js";
 import { wasAlerted } from "../email/sender.js";
@@ -26,18 +27,24 @@ const NUDGE_IDLE_MS = 24 * HOUR;
 /** At most one nudge per game per this long, for each seat (03 §7). */
 const NUDGE_INTERVAL_MS = 24 * HOUR;
 
-/** What one run of the step did. */
-export interface NudgeReport {
-  /** Seats found due. */
-  readonly due: number;
+interface NudgeCounts {
   readonly sent: number;
   /** Claimed, but building or sending the email failed: that day's nudge is lost. */
   readonly failed: number;
-  /** Not claimed: the seat moved on, the user stopped being eligible, or another run took it. */
+  /**
+   * Not claimed: the recipient is at their daily cap, the seat moved on, the user stopped being
+   * eligible, or another run took it.
+   */
   readonly skipped: number;
-  /** The instance-wide daily cap stopped the run; the rest wait, unclaimed (08 §4). */
-  readonly capped: boolean;
 }
+
+/**
+ * What one run of the step did. When the instance-wide daily cap stopped it, the rest wait
+ * unclaimed (08 §4) and how many were due isn't reported: it is only the first page of them.
+ */
+export type NudgeReport =
+  | (NudgeCounts & { readonly capped: false; readonly due: number })
+  | (NudgeCounts & { readonly capped: true });
 
 export interface NudgeStepOptions {
   readonly platform: Platform;
@@ -59,9 +66,14 @@ function renderDescribe(stored: string, names: readonly string[]): string | null
   return text.success ? formatText(text.data, names) : null;
 }
 
+/** A seat whose account was deleted (02 §5, 04 §Account deletion). */
+const DELETED_PLAYER = "Deleted player";
+/** A display name that isn't set (04 `users.display_name`). */
+const NEW_PLAYER = "New player";
+
 /**
- * Names by seat as the game screens show them (07 §1): "You" for the recipient, a seated player's
- * display name, and nothing for a seat without one, which `formatText` shows as "Seat n".
+ * Names by seat (02 §5): "You" for the recipient, a seated player's display name, "New player" for
+ * one without a name and "Deleted player" for a deleted account. Every seated row gets one.
  */
 async function seatNames(
   repos: Repositories,
@@ -86,10 +98,10 @@ async function seatNames(
       names[row.seat] = "You";
       continue;
     }
-    const name = row.userId === null ? null : (users.get(row.userId)?.displayName ?? null);
-    const shown = name ?? `Seat ${String(row.seat + 1)}`;
-    if (name !== null) names[row.seat] = name;
-    opponents.push(shown);
+    const user = row.userId === null ? undefined : users.get(row.userId);
+    const name = user === undefined ? DELETED_PLAYER : (user.displayName ?? NEW_PLAYER);
+    names[row.seat] = name;
+    opponents.push(name);
   }
   return { names, opponents };
 }
@@ -123,14 +135,17 @@ export async function sendDueNudges(options: NudgeStepOptions): Promise<NudgeRep
     idleSince: now - NUDGE_IDLE_MS,
     nudgedBefore: now - NUDGE_INTERVAL_MS,
   };
-  const cap = (amount: 0 | 1) =>
-    checkLimits(repos, config, now, [{ name: "NUDGE_EMAILS_PER_DAY", key: "all", amount }]);
   let sent = 0;
   let failed = 0;
   let skipped = 0;
-  // At the cap already: nothing is read, claimed or counted (the alert went out on crossing).
-  if ((await cap(0)).some((result) => result.exceeded)) {
-    return { due: 0, sent, failed, skipped, capped: true };
+  // The room left today, read without counting: only nudges actually claimed are counted (08 §4).
+  const [global] = await checkLimits(repos, config, now, [
+    { name: "NUDGE_EMAILS_PER_DAY", key: "all", amount: 0 },
+  ]);
+  let room = global === undefined ? 0 : Math.floor(global.limit - global.estimate);
+  if (room <= 0) {
+    await alertOncePerWindow(repos, log, "NUDGE_EMAILS_PER_DAY", now);
+    return { sent, failed, skipped, capped: true };
   }
   const installed = registry
     .all()
@@ -138,17 +153,27 @@ export async function sendDueNudges(options: NudgeStepOptions): Promise<NudgeRep
   const due = await repos.nudges.due(window, options.perRun, installed);
   let capped = false;
   for (const nudge of due) {
-    // Counted before the claim (08 §4): a nudge over the cap stays unclaimed for a later day.
-    const counted = await cap(1);
-    if (counted.some((result) => result.exceeded)) {
-      alertOnCrossing(log, counted);
+    if (room <= 0) {
       capped = true;
       break;
+    }
+    // The recipient's own daily cap (08 §4): over it, the nudge waits unclaimed.
+    const [recipient] = await checkLimits(repos, config, now, [
+      { name: "NUDGE_EMAILS_PER_USER_PER_DAY", key: nudge.userId, amount: 0 },
+    ]);
+    if (recipient?.exceeded !== false) {
+      skipped++;
+      continue;
     }
     if (!(await repos.nudges.claim(nudge.playerId, now, window))) {
       skipped++;
       continue;
     }
+    await checkLimits(repos, config, now, [
+      { name: "NUDGE_EMAILS_PER_DAY", key: "all", amount: 1 },
+      { name: "NUDGE_EMAILS_PER_USER_PER_DAY", key: nudge.userId, amount: 1 },
+    ]);
+    room--;
     try {
       const message = await buildNudge(
         repos,
@@ -174,5 +199,9 @@ export async function sendDueNudges(options: NudgeStepOptions): Promise<NudgeRep
       }
     }
   }
-  return { due: due.length, sent, failed, skipped, capped };
+  if (capped) {
+    await alertOncePerWindow(repos, log, "NUDGE_EMAILS_PER_DAY", now);
+    return { sent, failed, skipped, capped: true };
+  }
+  return { due: due.length, sent, failed, skipped, capped: false };
 }

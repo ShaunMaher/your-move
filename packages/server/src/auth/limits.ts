@@ -47,8 +47,9 @@ const LIMITS = {
   // The inbound invitation cap (06 §6.7): per target and creator, and per target in total.
   INVITATIONS_RECEIVED_PAIR_DAY: { limit: 1, windowMs: DAY },
   INVITATIONS_RECEIVED_DAY: { limit: 3, windowMs: DAY },
-  // "It's your turn" email nudges sent, instance-wide (alpha A6, 03 §7).
+  // "It's your turn" email nudges sent, instance-wide and per recipient (alpha A6, 03 §7).
   NUDGE_EMAILS_PER_DAY: { limit: 200, windowMs: DAY },
+  NUDGE_EMAILS_PER_USER_PER_DAY: { limit: 10, windowMs: DAY },
 } as const satisfies Record<string, LimitRule>;
 
 export type LimitName = keyof typeof LIMITS;
@@ -134,4 +135,24 @@ export function alertOnCrossing(
       log.error("instance-wide limit exceeded", { alert: result.name });
     }
   }
+}
+
+/**
+ * Logs an instance-wide limit's alert (08 §4) at most once per fixed window of that limit: a
+ * counter of its own (`<NAME>:alerted` in `rate_limits`) is raised, and only the call that makes
+ * it 1 logs. For callers that read a limit without counting over it, so the crossing itself is
+ * never counted (the nudge sweep, 03 §7).
+ */
+export async function alertOncePerWindow(
+  repos: Repositories,
+  log: { error(msg: string, fields: { readonly alert: string }): void },
+  name: LimitName,
+  now: number,
+): Promise<void> {
+  const { windowMs } = LIMITS[name];
+  const windowStart = Math.floor(now / windowMs) * windowMs;
+  const [count] = await repos.rateLimits.hit([
+    { key: `${name}:alerted`, windowStart, previousWindowStart: windowStart - windowMs, amount: 1 },
+  ]);
+  if (count?.current === 1) log.error("instance-wide limit exceeded", { alert: name });
 }
