@@ -345,8 +345,9 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
   into the static assets, and the Worker reads the index (once per isolate, when the app is built)
   and each list (on first use) through the `ASSETS` binding; on Node the build copies it to
   `dist/dictionaries`, which the server reads from disk and serves at the same path. Around the
-  runtime's `loadText` the core adds a 10 s timeout and remembers a failure for 30 s before
-  loading that list again (10 M3).
+  runtime's `loadText` the core adds a 10 s timeout, and it remembers any failure of the whole
+  load (a list whose size or hash doesn't match its manifest included) for 30 s before fetching
+  or hashing that list again (10 M3).
 - `serverOnly` dictionaries (operator and uploaded, words §9.5) are loaded from `BlobStore` on first
   use into an in-memory LRU cache **sized by bytes** (default 60 MB per isolate or process, below the
   Worker's 128 MB limit). Lookup is a binary search over the raw sorted text with no index build,

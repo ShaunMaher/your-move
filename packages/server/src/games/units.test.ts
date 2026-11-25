@@ -162,6 +162,31 @@ describe("the resource provider", () => {
     expect(calls).toBe(2);
     expect(await provider.load([{ kind: "other", resourceId: "x" }])).toEqual({});
   });
+
+  it("remembers a list whose size or hash doesn't match: not fetched or hashed again at once (S-6)", async () => {
+    let clock = 0;
+    let calls = 0;
+    const provider = createResourceProvider({
+      dictionaries: {
+        index,
+        loadText: () => {
+          calls += 1;
+          return Promise.resolve("not the manifest's list\n");
+        },
+      },
+      enabled: null,
+      now: () => clock,
+      failureTtlMs: 1000,
+    });
+    const load = () => provider.load([{ kind: "dictionary", resourceId: "one" }]);
+    await expect(load()).rejects.toThrow(/one/u);
+    await expect(load()).rejects.toThrow(DictionaryUnavailableError);
+    await expect(load()).rejects.toThrow(DictionaryUnavailableError);
+    expect(calls).toBe(1);
+    clock = 1000;
+    await expect(load()).rejects.toThrow();
+    expect(calls).toBe(2);
+  });
 });
 
 /** A minimal definition: only what the registry reads. */

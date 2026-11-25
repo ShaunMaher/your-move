@@ -16,7 +16,8 @@ import type { ResourceCatalog, ResourceKind, ResourceMeta, Resources } from "@yo
 /**
  * What a runtime supplies about the built-in dictionaries: the build's index, and a loader for one
  * word list. `loadText` resolves only once it holds the whole text and rejects on any failure; the
- * core adds the timeout and the brief negative cache of 10 M3 around it.
+ * core adds the timeout and the brief negative cache of 10 M3 around the whole load, its size and
+ * hash check included.
  */
 export interface BuiltinDictionaries {
   readonly index: DictionaryIndex;
@@ -69,39 +70,51 @@ export class DictionaryUnavailableError extends Error {
 }
 
 /**
- * Wraps a runtime's `loadText` with the 10 M3 contract's timeout and negative cache: a load that
- * takes too long fails, and for a short while after a failure the list isn't fetched again, so an
- * unavailable asset can't be refetched on every request.
+ * Wraps a runtime's `loadText` with the 10 M3 contract's timeout: a load that takes too long
+ * fails, and so leaves the provider's cache (it keeps only pending and successful loads).
  */
-function resilient(
+function timed(
   load: BuiltinDictionaries["loadText"],
-  options: {
-    readonly now: () => number;
-    readonly timeoutMs: number;
-    readonly failureTtlMs: number;
-  },
+  timeoutMs: number,
 ): BuiltinDictionaries["loadText"] {
-  const failedAt = new Map<string, number>();
   return async (manifest) => {
-    const failed = failedAt.get(manifest.id);
-    if (failed !== undefined && options.now() - failed < options.failureTtlMs) {
-      throw new DictionaryUnavailableError(`dictionary ${manifest.id} failed to load recently`);
-    }
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
         reject(new DictionaryUnavailableError(`dictionary ${manifest.id} took too long to load`));
-      }, options.timeoutMs);
+      }, timeoutMs);
     });
     try {
-      const text = await Promise.race([load(manifest), timeout]);
-      failedAt.delete(manifest.id);
-      return text;
-    } catch (error) {
-      failedAt.set(manifest.id, options.now());
-      throw error;
+      return await Promise.race([load(manifest), timeout]);
     } finally {
       clearTimeout(timer);
+    }
+  };
+}
+
+/**
+ * The 10 M3 contract's negative cache around one whole word-list load — the runtime's fetch or
+ * read, then the provider's size and hash check: for a short while after any failure, a
+ * mismatched list included, the list isn't fetched or hashed again, so an unavailable or stale
+ * asset can't be reloaded on every request (A2 review S-6).
+ */
+function remembered<T>(
+  load: (id: string) => Promise<T>,
+  options: { readonly now: () => number; readonly failureTtlMs: number },
+): (id: string) => Promise<T> {
+  const failedAt = new Map<string, number>();
+  return async (id) => {
+    const failed = failedAt.get(id);
+    if (failed !== undefined && options.now() - failed < options.failureTtlMs) {
+      throw new DictionaryUnavailableError(`dictionary ${id} failed to load recently`);
+    }
+    try {
+      const loaded = await load(id);
+      failedAt.delete(id);
+      return loaded;
+    } catch (error) {
+      failedAt.set(id, options.now());
+      throw error;
     }
   };
 }
@@ -118,11 +131,14 @@ export function createResourceProvider(options: ResourceProviderOptions): Resour
   }
   const provider = createDictionaryProvider({
     index,
-    loadText: resilient((manifest) => options.dictionaries.loadText(manifest), {
-      now: options.now,
-      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      failureTtlMs: options.failureTtlMs ?? DEFAULT_FAILURE_TTL_MS,
-    }),
+    loadText: timed(
+      (manifest) => options.dictionaries.loadText(manifest),
+      options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    ),
+  });
+  const loadList = remembered((id) => provider.load(id), {
+    now: options.now,
+    failureTtlMs: options.failureTtlMs ?? DEFAULT_FAILURE_TTL_MS,
   });
   const manifests = new Map(index.dictionaries.map((manifest) => [manifest.id, manifest]));
   // Built-in lists are public: the framework sets their versioned, hashed download URL (words §9.4).
@@ -148,7 +164,7 @@ export function createResourceProvider(options: ResourceProviderOptions): Resour
       let dictionary: Resources["dictionary"];
       for (const resource of resources) {
         if (resource.kind !== "dictionary") continue;
-        const list = await provider.load(resource.resourceId);
+        const list = await loadList(resource.resourceId);
         if (list !== undefined) dictionary = list;
       }
       return dictionary === undefined ? {} : { dictionary };
