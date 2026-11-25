@@ -112,6 +112,9 @@ test("two people play a words game on phones and one resigns", async ({
   await shot(ann, "new-game-1-pick");
   await ann.getByRole("button", { name: /^Words/u }).click();
   await expect(ann.getByRole("heading", { name: /options/u })).toBeVisible();
+  // Next is enabled once the options module has loaded; checked before then, axe can sample the
+  // button at the start of its fade from disabled, which is not what anyone sees.
+  await expect(ann.getByRole("button", { name: "Next" })).toBeEnabled();
   await expectAccessible(ann);
   await shot(ann, "new-game-2-options");
   await ann.getByRole("button", { name: "Next" }).click();
