@@ -4,8 +4,10 @@
  * game-specific code can hide in the framework (10 M3). One test per rule.
  */
 import type { GameEnvelope } from "@your-move/sdk";
+import { replayState } from "@your-move/server/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { installedGames } from "../../../generated/server-registry.js";
 import {
   act,
   call,
@@ -31,6 +33,17 @@ afterEach(() => {
 });
 
 const code = (body: unknown): string | undefined => (body as Partial<ErrorBody>).error?.code;
+
+/** Replaying the stored log reproduces the stored state exactly (04 invariant 1). */
+async function expectReplays(gameId: string): Promise<void> {
+  const repos = h.platform.repos;
+  const game = await repos.games.get(gameId);
+  const definition = installedGames.find((g) => g.manifest.type === game?.gameType)?.engines[1];
+  if (game?.state == null || definition === undefined) throw new Error("no started game");
+  expect(JSON.stringify(replayState(definition, game, await repos.games.actions(gameId)))).toBe(
+    game.state,
+  );
+}
 
 /** A two-player example game between `a` (creator, seat 0) and `b`, started by b's accept. */
 async function startedExample(a: Player, b: Player, options: Record<string, unknown> = {}) {
@@ -440,6 +453,8 @@ describe("membership (04 §Membership)", () => {
     expect((forA.view as ExampleView).you).toBe(forA.game.yourSeat);
     expect((forB.view as ExampleView).you).toBe(forB.game.yourSeat);
     expect(forA.game.players.find((player) => player.isYou)?.seat).toBe(forA.game.yourSeat);
+    // The seat-order draw comes first in the recorded start draws.
+    await expectReplays(game.id);
   });
 });
 
@@ -683,6 +698,7 @@ describe("playing (02 §2.3, 05 /actions)", () => {
     expect(view).toEqual((finalViews.seats[1] as { view: unknown }).view);
     const moved = await act(h, a, created.id, { type: "pass" });
     expect(code(moved.body)).toBe("GAME_NOT_ACTIVE");
+    await expectReplays(created.id);
   });
 
   it("plays a three-player example game to its end, ranking every seat", async () => {
@@ -710,6 +726,7 @@ describe("playing (02 §2.3, 05 /actions)", () => {
       ),
     ).toBe(true);
     expect((finished.view as ExampleView).endReason).not.toBeNull();
+    await expectReplays(game.id);
   });
 });
 

@@ -30,7 +30,7 @@ function isSeatedRow(row: GamePlayerRecord): row is ShownRow {
 }
 
 /** Whether a row makes its user a member, for reads and actions (04 §Membership). */
-export function isMemberRow(row: GamePlayerRecord): boolean {
+function isMemberRow(row: GamePlayerRecord): boolean {
   if (row.state === "joined" || row.state === "playing" || row.state === "out") return true;
   return row.state === "invited" && row.userId !== null && row.delivery !== "inert";
 }

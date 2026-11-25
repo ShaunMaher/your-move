@@ -79,6 +79,10 @@ export type {
 } from "./db/repositories.js";
 export type {
   GameActionRecord,
+  GameListQuery,
+  GameListRow,
+  GameStatus,
+  NewInvite,
   GamePlayerRecord,
   GamePlayerUpdate,
   GameRecord,

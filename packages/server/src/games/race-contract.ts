@@ -17,7 +17,6 @@ import { createApp, type App } from "../app.js";
 import { createSession } from "../auth/session.js";
 import { parseConfig } from "../config/parse.js";
 import type { Repositories } from "../db/repositories.js";
-import type { ContractTarget } from "../db/repository-contract.js";
 import { createConsoleEmailSender } from "../email/sender.js";
 import { createJsonLogger } from "../log.js";
 import type { InstalledGame } from "./registry.js";
@@ -35,6 +34,12 @@ const ENV = {
   ENABLED_GAMES: "example",
 };
 
+/** One migrated database of a runtime adapter, for the whole suite. */
+interface RaceTarget {
+  readonly repos: Repositories;
+  close(): Promise<void>;
+}
+
 interface Player {
   readonly id: string;
   readonly email: string;
@@ -49,12 +54,12 @@ interface Answer {
 /** The race suite on one adapter; of the installed games given, only `example` is used. */
 export function gameRaceContract(
   name: string,
-  connect: () => Promise<ContractTarget>,
+  connect: () => Promise<RaceTarget>,
   installed: readonly InstalledGame[],
 ): void {
   const games = installed.filter((game) => game.manifest.type === "example");
   describe(`transition races (03 §5.2): ${name}`, () => {
-    let target: ContractTarget;
+    let target: RaceTarget;
     let repos: Repositories;
     let app: App;
     let clock = Date.UTC(2026, 0, 1, 9);
@@ -116,8 +121,8 @@ export function gameRaceContract(
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
       const text = await response.text();
-      const body: unknown = text === "" ? null : JSON.parse(text);
-      return { status: response.status, body: body as Answer["body"] };
+      const parsed: unknown = text === "" ? null : JSON.parse(text);
+      return { status: response.status, body: parsed as Answer["body"] };
     };
 
     const view = async (who: Player, gameId: string) => {

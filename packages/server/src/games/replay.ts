@@ -10,7 +10,7 @@ import { type AnyGameDefinition, assertRange, type RandomSource } from "@your-mo
 import type { GameActionRecord, GameRecord } from "../db/repositories.js";
 
 /** Thrown when the recorded draws don't fit what the engine asks for. */
-export class ReplayError extends Error {
+class ReplayError extends Error {
   override readonly name = "ReplayError";
 }
 

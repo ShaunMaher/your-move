@@ -61,7 +61,7 @@ export interface ModuleOutcome {
 }
 
 /** Rows holding a seat, by seat number. */
-export function seatedRows(players: readonly GamePlayerRecord[]): GamePlayerRecord[] {
+function seatedRows(players: readonly GamePlayerRecord[]): GamePlayerRecord[] {
   return players.filter((row) => row.seat !== null).sort((a, b) => (a.seat ?? 0) - (b.seat ?? 0));
 }
 
@@ -255,7 +255,7 @@ function lobbyCounts(players: readonly GamePlayerRecord[]): { joined: number; in
  * the game, seats by the seat order (a `random` order drawn from the recorded randomness), `setup`
  * and the first clocks. Step 1, the block re-check, has nothing to check until blocks exist (M4).
  */
-export function startWrites(ctx: GameContext, now: number): GameWriteSet | GameError {
+function startWrites(ctx: GameContext, now: number): GameWriteSet | GameError {
   const { definition, game } = ctx;
   const joined = ctx.players
     .filter((row) => row.state === "joined")
