@@ -100,4 +100,88 @@ describe("the board's colours", () => {
     expect(STYLE_TEXT).toMatch(/data-premium="DL"[^}]*inset 0 0 0 2px/u);
     expect(STYLE_TEXT).toMatch(/data-premium="TL"[^}]*inset 0 0 0 2px/u);
   });
+
+  it("put every premium label on a solid chip of the pair's background, not on the stripes", () => {
+    for (const premium of ["DL", "TL", "DW", "TW"]) {
+      const code = premium.toLowerCase();
+      expect(STYLE_TEXT).toContain(
+        `.ym-w-sq[data-premium="${premium}"] .ym-w-face { background: var(--w-${code}-bg); }`,
+      );
+    }
+    // The stripes are painted on the square, which the chip covers where the label is.
+    expect(STYLE_TEXT).toMatch(/\.ym-w-face \{[^}]*padding/u);
+  });
+});
+
+/** A selector's specificity as a comparable number (ids, then classes, then elements). */
+function specificity(selector: string): number {
+  const plain = selector.replace(/:(?:where)\([^)]*\)/gu, "");
+  const ids = (plain.match(/#[\w-]+/gu) ?? []).length;
+  const pseudoElements = (plain.match(/::[\w-]+/gu) ?? []).length;
+  const classes = (plain.match(/\.[\w-]+|\[[^\]]*\]|(?<!:):[\w-]+/gu) ?? []).length;
+  const names = (plain.replace(/\[[^\]]*\]/gu, "").match(/(?:^|[\s>+~])[a-z][\w-]*/gu) ?? [])
+    .length;
+  return ids * 10_000 + classes * 100 + names + pseudoElements;
+}
+
+interface Declared {
+  readonly selector: string;
+  readonly property: string;
+  readonly order: number;
+}
+
+/** Every selector and property of the innermost rules, in source order. */
+function declarations(css: string): Declared[] {
+  const found: Declared[] = [];
+  let order = 0;
+  for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/gu)) {
+    const selectors = (rule[1] ?? "").split(",").map((part) => part.trim());
+    const properties = (rule[2] ?? "").split(";").map((part) => part.split(":")[0]?.trim() ?? "");
+    for (const selector of selectors)
+      for (const property of properties)
+        if (property !== "") found.push({ selector, property, order: order++ });
+  }
+  return found;
+}
+
+/**
+ * The text-style declarations of a square or tile selector that the sheet's `.ym-w button` reset
+ * overrides: the reset sets `font` and `color`, so a rule that sets them for a button has to
+ * outrank it (or tie and come later), or it silently loses (A3-P-3, A3-P2-2).
+ */
+function outranked(css: string): string[] {
+  const all = declarations(css);
+  const reset = all.find((d) => d.selector === ".ym-w button" && d.property === "color");
+  if (reset === undefined) throw new Error("the button reset is gone");
+  const floor = specificity(reset.selector);
+  return all
+    .filter(
+      (d) =>
+        /\.ym-w-(?:sq|tile)\b/u.test(d.selector) &&
+        /^(?:color|font|font-[a-z]+)$/u.test(d.property) &&
+        (specificity(d.selector) < floor ||
+          (specificity(d.selector) === floor && d.order < reset.order)),
+    )
+    .map((d) => `${d.selector} { ${d.property} }`);
+}
+
+describe("the stylesheet's specificity", () => {
+  it("lets every colour and font rule of a square or tile beat the button reset", () => {
+    expect(outranked(STYLE_TEXT)).toEqual([]);
+  });
+
+  it("notices a rule the reset would override", () => {
+    const css = `.ym-w button { font: inherit; color: inherit; }
+      .ym-w-tile { color: red; }
+      .ym-w-sq { font-size: 9px; }
+      .ym-w .ym-w-tile { color: white; }`;
+    expect(outranked(css)).toEqual([".ym-w-tile { color }", ".ym-w-sq { font-size }"]);
+  });
+
+  it("counts attributes and pseudo-classes as classes, and ignores a pseudo-element's weight", () => {
+    expect(specificity(".ym-w button")).toBe(101);
+    expect(specificity('.ym-w-sq[data-premium="DL"]')).toBe(200);
+    expect(specificity(".ym-w .ym-w-tile::after")).toBe(201);
+    expect(specificity(".ym-w .ym-w-sq:focus-visible")).toBe(300);
+  });
 });

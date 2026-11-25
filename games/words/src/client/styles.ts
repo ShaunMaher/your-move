@@ -7,7 +7,9 @@
  * The look is original (07 §5): cool neutral cells, letter premiums in green and word premiums in
  * violet, flat rounded navy tiles. Colour is never the only signal: a premium square carries its
  * label (2L 3L 2W 3W), letter squares an inset border and word squares diagonal stripes, the
- * start square a diamond, a tile its letter and points, the last play a notch.
+ * start square a diamond, a tile its letter and points, the last play a notch. A premium label
+ * sits on a solid chip of the square's base colour, never on the stripes (the stripes show around
+ * it), so the label's contrast is the chip's.
  */
 
 /** Every colour of the board. `styles.test.ts` checks the contrast of each pair in `PAIRS`. */
@@ -18,7 +20,8 @@ export const TOKENS = {
   cell: "#dfe6ee",
   muted: "#465163",
   accent: "#92400e",
-  last: "#7a5200",
+  ring: "#ffd98a",
+  notch: "#f4b942",
   bad: "#a31d1d",
   ok: "#1c6b3a",
   tile: "#243b55",
@@ -66,7 +69,15 @@ export const PAIRS: readonly Pair[] = [
   { what: "focus ring on the page", fg: "accent", bg: "paper", kind: "non-text" },
   { what: "focus and placed ring on a square", fg: "accent", bg: "cell", kind: "non-text" },
   { what: "focus ring on the rack", fg: "accent", bg: "line", kind: "non-text" },
-  { what: "last play notch on a square", fg: "last", bg: "cell", kind: "non-text" },
+  { what: "placed ring on a navy tile", fg: "ring", bg: "tile", kind: "non-text" },
+  { what: "last play notch on a navy tile", fg: "notch", bg: "tile", kind: "non-text" },
+  {
+    what: "placed ring and notch on a blank tile",
+    fg: "accent",
+    bg: "blank-tile",
+    kind: "non-text",
+  },
+  { what: "focus ring on a navy tile (inner band)", fg: "ring", bg: "tile", kind: "non-text" },
   { what: "tile against an empty square", fg: "tile", bg: "cell", kind: "non-text" },
   { what: "tile against the rack", fg: "tile", bg: "line", kind: "non-text" },
   {
@@ -117,7 +128,12 @@ const CSS = `
 .ym-w-sq[data-premium="TW"] { color: var(--w-tw-ink); background-color: var(--w-tw-bg);
   background-image: repeating-linear-gradient(45deg, transparent 0 3px, var(--w-tw-stripe) 3px 4px); }
 .ym-w-sq[data-target="true"] { outline: 2px dashed var(--w-accent); outline-offset: -2px; }
-.ym-w-face { display: flex; flex-direction: column; align-items: center; }
+.ym-w-face { display: flex; flex-direction: column; align-items: center; padding: 0.15em 0.3em;
+  border-radius: 3px; }
+.ym-w-sq[data-premium="DL"] .ym-w-face { background: var(--w-dl-bg); }
+.ym-w-sq[data-premium="DW"] .ym-w-face { background: var(--w-dw-bg); }
+.ym-w-sq[data-premium="TW"] .ym-w-face { background: var(--w-tw-bg); }
+.ym-w-sq[data-premium="TL"] .ym-w-face { background: var(--w-tl-bg); }
 .ym-w-start { display: block; width: 0.5em; height: 0.5em; margin: 0.2em 0 0.25em; background: currentColor;
   transform: rotate(45deg); }
 .ym-w-start + span { font-size: 0.85em; }
@@ -128,9 +144,16 @@ const CSS = `
 .ym-w .ym-w-tile small { position: absolute; right: 2px; bottom: 1px; font-size: 0.5em; font-weight: 600; }
 .ym-w .ym-w-tile[data-blank="true"] { background: var(--w-blank-tile); color: var(--w-blank-ink);
   box-shadow: inset 0 0 0 2px var(--w-blank-ink); font-style: italic; }
-.ym-w .ym-w-tile[data-state="placed"] { outline: 3px solid var(--w-accent); outline-offset: -3px; }
+.ym-w .ym-w-tile[data-state="placed"] { outline: 3px solid var(--w-ring); outline-offset: -3px; }
+.ym-w .ym-w-tile[data-state="placed"][data-blank="true"] { outline-color: var(--w-accent); }
 .ym-w .ym-w-tile[data-state="last"]::after { content: ""; position: absolute; top: 0; left: 0;
-  border: 0.45em solid var(--w-last); border-right-color: transparent; border-bottom-color: transparent; }
+  border: 0.45em solid var(--w-notch); border-right-color: transparent; border-bottom-color: transparent; }
+.ym-w .ym-w-tile[data-state="last"][data-blank="true"]::after { border-top-color: var(--w-accent);
+  border-left-color: var(--w-accent); }
+.ym-w .ym-w-sq:focus-visible { outline: 2px solid var(--w-accent); outline-offset: -2px;
+  box-shadow: inset 0 0 0 4px var(--w-ring); }
+.ym-w .ym-w-sq:focus-visible .ym-w-tile { box-shadow: inset 0 0 0 4px var(--w-ring); }
+.ym-w .ym-w-sq:focus-visible .ym-w-tile[data-blank="true"] { box-shadow: inset 0 0 0 4px var(--w-accent); }
 .ym-w .ym-w-tile[data-selected="true"] { outline: 3px solid var(--w-accent); outline-offset: 1px; overflow: visible; }
 .ym-w-toolbar { display: flex; gap: 0.25rem; justify-content: flex-end; align-items: center; }
 .ym-w-toolbar span { margin-inline-end: auto; }
