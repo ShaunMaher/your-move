@@ -279,24 +279,28 @@ filesystems are unsupported for the database anyway).
   `active` game whose `to_act_since` is at least 24 h old ("idle": in `toAct` that long without
   acting) and whose `last_nudged_at` is unset or at least 24 h old, if its user is a human with
   `settings.emailNudges` true, onboarded, not suspended or being deleted, whose `email_id` is set
-  and not in `email_suppressions`. Only games of an installed game type and rules version are
-  looked at, in SQL, so orphaned games never take a place in the queue. Each nudge is first
-  counted against the instance-wide daily cap `LIMIT_NUDGE_EMAILS_PER_DAY` (08 §4): at the cap
-  the run stops without claiming the rest (they wait for a later run) and the crossing is
-  alerted once. Then `last_nudged_at` is claimed with one conditional update that re-checks
-  everything above — the seat, the game being `active` and the user's eligibility — **before**
-  the email is sent (so two sweeps can't both send, an unsubscribe or a move in between stops it,
-  and a failed send isn't retried that day). It is a notification throttle, not game state: it is
+  and has no `bounced` or `complained` row in `email_suppressions`. An `unsubscribed` row doesn't
+  stop nudges: only the invites unsubscribe and the under-age exit write one, and nudges have
+  their own opt-out (the setting, and `email_id`, which a `nudges` unsubscribe clears). Only games
+  of an installed game type and rules version are looked at, in SQL, so orphaned games never take
+  a place in the queue; the least recently nudged seats come first, then the longest waiting.
+  Two daily caps apply (08 §4): instance-wide `LIMIT_NUDGE_EMAILS_PER_DAY` and per recipient
+  `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`. The run reads the room left under each without counting;
+  a nudge over either waits unclaimed for a later run (at the instance-wide cap the run stops),
+  only claimed nudges are counted, and the instance-wide cap is alerted once per fixed window,
+  through a counter of its own. Then `last_nudged_at` is claimed with one conditional update that
+  re-checks everything above — the seat, the game being `active` and the user's eligibility —
+  **before** the email is sent (so two sweeps can't both send, an unsubscribe or a move in
+  between stops it, and a failed send isn't retried that day). It is a notification throttle, not game state: it is
   not a transition (§5.2) and doesn't bump `version`. The email is a fixed template: the game
-  type's name, the other seated players' display names ("Seat n" for a seat without one, as the
-  game screens show it), the last public `describe` text (names filled in, "You" for the
+  type's name, the other seated players' display names ("New player" for a name that isn't set,
+  "Deleted player" for a deleted account, 02 §5, 04), the last public `describe` text (names filled in, "You" for the
   recipient), a link to the game, and the unsubscribe link and headers (05 §Email links) — never
   state, options, totals or standings (a move's points only as its `describe` text gives them),
   nor addresses (08 T18). A run sends at most a per-runtime number of nudges, bounded by what one
-  invocation may spend (100 on Node; 10 on Workers, 09 §3); the rest wait for the next run.
-  Turning nudges on in a signed-in session removes an `unsubscribed` suppression of the address
-  (that explicit consent outranks an earlier link click); `bounced` and `complained` rows stay
-  and keep suppressing (surfacing them in Settings is M4's, with bounce handling).
+  invocation may spend (100 on Node; 4 on Workers, 09 §3); the rest wait for the next run.
+  Turning nudges on changes no suppression; a `bounced` or `complained` row keeps stopping them
+  (surfacing that in Settings is M4's, with bounce handling).
 
 ## 8. Scheduled work
 

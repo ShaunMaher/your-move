@@ -273,8 +273,8 @@ tests are green in CI.
   to users with nudges on, 06 §6.2).
 - With bounce/complaint handling (09 §2): Settings tells a user with email nudges on when their
   address is suppressed as `bounced` or `complained`, so the toggle isn't silently ineffective.
-  The alpha writes no such rows; turning nudges on lifts only an `unsubscribed` row (alpha A6
-  review P-3, 2026-11-25).
+  The alpha writes no such rows, and an `unsubscribed` row doesn't stop nudges (alpha A6 review
+  P-3 and S2-1, 2026-11-25).
 - Install guide banner, update toast, dark mode, accessibility pass.
 - Docker deployment: `apps/node/docker-compose.tunnel.yml` (the proof-of-concept deployment behind a
   Cloudflare Tunnel, Q6) and `docker-compose.caddy.yml`, with the two-network layout and `*_FILE`
@@ -415,4 +415,4 @@ configuration generated from CI variables; no `pnpm install` in the job; `games:
 D1 first, as a self-contained bundle built in stage 3 and carried in the artifact. The D1- and
 Workers-specific commands `pnpm cf:migrate` and `pnpm cf:deploy` arrive with it. It also
 re-measures what one Cron Trigger invocation of the sweep spends (subrequests, D1 queries, CPU)
-and sets the Worker's nudges-per-run cap from that (10 until then; 09 §3, alpha A6 review P-4).
+and sets the Worker's nudges-per-run cap from that (4 until then; 09 §3, alpha A6 review P-4).

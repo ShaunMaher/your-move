@@ -185,7 +185,10 @@ Tracks invitation emails (for rate limiting, expiry and abuse handling). Stores 
 | expires_at | INTEGER | = lobby expiry: 14 days from the game's `created_at` (02 §4) |
 
 ### `email_suppressions`
-Addresses that asked never to receive invite/nudge emails, or that hard-bounced.
+Addresses that must not get our non-OTP emails. `unsubscribed` (the invites unsubscribe, 05
+§Email links, and the under-age exit) stops invite emails only: email nudges have their own
+opt-out, the setting and `users.email_id` (03 §7). `bounced` and `complained` stop every non-OTP
+email, nudges included.
 
 | Column | Type | Notes |
 |---|---|---|

@@ -76,10 +76,11 @@ curl http://127.0.0.1:8080/api/health
 
 The server also runs the scheduled sweep itself, every 15 minutes (03 §8). For now its only job is
 the "It's your turn" email nudges: off by default, each person turns them on in Settings, and every
-nudge carries a one-click unsubscribe link (05 §Email links). It sends at most 100 per run and 200
-a day across the instance (`LIMIT_NUDGE_EMAILS_PER_DAY`, so nudges can't use up the sender's
-daily quota that sign-in codes need); at the cap it stops with a `NUDGE_EMAILS_PER_DAY` alert in
-the log and the rest wait.
+nudge carries a one-click unsubscribe link (05 §Email links). It sends at most 100 per run, 200 a
+day across the instance (`LIMIT_NUDGE_EMAILS_PER_DAY`, so nudges can't use up the sender's daily
+quota that sign-in codes need) and 10 a day to any one person
+(`LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`); at the instance cap it stops with one
+`NUDGE_EMAILS_PER_DAY` alert in the log per day and the rest wait.
 
 The Cloudflare Tunnel compose file is below; the Caddy one arrives in M4 (09 §4).
 
@@ -290,7 +291,7 @@ deploy with `wrangler d1 migrations apply DB --remote --config apps/worker/wrang
 check for orphaned games with `pnpm games:check-db --d1 <database>`. The example configuration's
 Cron Trigger (`*/15 * * * *`) runs the sweep (03 §8); keep it in your copy, or no email nudges go
 out. One invocation has a small budget of subrequests and D1 queries, so the Worker sends at most
-10 nudges per run (09 §3); a run with a failed step or nudge shows as a failed invocation in the
+4 nudges per run (09 §3, which has the arithmetic against the per-invocation D1 query limit); a run with a failed step or nudge shows as a failed invocation in the
 trigger's history. Check that Workers Logs and Logpush don't keep the query string of
 `/api/v1/email/unsubscribe` (09 §5).
 

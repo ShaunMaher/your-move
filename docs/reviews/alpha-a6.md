@@ -33,3 +33,19 @@ changes are folded into v0.9.21 (the README history line).
 | A6-S-4 | Fixed (owner decision). `users.email_id` is cleared whenever nudges turn off, in Settings or by an unsubscribe; 04 says it is set exactly while they are on. Tests. | `db/auth-repos.ts`, 04 |
 | A6-S-5 | Fixed (spec, owner decision). 09 §5 and `docs/deploy.md` keep the unsubscribe query string out of edge logs. | 09 §5, `docs/deploy.md` |
 | A6-S-6 | Fixed (spec, owner decision). 08 §4 records the unrated unsubscribe POST as a deliberate T13 exception, with the reasoning. | 08 §4, 05 §Email links |
+
+## Round 2
+
+Round 2 verified every round 1 resolution. Its new findings, with the owner's decisions:
+
+| ID | Outcome | Where |
+|---|---|---|
+| A6-S2-1 / A6-P2-1 | Fixed (owner decision, reversing A6-P-3). Turning nudges on deletes no suppression. Nudge eligibility, in `due` and in the claim, is stopped only by `bounced` and `complained` rows; an `unsubscribed` row is about invite emails, and nudges have their own opt-out. The M4 note on showing a suppression in Settings stays, since bounces and complaints still stop nudges silently. Tests on both drivers and end to end. | `db/auth-repos.ts`, `db/nudge-repos.ts`, 03 §7, 04 `email_suppressions`, 10 M4, Q27 |
+| A6-P2-2 | Fixed (owner decision). The room left is read without counting, only claimed nudges are counted, and the alert is raised once per fixed window through a counter of its own. Test: a day of 15-minute runs under saturation across midnight sends the cap plus at most one, counts exactly what it sent, and alerts once in each window. | `auth/limits.ts`, `sweep/nudges.ts`, `apps/node/src/nudges.test.ts` |
+| A6-S2-2 | Fixed (owner decision). `due` lists the least recently nudged first, then the longest waiting; a per-recipient daily cap `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY` (default 10) is read and counted the same way, with no alert. 08 §4, 09 §1, Q27. Tests for the order (both drivers) and the cap. | `db/nudge-repos.ts`, `sweep/nudges.ts`, 08 §4, 09 §1 |
+| A6-P2-3 | Fixed (owner decision). A deleted account's seat is "Deleted player" and an unset name "New player", as 02 §5 and 04 say; every seated row gets one of these, so "Seat n" isn't used. 03 §7 agrees. The web app is unchanged (the owner files its divergence separately). Test. | `sweep/nudges.ts`, 03 §7 |
+| A6-P2-4 | Fixed, with one deviation. 09 §3 states the per-statement arithmetic: at most 5 statements per run and 10 per nudge, counting each statement of a batch as a query. At the requested 5 nudges a run comes to 55, over the Free plan's per-invocation limit of 50 (check the current Cloudflare limits), so the Worker sends 4 per run (45). | `apps/worker/src/index.ts`, 09 §3, `docs/deploy.md`, 10 |
+| A6-P2-5 | Fixed. The SDK changeset is a `patch`. | `.changeset/sdk-format-text-main-entry.md` |
+| A6-P2-6 | Fixed. The Cron Trigger's outcome lives in `runScheduled`, unit-tested: a clean or capped run ends cleanly; a failed step, a failed nudge or a Worker that couldn't be built fails the invocation and calls `noRetry`. | `apps/worker/src/scheduled.ts`, `scheduled.test.ts` |
+| A6-P2-7 | Fixed. A capped run reports and logs no `due` count. | `sweep/nudges.ts`, `sweep/sweep.ts` |
+| A6-P2-8 | Fixed. 05's `PATCH /api/v1/me` row lists the `400`. | 05 §Auth & account |
