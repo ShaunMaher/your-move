@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { GameEnvelope, GameError, SubmitResult } from "@your-move/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -15,6 +15,7 @@ const [SR, SC] = CLASSIC.start;
 const NAMES = ["Ann", "Bo"];
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   vi.restoreAllMocks();
   localStorage.clear();
@@ -359,6 +360,16 @@ describe("the blank", () => {
   });
 });
 
+const PREVIEW_MS = 250;
+const SERVER_MS = 600;
+
+/** Moves fake time on and lets the promises it settles run. */
+async function advance(ms: number): Promise<void> {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+
 describe("the live preview", () => {
   it("shows the local score at once, then the shell's answer", async () => {
     const { preview } = setup();
@@ -419,15 +430,57 @@ describe("the live preview", () => {
     expect(button("Play").hasAttribute("disabled")).toBe(true);
   });
 
-  it("asks once for the same tiles, and again when the answer was only a shrug", async () => {
+  it("asks once for the same tiles, even when they are taken back and put down again", async () => {
+    vi.useFakeTimers();
     const { preview } = setup();
     place("S, 1 point", SR, SC + 2);
-    await screen.findByText("All words are in the word list.");
+    await advance(PREVIEW_MS);
+    expect(preview).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("All words are in the word list.")).toBeTruthy();
     fireEvent.click(button("Recall"));
     place("S, 1 point", SR, SC + 2);
     expect(screen.getByText("All words are in the word list.")).toBeTruthy();
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    await advance(5000);
     expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits the whole debounce (249 ms: nothing, 250 ms: one question)", async () => {
+    vi.useFakeTimers();
+    const { preview } = setup();
+    place("S, 1 point", SR, SC + 2);
+    await advance(PREVIEW_MS - 1);
+    expect(preview).not.toHaveBeenCalled();
+    await advance(1);
+    expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts the wait again when the tiles change", async () => {
+    vi.useFakeTimers();
+    const { preview } = setup();
+    place("S, 1 point", SR, SC + 2);
+    await advance(PREVIEW_MS - 1);
+    place("E, 1 point", SR, SC + 3);
+    await advance(PREVIEW_MS - 1);
+    expect(preview).not.toHaveBeenCalled();
+    await advance(1);
+    expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("doesn't show a valid answer cached for an earlier version once the shell now refuses", async () => {
+    vi.useFakeTimers();
+    const { preview, rerenderAt } = setup();
+    place("S, 1 point", SR, SC + 2);
+    await advance(PREVIEW_MS);
+    expect(screen.getByText("All words are in the word list.")).toBeTruthy();
+    preview.mockImplementation(() =>
+      Promise.resolve({ code: "INVALID_WORDS", detail: { words: ["cats"] } } as GameError),
+    );
+    rerenderAt(4);
+    // At once the old answer is gone and Play waits for the new one.
+    expect(screen.queryByText("All words are in the word list.")).toBeNull();
+    await advance(PREVIEW_MS);
+    expect(screen.getByText("Not in the word list: CATS.")).toBeTruthy();
+    expect(button("Play").hasAttribute("disabled")).toBe(true);
   });
 
   it("retries a check that couldn't be made when the tiles come back", async () => {
@@ -446,19 +499,16 @@ describe("the live preview", () => {
     expect(preview).toHaveBeenCalledTimes(2);
   });
 
-  it("waits longer before asking the server about a list only the server holds", async () => {
+  it("waits longer before asking the server about a list only the server holds (599 ms, 600 ms)", async () => {
+    vi.useFakeTimers();
     const { preview } = setup(fresh(), {
       resources: [{ kind: "dictionary", id: "x", name: "X", distribution: "serverOnly" }],
     });
     place("S, 1 point", SR, SC + 2);
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await advance(SERVER_MS - 1);
     expect(preview).not.toHaveBeenCalled();
-    await vi.waitFor(
-      () => {
-        expect(preview).toHaveBeenCalledTimes(1);
-      },
-      { timeout: 1500 },
-    );
+    await advance(1);
+    expect(preview).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the score alone when the shell can't answer, and still allows the play", async () => {
@@ -475,10 +525,11 @@ describe("the live preview", () => {
   });
 
   it("only previews what is still on the board", async () => {
+    vi.useFakeTimers();
     const { preview } = setup();
     place("S, 1 point", SR, SC + 2);
     fireEvent.click(button("Recall"));
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    await advance(5000);
     expect(preview).not.toHaveBeenCalled();
     expect(screen.getByText("Your turn. Place tiles to make a word.")).toBeTruthy();
   });
