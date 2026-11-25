@@ -19,11 +19,11 @@ describe("runScheduled", () => {
     expect(control.noRetry).not.toHaveBeenCalled();
   });
 
-  it("ends cleanly when the daily cap stopped the run", async () => {
+  it("ends cleanly, without touching retries, when the daily cap stopped the run", async () => {
     const capped: SweepReport = { nudges: { sent: 0, failed: 0, skipped: 0, capped: true } };
-    await expect(
-      runScheduled(controller(), () => Promise.resolve(capped)),
-    ).resolves.toBeUndefined();
+    const control = controller();
+    await expect(runScheduled(control, () => Promise.resolve(capped))).resolves.toBeUndefined();
+    expect(control.noRetry).not.toHaveBeenCalled();
   });
 
   it.each<[string, SweepReport | null]>([

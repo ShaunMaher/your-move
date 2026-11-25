@@ -139,7 +139,8 @@ export function alertOnCrossing(
 
 /**
  * Logs an instance-wide limit's alert (08 §4) at most once per fixed window of that limit: a
- * counter of its own (`<NAME>:alerted` in `rate_limits`) is raised, and only the call that makes
+ * counter of its own (`alert:<NAME>` in `rate_limits`, a key `checkLimits`, whose keys start with
+ * a limit's name, can't produce) is raised, and only the call that makes
  * it 1 logs. For callers that read a limit without counting over it, so the crossing itself is
  * never counted (the nudge sweep, 03 §7).
  */
@@ -152,7 +153,7 @@ export async function alertOncePerWindow(
   const { windowMs } = LIMITS[name];
   const windowStart = Math.floor(now / windowMs) * windowMs;
   const [count] = await repos.rateLimits.hit([
-    { key: `${name}:alerted`, windowStart, previousWindowStart: windowStart - windowMs, amount: 1 },
+    { key: `alert:${name}`, windowStart, previousWindowStart: windowStart - windowMs, amount: 1 },
   ]);
   if (count?.current === 1) log.error("instance-wide limit exceeded", { alert: name });
 }
