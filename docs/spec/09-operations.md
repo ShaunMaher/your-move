@@ -128,8 +128,9 @@ that work on both runtimes, plus SMTP for Node only.
      for it; set up a regular purge of its *Sent* folder (or a retention rule if the edition
      supports one). Purged messages stay in Trash for 30 days, and any Vault hold keeps them longer;
      the privacy page's retention statement must allow for both (08 §5).
-  2. In a Google Cloud project, enable the Gmail API and create an OAuth client with user type
-     **Internal** and the single scope `gmail.send`.
+  2. In a Google Cloud project, enable the Gmail API, set the consent screen's user type to
+     **Internal** with the single scope `gmail.send`, and create an OAuth client of type **Desktop
+     app** (the only type that accepts a loopback redirect on a random port).
   3. Sign in as the sender user once with the `pnpm gmail:authorize` helper to obtain the refresh
      token. The helper:
      - runs the OAuth authorization-code flow with **PKCE** and a random `state`, on a loopback
@@ -139,16 +140,29 @@ that work on both runtimes, plus SMTP for Node only.
      - refuses the result unless the `id_token`'s verified `email` equals `GMAIL_SENDER` and the
        granted scope set is exactly the requested one (so authorising while signed in as the
        wrong account, e.g. an admin, fails instead of sending from their mailbox);
-     - reads the client id and secret from the environment or a file, never from argv;
-     - writes the refresh token to a new file with mode `0600` (or prints it once to stdout).
+     - reads the client id and secret from the environment or a file (`GMAIL_CLIENT_ID_FILE`,
+       `GMAIL_CLIENT_SECRET_FILE`), never from argv;
+     - writes the refresh token to a new file with mode `0600` outside the repository, and never
+       prints it; on any refusal it revokes the token it was just given and writes nothing.
 
-     At startup the server re-checks the token's granted scope and refuses to start if it is
-     anything other than `gmail.send` (plus `openid`/`email`).
+     The server re-checks the token on **every refresh** (so on Workers too, which have no startup
+     step): a granted scope other than `gmail.send` (plus `openid`/`email`), or an `id_token`
+     naming an address other than `GMAIL_SENDER`, refuses to send and logs an error-level alert
+     (`email_token_scope`, `email_token_account`). On Node it also refreshes once at startup
+     and, for those two refusals, refuses to start; Google being unreachable or having revoked the
+     token does not stop the server starting (it logs `email_token_failed` or
+     `email_credentials_rejected`, and then the same on every message).
   4. Store `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` and `GMAIL_SENDER` as
      Worker secrets or Docker secrets (`*_FILE`). To revoke, remove the app's access from the sender
      user's Google account and repeat step 3.
 - The generic `smtp` provider (Node only) stays available for operators with their own SMTP relay.
-- **Providers not built yet.** Until a provider's implementation lands (`gmail` in M4; `smtp` once
+- **Failures and alerts.** A message that can't be sent rejects, and the background task that
+  sent it logs nothing more: the sender has already logged one error-level entry with a fixed
+  `alert` (`email_send_failed` with the HTTP `status` where there is one, `email_token_failed`,
+  `email_credentials_rejected`) and the provider, never an address, a message, a token or
+  Google's response text. A `401` from Gmail refreshes the token once and retries once; nothing
+  else is retried (the person asks for a new code, 06 §3).
+- **Providers not built yet.** Until a provider's implementation lands (`smtp` once
   Q26 is decided, 10 M2; `resend`, `postmark`, `ses` and `cloudflare` when scheduled), a configuration naming it still
   starts, logs an error-level `email_provider_unavailable` alert at startup and on every message, and sends
   nothing; the API keeps its normal responses. Only `console` (local-dev) sends in M2.

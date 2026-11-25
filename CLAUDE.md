@@ -68,6 +68,7 @@ Toolchain: `mise install` (Node, pnpm and the scanners pinned in `mise.toml` and
 - Games: `pnpm games:generate` (also runs on `prepare`) · `pnpm games:verify` (`--fast` in builds; never in deploy jobs) ·
   `pnpm games:check-inputs` (after the builds; `--only web,node` in the Docker build) ·
   `pnpm games:check-db` (deploy; reads only `generated/installed.json`)
+- Email: `pnpm gmail:authorize --out <file>` (the one-time Gmail refresh token, docs/deploy.md)
 - API: `pnpm api:generate` (OpenAPI document + `@your-move/api-client`) · `pnpm api:surface`
   (the SDK's API Extractor reports)
 - Releases: `pnpm changeset` · `pnpm renovate:sync` (game-package rule in `renovate.json`)
@@ -75,7 +76,7 @@ Toolchain: `mise install` (Node, pnpm and the scanners pinned in `mise.toml` and
   deployment ships)
 - Not built yet, with the milestone that adds them: `pnpm cf:migrate` and `pnpm cf:deploy` (both
   D1/Workers-specific: the first Workers deployment, 10) · `pnpm gen:vapid` (M4) ·
-  `pnpm gmail:authorize` (M4) · `pnpm admin:*` (Admin API client, 09 §1.2; M3)
+  `pnpm admin:*` (Admin API client, 09 §1.2; M3)
 
 Commits follow Conventional Commits (11 §7); published packages need a changeset.
 
