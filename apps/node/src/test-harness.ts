@@ -15,6 +15,7 @@ import {
   createJsonLogger,
   type Env,
   type InstalledGame,
+  NO_DICTIONARIES,
   parseConfig,
   type Platform,
   type RandomFactory,
@@ -27,7 +28,7 @@ import { nodeDictionaries } from "./dictionaries.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
-/** The dictionary package's served layout, built by `pnpm build`. */
+/** The dictionary package's served layout (built by `pnpm build`, or the tests' global setup). */
 const DICTIONARIES = fileURLToPath(
   new URL("../../../packages/dictionary/generated/served", import.meta.url),
 );
@@ -146,7 +147,8 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     nodeConfig: { trustProxy: "xff", trustProxyHops: 1, trustProxyPeers: ["127.0.0.0/8"] },
     log,
     now,
-    dictionaries: nodeDictionaries(DICTIONARIES),
+    // Without games nothing reads a word list, so the tests of sign-in need no dictionary build.
+    dictionaries: games.length === 0 ? NO_DICTIONARIES : nodeDictionaries(DICTIONARIES),
     smtp: capture,
   });
   const app = createApp({

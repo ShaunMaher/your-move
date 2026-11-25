@@ -11,6 +11,7 @@
   "include": [
     "src",
     "scripts",
+    "vitest.config.ts",
     "../../generated/server-registry.ts",
     "../../generated/installed.json"
   ],
