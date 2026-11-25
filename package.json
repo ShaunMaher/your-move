@@ -32,6 +32,7 @@
     "games:check-db": "tsx scripts/src/bin/games-check-db.ts",
     "db:check": "tsx scripts/src/bin/db-check.ts",
     "api:generate": "tsx scripts/src/bin/api-generate.ts",
+    "web:icons": "tsx scripts/src/bin/web-icons.ts",
     "renovate:sync": "tsx scripts/src/bin/renovate-sync.ts",
     "gates:prove": "tsx scripts/src/bin/gates-prove.ts",
     "sbom:app": "pnpm --filter . --filter @your-move/web --filter @your-move/node sbom --prod --sbom-format cyclonedx --sbom-type application --out sbom/node.cdx.json && pnpm --filter . --filter @your-move/web --filter @your-move/worker sbom --prod --sbom-format cyclonedx --sbom-type application --out sbom/worker.cdx.json",
