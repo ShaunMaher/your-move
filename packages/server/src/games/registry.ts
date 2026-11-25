@@ -12,6 +12,8 @@ import type {
   ResourceCatalog,
 } from "@your-move/sdk";
 
+import { guardEngine } from "./engine-fault.js";
+
 /** One installed game package, as the generated server registry lists it (02 §7.3). */
 export interface InstalledGame {
   readonly manifest: GameManifest;
@@ -107,11 +109,14 @@ export function createGameRegistry(
         );
       }
     }
-    const byVersion = new Map(definitions.map((definition) => [definition.version, definition]));
+    // Module calls behind the fault boundary: an exception is logged without its message (S-5).
+    const byVersion = new Map(
+      definitions.map((definition) => [definition.version, guardEngine(definition)]),
+    );
     types.set(type, {
       type,
       manifest: game.manifest,
-      latest,
+      latest: byVersion.get(latest.version) ?? latest,
       config,
       enabled: options.enabledGames.includes(type),
       engine: (version) => byVersion.get(version),

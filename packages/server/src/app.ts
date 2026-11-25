@@ -8,6 +8,7 @@ import { registerAuthRoutes } from "./auth/routes.js";
 import { readSessionCookie } from "./auth/session.js";
 import { isLocalDev } from "./config/local-dev.js";
 import { deriveSubkeys, type Subkeys } from "./crypto/subkeys.js";
+import { EngineFault } from "./games/engine-fault.js";
 import { createGameRegistry, type InstalledGame } from "./games/registry.js";
 import { createResourceProvider } from "./games/resources.js";
 import { registerGameRoutes } from "./games/routes.js";
@@ -72,14 +73,31 @@ function stackFrames(error: Error): string {
     .join("\n");
 }
 
+/** A class name as code spells it, or nothing. */
+function safeName(name: string): string | undefined {
+  return /^[A-Za-z_$][\w$]{0,63}$/u.test(name) ? name : undefined;
+}
+
 /**
  * What a server fault's log entry may say (09 §5). Errors that wrap another — a database driver's
  * query error carries the SQL and its parameters (addresses, token hashes) in its message — and
  * parse errors, whose message quotes the parsed text, are logged by class, stack frames and the
- * cause's class or code only. Other errors keep their message.
+ * cause's class or code only; a game module's exception ({@link EngineFault}) by the game type, the
+ * member called, and the original's class and stack frames. Other errors keep their message.
  */
 function faultFields(error: Error): Record<string, string | undefined> {
   const cause: unknown = error.cause;
+  if (error instanceof EngineFault) {
+    // A module's exception may quote hidden state: its class and frames only (A2 review S-5).
+    return {
+      errorClass: error.name,
+      gameType: error.gameType,
+      member: error.member,
+      ...(cause instanceof Error
+        ? { causeClass: safeName(cause.constructor.name), stack: stackFrames(cause) }
+        : { causeClass: typeof cause }),
+    };
+  }
   if (cause !== undefined || error instanceof SyntaxError) {
     const causeCode =
       typeof cause === "object" && cause !== null && "code" in cause ? cause.code : undefined;
