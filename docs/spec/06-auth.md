@@ -72,6 +72,14 @@ Attempt counting, consumption and rate limiting must be race-free under parallel
   new-accounts limit (08 §4), a challenge is still inserted (`emailed = 0`, so it can never be
   satisfied, §3.1), so a following wrong `/otp/verify` does the same attempt-counting work for known and
   unknown addresses.
+- A request that sends nothing (per-email limit, new-accounts limit) adds 1 to a separate,
+  never-read counter (`silent`) instead of the instance-wide email counters, and schedules a
+  background task that does nothing, so every path does the same work before the response. Adding
+  0 would write nothing, and not scheduling would skip a step; both made the silent paths
+  measurably quicker. Parity covers the work before the response. What happens afterwards on the
+  new-accounts-limited path (no email is sent where a known address would get one, and
+  the instance-wide cap isn't charged, because it counts sends and is judged on whether a send
+  would happen) differs by design (08 §4) and is an accepted risk (findings.md F-14).
 - `/otp/verify` computes an HMAC against a dummy key/value when no live challenge exists.
 - M2 includes a loose statistical timing test for both endpoints.
 

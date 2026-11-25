@@ -70,6 +70,8 @@ export interface Harness {
   advance(ms: number): void;
   setTime(ms: number): void;
   request(method: string, path: string, body?: unknown, options?: SendOptions): Promise<Response>;
+  /** How many background tasks (`waitUntil` calls) requests have scheduled so far. */
+  backgroundScheduled(): number;
   /** Captured emails, after all background work has finished. */
   emails(): Promise<readonly CapturedEmail[]>;
   /** The newest email to `to`, or undefined. */
@@ -128,6 +130,17 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
   });
   const app = createApp({ platform, games: [] });
   const background = createBackgroundTracker();
+  let scheduled = 0;
+  const countedContext = (): ReturnType<typeof background.context> => {
+    const context = background.context();
+    return {
+      ...context,
+      waitUntil(promise) {
+        scheduled++;
+        context.waitUntil(promise);
+      },
+    };
+  };
   const origin = config.publicUrl;
   const captured = (): readonly CapturedEmail[] => (platform.email.captured ?? capture.captured)();
 
@@ -147,7 +160,7 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
       path,
       { method, headers, ...(payload === undefined ? {} : { body: payload }) },
       { incoming: { socket: { remoteAddress: options.peer ?? "127.0.0.1" } } },
-      background.context(),
+      countedContext(),
     );
   };
 
@@ -167,6 +180,7 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
       clock = ms;
     },
     request,
+    backgroundScheduled: () => scheduled,
     emails,
     lastEmail,
     async requestCode(email, options) {

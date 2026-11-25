@@ -8,6 +8,13 @@ const ROOTS = globSync(["{apps,packages,games,tests}/*/package.json", "scripts/p
   .map((file) => dirname(file))
   .sort();
 
+/**
+ * The statistical timing suite (ADR 0006) is a measurement, not an ordinary test: `pnpm test` skips
+ * it and `pnpm test:timing` (which sets this variable) runs only it.
+ */
+const TIMING = process.env["YM_TIMING"] === "1";
+const TIMING_FILE = "src/auth-timing.test.ts";
+
 /** Every workspace package with tests. A package with its own vitest.config.ts uses it. */
 function projects(): (string | TestProjectInlineConfiguration)[] {
   return ROOTS.map((root) =>
@@ -15,7 +22,12 @@ function projects(): (string | TestProjectInlineConfiguration)[] {
       ? root
       : {
           extends: true,
-          test: { name: root, root, include: ["src/**/*.test.ts"] },
+          test: {
+            name: root,
+            root,
+            include: TIMING ? [TIMING_FILE] : ["src/**/*.test.ts"],
+            exclude: TIMING ? [] : ["**/node_modules/**", `**/${TIMING_FILE}`],
+          },
         },
   );
 }
