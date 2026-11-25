@@ -69,3 +69,44 @@ export async function signUp(page: Page, address: string, name: string): Promise
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Hi, ${name}`);
 }
+
+/** The one shape a cached word list is stored at (apps/web/src/word-lists.ts). */
+const WORD_LIST_PATH = /^\/assets\/dictionaries\/[A-Za-z0-9_-]+-v\d+\.[0-9a-f]{16}\.txt$/u;
+
+/** Starts recording the `/api/` responses the page gets from the service worker (there must be none). */
+export function watchWorkerResponses(page: Page): string[] {
+  const fromWorker: string[] = [];
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname.startsWith("/api/") && response.fromServiceWorker()) {
+      fromWorker.push(response.url());
+    }
+  });
+  return fromWorker;
+}
+
+/**
+ * Cache Storage holds the build's precache list in the worker's own cache and, in the word-list
+ * cache `dictionaries-v1`, only entries of the served word-list shape: nothing the app fetched
+ * from `/api/` or anywhere else (07 §4).
+ */
+export async function expectOnlyShellAndWordLists(
+  page: Page,
+  request: APIRequestContext,
+): Promise<void> {
+  const source = await (await request.get("/sw.js")).text();
+  const build = JSON.parse(/^const BUILD = (.*);$/mu.exec(source)?.[1] ?? "null") as {
+    precache: string[];
+  };
+  const caches = await page.evaluate(async () => {
+    const found: Record<string, string[]> = {};
+    for (const name of await caches.keys()) {
+      found[name] = (await (await caches.open(name)).keys())
+        .map((entry) => new URL(entry.url).pathname)
+        .sort();
+    }
+    return found;
+  });
+  const shell = Object.entries(caches).filter(([name]) => name !== "dictionaries-v1");
+  expect(shell.flatMap(([, paths]) => paths).sort()).toEqual([...build.precache].sort());
+  for (const path of caches["dictionaries-v1"] ?? []) expect(path).toMatch(WORD_LIST_PATH);
+}

@@ -7,9 +7,15 @@
  */
 import type { Page } from "@playwright/test";
 
-import { GAME_TEST_TIMEOUT_MS } from "./budgets.js";
+import { GAME_LOOP_BUDGET_MS, GAME_TEST_TIMEOUT_MS, RESIGN_TEST_TIMEOUT_MS } from "./budgets.js";
 import { expect, test } from "./fixtures.js";
-import { expectAccessible, freshAddress, signUp } from "./helpers.js";
+import {
+  expectAccessible,
+  expectOnlyShellAndWordLists,
+  freshAddress,
+  signUp,
+  watchWorkerResponses,
+} from "./helpers.js";
 import { loadWordList, takeTurn } from "./words-player.js";
 
 async function shot(page: Page, name: string): Promise<void> {
@@ -35,13 +41,24 @@ async function refocus(page: Page): Promise<void> {
 }
 
 /**
- * The words board labels a premium square "triple word" while its face reads "3W", which axe's
- * label-content-name-mismatch (WCAG 2.5.3) rejects. The board is the words package's (alpha A3),
- * not the shell's: reported to its owner (A4 handoff), and skipped here until it is fixed there.
+ * The words board draws the scores and whose turn it is (the shell adds neither while a board is
+ * on screen, 02 §3), so a page's turn is read off the board's score bar: the entry marked as to
+ * act is the viewer's when it says "(you)".
  */
-const BOARD_LABELS = ["label-content-name-mismatch"];
+const toAct = (page: Page) => page.locator('.ym-w-scores li[aria-current="true"]');
+async function isMyTurn(page: Page): Promise<boolean> {
+  return (await toAct(page).allTextContents()).some((text) => text.includes("(you)"));
+}
 
-const turn = (page: Page) => page.locator("p.turn");
+/** The viewer's and the opponent's scores, as the board's score bar shows them. */
+async function scoresOf(page: Page): Promise<number[]> {
+  const entries = await page
+    .getByRole("list", { name: "Scores" })
+    .getByRole("listitem")
+    .allTextContents();
+  return entries.map((entry) => Number(/(\d+)$/u.exec(entry.trim())?.[1] ?? Number.NaN));
+}
+
 const FAR = { timeout: 20_000 };
 
 /** Ann creates a words game and invites Bob by address; both are on the game's screen after. */
@@ -73,12 +90,18 @@ async function createAndAccept(ann: Page, bob: Page, bobAddress: string): Promis
 test("two people play a words game on phones and one resigns", async ({
   page: ann,
   friend: bob,
+  request,
 }) => {
   test.setTimeout(GAME_TEST_TIMEOUT_MS);
   const annAddress = freshAddress();
   const bobAddress = freshAddress();
+  const fromWorker = [ann, bob].map(watchWorkerResponses);
   await signUp(ann, annAddress, "Ann");
   await signUp(bob, bobAddress, "Bob");
+  // The worker must be in charge for the checks of what it did and cached to mean anything.
+  for (const page of [ann, bob]) {
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+  }
 
   // Home before any game, then the new-game flow with its screens checked one by one.
   await expect(ann.getByText("No games yet")).toBeVisible();
@@ -136,37 +159,45 @@ test("two people play a words game on phones and one resigns", async ({
     { page: bob, name: "Bob", plays: 0 },
   ];
   const whoseTurn = async () => {
-    for (const player of players) {
-      if ((await turn(player.page).textContent()) === "Your turn") return player;
-    }
+    for (const player of players) if (await isMyTurn(player.page)) return player;
     return undefined;
   };
   let first = true;
+  // Bounded by rounds and by time, so a stuck game fails an assertion below, not the test timeout.
+  const deadline = Date.now() + GAME_LOOP_BUDGET_MS;
   for (let round = 0; round < 40 && players.some((p) => p.plays < 2); round += 1) {
+    if (Date.now() > deadline) break;
     for (const player of players) await refocus(player.page);
     await expect.poll(async () => (await whoseTurn())?.name ?? "", FAR).not.toBe("");
     const mover = await whoseTurn();
     if (mover === undefined) throw new Error("nobody's turn");
     if (first) {
-      await expectAccessible(mover.page, BOARD_LABELS);
+      await expectAccessible(mover.page);
       await shot(mover.page, "game-in-progress");
       first = false;
     }
     if (await takeTurn(mover.page, words)) mover.plays += 1;
-    await expect(turn(mover.page)).toContainText("Waiting for", FAR);
+    await expect.poll(() => isMyTurn(mover.page), FAR).toBe(false);
   }
   expect(Math.min(...players.map((p) => p.plays))).toBeGreaterThanOrEqual(2);
+  // Both people scored, as both pages' score bars say.
+  for (const player of players) {
+    await refocus(player.page);
+    await expect
+      .poll(async () => (await scoresOf(player.page)).every((score) => score > 0), FAR)
+      .toBe(true);
+  }
 
   // The history drawer lists the moves the module's way, oldest first.
   await refocus(ann);
   await ann.getByRole("button", { name: "Menu" }).click();
-  await expectAccessible(ann, BOARD_LABELS);
+  await expectAccessible(ann);
   await shot(ann, "menu");
   await ann.getByRole("button", { name: "History" }).click();
   const moves = ann.getByRole("list", { name: "Moves, oldest first" });
   await expect(moves).toBeVisible();
   expect(await moves.getByRole("listitem").count()).toBeGreaterThanOrEqual(4);
-  await expectAccessible(ann, BOARD_LABELS);
+  await expectAccessible(ann);
   await shot(ann, "history");
   await ann.keyboard.press("Escape");
 
@@ -175,7 +206,7 @@ test("two people play a words game on phones and one resigns", async ({
   await bob.getByRole("button", { name: "Menu" }).click();
   await bob.getByRole("button", { name: "Resign…" }).click();
   await expect(bob.getByRole("dialog", { name: "Resign this game?" })).toBeVisible();
-  await expectAccessible(bob, BOARD_LABELS);
+  await expectAccessible(bob);
   await shot(bob, "resign-confirm");
   await bob.getByRole("button", { name: "Keep playing" }).click();
   await expect(bob.getByRole("dialog")).toHaveCount(0);
@@ -194,7 +225,7 @@ test("two people play a words game on phones and one resigns", async ({
     const rows = results.getByRole("listitem");
     await expect(rows.nth(0)).toContainText(first);
     await expect(rows.nth(1)).toContainText("resigned");
-    await expectAccessible(page, BOARD_LABELS);
+    await expectAccessible(page);
   }
   await shot(ann, "finished");
   await shot(bob, "finished-resigner");
@@ -204,6 +235,11 @@ test("two people play a words game on phones and one resigns", async ({
   await expect(ann.getByText(/^Finished \(1\)/u)).toBeVisible();
   await expect(ann.getByRole("region", { name: /Your turn|Waiting/u })).toHaveCount(0);
   await shot(ann, "home-finished");
+
+  // The worker answered no API request for either person, and Cache Storage holds the shell plus
+  // the word list the game downloaded, nothing else.
+  expect(fromWorker).toEqual([[], []]);
+  for (const page of [ann, bob]) await expectOnlyShellAndWordLists(page, request);
 
   // Signing out wipes the per-game state this device kept (06 §4).
   await ann.evaluate(() => {
@@ -216,7 +252,7 @@ test("two people play a words game on phones and one resigns", async ({
 });
 
 test("a game can be resigned straight after it starts", async ({ page: ann, friend: bob }) => {
-  test.setTimeout(GAME_TEST_TIMEOUT_MS);
+  test.setTimeout(RESIGN_TEST_TIMEOUT_MS);
   const bobAddress = freshAddress();
   await signUp(ann, freshAddress(), "Ann");
   await signUp(bob, bobAddress, "Bob");
