@@ -1,8 +1,18 @@
+/* Original look; every colour and size is a custom property so theming stays cheap (07 §5). */
 :root {
   color-scheme: light dark;
   --color-bg: #f7f7f5;
+  --color-surface: #ffffff;
   --color-fg: #1b1b1b;
+  --color-muted: #55585c;
+  --color-border: #c9ccd0;
+  --color-accent: #1f5f8b;
+  --color-accent-fg: #ffffff;
+  --color-danger: #a4262c;
+  --color-danger-bg: #fdecea;
   --space: 1rem;
+  --radius: 0.75rem;
+  --target: 2.75rem; /* 44 pt touch targets */
   font-family: system-ui, sans-serif;
   line-height: 1.5;
 }
@@ -10,7 +20,14 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --color-bg: #151515;
+    --color-surface: #1f2124;
     --color-fg: #ececec;
+    --color-muted: #b4b8bd;
+    --color-border: #43474c;
+    --color-accent: #8cc2e8;
+    --color-accent-fg: #0b1b27;
+    --color-danger: #ff9b95;
+    --color-danger-bg: #3a1f1e;
   }
 }
 
@@ -20,10 +37,234 @@ body {
   color: var(--color-fg);
 }
 
+/* The app is a centred portrait column, with room for the notch and home bar (07 §4). */
 .shell {
   max-width: 32rem;
+  min-height: 100dvh;
   margin: 0 auto;
   padding: calc(var(--space) + env(safe-area-inset-top))
     calc(var(--space) + env(safe-area-inset-right)) calc(var(--space) + env(safe-area-inset-bottom))
     calc(var(--space) + env(safe-area-inset-left));
+  box-sizing: border-box;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+  min-height: var(--target);
+  margin-bottom: var(--space);
+}
+
+.brand {
+  margin: 0;
+  font-weight: 700;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: 1.25;
+}
+
+h1 {
+  font-size: 1.75rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+}
+
+h3 {
+  font-size: 1.05rem;
+}
+
+p {
+  margin: 0;
+}
+
+a,
+.link {
+  color: var(--color-accent);
+}
+
+a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+}
+
+.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field label {
+  font-weight: 600;
+}
+
+.hint {
+  color: var(--color-muted);
+}
+
+/* 16 px or more keeps iOS from zooming the page when a field is focused. */
+input[type="text"],
+input[type="email"] {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--target);
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  font-size: 1rem;
+  color: inherit;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+.code-input {
+  font-size: 1.5rem;
+  letter-spacing: 0.2em;
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.button {
+  min-height: var(--target);
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--color-accent-fg);
+  background: var(--color-accent);
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.button.secondary {
+  color: var(--color-accent);
+  background: transparent;
+}
+
+.button.danger {
+  color: var(--color-accent-fg);
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+@media (prefers-color-scheme: dark) {
+  .button.danger {
+    color: #1b0f0e;
+  }
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.problem {
+  padding: 0.5rem 0.75rem;
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border-radius: var(--radius);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: var(--target);
+}
+
+.check input {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0;
+}
+
+.details dt {
+  color: var(--color-muted);
+}
+
+.details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast {
+  position: fixed;
+  right: var(--space);
+  bottom: calc(var(--space) + env(safe-area-inset-bottom));
+  left: var(--space);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: 0.75rem var(--space);
+  background: var(--color-surface);
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .button {
+    transition: opacity 0.15s;
+  }
 }
