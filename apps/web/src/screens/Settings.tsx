@@ -1,12 +1,12 @@
 /**
- * The part of `/settings` (07 §1) the sign-in slice needs: who is signed in, sign out, and sign
- * out everywhere with the choice to revoke API tokens too (06 §4). The rest of the screen arrives
- * with its features.
+ * The parts of `/settings` (07 §1) built so far: who is signed in, the email nudges toggle (03 §7,
+ * alpha A6), sign out, and sign out everywhere with the choice to revoke API tokens too (06 §4).
+ * The rest of the screen arrives with its features.
  */
 import type { ApiClient } from "@your-move/api-client";
 import { useState } from "react";
 
-import { type Me, signOutEverywhere } from "../auth-api.js";
+import { type Me, saveEmailNudges, signOutEverywhere } from "../auth-api.js";
 import { Link } from "../router.js";
 import { useSignOut } from "../use-sign-out.js";
 import { Page } from "./Page.js";
@@ -16,10 +16,74 @@ interface SettingsProps {
   readonly api: ApiClient;
   readonly appName: string;
   readonly me: Me;
+  /** The server's answer after a setting changed. */
+  readonly onMeChanged: (me: Me) => void;
+  /** A call answered 401: the session ended elsewhere. */
+  readonly onSessionLost: () => void;
   readonly onSignedOut: () => void;
 }
 
-export function Settings({ api, appName, me, onSignedOut }: SettingsProps) {
+/** The email nudges toggle (03 §7): saved at once, shown as the server's answer. */
+function EmailNudges({
+  api,
+  me,
+  onMeChanged,
+  onSessionLost,
+}: Pick<SettingsProps, "api" | "me" | "onMeChanged" | "onSessionLost">) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function change(emailNudges: boolean) {
+    if (pending) return;
+    setPending(true);
+    setError(null);
+    const outcome = await saveEmailNudges(api, emailNudges);
+    setPending(false);
+    if (outcome.ok) {
+      onMeChanged(outcome.data);
+      return;
+    }
+    if (outcome.failure === "unauthenticated") {
+      onSessionLost();
+      return;
+    }
+    setError(
+      outcome.failure === "offline"
+        ? "You seem to be offline. Your setting wasn't saved. Try again."
+        : "Your setting wasn't saved. Please try again.",
+    );
+  }
+
+  return (
+    <section className="card stack" aria-labelledby="email-heading">
+      <h2 id="email-heading">Emails</h2>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={me.settings.emailNudges}
+          disabled={pending}
+          aria-describedby="email-nudges-help email-nudges-problem"
+          onChange={(event) => void change(event.target.checked)}
+        />
+        Email me when it&apos;s my turn
+      </label>
+      <p id="email-nudges-help">
+        When a game has waited a day for your move, we&apos;ll email you, at most once a day for
+        each game. Every email has a link to turn this off.
+      </p>
+      <Problem id="email-nudges-problem" message={error} />
+    </section>
+  );
+}
+
+export function Settings({
+  api,
+  appName,
+  me,
+  onMeChanged,
+  onSessionLost,
+  onSignedOut,
+}: SettingsProps) {
   const [confirming, setConfirming] = useState(false);
   const [revokeTokens, setRevokeTokens] = useState(true);
   const [pending, setPending] = useState(false);
@@ -56,6 +120,7 @@ export function Settings({ api, appName, me, onSignedOut }: SettingsProps) {
           <dd>{me.email}</dd>
         </dl>
       </section>
+      <EmailNudges api={api} me={me} onMeChanged={onMeChanged} onSessionLost={onSessionLost} />
       <section className="card stack" aria-labelledby="signout-heading">
         <h2 id="signout-heading">Sign out</h2>
         <button

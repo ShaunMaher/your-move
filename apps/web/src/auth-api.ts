@@ -98,6 +98,15 @@ export async function saveDisplayName(api: ApiClient, displayName: string): Prom
     : { ok: true, data: outcome.data };
 }
 
+/** Turns the "It's your turn" email nudges on or off (03 §7); answers the updated user. */
+export async function saveEmailNudges(api: ApiClient, emailNudges: boolean): Promise<Outcome<Me>> {
+  const outcome = await settle(api.PATCH("/api/v1/me", { body: { settings: { emailNudges } } }));
+  if (!outcome.ok) return outcome;
+  return outcome.data === undefined
+    ? { ok: false, failure: "failed" }
+    : { ok: true, data: outcome.data };
+}
+
 export async function signOut(api: ApiClient): Promise<Outcome<undefined>> {
   return settle(api.POST("/api/v1/auth/logout", { body: {} }));
 }

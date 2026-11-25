@@ -469,7 +469,7 @@ describe("signed in", () => {
   it("can change its mind", async () => {
     const calls = await openEverywhere();
     click("Cancel");
-    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "Also revoke all my API tokens" })).toBeNull();
     expect(calls.some((call) => call.path.endsWith("logout-all"))).toBe(false);
   });
 });

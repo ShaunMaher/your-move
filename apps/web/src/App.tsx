@@ -195,6 +195,12 @@ export function App({ api }: AppProps) {
         : current,
     );
   };
+  // A change on the Settings screen: the same person, nothing else moves.
+  const updateMe = (next: Me) => {
+    setBoot((current) =>
+      current.status === "ready" && current.me?.id === next.id ? { ...current, me: next } : current,
+    );
+  };
   const signedInHere = (next: Me) => {
     const returnTo = peekReturnPath();
     setBoot((current) =>
@@ -242,7 +248,16 @@ export function App({ api }: AppProps) {
       />
     );
   } else if (place === "/settings") {
-    screen = <Settings api={api} appName={boot.config.appName} me={me} onSignedOut={signedOut} />;
+    screen = (
+      <Settings
+        api={api}
+        appName={boot.config.appName}
+        me={me}
+        onMeChanged={updateMe}
+        onSessionLost={sessionLost}
+        onSignedOut={signedOut}
+      />
+    );
   } else screen = <NotFound appName={boot.config.appName} />;
 
   return (
