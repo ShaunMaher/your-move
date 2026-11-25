@@ -1,7 +1,8 @@
 /**
- * Registers the service worker and reports when an updated one is waiting (07 §4, `registerType:
- * "prompt"`): the app shows "New version available" and only reloads when the person agrees, so
- * a game in progress is never replaced under them.
+ * Registers the service worker and reports when an updated one is waiting (07 §4): the app shows
+ * "New version available" and activates the update only when the person agrees, so a game in
+ * progress is never replaced under them. Once it is activated, every open tab reloads (the old
+ * worker's cache is gone, so a tab left on the old code would find its files missing).
  */
 
 export interface UpdateWatch {
@@ -19,13 +20,13 @@ export function watchForUpdates(
   onUpdate: (watch: UpdateWatch) => void,
   reload: () => void,
 ): void {
-  // Reload only once the person has asked for the update: the first worker claiming the page
-  // also fires `controllerchange`, and that must not reload a page that has just loaded.
-  let applying = false;
+  // A page controlled by a worker reloads when another takes over, in whichever tab the person
+  // asked for the update. The first worker claiming an uncontrolled page also fires
+  // `controllerchange`, and that must not reload a page that has just loaded.
+  let controlled = container.controller !== null;
   const offer = (worker: ServiceWorker) => {
     onUpdate({
       apply: () => {
-        applying = true;
         worker.postMessage("SKIP_WAITING");
       },
     });
@@ -40,9 +41,9 @@ export function watchForUpdates(
     });
   });
   container.addEventListener("controllerchange", () => {
-    if (!applying) return;
-    applying = false;
-    reload();
+    const wasControlled = controlled;
+    controlled = true;
+    if (wasControlled) reload();
   });
 }
 

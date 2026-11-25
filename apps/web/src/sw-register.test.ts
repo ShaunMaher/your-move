@@ -67,11 +67,27 @@ describe("watchForUpdates", () => {
     onUpdate.mock.calls[0]?.[0].apply();
     expect(f.posted).toEqual(["SKIP_WAITING"]);
     f.takeOver();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("reloads a tab whose worker is replaced although it never offered the update", () => {
+    const f = fakes({ controlled: true });
+    const { onUpdate, reload } = watch(f);
+    f.takeOver();
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("reloads when the first worker's page is later taken over by an update", () => {
+    const f = fakes({ controlled: false });
+    const { reload } = watch(f);
+    f.takeOver();
+    expect(reload).not.toHaveBeenCalled();
     f.takeOver();
     expect(reload).toHaveBeenCalledOnce();
   });
 
-  it("does not reload when a worker takes over without being asked to (the first install)", () => {
+  it("does not reload when a worker first takes over a page (the first install)", () => {
     const f = fakes({ controlled: false });
     const { reload } = watch(f);
     f.takeOver();
