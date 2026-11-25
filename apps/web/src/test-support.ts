@@ -26,8 +26,9 @@ interface Call {
   readonly body: unknown;
 }
 
-type Handler = (call: Call) => Response | Error;
-type Routes = Record<string, Handler | Response | Error>;
+type Answer = Response | Error | Promise<Response>;
+type Handler = (call: Call) => Answer;
+type Routes = Record<string, Handler | Answer>;
 
 export const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -49,8 +50,8 @@ export function fakeApi(routes: Routes) {
       const text = await request.clone().text();
       const call = { method, path, body: text === "" ? undefined : (JSON.parse(text) as unknown) };
       calls.push(call);
-      const route: Handler | Response | Error | undefined = routes[`${method} ${path}`];
-      const answer = typeof route === "function" ? route(call) : route;
+      const route: Handler | Answer | undefined = routes[`${method} ${path}`];
+      const answer = await (typeof route === "function" ? route(call) : route);
       // A body can be read once; the same route may be asked again.
       if (answer instanceof Response) return answer.clone();
       if (answer instanceof Error) throw answer;
