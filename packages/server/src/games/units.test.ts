@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { GamePlayerRecord, GameRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
 import { accept, LOBBY_LIFETIME_MS, rerank, start } from "./lifecycle.js";
+import { EngineFault, guardEngine } from "./engine-fault.js";
 import { cryptoRandom, recorded } from "./random.js";
 import { createGameRegistry, GameConfigError } from "./registry.js";
 import {
@@ -358,5 +359,40 @@ describe("start and accept at the lobby's expiry (A2 review S2-5)", () => {
 
   it("accept a lobby a moment before it", () => {
     expect(accept(ctx, invited, due - 1)).not.toHaveProperty("refused");
+  });
+});
+
+describe("the engine-fault boundary (A2 review S2-6)", () => {
+  const secret = "the hand 7,8,9";
+  const definition = guardEngine({
+    type: "t",
+    version: 1,
+    actionSchema: z.unknown().transform(() => {
+      throw new Error(secret);
+    }),
+    optionsSchema: z.object({}),
+    view: () => {
+      throw new Error(secret);
+    },
+  } as unknown as AnyGameDefinition);
+
+  it("turns a throw from a schema's refinement into an EngineFault without the message", () => {
+    let caught: unknown;
+    try {
+      definition.actionSchema.safeParse(1);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(EngineFault);
+    expect((caught as EngineFault).message).not.toContain(secret);
+    expect((caught as EngineFault).member).toBe("actionSchema.safeParse");
+  });
+
+  it("still parses with a well-behaved schema", () => {
+    expect(definition.optionsSchema.safeParse({}).success).toBe(true);
+  });
+
+  it("keeps guarding a function member", () => {
+    expect(() => (definition.view as () => unknown)()).toThrow(EngineFault);
   });
 });
