@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { view } from "../engine/present.js";
 import { board, envelope, rack, ruleset, state } from "../test-support.js";
+import "./dom-setup.js";
 import { Board } from "./Board.js";
 
 const CLASSIC = ruleset("classic");
@@ -162,6 +163,56 @@ describe("dragging tiles", () => {
     move(290, RACK_TOP + 20);
     release();
     expect(rackNames().at(-1)).toBe("S, 1 point");
+  });
+
+  it("saves the rack order only once the player reorders it by dragging", () => {
+    table();
+    const key = "ym.game.words.u0.g1";
+    expect(localStorage.getItem(key)).toBeNull();
+    grab(rackTile("S, 1 point"));
+    move(150, 190);
+    release();
+    expect(localStorage.getItem(key)).toBeNull();
+    grab(rackTile("A, 1 point"));
+    move(290, RACK_TOP + 20);
+    release();
+    expect(JSON.parse(localStorage.getItem(key) ?? "null")).toEqual([1, 2, 3, 4, 5, 6, 0]);
+  });
+
+  it("ignores a second drag while one is live", () => {
+    table();
+    grab(rackTile("S, 1 point"));
+    move(150, 190);
+    // A second finger goes down on another tile and moves: it neither starts a drag nor ends the first.
+    fireEvent.pointerDown(rackTile("X, 8 points"), {
+      pointerId: 2,
+      clientX: 85,
+      clientY: 420,
+      button: 0,
+    });
+    move(60, 250, 2);
+    release(2);
+    expect(document.querySelectorAll(".ym-w-ghost")).toHaveLength(1);
+    expect(square(SR + 2, SC).getAttribute("data-target")).toBe("true");
+    release();
+    expect(square(SR + 2, SC).getAttribute("aria-label")).toContain("S, 1 point");
+    expect(rackNames()).toContain("X, 8 points");
+    // After the first drag ends, the next one works.
+    grab(rackTile("X, 8 points"));
+    move(at(SR + 3, SC + 2).clientX, at(SR + 3, SC + 2).clientY);
+    release();
+    expect(square(SR + 3, SC + 2).getAttribute("aria-label")).toContain("X, 8 points");
+  });
+
+  it("keeps the zoom buttons outside the board frame, in a toolbar of 44 pt targets", () => {
+    table();
+    const zoom = screen.getByRole("group", { name: "Board zoom" });
+    expect(frame().contains(zoom)).toBe(false);
+    for (const name of ["Zoom in", "Zoom out"]) {
+      const target = screen.getByRole("button", { name });
+      expect(frame().contains(target)).toBe(false);
+      expect(zoom.contains(target)).toBe(true);
+    }
   });
 
   it("asks for a letter when a blank is dropped", () => {

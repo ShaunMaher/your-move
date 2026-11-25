@@ -42,39 +42,29 @@ function parseKey(key: string): { row: number; col: number } {
   return { row, col };
 }
 
-/**
- * The shown order for a rack, from the letters of a saved order (best effort: anything saved that
- * the rack no longer holds is skipped, and new tiles go last).
- */
-export function orderFrom(rack: readonly string[], saved: string | null): number[] {
-  const left = rack.map((_, id) => id);
-  const order: number[] = [];
-  for (const letter of saved ?? "") {
-    const at = left.findIndex((id) => rack[id] === letter);
-    const [id] = at === -1 ? [] : left.splice(at, 1);
-    if (id !== undefined) order.push(id);
-  }
-  return [...order, ...left];
+/** Whether `order` is a permutation of `0..size-1`. */
+function isPermutation(order: readonly number[], size: number): boolean {
+  return (
+    order.length === size &&
+    new Set(order).size === size &&
+    order.every((id) => Number.isInteger(id) && id >= 0 && id < size)
+  );
 }
 
-export function initial(rack: readonly string[], saved: string | null = null): Tentative {
-  return { order: orderFrom(rack, saved), placed: {}, blankFor: null };
+/** A new tentative state for `rack`, in a saved order if it is a valid one for this rack. */
+export function initial(
+  rack: readonly string[],
+  saved: readonly number[] | null = null,
+): Tentative {
+  const order =
+    saved !== null && isPermutation(saved, rack.length) ? [...saved] : rack.map((_, id) => id);
+  return { order, placed: {}, blankFor: null };
 }
 
 /** The rack tile ids still on the rack, in shown order. */
 export function onRack(t: Tentative): number[] {
   const used = new Set(Object.values(t.placed).map((put) => put.id));
   return t.order.filter((id) => !used.has(id));
-}
-
-/** The letters of the rack in shown order, for saving. */
-export function savedOrder(t: Tentative, rack: readonly string[]): string {
-  return t.order.map((id) => rack[id] ?? "").join("");
-}
-
-/** The square a rack tile is on, if it is placed. */
-export function squareOf(t: Tentative, id: number): string | null {
-  return Object.entries(t.placed).find(([, put]) => put.id === id)?.[0] ?? null;
 }
 
 function without(placed: Tentative["placed"], key: string): Tentative["placed"] {
@@ -171,4 +161,35 @@ export function toPlacements(t: Tentative, rack: readonly string[]): Placement[]
 /** How many tiles are placed on the board. */
 export function placedCount(t: Tentative): number {
   return Object.keys(t.placed).length;
+}
+
+/**
+ * Carries the tentative tiles over to a new view of the game (an opponent played, a refetch):
+ * the rack order is rebuilt against the new rack by tile, a placed tile stays if its square is
+ * still empty and the rack still holds that tile, and a tile that can't be matched goes back to
+ * the rack. Nothing is lost that the new view doesn't force.
+ */
+export function reconcile(
+  t: Tentative,
+  before: readonly string[],
+  rack: readonly string[],
+  isOccupied: (key: string) => boolean,
+): Tentative {
+  const free = rack.map((_, id) => id);
+  const carried = new Map<number, number>();
+  for (const old of t.order) {
+    const tile = before[old];
+    const at = tile === undefined ? -1 : free.findIndex((id) => rack[id] === tile);
+    const [id] = at === -1 ? [] : free.splice(at, 1);
+    if (id !== undefined) carried.set(old, id);
+  }
+  const placed: Record<string, Put> = {};
+  for (const [key, put] of Object.entries(t.placed)) {
+    const id = carried.get(put.id);
+    if (id === undefined || isOccupied(key)) continue;
+    placed[key] = put.letter === undefined ? { id } : { id, letter: put.letter };
+  }
+  const order = [...t.order.flatMap((old) => carried.get(old) ?? []), ...free];
+  const blankFor = t.blankFor !== null && t.blankFor in placed ? t.blankFor : null;
+  return { order, placed, blankFor };
 }

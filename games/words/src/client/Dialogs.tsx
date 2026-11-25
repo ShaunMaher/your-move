@@ -13,11 +13,16 @@ const ALPHABET = Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i
 
 /** Asks which letter a blank stands for; dismissing it takes the blank back to the rack. */
 export function BlankPicker(props: {
+  readonly restoreTo: () => HTMLElement | null;
   readonly onPick: (letter: string) => void;
   readonly onCancel: () => void;
 }): ReactElement {
   return (
-    <Dialog title="Choose a letter for the blank" onClose={props.onCancel}>
+    <Dialog
+      title="Choose a letter for the blank"
+      onClose={props.onCancel}
+      restoreTo={props.restoreTo}
+    >
       <div className="ym-w-picker">
         {ALPHABET.map((letter) => (
           <button
@@ -43,6 +48,7 @@ export function BlankPicker(props: {
 
 /** Picks the rack tiles to swap (words §3.2). */
 export function SwapDialog(props: {
+  readonly restoreTo: () => HTMLElement | null;
   readonly rack: readonly string[];
   readonly points: (tile: string) => number;
   readonly swapMinBag: number;
@@ -58,7 +64,7 @@ export function SwapDialog(props: {
     setChosen((now) => (now.includes(id) ? now.filter((other) => other !== id) : [...now, id]));
   };
   return (
-    <Dialog title="Swap tiles" onClose={props.onCancel}>
+    <Dialog title="Swap tiles" onClose={props.onCancel} restoreTo={props.restoreTo}>
       {allowed ? (
         <p>Choose the tiles to put back. Swapping scores nothing and ends your turn.</p>
       ) : (
@@ -107,12 +113,13 @@ export function SwapDialog(props: {
 
 /** Confirms passing (words §3.3). */
 export function PassDialog(props: {
+  readonly restoreTo: () => HTMLElement | null;
   readonly busy: boolean;
   readonly onPass: () => void;
   readonly onCancel: () => void;
 }): ReactElement {
   return (
-    <Dialog title="Pass your turn?" onClose={props.onCancel}>
+    <Dialog title="Pass your turn?" onClose={props.onCancel} restoreTo={props.restoreTo}>
       <p>
         Passing scores nothing and ends your turn. Several scoreless turns in a row end the game.
       </p>

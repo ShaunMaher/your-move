@@ -6,7 +6,13 @@ import type { GameEnvelope } from "@your-move/sdk";
 
 import { BLANK } from "../engine/index.js";
 
-/** Display names by seat from the game envelope; a seat without a name is "Seat n". */
+/**
+ * Display names by seat from the game envelope; a seat without a name is "Seat n".
+ *
+ * Every seat is shown by its display name alone. An AI seat must also be labelled as one (08 T31);
+ * the alpha has no AI seats, so that label arrives with the AI milestone, together with the
+ * `players` rows' `kind` and `aiOwnerName` this function would then read.
+ */
 export function seatNames(game: GameEnvelope, seats: number): string[] {
   return Array.from({ length: seats }, (_, seat) => {
     const player = game.players.find((row) => row.seat === seat);

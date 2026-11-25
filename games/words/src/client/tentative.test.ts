@@ -5,14 +5,12 @@ import {
   initial,
   move,
   onRack,
-  orderFrom,
   placedCount,
   recall,
+  reconcile,
   reorder,
-  savedOrder,
   setBlankLetter,
   squareKey,
-  squareOf,
   toPlacements,
 } from "./tentative.js";
 
@@ -20,19 +18,69 @@ import {
 const RACK = ["a", "b", "s", "t", "?"];
 
 describe("the rack's shown order", () => {
-  it("starts as the view's order, or the saved one where it still fits", () => {
-    expect(orderFrom(RACK, null)).toEqual([0, 1, 2, 3, 4]);
-    expect(orderFrom(RACK, "ts?ab")).toEqual([3, 2, 4, 0, 1]);
-    // Letters the rack no longer holds are skipped, new tiles go last.
-    expect(orderFrom(RACK, "zsa")).toEqual([2, 0, 1, 3, 4]);
-    expect(orderFrom(["e", "e", "x"], "ee")).toEqual([0, 1, 2]);
-    expect(orderFrom(["e", "x"], "eee")).toEqual([0, 1]);
+  it("starts as the view's order, or the saved one where it is a permutation of this rack", () => {
+    expect(initial(RACK).order).toEqual([0, 1, 2, 3, 4]);
+    expect(initial(RACK, [3, 2, 4, 0, 1]).order).toEqual([3, 2, 4, 0, 1]);
+    for (const bad of [
+      [0, 1],
+      [0, 0, 1, 2, 3],
+      [0, 1, 2, 3, 5],
+      [0, 1, 2, 3, 4, 5],
+      [0.5, 1, 2, 3, 4],
+    ]) {
+      expect(initial(RACK, bad).order).toEqual([0, 1, 2, 3, 4]);
+    }
   });
 
-  it("saves as letters and reorders", () => {
+  it("reorders, keeping every tile", () => {
     const t = reorder(initial(RACK), [4, 3, 2, 1, 0]);
-    expect(savedOrder(t, RACK)).toBe("?tsba");
     expect(onRack(t)).toEqual([4, 3, 2, 1, 0]);
+  });
+});
+
+describe("reconciling with a new view", () => {
+  const none = (): boolean => false;
+
+  it("keeps the order and the placed tiles when the rack is the same", () => {
+    const t = move(
+      reorder(initial(RACK), [4, 3, 2, 1, 0]),
+      RACK,
+      { kind: "rack", id: 2 },
+      { kind: "square", key: "7,7" },
+    );
+    expect(reconcile(t, RACK, RACK, none)).toEqual(t);
+  });
+
+  it("drops a placed tile whose square is now taken, and returns it to the rack in place", () => {
+    let t = initial(RACK);
+    t = move(t, RACK, { kind: "rack", id: 0 }, { kind: "square", key: "7,7" });
+    t = move(t, RACK, { kind: "rack", id: 2 }, { kind: "square", key: "7,8" });
+    const next = reconcile(t, RACK, RACK, (key) => key === "7,7");
+    expect(Object.keys(next.placed)).toEqual(["7,8"]);
+    expect(next.order).toEqual(t.order);
+    expect(onRack(next)).toEqual([0, 1, 3, 4]);
+  });
+
+  it("rebuilds the order and the placed ids against a new rack by tile", () => {
+    let t = reorder(initial(RACK), [3, 2, 4, 0, 1]);
+    t = move(t, RACK, { kind: "rack", id: 2 }, { kind: "square", key: "7,7" });
+    // The player's own play used `a` and `b`; two new tiles came in.
+    const fresh = ["e", "s", "t", "?", "z"];
+    const next = reconcile(t, RACK, fresh, none);
+    expect(next.placed).toEqual({ "7,7": { id: 1 } });
+    // t s ? kept their relative order, the new tiles go last.
+    expect(next.order).toEqual([2, 1, 3, 0, 4]);
+    expect(new Set(next.order).size).toBe(5);
+  });
+
+  it("returns a placed tile the new rack no longer holds, and keeps a blank's letter", () => {
+    let t = initial(RACK);
+    t = move(t, RACK, { kind: "rack", id: 4 }, { kind: "square", key: "7,7" });
+    t = setBlankLetter(t, "e");
+    t = move(t, RACK, { kind: "rack", id: 0 }, { kind: "square", key: "7,8" });
+    const next = reconcile(t, RACK, ["?", "b", "b"], none);
+    expect(next.placed).toEqual({ "7,7": { id: 0, letter: "e" } });
+    expect(next.blankFor).toBeNull();
   });
 });
 
@@ -46,8 +94,6 @@ describe("moving tiles", () => {
     );
     expect(placed.placed).toEqual({ "7,7": { id: 2 } });
     expect(onRack(placed)).toEqual([0, 1, 3, 4]);
-    expect(squareOf(placed, 2)).toBe("7,7");
-    expect(squareOf(placed, 0)).toBeNull();
     expect(placedCount(placed)).toBe(1);
     const back = move(placed, RACK, { kind: "square", key: "7,7" }, { kind: "rack", before: 1 });
     expect(back.placed).toEqual({});

@@ -30,6 +30,9 @@ import { squareKey, type Put } from "./tentative.js";
 import { tileName } from "./text.js";
 import { TileFace } from "./Tile.js";
 
+/** What a premium square says on its face: letters ×2 or ×3, whole words ×2 or ×3. */
+const PREMIUM_LABEL = { DL: "2L", TL: "3L", DW: "2W", TW: "3W" } as const;
+
 const PREMIUM_NAME = {
   DL: "double letter",
   TL: "triple letter",
@@ -205,96 +208,102 @@ export function BoardGrid({ frame, ...props }: GridProps): ReactElement {
   }
 
   return (
-    <div
-      ref={frame}
-      className="ym-w-frame"
-      role="group"
-      aria-label={`Board, ${String(size)} by ${String(size)}`}
-    >
+    <>
       <div
-        className="ym-w-grid"
-        data-gesture={active}
-        style={{
-          gridTemplateColumns: `repeat(${String(size)}, minmax(0, 1fr))`,
-          gridTemplateRows: `repeat(${String(size)}, minmax(0, 1fr))`,
-          transform: `translate(${String(viewport.x)}px, ${String(viewport.y)}px) scale(${String(viewport.scale)})`,
-        }}
+        ref={frame}
+        className="ym-w-frame"
+        role="group"
+        aria-label={`Board, ${String(size)} by ${String(size)}`}
       >
-        {board.map((line, row) =>
-          line.map((square, col) => {
-            const key = squareKey(row, col);
-            const put = props.placed[key];
-            const premium =
-              square === null && put === undefined ? premiumAt(ruleset, row, col) : null;
-            const isStart = ruleset.start[0] === row && ruleset.start[1] === col;
-            const tile = square?.tile ?? put?.tile ?? null;
-            const letter = square?.letter ?? put?.put.letter;
-            const points = tile === null ? 0 : tilePoints(ruleset, tile);
-            const where = `Row ${String(row + 1)}, column ${String(col + 1)}`;
-            const what =
-              tile === null
-                ? [
-                    premium === null ? null : PREMIUM_NAME[premium],
-                    isStart ? "start square" : null,
-                    "empty",
-                  ]
-                    .filter((part) => part !== null)
-                    .join(", ")
-                : [
-                    tileName(tile, points, tile === "?" ? letter : undefined),
-                    put === undefined ? null : "your tile, not played yet",
-                    props.last.has(key) ? "last play" : null,
-                  ]
-                    .filter((part) => part !== null)
-                    .join(", ");
-            return (
-              <button
-                key={key}
-                type="button"
-                className="ym-w-sq"
-                data-square={key}
-                data-drag={put === undefined ? undefined : ""}
-                data-premium={premium ?? undefined}
-                data-target={props.dropTarget === key}
-                tabIndex={focus === key ? 0 : -1}
-                aria-label={`${where}, ${what}`}
-                aria-pressed={put === undefined ? undefined : props.selected === key}
-                onFocus={() => {
-                  setFocus(key);
-                  const frameSize = frame.current?.getBoundingClientRect().width ?? 0;
-                  const next = revealSquare(viewport, frameSize, size, row, col);
-                  if (next !== viewport) props.onViewport(next);
-                }}
-                onKeyDown={(event) => {
-                  onKey(event, row, col);
-                }}
-                onClick={() => {
-                  if (!suppress.current) props.onSquare(key);
-                }}
-                onPointerDown={(event) => {
-                  if (put !== undefined) props.onTileDown(key, event);
-                }}
-              >
-                {tile === null ? (
-                  <span aria-hidden="true">{premium ?? (isStart ? "★" : "")}</span>
-                ) : (
-                  <span
-                    className="ym-w-tile"
-                    data-blank={tile === "?"}
-                    data-state={
-                      put !== undefined ? "placed" : props.last.has(key) ? "last" : undefined
-                    }
-                    data-selected={props.selected === key}
-                  >
-                    <TileFace tile={tile} points={points} letter={letter} />
-                  </span>
-                )}
-              </button>
-            );
-          }),
-        )}
+        <div
+          className="ym-w-grid"
+          data-gesture={active}
+          style={{
+            gridTemplateColumns: `repeat(${String(size)}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${String(size)}, minmax(0, 1fr))`,
+            transform: `translate(${String(viewport.x)}px, ${String(viewport.y)}px) scale(${String(viewport.scale)})`,
+          }}
+        >
+          {board.map((line, row) =>
+            line.map((square, col) => {
+              const key = squareKey(row, col);
+              const put = props.placed[key];
+              const premium =
+                square === null && put === undefined ? premiumAt(ruleset, row, col) : null;
+              const isStart = ruleset.start[0] === row && ruleset.start[1] === col;
+              const tile = square?.tile ?? put?.tile ?? null;
+              const letter = square?.letter ?? put?.put.letter;
+              const points = tile === null ? 0 : tilePoints(ruleset, tile);
+              const where = `Row ${String(row + 1)}, column ${String(col + 1)}`;
+              const what =
+                tile === null
+                  ? [
+                      premium === null ? null : PREMIUM_NAME[premium],
+                      isStart ? "start square" : null,
+                      "empty",
+                    ]
+                      .filter((part) => part !== null)
+                      .join(", ")
+                  : [
+                      tileName(tile, points, tile === "?" ? letter : undefined),
+                      put === undefined ? null : "your tile, not played yet",
+                      props.last.has(key) ? "last play" : null,
+                    ]
+                      .filter((part) => part !== null)
+                      .join(", ");
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className="ym-w-sq"
+                  data-square={key}
+                  data-drag={put === undefined ? undefined : ""}
+                  data-premium={premium ?? undefined}
+                  data-target={props.dropTarget === key}
+                  tabIndex={focus === key ? 0 : -1}
+                  aria-label={`${where}, ${what}`}
+                  aria-pressed={put === undefined ? undefined : props.selected === key}
+                  onFocus={() => {
+                    setFocus(key);
+                    const frameSize = frame.current?.getBoundingClientRect().width ?? 0;
+                    const next = revealSquare(viewport, frameSize, size, row, col);
+                    if (next !== viewport) props.onViewport(next);
+                  }}
+                  onKeyDown={(event) => {
+                    onKey(event, row, col);
+                  }}
+                  onClick={() => {
+                    if (!suppress.current) props.onSquare(key);
+                  }}
+                  onPointerDown={(event) => {
+                    if (put !== undefined) props.onTileDown(key, event);
+                  }}
+                >
+                  {tile === null ? (
+                    <span aria-hidden="true" className="ym-w-face">
+                      {isStart && <span className="ym-w-start" />}
+                      {premium !== null && <span>{PREMIUM_LABEL[premium]}</span>}
+                    </span>
+                  ) : (
+                    <span
+                      className="ym-w-tile"
+                      data-blank={tile === "?"}
+                      data-state={
+                        put !== undefined ? "placed" : props.last.has(key) ? "last" : undefined
+                      }
+                      data-selected={props.selected === key}
+                    >
+                      <TileFace tile={tile} points={points} letter={letter} />
+                    </span>
+                  )}
+                </button>
+              );
+            }),
+          )}
+        </div>
       </div>
-      <div className="ym-w-zoom">
+      <div className="ym-w-toolbar" role="group" aria-label="Board zoom">
+        <span className="ym-w-meta">Pinch or double-tap to zoom</span>
         <button
           type="button"
           aria-label="Zoom out"
@@ -315,6 +324,6 @@ export function BoardGrid({ frame, ...props }: GridProps): ReactElement {
           +
         </button>
       </div>
-    </div>
+    </>
   );
 }
