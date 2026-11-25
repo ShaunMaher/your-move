@@ -70,7 +70,7 @@ const proofs: Record<string, Proof> = {
     return null;
   },
 
-  "architecture: an engine importing node:fs, the core using node:http and the schema, the web app importing the server and Drizzle"() {
+  "architecture: an engine importing node:fs, the core using node:http and the schema, the web app importing the server, Drizzle and the build code"() {
     const result = exec(
       join(ROOT_DIR, "node_modules/.bin/depcruise"),
       ["--config", join(ROOT_DIR, ".dependency-cruiser.mjs"), "games", "packages", "apps"],
@@ -83,6 +83,7 @@ const proofs: Record<string, Proof> = {
       "core-storage-through-repositories",
       "drizzle-only-in-storage-adapters",
       "web-only-through-api-client",
+      "web-src-not-to-build-code",
     ]) {
       if (!result.output.includes(rule)) return `dependency-cruiser did not report ${rule}`;
     }
