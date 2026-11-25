@@ -30,3 +30,13 @@ export const LAUNCH_TIMEOUT_MS = 120_000;
  * and the first test then 3–4 s, where without it the first test failed at 35–38 s.
  */
 export const WARMUP_TIMEOUT_MS = 90_000;
+
+/**
+ * A test in which two people play a game (game.spec.ts): sign-ins, an invitation, several real
+ * moves each checked against the server, and a resignation, across two browser contexts. Not the
+ * 30 s of a single-page test; sized well above what it took
+ * because a loaded CI runner is several times slower than that. Measured locally, in the pinned
+ * image: 20 s for the full game on WebKit (a warm browser, nothing else running); 120 s is six
+ * times that.
+ */
+export const GAME_TEST_TIMEOUT_MS = 120_000;

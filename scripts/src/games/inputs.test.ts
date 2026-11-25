@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 
 import {
+  BUNDLES,
   resetBundleInputs,
   uncheckedInputs,
   writeBundleInputs,
@@ -125,7 +126,7 @@ describe("bundler-input closure", () => {
       `games/x/${MANIFEST}`,
       "games/x/dist/engine/package.json",
     ]);
-    expect(uncheckedInputs(root, ["web", "node"])).toEqual([
+    expect(uncheckedInputs(root, ["web", "node"], false)).toEqual([
       "the web build read games/x/dist/other.js from @x/game-x, which games:verify didn't check",
       "the node build read games/x/dist/engine/package.json from @x/game-x, which games:verify didn't check",
     ]);
@@ -149,7 +150,7 @@ describe("bundler-input closure", () => {
     ]);
     // The web build may read it.
     writeBundleInputs(root, "web", root, [`games/x/${CLIENT}`, "games/x/dist/engine/rules.jsx"]);
-    expect(uncheckedInputs(root, ["web"])).toEqual([]);
+    expect(uncheckedInputs(root, ["web"], false)).toEqual([]);
   });
 
   it("follows symlinks before comparing", () => {
@@ -205,7 +206,7 @@ describe("bundler-input closure", () => {
     resetBundleInputs(root);
     expect(existsSync(join(root, "generated/bundles"))).toBe(false);
     writeBundleInputs(root, "web", root, []);
-    expect(uncheckedInputs(root)).toEqual([
+    expect(uncheckedInputs(root, BUNDLES, false)).toEqual([
       "generated/bundles/node.json is missing: the node build didn't record its inputs",
       "generated/bundles/worker.json is missing: the worker build didn't record its inputs",
     ]);
