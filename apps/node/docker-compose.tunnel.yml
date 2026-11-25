@@ -1,0 +1,102 @@
+# The proof-of-concept deployment (docs/spec/09-operations.md §4, Q6): the app behind a
+# Cloudflare Tunnel, sending its email through the `gmail` provider. Step by step in
+# docs/deploy.md; the values it needs are in apps/node/tunnel.env.example.
+#
+#   docker compose -f apps/node/docker-compose.tunnel.yml --env-file <your env file> up -d
+#
+# - No host port is published and no inbound firewall rule is needed: `cloudflared` dials out to
+#   Cloudflare, and TLS ends there. The tunnel's public hostname must route only to the app
+#   (http://app:8080), with no catch-all rule.
+# - `front` is internal (no route out, nothing else can join it) and holds only the app and
+#   `cloudflared`, so nothing else can reach the app's port and forge CF-Connecting-IP. Its subnet is
+#   pinned, and TRUST_PROXY_PEERS is exactly that subnet plus loopback (the container's own health
+#   check); a request from any other peer is refused (08 §4.1). If you change the subnet, change both.
+# - `egress` is an ordinary bridge for outbound calls: the app's (Gmail) and the tunnel's.
+# - Every secret is a Docker secret read through `<NAME>_FILE`, so none shows in `docker inspect`
+#   or the process environment.
+# - Pull the image by digest (docs/deploy.md), never by tag.
+
+services:
+  app:
+    image: ${APP_IMAGE:?set APP_IMAGE to the image reference, by digest}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL:?set PUBLIC_URL to https://<hostname>}
+      APP_NAME: ${APP_NAME:-}
+      OPERATOR_CONTACT: ${OPERATOR_CONTACT:?set OPERATOR_CONTACT to the address shown on the privacy page}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      EMAIL_PROVIDER: gmail
+      EMAIL_FROM: ${EMAIL_FROM:?set EMAIL_FROM to "Name" <address>}
+      GMAIL_SENDER: ${GMAIL_SENDER:?set GMAIL_SENDER to the sender user's address (EMAIL_FROM's address)}
+      TRUST_PROXY: cloudflare
+      TRUST_PROXY_PEERS: 172.30.99.0/28,127.0.0.0/8,::1/128
+      APP_SECRET_FILE: /run/secrets/app_secret
+      GMAIL_CLIENT_ID_FILE: /run/secrets/gmail_client_id
+      GMAIL_CLIENT_SECRET_FILE: /run/secrets/gmail_client_secret
+      GMAIL_REFRESH_TOKEN_FILE: /run/secrets/gmail_refresh_token
+    secrets:
+      - app_secret
+      - gmail_client_id
+      - gmail_client_secret
+      - gmail_refresh_token
+    volumes:
+      - data:/data
+      - blobs:/data/blobs
+    networks:
+      - front
+      - egress
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.11.2@sha256:55c7e3e8d89d5e8d20b75a82f3602cbf98e06db406e73e282073cfdc5a9a3af6
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command: tunnel --no-autoupdate --metrics 127.0.0.1:2000 run --token-file /run/secrets/tunnel_token
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    secrets:
+      - tunnel_token
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - front
+      - egress
+
+networks:
+  front:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.99.0/28
+  egress: {}
+
+volumes:
+  data: {}
+  blobs: {}
+
+secrets:
+  app_secret:
+    file: ${SECRETS_DIR:?set SECRETS_DIR to the directory holding the secret files}/app_secret
+  gmail_client_id:
+    file: ${SECRETS_DIR}/gmail_client_id
+  gmail_client_secret:
+    file: ${SECRETS_DIR}/gmail_client_secret
+  gmail_refresh_token:
+    file: ${SECRETS_DIR}/gmail_refresh_token
+  tunnel_token:
+    file: ${SECRETS_DIR}/tunnel_token
