@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { type ClientConfig, type Me, loadConfig, loadSession } from "./auth-api.js";
 import { applyAppName } from "./document-meta.js";
 import { InstallBanner } from "./InstallBanner.js";
+import { resyncPush } from "./push.js";
 import {
   clearReturnPath,
   isDestination,
@@ -172,6 +173,13 @@ export function App({ api }: AppProps) {
     };
   }, [meId, api, endSession, retry]);
 
+  // At each launch with a session, this device's push subscription is saved again: Safari has no
+  // `pushsubscriptionchange`, and the session may be a new one (07 §4).
+  const pushKey = config?.vapidPublicKey;
+  useEffect(() => {
+    if (meId !== null) void resyncPush(api, pushKey);
+  }, [meId, api, pushKey]);
+
   // After a move to another screen, focus goes to its heading so a screen reader starts reading
   // there. A field the new screen has focused itself (its effects run first) keeps focus.
   const screenKey = boot.status === "ready" ? (me === null ? "signin" : place) : boot.status;
@@ -235,6 +243,7 @@ export function App({ api }: AppProps) {
       <NewGame
         api={api}
         appName={boot.config.appName}
+        pushKey={pushKey}
         ownEmail={me.email ?? ""}
         onSessionLost={sessionLost}
       />
@@ -257,6 +266,7 @@ export function App({ api }: AppProps) {
         api={api}
         appName={boot.config.appName}
         me={me}
+        pushKey={pushKey}
         onMeChanged={updateMe}
         onSessionLost={sessionLost}
         onSignedOut={signedOut}

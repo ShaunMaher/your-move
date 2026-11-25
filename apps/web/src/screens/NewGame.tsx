@@ -9,9 +9,11 @@ import type { GameClientModule } from "@your-move/sdk/client";
 import { type SyntheticEvent, useEffect, useRef, useState } from "react";
 
 import { loadCatalog } from "../catalog.js";
+import { Dialog } from "../Dialog.js";
 import { type CatalogGame, createGame } from "../game-api.js";
 import { GameIcon } from "../GameIcon.js";
 import { loadGameClient } from "../games.js";
+import { rememberPushOffered, shouldOfferPush, turnOnPush } from "../push.js";
 import { navigate, Link } from "../router.js";
 import { looksLikeEmail } from "../text.js";
 import { Page } from "./Page.js";
@@ -20,6 +22,8 @@ import { Problem } from "./Problem.js";
 interface NewGameProps {
   readonly api: ApiClient;
   readonly appName: string;
+  /** The instance's VAPID public key, for the notifications offer after creating (03 §7). */
+  readonly pushKey: string | undefined;
   readonly ownEmail: string;
   /** The session is gone (401). */
   readonly onSessionLost: () => void;
@@ -48,7 +52,50 @@ function createProblem(status: number, code: string): string {
   return CREATE_PROBLEMS[code] ?? "Something went wrong. Please try again.";
 }
 
-export function NewGame({ api, appName, ownEmail, onSessionLost }: NewGameProps) {
+/**
+ * Offered once per device after a game is created (03 §7: never at sign-in): turning notifications
+ * on here asks for permission from the tap, as iOS requires. Either answer goes on to the game.
+ */
+function PushOffer({
+  api,
+  appName,
+  pushKey,
+  onDone,
+}: {
+  readonly api: ApiClient;
+  readonly appName: string;
+  readonly pushKey: string;
+  readonly onDone: () => void;
+}) {
+  const [pending, setPending] = useState(false);
+  return (
+    <Dialog title="Know when it's your turn?" onClose={onDone} dismissible={!pending}>
+      <p>
+        {appName} can send a notification to this device when it&apos;s your turn or a game ends.
+        You can change this in Settings at any time.
+      </p>
+      <div className="row">
+        <button
+          type="button"
+          className="button"
+          disabled={pending}
+          onClick={() => {
+            setPending(true);
+            // Straight from the tap: the permission prompt needs it (iOS).
+            void turnOnPush(api, pushKey).then(onDone);
+          }}
+        >
+          {pending ? "Turning on…" : "Turn on notifications"}
+        </button>
+        <button type="button" className="button secondary" disabled={pending} onClick={onDone}>
+          Not now
+        </button>
+      </div>
+    </Dialog>
+  );
+}
+
+export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewGameProps) {
   const [games, setGames] = useState<readonly CatalogGame[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -60,6 +107,8 @@ export function NewGame({ api, appName, ownEmail, onSessionLost }: NewGameProps)
   const [emails, setEmails] = useState<readonly string[]>([""]);
   const [problem, setProblem] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  /** The created game's path, while the notifications offer is open. */
+  const [offering, setOffering] = useState<string | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   /** The game whose client module is wanted now: a load for any other one is ignored when it ends. */
   const wanted = useRef<string | null>(null);
@@ -147,7 +196,11 @@ export function NewGame({ api, appName, ownEmail, onSessionLost }: NewGameProps)
       invitees: emails.map((email) => ({ email })),
     });
     if (result.ok) {
-      navigate(`/g/${encodeURIComponent(result.data.game.id)}`);
+      const path = `/g/${encodeURIComponent(result.data.game.id)}`;
+      if (pushKey !== undefined && (await shouldOfferPush(pushKey))) {
+        rememberPushOffered();
+        setOffering(path);
+      } else navigate(path);
       return;
     }
     setPending(false);
@@ -341,6 +394,16 @@ export function NewGame({ api, appName, ownEmail, onSessionLost }: NewGameProps)
             </button>
           </div>
         </section>
+      ) : null}
+      {offering !== null && pushKey !== undefined ? (
+        <PushOffer
+          api={api}
+          appName={appName}
+          pushKey={pushKey}
+          onDone={() => {
+            navigate(offering);
+          }}
+        />
       ) : null}
     </Page>
   );

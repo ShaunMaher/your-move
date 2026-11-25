@@ -3,8 +3,10 @@
  * "New version available" and activates the update only when the person agrees, so a game in
  * progress is never replaced under them. Once it is activated, every open tab reloads, the other
  * tabs without being asked (the old worker's cache is gone, so a tab left on the old code would
- * find its files missing); input not yet sent in those tabs is lost.
+ * find its files missing); input not yet sent in those tabs is lost. It also follows the worker's
+ * request to show a game when a notification is tapped.
  */
+import { navigate } from "./router.js";
 
 export interface UpdateWatch {
   /** Activates the waiting worker; the page reloads when it takes over. */
@@ -48,10 +50,32 @@ export function watchForUpdates(
   });
 }
 
+/**
+ * Moves to a game when the service worker asks: a tapped notification for a window already open
+ * (07 §4). Only a game's path is accepted, and only from a service worker of this origin.
+ */
+export function followNotificationTaps(
+  container: ServiceWorkerContainer,
+  open: (path: string) => void,
+): void {
+  container.addEventListener("message", (event: MessageEvent) => {
+    if (event.origin !== "" && event.origin !== window.location.origin) return;
+    const data: unknown = event.data;
+    if (typeof data !== "object" || data === null) return;
+    const { type, path } = data as { type?: unknown; path?: unknown };
+    if (type === "open" && typeof path === "string" && /^\/g\/[^/?#\\]+$/u.test(path)) open(path);
+  });
+  // Messages wait until the page says it is listening.
+  container.startMessages();
+}
+
 /** Registers `/sw.js` in a production build; a no-op in development and where unsupported. */
 export function registerServiceWorker(onUpdate: (watch: UpdateWatch) => void): void {
   if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
   const container = navigator.serviceWorker;
+  followNotificationTaps(container, (path) => {
+    navigate(path);
+  });
   const register = () => {
     void container.register("/sw.js").then(
       (registration) => {

@@ -1,5 +1,6 @@
 /** A fake API for the component tests: a handler table over the typed client; nothing touches the network. */
 import { createApiClient } from "@your-move/api-client";
+import { vi } from "vitest";
 
 import type { GameEnvelope } from "./game-api.js";
 
@@ -154,4 +155,86 @@ export function summary(over: Record<string, unknown> = {}) {
     version: 3,
     ...over,
   };
+}
+
+/** A VAPID public key, as `/api/v1/config` gives it (RFC 8291 Appendix A's, never deployed). */
+export const PUSH_KEY =
+  "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8";
+
+function keyBytes(key: string): Uint8Array<ArrayBuffer> {
+  return Uint8Array.from(atob(key.replaceAll("-", "+").replaceAll("_", "/")), (c) =>
+    c.charCodeAt(0),
+  );
+}
+
+interface FakePushOptions {
+  /** `Notification.permission` now. Default `default`. */
+  readonly permission?: NotificationPermission;
+  /** What `requestPermission()` answers. Default `granted`. */
+  readonly answer?: NotificationPermission;
+  /** Whether a service worker is registered. Default true. */
+  readonly registered?: boolean;
+  /** An existing subscription, made with this VAPID key. */
+  readonly subscribedWith?: string;
+}
+
+/**
+ * A device with the Push API: a registration whose `pushManager` remembers one subscription, and
+ * `Notification` with a permission. Undo it with {@link removeFakePush} (and `vi.unstubAllGlobals`).
+ */
+export function fakePush(options: FakePushOptions = {}) {
+  let permission: NotificationPermission = options.permission ?? "default";
+  let serial = 0;
+  const make = (key: Uint8Array<ArrayBuffer>) => {
+    serial += 1;
+    const endpoint = `https://fcm.googleapis.com/fcm/send/device-${String(serial)}`;
+    const subscription = {
+      endpoint,
+      options: { applicationServerKey: key.buffer },
+      toJSON: () => ({ endpoint, expirationTime: null, keys: { p256dh: "p", auth: "a" } }),
+      unsubscribe: vi.fn(() => {
+        if (state.subscription === subscription) state.subscription = null;
+        return Promise.resolve(true);
+      }),
+    };
+    return subscription;
+  };
+  const state: { subscription: ReturnType<typeof make> | null } = {
+    subscription:
+      options.subscribedWith === undefined ? null : make(keyBytes(options.subscribedWith)),
+  };
+  const pushManager = {
+    getSubscription: vi.fn(() => Promise.resolve(state.subscription)),
+    subscribe: vi.fn((init: { userVisibleOnly?: boolean; applicationServerKey: Uint8Array }) => {
+      state.subscription = make(new Uint8Array(init.applicationServerKey));
+      return Promise.resolve(state.subscription);
+    }),
+  };
+  const requestPermission = vi.fn(() => {
+    permission = options.answer ?? "granted";
+    return Promise.resolve(permission);
+  });
+  Object.defineProperty(window.navigator, "serviceWorker", {
+    configurable: true,
+    value: {
+      getRegistration: () =>
+        Promise.resolve(options.registered === false ? undefined : { pushManager }),
+    },
+  });
+  vi.stubGlobal("PushManager", function PushManager() {
+    // Only its presence is checked.
+  });
+  vi.stubGlobal("Notification", {
+    get permission() {
+      return permission;
+    },
+    requestPermission,
+  });
+  return { state, pushManager, requestPermission };
+}
+
+/** Takes the fake service worker container off `navigator` again. */
+export function removeFakePush(): void {
+  Reflect.deleteProperty(window.navigator, "serviceWorker");
+  vi.unstubAllGlobals();
 }

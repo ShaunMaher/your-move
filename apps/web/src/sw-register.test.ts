@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { type UpdateWatch, watchForUpdates } from "./sw-register.js";
+import { followNotificationTaps, type UpdateWatch, watchForUpdates } from "./sw-register.js";
 
 /** A just-enough fake of the service worker objects. */
 function fakes(options: { controlled: boolean; waiting?: boolean }) {
@@ -114,5 +114,48 @@ describe("watchForUpdates", () => {
     f.foundUpdate();
     f.installing.fire("statechange");
     expect(onUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("followNotificationTaps (07 §4)", () => {
+  function container() {
+    let listener: ((event: MessageEvent) => void) | null = null;
+    const fake = {
+      addEventListener: (_type: string, given: (event: MessageEvent) => void) => {
+        listener = given;
+      },
+      startMessages: vi.fn(),
+    };
+    return {
+      fake,
+      send: (data: unknown, origin = "") => {
+        listener?.(new MessageEvent("message", { data, origin }));
+      },
+    };
+  }
+
+  it("shows the game a tapped notification is for, and starts listening at once", () => {
+    const { fake, send } = container();
+    const open = vi.fn();
+    followNotificationTaps(fake as unknown as ServiceWorkerContainer, open);
+    expect(fake.startMessages).toHaveBeenCalledOnce();
+    send({ type: "open", path: "/g/abc-123" });
+    send({ type: "open", path: "/g/xyz" }, window.location.origin);
+    expect(open.mock.calls).toEqual([["/g/abc-123"], ["/g/xyz"]]);
+  });
+
+  it.each([
+    ["another origin", { type: "open", path: "/g/abc" }, "https://evil.example"],
+    ["a path that isn't a game's", { type: "open", path: "/settings" }, ""],
+    ["another site's URL", { type: "open", path: "https://evil.example/g/1" }, ""],
+    ["a protocol-relative path", { type: "open", path: "//evil.example/g/1" }, ""],
+    ["another message", { type: "SKIP_WAITING", path: "/g/abc" }, ""],
+    ["a string", "open", ""],
+  ])("ignores %s", (_name, data, origin) => {
+    const { fake, send } = container();
+    const open = vi.fn();
+    followNotificationTaps(fake as unknown as ServiceWorkerContainer, open);
+    send(data, origin);
+    expect(open).not.toHaveBeenCalled();
   });
 });

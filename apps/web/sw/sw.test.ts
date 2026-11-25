@@ -51,14 +51,36 @@ function fakeCaches(initial: Record<string, string[]> = {}) {
 }
 
 /** Runs the worker's source, as the build assembles it, against stubs of its globals. */
-function load(options: { caches?: ReturnType<typeof fakeCaches>; fetch?: typeof fetch } = {}) {
+/** A window of the app (or another page) as `clients.matchAll` reports it. */
+interface FakeWindow {
+  readonly url: string;
+  readonly postMessage: ReturnType<typeof vi.fn>;
+  readonly focus: ReturnType<typeof vi.fn>;
+}
+
+function fakeWindow(url: string): FakeWindow {
+  return { url, postMessage: vi.fn(), focus: vi.fn(() => Promise.resolve()) };
+}
+
+function load(
+  options: {
+    caches?: ReturnType<typeof fakeCaches>;
+    fetch?: typeof fetch;
+    windows?: FakeWindow[];
+  } = {},
+) {
   const listeners = new Map<string, Listener>();
   const caches = options.caches ?? fakeCaches();
   const fetchStub = options.fetch ?? vi.fn(() => Promise.resolve(new Response("network")));
   const self = {
     location: { origin: ORIGIN },
     addEventListener: (type: string, listener: Listener) => listeners.set(type, listener),
-    clients: { claim: vi.fn(() => Promise.resolve()) },
+    clients: {
+      claim: vi.fn(() => Promise.resolve()),
+      matchAll: vi.fn(() => Promise.resolve(options.windows ?? [])),
+      openWindow: vi.fn(() => Promise.resolve(null)),
+    },
+    registration: { showNotification: vi.fn(() => Promise.resolve()) },
     skipWaiting: vi.fn(() => Promise.resolve()),
   };
   vm.runInNewContext(renderWorker(BUILD, template), {
@@ -224,5 +246,109 @@ describe("navigations", () => {
     const worker = load({ fetch: () => Promise.reject(new TypeError("x")) });
     const response = await dispatch(worker, "/", { mode: "navigate" });
     expect(response?.type).toBe("error");
+  });
+});
+
+/** Delivers a push with this payload (a string, or none) and waits for the worker's work. */
+async function push(worker: ReturnType<typeof load>, payload: string | null): Promise<void> {
+  const waits: Promise<unknown>[] = [];
+  worker.listeners.get("push")?.({
+    data:
+      payload === null ? null : { json: () => JSON.parse(payload) as unknown, text: () => payload },
+    waitUntil: (p: Promise<unknown>) => waits.push(p),
+  });
+  await Promise.all(waits);
+}
+
+describe("push (07 §4)", () => {
+  it("shows the server's notification, one per game, opening the game", async () => {
+    const worker = load();
+    await push(
+      worker,
+      JSON.stringify({
+        title: "Family Games",
+        body: "Sam passed. Your turn.",
+        url: "/g/abc-123",
+        tag: "game-abc-123",
+      }),
+    );
+    expect(worker.self.registration.showNotification).toHaveBeenCalledWith("Family Games", {
+      body: "Sam passed. Your turn.",
+      icon: "/icons/icon-192.png",
+      data: { url: "/g/abc-123" },
+      tag: "game-abc-123",
+      renotify: true,
+    });
+  });
+
+  it.each([
+    ["no payload", null],
+    ["a payload that isn't JSON", "not json"],
+    ["JSON without a title", JSON.stringify({ body: "x" })],
+    ["JSON that isn't an object", "42"],
+  ])("still shows a notification for %s (iOS revokes silent pushes)", async (_name, payload) => {
+    const worker = load();
+    await push(worker, payload);
+    expect(worker.self.registration.showNotification).toHaveBeenCalledWith("Game update", {
+      body: "Something happened in one of your games.",
+      data: { url: "/" },
+    });
+  });
+
+  it.each([
+    ["another origin", "https://evil.example/g/1"],
+    ["a protocol-relative URL", "//evil.example/g/1"],
+    ["a non-game path", "/settings"],
+    ["a nested path", "/g/1/../../x"],
+    ["a query", "/g/1?x=1"],
+    ["a non-string", 42],
+  ])("opens only a game's path, not %s", async (_name, url) => {
+    const worker = load();
+    await push(worker, JSON.stringify({ title: "t", body: "b", url }));
+    expect(worker.self.registration.showNotification).toHaveBeenCalledWith(
+      "t",
+      expect.objectContaining({ data: { url: "/" } }),
+    );
+  });
+});
+
+describe("notificationclick (07 §4)", () => {
+  async function click(worker: ReturnType<typeof load>, url: unknown) {
+    const close = vi.fn();
+    const waits: Promise<unknown>[] = [];
+    worker.listeners.get("notificationclick")?.({
+      notification: { close, data: { url } },
+      waitUntil: (p: Promise<unknown>) => waits.push(p),
+    });
+    await Promise.all(waits);
+    return close;
+  }
+
+  it("asks an open window of the app to show the game, and focuses it", async () => {
+    const other = fakeWindow("https://elsewhere.example/");
+    const app = fakeWindow(`${ORIGIN}/settings`);
+    const worker = load({ windows: [other, app] });
+    const close = await click(worker, "/g/abc");
+    expect(close).toHaveBeenCalledOnce();
+    expect(worker.self.clients.matchAll).toHaveBeenCalledWith({
+      type: "window",
+      includeUncontrolled: true,
+    });
+    expect(app.postMessage).toHaveBeenCalledWith({ type: "open", path: "/g/abc" });
+    expect(app.focus).toHaveBeenCalledOnce();
+    expect(other.postMessage).not.toHaveBeenCalled();
+    expect(worker.self.clients.openWindow).not.toHaveBeenCalled();
+  });
+
+  it("opens the game when no window of the app is open", async () => {
+    const worker = load({ windows: [fakeWindow("https://elsewhere.example/")] });
+    await click(worker, "/g/abc");
+    expect(worker.self.clients.openWindow).toHaveBeenCalledWith("/g/abc");
+  });
+
+  it("opens the game list for anything that isn't a game's path", async () => {
+    const worker = load();
+    await click(worker, "https://evil.example/");
+    expect(worker.self.clients.openWindow).toHaveBeenCalledWith("/");
   });
 });

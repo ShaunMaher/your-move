@@ -5,13 +5,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forgetCatalog } from "../catalog.js";
 import { loadGameClient } from "../games.js";
 import { fakeClient } from "../test-client.js";
-import { CATALOG, CATALOG_GAME, fakeApi, json, problem } from "../test-support.js";
+import {
+  CATALOG,
+  CATALOG_GAME,
+  fakeApi,
+  fakePush,
+  json,
+  problem,
+  PUSH_KEY,
+  removeFakePush,
+} from "../test-support.js";
 import { NewGame } from "./NewGame.js";
 
 vi.mock("../games.js", () => ({ loadGameClient: vi.fn(() => Promise.resolve(fakeClient)) }));
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/new");
+  window.localStorage.clear();
 });
 afterEach(() => {
   cleanup();
@@ -29,6 +39,7 @@ const view = (create: Response = json(created, 201), catalog: Response = json(CA
     <NewGame
       api={fake.api}
       appName="Family Games"
+      pushKey={undefined}
       ownEmail="sam@example.org"
       onSessionLost={lost}
     />,
@@ -149,7 +160,13 @@ describe("the new-game flow", () => {
       "POST /api/v1/games": new Error("offline"),
     });
     const { unmount } = render(
-      <NewGame api={offline.api} appName="A" ownEmail="sam@example.org" onSessionLost={vi.fn()} />,
+      <NewGame
+        api={offline.api}
+        appName="A"
+        pushKey={undefined}
+        ownEmail="sam@example.org"
+        onSessionLost={vi.fn()}
+      />,
     );
     await toPlayers();
     typeEmail("alex@example.org");
@@ -174,5 +191,79 @@ describe("the new-game flow", () => {
     expect(await screen.findByText(/Couldn't load the games/u)).toBeDefined();
     click("Try again");
     expect(await screen.findByText(/Couldn't load the games/u)).toBeDefined();
+  });
+});
+
+describe("the notifications offer after creating a game (03 §7, alpha A8)", () => {
+  afterEach(removeFakePush);
+
+  function create(pushKey: string | undefined) {
+    const fake = fakeApi({
+      "GET /api/v1/catalog": json(CATALOG),
+      "POST /api/v1/games": json(created, 201),
+      "POST /api/v1/push/subscriptions": new Response(null, { status: 204 }),
+    });
+    render(
+      <NewGame
+        api={fake.api}
+        appName="Family Games"
+        pushKey={pushKey}
+        ownEmail="sam@example.org"
+        onSessionLost={vi.fn()}
+      />,
+    );
+    return fake;
+  }
+
+  async function createGame() {
+    await toPlayers();
+    typeEmail("alex@example.org");
+    click("Review");
+    click("Create game");
+  }
+
+  it("asks once, turns notifications on from the tap, then goes to the game", async () => {
+    const device = fakePush();
+    const { calls } = create(PUSH_KEY);
+    await createGame();
+    await screen.findByRole("dialog", { name: "Know when it's your turn?" });
+    expect(window.location.pathname).toBe("/new");
+    click("Turn on notifications");
+    expect(device.requestPermission).toHaveBeenCalledOnce();
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/g/g9");
+    });
+    expect(calls.some((call) => call.path === "/api/v1/push/subscriptions")).toBe(true);
+    expect(device.state.subscription).not.toBeNull();
+  });
+
+  it("goes to the game on 'Not now' and doesn't ask again on this device", async () => {
+    const device = fakePush();
+    create(PUSH_KEY);
+    await createGame();
+    await screen.findByRole("dialog", { name: "Know when it's your turn?" });
+    click("Not now");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/g/g9");
+    });
+    expect(device.requestPermission).not.toHaveBeenCalled();
+    cleanup();
+    forgetCatalog();
+    window.history.replaceState(null, "", "/new");
+    create(PUSH_KEY);
+    await createGame();
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/g/g9");
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("isn't made without a server key or where push can't work", async () => {
+    create(undefined);
+    await createGame();
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/g/g9");
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

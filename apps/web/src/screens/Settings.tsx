@@ -1,12 +1,14 @@
 /**
- * The parts of `/settings` (07 §1) built so far: who is signed in, the email nudges toggle (03 §7,
- * alpha A6), sign out, and sign out everywhere with the choice to revoke API tokens too (06 §4).
- * The rest of the screen arrives with its features.
+ * The parts of `/settings` (07 §1) built so far: who is signed in, notifications on this device
+ * (07 §4, alpha A8), the email nudges toggle (03 §7, alpha A6), sign out, and sign out everywhere
+ * with the choice to revoke API tokens too (06 §4). The rest of the screen arrives with its
+ * features.
  */
 import type { ApiClient } from "@your-move/api-client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { type Me, saveEmailNudges, signOutEverywhere } from "../auth-api.js";
+import { type PushChange, pushState, type PushState, turnOffPush, turnOnPush } from "../push.js";
 import { Link } from "../router.js";
 import { useSignOut } from "../use-sign-out.js";
 import { Page } from "./Page.js";
@@ -16,6 +18,8 @@ interface SettingsProps {
   readonly api: ApiClient;
   readonly appName: string;
   readonly me: Me;
+  /** The instance's VAPID public key; without one it sends no pushes. */
+  readonly pushKey: string | undefined;
   /** The server's answer after a setting changed. */
   readonly onMeChanged: (me: Me) => void;
   /** A call answered 401: the session ended elsewhere. */
@@ -76,10 +80,110 @@ function EmailNudges({
   );
 }
 
+const PUSH_PROBLEMS: Partial<Record<PushChange, string>> = {
+  offline: "You seem to be offline. Notifications weren't changed. Try again.",
+  failed: "Notifications couldn't be changed on this device. Please try again.",
+};
+
+/**
+ * Notifications on this device (07 §4): a toggle where push can work, and otherwise what stands in
+ * the way, with the way to the Home Screen on iOS Safari. Turning it on asks for permission from
+ * the tap itself.
+ */
+function PushNotifications({
+  api,
+  appName,
+  pushKey,
+  onSessionLost,
+}: Pick<SettingsProps, "api" | "appName" | "pushKey" | "onSessionLost">) {
+  const [state, setState] = useState<PushState | "checking">("checking");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void pushState(pushKey).then((found) => {
+      if (live) setState(found);
+    });
+    return () => {
+      live = false;
+    };
+  }, [pushKey]);
+
+  function settle(change: PushChange) {
+    setPending(false);
+    if (change === "unauthenticated") {
+      onSessionLost();
+      return;
+    }
+    if (change === "on" || change === "off" || change === "denied") setState(change);
+    setError(PUSH_PROBLEMS[change] ?? null);
+  }
+
+  function toggle(on: boolean) {
+    if (pending || pushKey === undefined) return;
+    setPending(true);
+    setError(null);
+    // Straight from the tap: the permission prompt needs it (iOS).
+    void (on ? turnOnPush(api, pushKey) : turnOffPush(api)).then(settle);
+  }
+
+  let body;
+  if (state === "checking") body = <p role="status">Checking this device…</p>;
+  else if (state === "no-server-key") body = <p>{appName} doesn&apos;t send notifications.</p>;
+  else if (state === "needs-install") {
+    body = (
+      <p>
+        On iPhone and iPad, notifications work once {appName} is on your Home Screen. Open it from
+        there and turn them on here. <Link to="/install">How to add it to your Home Screen</Link>
+      </p>
+    );
+  } else if (state === "unsupported") {
+    body = <p>This browser can&apos;t show notifications from {appName}.</p>;
+  } else if (state === "denied") {
+    body = (
+      <p>
+        Notifications from {appName} are blocked on this device. To get them, allow them in your
+        browser or device settings, then come back here.
+      </p>
+    );
+  } else {
+    body = (
+      <>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={state === "on"}
+            disabled={pending}
+            aria-describedby="push-help push-problem"
+            onChange={(event) => {
+              toggle(event.target.checked);
+            }}
+          />
+          Notify me on this device
+        </label>
+        <p id="push-help">
+          When it&apos;s your turn, or a game ends. A notification names the players and says what
+          was played, nothing else about the game.
+        </p>
+      </>
+    );
+  }
+
+  return (
+    <section className="card stack" aria-labelledby="push-heading">
+      <h2 id="push-heading">Notifications</h2>
+      {body}
+      <Problem id="push-problem" message={error} />
+    </section>
+  );
+}
+
 export function Settings({
   api,
   appName,
   me,
+  pushKey,
   onMeChanged,
   onSessionLost,
   onSignedOut,
@@ -126,6 +230,12 @@ export function Settings({
           <Link to="/install">How to add {appName} to your Home Screen</Link>
         </p>
       </section>
+      <PushNotifications
+        api={api}
+        appName={appName}
+        pushKey={pushKey}
+        onSessionLost={onSessionLost}
+      />
       <EmailNudges api={api} me={me} onMeChanged={onMeChanged} onSessionLost={onSessionLost} />
       <section className="card stack" aria-labelledby="signout-heading">
         <h2 id="signout-heading">Sign out</h2>

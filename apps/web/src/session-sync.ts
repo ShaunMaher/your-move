@@ -4,6 +4,7 @@
  * becomes visible (the session may have been ended from another device).
  */
 import { forgetCatalog } from "./catalog.js";
+import { dropPushSubscription } from "./push.js";
 import { clearReturnPath } from "./return-path.js";
 
 const CHANNEL = "session";
@@ -31,12 +32,14 @@ export function clearGameState(): void {
 }
 
 /**
- * Everything the client keeps about the person, cleared whenever their session ends in this tab.
- * Later slices add to it: the push unsubscribe (A5) and anything else the app keeps per user.
+ * Everything the client keeps about the person, cleared whenever their session ends in this tab:
+ * the return path, per-game state and this device's push subscription (06 §4; the server deleted
+ * its copy with the session).
  */
 export function clearClientState(): void {
   clearReturnPath();
   clearGameState();
+  dropPushSubscription();
 }
 
 function openChannel(): BroadcastChannel | null {
