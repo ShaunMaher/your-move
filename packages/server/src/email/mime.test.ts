@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildMime, EXTRA_HEADERS, type MimeInput, quotedPrintable } from "./mime.js";
+import { buildMime, type MimeInput, quotedPrintable } from "./mime.js";
 import { EmailHeaderError } from "./sender.js";
 
 const base: MimeInput = {
@@ -100,27 +100,6 @@ describe("buildMime", () => {
       header(buildMime({ ...base, from: { name: null, address: "a@example.org" } }), "From"),
     ).toBe("a@example.org");
   });
-
-  it("adds the allowed extra headers and nothing else", () => {
-    const raw = buildMime({
-      ...base,
-      headers: {
-        "List-Unsubscribe": "<https://play.example.org/api/v1/email/unsubscribe?t=x>",
-        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-      },
-    });
-    expect(header(raw, "List-Unsubscribe-Post")).toBe("List-Unsubscribe=One-Click");
-    expect(EXTRA_HEADERS).toHaveLength(2);
-    for (const name of ["Bcc", "Cc", "To", "Reply-To", "X-Anything", "list-unsubscribe"]) {
-      expect(() => buildMime({ ...base, headers: { [name]: "x" } })).toThrow(EmailHeaderError);
-    }
-    expect(() => buildMime({ ...base, headers: { "List-Unsubscribe": "<é>" } })).toThrow(
-      EmailHeaderError,
-    );
-    expect(() => buildMime({ ...base, headers: { "List-Unsubscribe": "<a>\r\nBcc: x" } })).toThrow(
-      EmailHeaderError,
-    );
-  });
 });
 
 describe("hostile input (08 T14)", () => {
@@ -207,8 +186,20 @@ describe("hostile input (08 T14)", () => {
     }
   });
 
-  it("converts an internationalised domain to punycode", () => {
-    expect(header(buildMime({ ...base, to: "sam@bücher.example" }), "To")).toBe(
+  it("refuses, and never converts, a domain that isn't already ASCII (the stored address is the delivered one)", () => {
+    for (const to of [
+      "sam@bücher.example",
+      "x@gmail.com#é",
+      "x@gmail.com/é",
+      "x@gmail.com?é",
+      "x@ｇｍａｉｌ.com",
+      "x@gma%69l.com",
+      "x@a_b.example",
+      "x@-a.example",
+    ]) {
+      expect(() => buildMime({ ...base, to })).toThrow(EmailHeaderError);
+    }
+    expect(header(buildMime({ ...base, to: "sam@xn--bcher-kva.example" }), "To")).toBe(
       "sam@xn--bcher-kva.example",
     );
   });

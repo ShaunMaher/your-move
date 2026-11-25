@@ -13,7 +13,10 @@ Conventions:
 - JSON columns: `TEXT` containing JSON, parsed and validated by Zod on read.
 - Emails are stored **normalised**: trimmed, Unicode NFC, lower-cased. No provider-specific
   canonicalisation (dots / `+tags` are kept as typed). Must match a pragmatic address regex and be
-  ≤ 254 chars.
+  ≤ 254 chars. The stored domain is **ASCII**, so the stored address is the one mail is delivered
+  to (09 §2): a domain with any ASCII character other than letters, digits, `.` and `-`, or one
+  that NFKC would rewrite, is refused; an internationalised domain is stored as punycode with the
+  same number of labels. This happens before any limit or lookup, identically for every address.
 - Columns marked 🔒 are **secret game state** and must never be serialised to a client (02 §2.1
   rule 4, invariant 4 below).
 

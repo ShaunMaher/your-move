@@ -9,6 +9,10 @@ describe("normaliseAddress (04 conventions)", () => {
     ["  sam+games@example.org\t", "sam+games@example.org"],
     ["first.last@sub.example.co.uk", "first.last@sub.example.co.uk"],
     ["Ånne@example.org".normalize("NFD"), "ånne@example.org"],
+    // The stored domain is ASCII: an internationalised one is stored as punycode (09 §2).
+    ["x@bücher.de", "x@xn--bcher-kva.de"],
+    ["x@BÜCHER.de", "x@xn--bcher-kva.de"],
+    ["x@bu\u0308cher.de", "x@xn--bcher-kva.de"],
   ])("%j → %s", (input, expected) => {
     expect(normaliseAddress(input)).toBe(expected);
   });
@@ -30,6 +34,18 @@ describe("normaliseAddress (04 conventions)", () => {
     "sam@example..org",
     "sam\u0000@example.org",
     `${"a".repeat(65)}@example.org`,
+    // A domain a URL parser would rewrite into something else is never stored (A5-S-3).
+    "x@gmail.com#é",
+    "x@gmail.com/é",
+    "x@gmail.com?é",
+    "x@ｇｍａｉｌ.com",
+    "x@gma%69l.cömx",
+    "x@gmail.com%2F.é.de",
+    "x@a_b.example",
+    "x@-a.example",
+    "x@a-.example",
+    "x@exämple。org",
+    "x@xn--bcher-kva.de\u00e9\u0000",
   ])("refuses %j", (input) => {
     expect(normaliseAddress(input)).toBeNull();
   });

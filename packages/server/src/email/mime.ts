@@ -6,10 +6,12 @@
  * - Every header value is checked for control characters (CR, LF, NUL, ...), and anything that
  *   isn't printable ASCII is RFC 2047 encoded, so no input can end its header or start another.
  * - Display names are quoted strings (backslash and quote escaped) or encoded words.
- * - Addresses must be plain ASCII `addr-spec`s; an internationalised domain is converted to
- *   punycode. A non-ASCII local part is refused rather than sent where it may not be accepted.
+ * - Addresses must be plain ASCII `addr-spec`s, never converted here: a non-ASCII domain or local
+ *   part is refused rather than sent somewhere other than the stored address.
  * - The body is `multipart/alternative`: plain text, then HTML, both quoted-printable UTF-8.
  */
+import { ASCII_DOMAIN } from "../accounts/email.js";
+import { toBase64 } from "../base64.js";
 import { EmailHeaderError } from "./sender.js";
 
 interface MimeMailbox {
@@ -28,12 +30,7 @@ export interface MimeInput {
   readonly date: Date;
   /** `local@domain`, without angle brackets; unique per message. */
   readonly messageId: string;
-  /** Extra headers; only the names in {@link EXTRA_HEADERS}. Values must be printable ASCII. */
-  readonly headers?: Readonly<Record<string, string>>;
 }
-
-/** The extra headers a caller may add (09 §2: unsubscribe links on every non-OTP email). */
-export const EXTRA_HEADERS: readonly string[] = ["List-Unsubscribe", "List-Unsubscribe-Post"];
 
 /**
  * The multipart boundary. A body can't contain it: quoted-printable writes every `=` as `=3D`, so
@@ -42,8 +39,6 @@ export const EXTRA_HEADERS: readonly string[] = ["List-Unsubscribe", "List-Unsub
 const BOUNDARY = "=_ym_alt_boundary";
 const CRLF = "\r\n";
 const LOCAL_PART = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/u;
-const DOMAIN =
-  /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/u;
 const PRINTABLE_ASCII = /^[ -~]*$/u;
 /** Bytes per encoded word: 36 bytes become 48 base64 characters, 60 with the word's wrapper. */
 const WORD_BYTES = 36;
@@ -53,18 +48,12 @@ function refuseControls(value: string, what: string): void {
   if (/\p{Cc}/u.test(value)) throw new EmailHeaderError(`${what} contains a control character`);
 }
 
-function base64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
 /** RFC 2047 `B` encoded words for `value`, never splitting a character, joined by folding. */
 function encodedWords(value: string): string {
   const words: string[] = [];
   let chunk: number[] = [];
   const flush = (): void => {
-    if (chunk.length > 0) words.push(`=?UTF-8?B?${base64(Uint8Array.from(chunk))}?=`);
+    if (chunk.length > 0) words.push(`=?UTF-8?B?${toBase64(Uint8Array.from(chunk))}?=`);
     chunk = [];
   };
   for (const character of value) {
@@ -92,20 +81,17 @@ function encodePhrase(name: string): string {
   return encodedWords(name);
 }
 
-/** A checked ASCII `addr-spec`; the domain of an internationalised address becomes punycode. */
+/**
+ * A checked ASCII `addr-spec`. Nothing is converted: an address whose domain isn't already ASCII is
+ * refused, because the stored address must be the one delivered to (`normaliseAddress` stores the
+ * punycode form).
+ */
 function encodeAddress(address: string, what: string): string {
   refuseControls(address, what);
   const at = address.lastIndexOf("@");
   const local = address.slice(0, at);
-  let domain = address.slice(at + 1);
-  if (!PRINTABLE_ASCII.test(domain)) {
-    try {
-      domain = new URL(`http://${domain}`).hostname;
-    } catch {
-      throw new EmailHeaderError(`${what} is not a valid address`);
-    }
-  }
-  if (at < 1 || address.length > 254 || !LOCAL_PART.test(local) || !DOMAIN.test(domain)) {
+  const domain = address.slice(at + 1);
+  if (at < 1 || address.length > 254 || !LOCAL_PART.test(local) || !ASCII_DOMAIN.test(domain)) {
     throw new EmailHeaderError(`${what} is not a valid ASCII address`);
   }
   return `${local}@${domain}`;
@@ -174,13 +160,6 @@ export function buildMime(input: MimeInput): string {
     `Message-ID: <${input.messageId}>`,
     "MIME-Version: 1.0",
   ];
-  for (const [name, value] of Object.entries(input.headers ?? {})) {
-    if (!EXTRA_HEADERS.includes(name)) throw new EmailHeaderError(`header ${name} is not allowed`);
-    if (!PRINTABLE_ASCII.test(value)) {
-      throw new EmailHeaderError(`${name} must be printable ASCII`);
-    }
-    headers.push(`${name}: ${value}`);
-  }
   headers.push(`Content-Type: multipart/alternative; boundary="${BOUNDARY}"`);
   const body = [
     ...part("text/plain", input.text),

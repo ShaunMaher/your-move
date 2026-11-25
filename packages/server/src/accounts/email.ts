@@ -21,13 +21,44 @@ const LOCAL = String.raw`[^\s\p{Cc}\p{Cf}@<>()[\]\\,;:"]{1,64}`;
 const LABEL = String.raw`[^\s\p{Cc}\p{Cf}@<>()[\]\\,;:".]+`;
 const ADDRESS = new RegExp(String.raw`^${LOCAL}@${LABEL}(?:\.${LABEL})+$`, "u");
 
+/** A delivery-safe domain: ASCII labels of letters, digits and inner hyphens, at least two. */
+export const ASCII_DOMAIN =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/u;
+
+/**
+ * The ASCII form of `domain`, or `null` when it can't be one that means the same thing. Any ASCII
+ * character outside letters, digits, `.` and `-` is refused, and so is a domain that NFKC would
+ * rewrite: a URL parser maps such characters to ASCII ones (`#`, `/`, `%`), which would send mail
+ * somewhere other than the stored address says. Only a plain internationalised domain is
+ * converted (punycode), with the same number of labels.
+ */
+function asciiDomain(domain: string): string | null {
+  if (/\p{ASCII}/u.test(domain.replaceAll(/[A-Za-z0-9.-]/gu, ""))) return null;
+  if (domain.normalize("NFKC") !== domain) return null;
+  if (!/[^\p{ASCII}]/u.test(domain)) return ASCII_DOMAIN.test(domain) ? domain : null;
+  let converted: string;
+  try {
+    converted = new URL(`http://${domain}`).hostname;
+  } catch {
+    return null;
+  }
+  const labels = (value: string): number => value.split(".").length;
+  return ASCII_DOMAIN.test(converted) && labels(converted) === labels(domain) ? converted : null;
+}
+
 /**
  * Normalises and validates an address typed by a person: trim, Unicode NFC, lower case, then the
  * shape and length checks. No provider-specific canonicalisation: dots and `+tags` stay as typed
- * (04). Returns `null` for anything that isn't a plausible address.
+ * (04). The domain is stored in ASCII (an internationalised one as punycode), so the stored
+ * address is exactly the one mail is delivered to (09 §2, 08 T14). Returns `null` for anything
+ * that isn't a plausible address.
  */
 export function normaliseAddress(input: string): NormalisedEmail | null {
   const value = input.trim().normalize("NFC").toLowerCase();
   if (value.length > MAX_EMAIL_LENGTH || !ADDRESS.test(value)) return null;
-  return value as NormalisedEmail;
+  const at = value.lastIndexOf("@");
+  const domain = asciiDomain(value.slice(at + 1));
+  if (domain === null) return null;
+  const address = `${value.slice(0, at)}@${domain}`;
+  return address.length > MAX_EMAIL_LENGTH ? null : (address as NormalisedEmail);
 }
