@@ -7,7 +7,12 @@ import type { Text } from "@your-move/sdk";
 import { describe, expect, it } from "vitest";
 
 import type { GamePlayerRecord, GameRecord, GameWriteSet, LoadedGame } from "../db/repositories.js";
-import { type PushedTransition, pushMessage, transitionPushes } from "./notify.js";
+import {
+  interleaveByRecipient,
+  type PushedTransition,
+  pushMessage,
+  transitionPushes,
+} from "./notify.js";
 
 const T0 = Date.UTC(2026, 0, 1);
 
@@ -315,5 +320,49 @@ describe("pushMessage (08 T18)", () => {
     expect(
       JSON.stringify(pushMessage(MOVE, { userId: "bob", seat: 1, kind: "turn" }, USERS, "G")),
     ).not.toContain("rack");
+  });
+});
+
+describe("interleaveByRecipient (A8-S-3)", () => {
+  const sub = (userId: string, n: number, useful: number) => ({
+    id: `${userId}-${String(n)}`,
+    userId,
+    createdAt: useful,
+    lastSuccessAt: null,
+  });
+
+  it("takes each recipient's devices in turn, most recently useful first", () => {
+    const rows = [
+      ...Array.from({ length: 10 }, (_, n) => sub("many", n, n)),
+      sub("one", 0, 0),
+      { ...sub("two", 0, 0), lastSuccessAt: 50 },
+      sub("two", 1, 10),
+    ];
+    const order = interleaveByRecipient(rows, ["many", "one", "two"]).map((row) => row.id);
+    expect(order.slice(0, 6)).toEqual(["many-9", "one-0", "two-0", "many-8", "two-1", "many-7"]);
+    expect(order).toHaveLength(13);
+    // A cut after the first three still reaches every recipient.
+    expect(new Set(order.slice(0, 3).map((id) => id.split("-")[0]))).toEqual(
+      new Set(["many", "one", "two"]),
+    );
+  });
+
+  it("leaves out subscriptions of anyone not a recipient", () => {
+    expect(interleaveByRecipient([sub("other", 0, 0)], ["many"])).toEqual([]);
+  });
+});
+
+describe("cutting long text (A8-P-8)", () => {
+  it("cuts by code point, never inside a surrogate pair", () => {
+    const text: Text = [{ seat: 0 }, ` ${"🎲".repeat(300)}`];
+    const body = pushMessage(
+      { ...MOVE, describe: text },
+      { userId: "bob", seat: 1, kind: "turn" },
+      USERS,
+      "G",
+    ).body;
+    expect(Array.from(body)).toHaveLength(240);
+    expect(body.endsWith("🎲…")).toBe(true);
+    expect(body).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/u);
   });
 });

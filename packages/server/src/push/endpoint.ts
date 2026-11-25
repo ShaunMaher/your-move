@@ -13,6 +13,9 @@ const PUSH_SERVICES = [
   "push.services.mozilla.com",
 ] as const;
 
+/** Subscriptions kept per user, the least recently useful evicted (04, 08 T12). */
+export const MAX_SUBSCRIPTIONS_PER_USER = 10;
+
 /** The longest endpoint accepted; real ones are a few hundred characters. */
 const MAX_ENDPOINT_LENGTH = 2048;
 

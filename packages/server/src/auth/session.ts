@@ -4,7 +4,12 @@
  * cap of 400 days. Local-dev mode uses the plain `sid` cookie without `Secure` (06 §4, 08 T19).
  */
 import { toBase64Url } from "../base64.js";
-import type { SessionRecord, UserRecord, Repositories } from "../db/repositories.js";
+import type {
+  Repositories,
+  SessionCutoffs,
+  SessionRecord,
+  UserRecord,
+} from "../db/repositories.js";
 
 const DAY = 86_400_000;
 const SLIDING_EXPIRY_MS = 180 * DAY;
@@ -61,6 +66,18 @@ function slidingExpiry(createdAt: number, now: number): number {
   return Math.min(now + SLIDING_EXPIRY_MS, createdAt + ABSOLUTE_EXPIRY_MS);
 }
 
+/**
+ * What "live" means at `now` (06 §4): not past its sliding expiry and within the absolute cap. The
+ * session check and every query that needs live sessions (push subscriptions, 03 §7) use it.
+ */
+export function liveSessionCutoffs(now: number): SessionCutoffs {
+  return { expiresAfter: now, createdAfter: now - ABSOLUTE_EXPIRY_MS };
+}
+
+function isLive(session: SessionRecord, cutoffs: SessionCutoffs): boolean {
+  return session.expiresAt > cutoffs.expiresAfter && session.createdAt > cutoffs.createdAfter;
+}
+
 export interface ActiveSession {
   readonly session: SessionRecord;
   readonly user: UserRecord;
@@ -80,7 +97,7 @@ export async function loadSession(
   const found = await repos.sessions.findByTokenHash(await hashSessionToken(token));
   if (found === null) return null;
   const { session, user } = found;
-  if (now >= session.expiresAt || now >= session.createdAt + ABSOLUTE_EXPIRY_MS) {
+  if (!isLive(session, liveSessionCutoffs(now))) {
     await repos.sessions.delete(user.id, session.id);
     return null;
   }

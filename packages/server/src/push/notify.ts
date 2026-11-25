@@ -11,16 +11,16 @@
  */
 import { formatText, type Text } from "@your-move/sdk";
 
+import { liveSessionCutoffs } from "../auth/session.js";
 import type { GamePlayerRecord, GameWriteSet, LoadedGame, UserRecord } from "../db/repositories.js";
 import { namesBySeat, playerName, seatedRows } from "../games/names.js";
 import type { Platform } from "../platform.js";
 import type { PushMessage } from "./sender.js";
 
-/** Subscriptions kept per user (04, 08 T12). */
-export const MAX_SUBSCRIPTIONS_PER_USER = 10;
 /**
- * Pushes one transition sends at most: eight seats with ten devices each would be 70 outbound
- * requests, beyond the 50 subrequests a Workers invocation may make (09 §3).
+ * Pushes one transition sends at most: seven recipients with ten devices each would be 70 outbound
+ * requests, beyond the 50 subrequests a Workers invocation may make (09 §3). Subscriptions are
+ * interleaved by recipient before the cut.
  */
 const MAX_PUSHES_PER_TRANSITION = 40;
 /** Lock screens show a line or two; longer text is cut. */
@@ -95,8 +95,35 @@ function sentence(text: string): string {
   return /[.!?]$/u.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
+/** At most {@link MAX_BODY_LENGTH} code points, so a cut never splits a surrogate pair. */
 function cut(text: string): string {
-  return text.length <= MAX_BODY_LENGTH ? text : `${text.slice(0, MAX_BODY_LENGTH - 1)}…`;
+  const points = Array.from(text);
+  return points.length <= MAX_BODY_LENGTH
+    ? text
+    : `${points.slice(0, MAX_BODY_LENGTH - 1).join("")}…`;
+}
+
+/**
+ * The subscriptions in the order they are sent, so the per-transition cap falls fairly: each
+ * recipient's first device, then each one's second, and so on (recipients in seat order, each
+ * one's devices most recently useful first). No recipient's many devices can crowd out another's.
+ */
+export function interleaveByRecipient<
+  T extends { userId: string; lastSuccessAt: number | null; createdAt: number },
+>(subscriptions: readonly T[], recipients: readonly string[]): T[] {
+  const useful = (row: T) => row.lastSuccessAt ?? row.createdAt;
+  const queues = recipients.map((userId) =>
+    subscriptions.filter((row) => row.userId === userId).sort((a, b) => useful(b) - useful(a)),
+  );
+  const longest = Math.max(0, ...queues.map((queue) => queue.length));
+  const order: T[] = [];
+  for (let round = 0; round < longest; round++) {
+    for (const queue of queues) {
+      const next = queue[round];
+      if (next !== undefined) order.push(next);
+    }
+  }
+  return order;
 }
 
 /**
@@ -151,9 +178,14 @@ export async function sendTransitionPushes(
   if (!push.enabled) return;
   const recipients = transitionPushes(transition);
   if (recipients.length === 0) return;
-  const subscriptions = await repos.pushSubscriptions.forUsers([
-    ...new Set(recipients.map((recipient) => recipient.userId)),
-  ]);
+  const recipientIds = [...new Set(recipients.map((recipient) => recipient.userId))];
+  const subscriptions = interleaveByRecipient(
+    await repos.pushSubscriptions.forUsers(
+      recipientIds,
+      liveSessionCutoffs(platform.now().getTime()),
+    ),
+    recipientIds,
+  );
   if (subscriptions.length === 0) return;
   const seatedIds = seatedRows(playersAfter(transition)).flatMap((row) =>
     row.userId === null ? [] : [row.userId],

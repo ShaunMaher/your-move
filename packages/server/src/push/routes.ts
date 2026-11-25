@@ -12,8 +12,7 @@ import { requireSession } from "../auth/require-session.js";
 import type { UserRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
 import type { AppEnv, Platform } from "../platform.js";
-import { parseEndpoint, parseKeys } from "./endpoint.js";
-import { MAX_SUBSCRIPTIONS_PER_USER } from "./notify.js";
+import { MAX_SUBSCRIPTIONS_PER_USER, parseEndpoint, parseKeys } from "./endpoint.js";
 
 export function registerPushRoutes(app: OpenAPIHono<AppEnv>, platform: Platform): void {
   const { repos, config } = platform;

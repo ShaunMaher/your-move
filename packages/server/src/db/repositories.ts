@@ -136,6 +136,14 @@ export interface OtpRepo {
 export type SessionRecord = InferSelectModel<typeof sessions>;
 export type NewSession = InferInsertModel<typeof sessions>;
 
+/** A session is live when both hold (06 §4); built by `liveSessionCutoffs`. */
+export interface SessionCutoffs {
+  /** `expires_at` (the sliding expiry) is after this. */
+  readonly expiresAfter: number;
+  /** `created_at` is after this (the absolute cap). */
+  readonly createdAfter: number;
+}
+
 export interface SessionRepo {
   create(session: NewSession): Promise<void>;
   /** The session with this token hash and its user, or null. Expiry is the caller's to judge. */
@@ -454,16 +462,19 @@ export type NewPushSubscription = Omit<PushSubscriptionRecord, "lastSuccessAt">;
 export interface PushSubscriptionRepo {
   /**
    * Saves a subscription bound to its session (05 §Push subscriptions), then keeps only the user's
-   * newest `maxPerUser` (04: oldest evicted), in one atomic batch. An endpoint already stored is
-   * reassigned to this user, session and keys (an idempotent upsert, keeping its id); its
+   * `maxPerUser` most recently useful (04: by last success, else creation; the least recently
+   * useful evicted), in one atomic batch. An endpoint already stored for the same user and
+   * session is updated in place (an idempotent upsert, keeping its id). One stored for another
+   * user or session moves to this user and session only if the keys sent equal the stored ones
+   * (the same browser subscription); otherwise nothing changes. A move keeps the id;
    * `created_at` and `last_success_at` are kept when the user is the same and start afresh when
    * the endpoint changes hands. The saved subscription is never the one evicted.
    */
   save(subscription: NewPushSubscription, maxPerUser: number): Promise<void>;
   /** Deletes the user's subscription with this endpoint, if it is theirs. */
   remove(userId: string, endpoint: string): Promise<void>;
-  /** Every subscription of these users. */
-  forUsers(userIds: readonly string[]): Promise<PushSubscriptionRecord[]>;
+  /** Every subscription of these users whose session is live (A8-S-2). */
+  forUsers(userIds: readonly string[], live: SessionCutoffs): Promise<PushSubscriptionRecord[]>;
   /** Deletes subscriptions whose push service answered 404 or 410 (04), in one statement. */
   delete(ids: readonly string[]): Promise<void>;
   /** Records deliveries the push services accepted, in one statement. */

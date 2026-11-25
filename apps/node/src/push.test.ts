@@ -185,6 +185,20 @@ describe("the push subscription endpoints (05, 08 T12)", () => {
     expect(storedEndpoints(bo.id)).toEqual([phone.endpoint]);
   });
 
+  it("doesn't move an endpoint sent with other keys, and answers the same (A8-S-1)", async () => {
+    const [ada, bo] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
+    const phone = await device();
+    await subscribe(ada, phone);
+    const other = await device();
+    const result = await call(h, bo, "POST", "/api/v1/push/subscriptions", {
+      endpoint: phone.endpoint,
+      keys: subscription(other).keys,
+    });
+    expect(result).toEqual({ status: 204, body: null });
+    expect(storedEndpoints(ada.id)).toEqual([phone.endpoint]);
+    expect(storedEndpoints(bo.id)).toEqual([]);
+  });
+
   it("keeps ten per user, the oldest evicted", async () => {
     const ada = await signUp(h, "Ada");
     const devices: Device[] = [];
@@ -337,6 +351,57 @@ describe("pushes from a game's transitions (03 §7, 08 T18)", () => {
     expect(logged).not.toContain("passed");
     // A failure isn't a gone subscription: both stay.
     expect(storedEndpoints(bo.id)).toHaveLength(2);
+  });
+});
+
+describe("pushes and sessions (A8-S-2)", () => {
+  it("sends nothing to a subscription whose session has expired", async () => {
+    const ada = await signUp(h, "Ada");
+    const bo = await signUp(h, "Bo");
+    const adaPhone = await device();
+    await subscribe(ada, adaPhone);
+    // Ada's session idles past its sliding expiry; it is deleted only at its next use.
+    h.exec(
+      "UPDATE sessions SET expires_at = ? WHERE user_id = ?",
+      h.platform.now().getTime(),
+      ada.id,
+    );
+    const created = await createGame(h, bo, {
+      gameType: "words",
+      invitees: [{ email: ada.email }],
+    });
+    const adaFresh = await h.signIn(ada.email);
+    expect((await transition(h, { ...ada, cookie: adaFresh }, created.id, "accept")).status).toBe(
+      200,
+    );
+    // Bo is seat 0 and first to act; Bo passes, so it's Ada's turn.
+    expect((await act(h, bo, created.id, { type: "pass" })).status).toBe(200);
+    expect(await received(adaPhone)).toEqual([]);
+  });
+});
+
+describe("a decline before the first move ends the game (A8-P-3)", () => {
+  it("tells the others it's over, naming who declined, and not the decliner", async () => {
+    const ada = await signUp(h, "Ada");
+    const bo = await signUp(h, "Bo");
+    const [adaPhone, boPhone] = [await device(), await device()];
+    await subscribe(ada, adaPhone);
+    await subscribe(bo, boPhone);
+    const created = await createGame(h, ada, {
+      gameType: "words",
+      invitees: [{ email: bo.email }],
+    });
+    expect((await transition(h, bo, created.id, "accept")).status).toBe(200);
+    const declined = await transition(h, bo, created.id, "decline");
+    expect(declined.status).toBe(200);
+    expect(declined.body.game.status).toBe("declined");
+    expect((await received(adaPhone)).at(-1)).toEqual({
+      title: "Family Games",
+      body: "Bo declined the game, so it's over.",
+      url: `/g/${created.id}`,
+      tag: `game-${created.id}`,
+    });
+    expect(await received(boPhone)).toEqual([]);
   });
 });
 

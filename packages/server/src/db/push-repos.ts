@@ -3,11 +3,11 @@
  * Written once over the shared schema and run by either adapter's {@link Database}. A
  * subscription dies with its session through the foreign key (06 §4).
  */
-import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, gt, inArray, notInArray, sql } from "drizzle-orm";
 
 import { type Database, runBatch } from "./database.js";
 import type { PushSubscriptionRepo } from "./repositories.js";
-import { pushSubscriptions } from "./schema.js";
+import { pushSubscriptions, sessions } from "./schema.js";
 
 export function pushSubscriptionRepo(db: Database): PushSubscriptionRepo {
   return {
@@ -18,6 +18,9 @@ export function pushSubscriptionRepo(db: Database): PushSubscriptionRepo {
         .values(subscription)
         .onConflictDoUpdate({
           target: pushSubscriptions.endpoint,
+          // Another user's or session's endpoint moves only with the same keys: the same browser
+          // subscription, re-saved (A8-S-1). Otherwise the row is left as it is.
+          setWhere: sql`(${sameUser} AND ${pushSubscriptions.sessionId} = excluded.session_id) OR (${pushSubscriptions.p256dh} = excluded.p256dh AND ${pushSubscriptions.auth} = excluded.auth)`,
           set: {
             userId: sql`excluded.user_id`,
             sessionId: sql`excluded.session_id`,
@@ -28,14 +31,15 @@ export function pushSubscriptionRepo(db: Database): PushSubscriptionRepo {
             lastSuccessAt: sql`CASE WHEN ${sameUser} THEN ${pushSubscriptions.lastSuccessAt} ELSE NULL END`,
           },
         });
-      // The user's newest `maxPerUser`, the one just saved first whatever its age.
+      // The user's `maxPerUser` most recently useful (last success, else creation), the one just
+      // saved first whatever its age.
       const kept = db
         .select({ id: pushSubscriptions.id })
         .from(pushSubscriptions)
         .where(eq(pushSubscriptions.userId, subscription.userId))
         .orderBy(
           sql`${pushSubscriptions.endpoint} = ${subscription.endpoint} DESC`,
-          sql`${pushSubscriptions.createdAt} DESC`,
+          sql`coalesce(${pushSubscriptions.lastSuccessAt}, ${pushSubscriptions.createdAt}) DESC`,
           sql`${pushSubscriptions.id} DESC`,
         )
         .limit(maxPerUser);
@@ -54,12 +58,21 @@ export function pushSubscriptionRepo(db: Database): PushSubscriptionRepo {
         .delete(pushSubscriptions)
         .where(and(eq(pushSubscriptions.userId, userId), eq(pushSubscriptions.endpoint, endpoint)));
     },
-    async forUsers(userIds) {
+    async forUsers(userIds, live) {
       if (userIds.length === 0) return [];
+      // Only subscriptions whose session is live: an expired session not yet deleted (that
+      // happens lazily, at its next use) gets no more pushes (A8-S-2).
       return db
-        .select()
+        .select(getTableColumns(pushSubscriptions))
         .from(pushSubscriptions)
-        .where(inArray(pushSubscriptions.userId, [...userIds]));
+        .innerJoin(sessions, eq(sessions.id, pushSubscriptions.sessionId))
+        .where(
+          and(
+            inArray(pushSubscriptions.userId, [...userIds]),
+            gt(sessions.expiresAt, live.expiresAfter),
+            gt(sessions.createdAt, live.createdAfter),
+          ),
+        );
     },
     async delete(ids) {
       if (ids.length === 0) return;
