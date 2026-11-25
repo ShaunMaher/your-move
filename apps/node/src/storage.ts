@@ -14,6 +14,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { findLiveOrphans, type Installed, type Orphan, type Repositories } from "@your-move/server";
 
+import { exposedDirectoryMode } from "./db/files.js";
 import { acquireInstanceLock, type InstanceLock } from "./db/instance-lock.js";
 import { migrate, type MigrationOutcome } from "./db/migrate.js";
 import { nodeRepositories, openSqlite } from "./db/sqlite.js";
@@ -37,6 +38,11 @@ export interface Storage {
   readonly migrations: MigrationOutcome;
   /** Orphaned live games accepted with `ALLOW_ORPHAN_GAMES`; empty otherwise. */
   readonly acceptedOrphans: readonly Orphan[];
+  /**
+   * The database directory's mode when group or others have any permission on it (startup warns),
+   * else null; always null for an in-memory database.
+   */
+  readonly exposedDirectoryMode: string | null;
   /** Closes the database and releases the instance lock. */
   close(): void;
 }
@@ -83,7 +89,15 @@ export async function openStorage(options: StorageOptions): Promise<Storage> {
       open.close();
       lock.release();
     };
-    return { sqlite, repos, migrations, acceptedOrphans: orphans, close };
+    return {
+      sqlite,
+      repos,
+      migrations,
+      acceptedOrphans: orphans,
+      exposedDirectoryMode:
+        options.databasePath === ":memory:" ? null : exposedDirectoryMode(options.databasePath),
+      close,
+    };
   } catch (error) {
     sqlite?.close();
     lock.release();

@@ -1,6 +1,6 @@
 # 5. Storage on Node: `node:sqlite` through Drizzle's proxy driver, one instance, safe migrations
 
-Status: accepted (2026-11-25)
+Status: accepted (2026-11-24)
 
 ## Context
 
@@ -44,6 +44,10 @@ migration set for D1 and Node (03 §4, 04). Building M2a showed:
     reviewed `-- migration-reviewed:` line that explains how child rows survive on both drivers.
   - `pnpm db:check` enforces that rule in CI. It also regenerates the migrations to prove they
     match `schema.ts`, and checks the journal.
+  - The M2a round 2 review (v0.9.14) added: no transaction control in a migration (refused by
+    `pnpm db:check` and, through SQLite's authorizer, by Node), the rebuild rule matched with
+    comments removed, and `pnpm db:check` comparing the schema the committed `.sql` builds with a
+    fresh generation, since regeneration alone never reads the `.sql`.
 - **Private files.** The database and lock files are 0600, in a 0700 directory.
 
 ## Consequences
