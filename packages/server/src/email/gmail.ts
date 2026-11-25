@@ -266,9 +266,11 @@ export function createGmailEmailSender(options: GmailOptions): GmailEmailSender 
           });
           throw markAlerted(error);
         }
+        // The class only: a message could quote a token or an address.
         log.error("gmail could not be reached: the message was not sent", {
           alert: "email_send_failed",
           provider: "gmail",
+          errorClass: error instanceof Error ? error.name : typeof error,
         });
         throw markAlerted(new Error("gmail could not be reached"));
       }

@@ -265,7 +265,7 @@ describe("gmail sender", () => {
     });
     await expect(sender.send(message)).rejects.toThrow("could not be reached");
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatchObject({ alert: "email_send_failed" });
+    expect(lines[0]).toMatchObject({ alert: "email_send_failed", errorClass: "Error" });
     expectNoSecrets(lines);
   });
 
