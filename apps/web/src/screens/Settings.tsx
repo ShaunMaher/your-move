@@ -5,7 +5,7 @@
  * features.
  */
 import type { ApiClient } from "@your-move/api-client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { type Me, saveEmailNudges, signOutEverywhere } from "../auth-api.js";
 import { type PushChange, pushState, type PushState, turnOffPush, turnOnPush } from "../push.js";
@@ -99,6 +99,15 @@ function PushNotifications({
   const [state, setState] = useState<PushState | "checking">("checking");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  /** The toggle just went away (A8-P-4): focus goes to the section's heading, not the page. */
+  const focusHeading = useRef(false);
+
+  useEffect(() => {
+    if (!focusHeading.current) return;
+    focusHeading.current = false;
+    heading.current?.focus();
+  }, [state]);
 
   useEffect(() => {
     let live = true;
@@ -117,6 +126,7 @@ function PushNotifications({
       return;
     }
     if (change === "on" || change === "off" || change === "denied") setState(change);
+    if (change === "denied") focusHeading.current = true;
     setError(PUSH_PROBLEMS[change] ?? null);
   }
 
@@ -172,7 +182,9 @@ function PushNotifications({
 
   return (
     <section className="card stack" aria-labelledby="push-heading">
-      <h2 id="push-heading">Notifications</h2>
+      <h2 id="push-heading" ref={heading} tabIndex={-1}>
+        Notifications
+      </h2>
       {body}
       <Problem id="push-problem" message={error} />
     </section>

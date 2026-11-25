@@ -9,11 +9,11 @@ import type { GameClientModule } from "@your-move/sdk/client";
 import { type SyntheticEvent, useEffect, useRef, useState } from "react";
 
 import { loadCatalog } from "../catalog.js";
-import { Dialog } from "../Dialog.js";
 import { type CatalogGame, createGame } from "../game-api.js";
 import { GameIcon } from "../GameIcon.js";
 import { loadGameClient } from "../games.js";
-import { rememberPushOffered, shouldOfferPush, turnOnPush } from "../push.js";
+import { rememberPushOffered, shouldOfferPush } from "../push.js";
+import { PushOffer } from "../PushOffer.js";
 import { navigate, Link } from "../router.js";
 import { looksLikeEmail } from "../text.js";
 import { Page } from "./Page.js";
@@ -50,49 +50,6 @@ const CREATE_PROBLEMS: Readonly<Record<string, string>> = {
 function createProblem(status: number, code: string): string {
   if (status === 0) return "You seem to be offline. Check your connection and try again.";
   return CREATE_PROBLEMS[code] ?? "Something went wrong. Please try again.";
-}
-
-/**
- * Offered once per device after a game is created (03 §7: never at sign-in): turning notifications
- * on here asks for permission from the tap, as iOS requires. Either answer goes on to the game.
- */
-function PushOffer({
-  api,
-  appName,
-  pushKey,
-  onDone,
-}: {
-  readonly api: ApiClient;
-  readonly appName: string;
-  readonly pushKey: string;
-  readonly onDone: () => void;
-}) {
-  const [pending, setPending] = useState(false);
-  return (
-    <Dialog title="Know when it's your turn?" onClose={onDone} dismissible={!pending}>
-      <p>
-        {appName} can send a notification to this device when it&apos;s your turn or a game ends.
-        You can change this in Settings at any time.
-      </p>
-      <div className="row">
-        <button
-          type="button"
-          className="button"
-          disabled={pending}
-          onClick={() => {
-            setPending(true);
-            // Straight from the tap: the permission prompt needs it (iOS).
-            void turnOnPush(api, pushKey).then(onDone);
-          }}
-        >
-          {pending ? "Turning on…" : "Turn on notifications"}
-        </button>
-        <button type="button" className="button secondary" disabled={pending} onClick={onDone}>
-          Not now
-        </button>
-      </div>
-    </Dialog>
-  );
 }
 
 export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewGameProps) {

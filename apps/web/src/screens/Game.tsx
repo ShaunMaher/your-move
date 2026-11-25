@@ -22,6 +22,8 @@ import {
   transition,
 } from "../game-api.js";
 import { loadGameClient } from "../games.js";
+import { rememberPushOffered, shouldOfferPush } from "../push.js";
+import { PushOffer } from "../PushOffer.js";
 import { navigate, Link } from "../router.js";
 import { useRefresh, useVisible } from "../use-refresh.js";
 import { cacheWordLists } from "../word-lists.js";
@@ -75,6 +77,8 @@ type Load =
 interface GameProps {
   readonly api: ApiClient;
   readonly appName: string;
+  /** The instance's VAPID public key, for the notifications offer after accepting (03 §7). */
+  readonly pushKey?: string | undefined;
   readonly id: string;
   /** The session is gone (401). */
   readonly onSessionLost: () => void;
@@ -82,8 +86,17 @@ interface GameProps {
   readonly loadClient?: (type: string) => Promise<GameClientModule | null>;
 }
 
-export function Game({ api, appName, id, onSessionLost, loadClient = loadGameClient }: GameProps) {
+export function Game({
+  api,
+  appName,
+  pushKey,
+  id,
+  onSessionLost,
+  loadClient = loadGameClient,
+}: GameProps) {
   const [load, setLoad] = useState<Load>({ status: "loading" });
+  /** The notifications offer, open after an accepted invitation (A8-P-2). */
+  const [offering, setOffering] = useState(false);
   /** Why the screen may be out of date (offline, a failing server), or `null` when it is current. */
   const [notice, setNotice] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<{
@@ -246,6 +259,12 @@ export function Game({ api, appName, id, onSessionLost, loadClient = loadGameCli
         if (result.data === undefined)
           navigate("/"); // a lobby decline: no longer a member
         else apply(result.data);
+        // An invited player may never create a game: they are offered notifications here, once
+        // per device, after the tap that accepted (03 §7).
+        if (verb === "accept" && pushKey !== undefined && (await shouldOfferPush(pushKey))) {
+          rememberPushOffered();
+          setOffering(true);
+        }
         return null;
       }
       if (result.status === 401) onSessionLost();
@@ -257,7 +276,7 @@ export function Game({ api, appName, id, onSessionLost, loadClient = loadGameCli
         verb === "resign" ? RESIGN_PROBLEMS : LOBBY_PROBLEMS,
       );
     },
-    [api, id, game, apply, refetch, onSessionLost],
+    [api, id, game, apply, refetch, onSessionLost, pushKey],
   );
 
   if (load.status === "loading") {
@@ -299,30 +318,47 @@ export function Game({ api, appName, id, onSessionLost, loadClient = loadGameCli
 
   const client = loaded?.type === load.game.gameType ? loaded.module : "loading";
   const gameName = names.get(load.game.gameType) ?? load.game.gameType;
+  const offer =
+    offering && pushKey !== undefined ? (
+      <PushOffer
+        api={api}
+        appName={appName}
+        pushKey={pushKey}
+        onDone={() => {
+          setOffering(false);
+        }}
+      />
+    ) : null;
   if (load.game.status === "lobby") {
     return (
-      <Lobby
-        appName={appName}
-        gameName={gameName}
-        game={load.game}
-        onAction={act}
-        notice={notice}
-      />
+      <>
+        <Lobby
+          appName={appName}
+          gameName={gameName}
+          game={load.game}
+          onAction={act}
+          notice={notice}
+        />
+        {offer}
+      </>
     );
   }
   return (
-    <Frame
-      api={api}
-      appName={appName}
-      gameName={gameName}
-      game={load.game}
-      view={load.view}
-      client={client}
-      submit={submit}
-      preview={preview}
-      onResign={() => act("resign")}
-      onSessionLost={onSessionLost}
-      notice={notice}
-    />
+    <>
+      {offer}
+      <Frame
+        api={api}
+        appName={appName}
+        gameName={gameName}
+        game={load.game}
+        view={load.view}
+        client={client}
+        submit={submit}
+        preview={preview}
+        onResign={() => act("resign")}
+        onSessionLost={onSessionLost}
+        notice={notice}
+      />
+    </>
   );
 }

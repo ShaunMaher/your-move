@@ -3,7 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { forgetCatalog } from "../catalog.js";
 import { fakeClient, submitted } from "../test-client.js";
-import { CATALOG, envelope, fakeApi, json, player, problem } from "../test-support.js";
+import {
+  CATALOG,
+  envelope,
+  fakeApi,
+  fakePush,
+  json,
+  player,
+  problem,
+  PUSH_KEY,
+  removeFakePush,
+} from "../test-support.js";
 import { Game } from "./Game.js";
 
 const VIEW = { board: "empty" };
@@ -46,7 +56,7 @@ function open(
     string,
     Response | Error | ((call: never) => Response | Error | Promise<Response | Error>)
   > = {},
-  options: { client?: typeof fakeClient | null } = {},
+  options: { client?: typeof fakeClient | null; pushKey?: string } = {},
 ) {
   const fake = fakeApi({
     "GET /api/v1/catalog": json(CATALOG),
@@ -60,6 +70,7 @@ function open(
     <Game
       api={fake.api}
       appName="Family Games"
+      pushKey={options.pushKey}
       id="g1"
       onSessionLost={lost}
       loadClient={() => Promise.resolve(client)}
@@ -764,5 +775,83 @@ describe("a game that can't be shown", () => {
     cleanup();
     open({ "GET /api/v1/games/g1": withView(envelope({ gameVersion: 7 })) });
     expect(await screen.findByText(/version of the rules this app doesn't know/u)).toBeDefined();
+  });
+});
+
+describe("the notifications offer after accepting an invitation (A8-P-2)", () => {
+  const invitation = () =>
+    lobby({
+      yourInvitation: "normal",
+      players: [
+        player({ seat: null, state: "joined", isYou: false, displayName: "Robin" }),
+        player({ seat: null, state: "invited", isCreator: false }),
+      ],
+    });
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+  afterEach(removeFakePush);
+
+  it("is offered once the accept succeeds, and turns notifications on from the tap", async () => {
+    const device = fakePush();
+    const { calls } = open(
+      {
+        "GET /api/v1/games/g1": json({ game: invitation(), view: null }),
+        // The accept fills the last seat: the game starts.
+        "POST /api/v1/games/g1/accept": withView(envelope({ version: 4 })),
+        "POST /api/v1/push/subscriptions": new Response(null, { status: 204 }),
+      },
+      { pushKey: PUSH_KEY },
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Accept" }));
+    await screen.findByRole("dialog", { name: "Know when it's your turn?" });
+    click("Turn on notifications");
+    expect(device.requestPermission).toHaveBeenCalledOnce();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(calls.some((call) => call.path === "/api/v1/push/subscriptions")).toBe(true);
+  });
+
+  it("isn't offered again on this device, nor without a key, nor for a failed accept", async () => {
+    fakePush();
+    window.localStorage.setItem("ym.push-offered", "1");
+    open(
+      {
+        "GET /api/v1/games/g1": json({ game: invitation(), view: null }),
+        "POST /api/v1/games/g1/accept": json({
+          game: { ...invitation(), yourInvitation: null, version: 4 },
+          view: null,
+        }),
+      },
+      { pushKey: PUSH_KEY },
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Accept" }));
+    await screen.findByText(/Waiting for the creator to start/u);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    cleanup();
+    window.localStorage.clear();
+    open(
+      {
+        "GET /api/v1/games/g1": json({ game: invitation(), view: null }),
+        "POST /api/v1/games/g1/accept": problem(409, "STALE_GAME"),
+      },
+      { pushKey: PUSH_KEY },
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Accept" }));
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    cleanup();
+    open({
+      "GET /api/v1/games/g1": json({ game: invitation(), view: null }),
+      "POST /api/v1/games/g1/accept": json({
+        game: { ...invitation(), yourInvitation: null, version: 4 },
+        view: null,
+      }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Accept" }));
+    await screen.findByText(/Waiting for the creator to start/u);
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

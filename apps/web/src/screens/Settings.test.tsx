@@ -132,6 +132,10 @@ describe("notifications on this device (07 §4, alpha A8)", () => {
     fireEvent.click(await screen.findByRole("checkbox", { name: PUSH_LABEL }));
     await screen.findByText(/Notifications from Family Games are blocked on this device/u);
     expect(screen.queryByRole("checkbox", { name: PUSH_LABEL })).toBeNull();
+    // The toggle is gone, so focus goes to the section's heading, not the page (A8-P-4).
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Notifications" }));
+    });
   });
 
   it("says so when saving fails, and stays off", async () => {
@@ -183,5 +187,25 @@ describe("signing out on this device (06 §4)", () => {
     await waitFor(() => {
       expect(device.state.subscription).toBeNull();
     });
+  });
+});
+
+describe("a launch without a session (06 §4, A8-P-1)", () => {
+  afterEach(removeFakePush);
+
+  it("drops the device's push subscription and saves nothing", async () => {
+    const device = fakePush({ permission: "granted", subscribedWith: PUSH_KEY });
+    const subscription = device.state.subscription;
+    const { api, calls } = fakeApi({
+      "GET /api/v1/config": json({ ...CONFIG, vapidPublicKey: PUSH_KEY }),
+      "GET /api/v1/me": problem(401, "UNAUTHENTICATED"),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    await waitFor(() => {
+      expect(subscription?.unsubscribe).toHaveBeenCalled();
+    });
+    expect(device.state.subscription).toBeNull();
+    expect(calls.filter((call) => call.path.startsWith("/api/v1/push"))).toEqual([]);
   });
 });

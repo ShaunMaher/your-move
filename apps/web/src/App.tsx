@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { type ClientConfig, type Me, loadConfig, loadSession } from "./auth-api.js";
 import { applyAppName } from "./document-meta.js";
 import { InstallBanner } from "./InstallBanner.js";
-import { resyncPush } from "./push.js";
+import { dropPushSubscription, resyncPush } from "./push.js";
 import {
   clearReturnPath,
   isDestination,
@@ -122,9 +122,11 @@ export function App({ api }: AppProps) {
   useEffect(() => {
     if (boot.status !== "ready") return;
     if (me === null) {
-      // No session: nothing of a previous person's may remain. A signed-out visit to a page is
-      // remembered, so signing in lands back there.
+      // No session: nothing of a previous person's may remain, this device's push subscription
+      // included (06 §4; the server's copy went with the session). A signed-out visit to a page
+      // is remembered, so signing in lands back there.
       clearGameState();
+      dropPushSubscription();
       if (path !== "/signin") rememberReturnPath(path);
     } else if (place === path && isDestination(path)) {
       // Arrived at a real destination (not a sign-in screen on the way): the memory is spent.
@@ -254,6 +256,7 @@ export function App({ api }: AppProps) {
         key={gameId}
         api={api}
         appName={boot.config.appName}
+        pushKey={pushKey}
         id={gameId}
         onSessionLost={sessionLost}
       />
