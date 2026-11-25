@@ -75,6 +75,11 @@ faggoting and faggotings) was removed by owner decision.
   lines dropped for their length or characters);
 - `index.json`: every manifest and the global removals, which the M6 upload and operator paths
   apply to their lists; the runtime reads it through `parseIndex`.
+- `served/`: what the runtimes publish (words §9.4, 03 §10): `index.json` again, and each
+  `words.txt` (with its `.gz` and `.br` copies) under its versioned, hashed `servedFileName`,
+  `<id>-v<version>.<16 hex digits of wordsSha256>.txt`. The Node build copies it to
+  `apps/node/dist/dictionaries`, the Worker build into its static assets; clients download each
+  list at `servedPath(manifest)`, `/assets/dictionaries/<name>`.
 
 Tests elsewhere in the workspace that need a real list (the words engine's property tests) build
 one in memory, writing nothing, with `buildBuiltin(id)` from `@your-move/dictionary/builder`.

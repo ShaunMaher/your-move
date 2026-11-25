@@ -230,14 +230,18 @@ from `game_actions`. `via` lets every client mark AI moves (02 §9.1). Never ret
 
 ### `POST /api/v1/games/:id/preview`
 `{ action }` → `200 { preview }` or `400` module error, without committing. Only for modules that
-implement `preview`, and only for a full module `Action` (never free-form words). Runs checks 1, 2,
+implement `preview` (for any other game type the route answers `404 NOT_FOUND`), and only for a
+full module `Action` (never free-form words). Runs checks 1, 2,
 4, 6 and 7 of `/actions` — including the `serverOnly` lookup-budget reservation — then module
 `preview`. It **never** runs check 5: previews are allowed to a `read` token whatever the game's
 `aiAssistance` (02 §9.3). Rate-limited (it can be a dictionary oracle — 08 T22, §4); a test
 asserts that preview draws on the lookup budget.
 
 ### Lifecycle transitions
-All take `{ expectedVersion }` and are framework transitions (03 §5.2).
+All take `{ expectedVersion }` and are framework transitions (03 §5.2). Each answers
+`200 { game, view }` as `GET /api/v1/games/:id` would after it, except a decline that ends the
+caller's membership (a lobby decline, 04 §Membership), which answers `204`: there is nothing left
+the caller may see.
 
 | Method | Path | Who / when | Errors (besides `404`, `409 STALE_GAME`) |
 |---|---|---|---|
@@ -287,7 +291,7 @@ creator's game caps. Joining always requires an explicit tap on Join (07 §1).
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/v1/config` **public** | `{ appName, appShortName, operatorContact, minAge, vapidPublicKey?, turnstileSiteKey?, uploadsEnabled }` — non-sensitive values only (`uploadsEnabled` = framework `DICTIONARY_UPLOADS`) |
-| GET | `/api/v1/catalog` | `{ games: [{ type, version, name, players, defaultTurnTimeoutDays, defaults, catalog }] }` for enabled game types. `defaults` follows the create path's rule: the viewer's `lastOptions[type]` if `resolveOptions` accepts it against the current `ctx.resources`, otherwise `{}` (module defaults), so a deleted upload or disabled ruleset is never offered. `catalog` = module `catalog(ctx)` with `ctx.resources` = built-in and operator resources that are enabled (`DICTIONARIES_ENABLED`, `DICTIONARIES_EXTRA`) plus the **viewer's own** non-deleted uploads; it never contains `blob_key`, `sha256` or `size_bytes`. Public dictionaries carry their versioned, hashed download URL |
+| GET | `/api/v1/catalog` | `{ games: [{ type, version, name, description, icon, players, defaultTurnTimeoutDays, defaults, catalog }] }` for enabled game types (`name`, `description`, the sanitised `icon` and the overall `players` bounds come from the manifest, 02 §7.2, so the game picker needs no client chunk). `defaults` follows the create path's rule: the viewer's `lastOptions[type]` if `resolveOptions` accepts it against the current `ctx.resources`, otherwise `{}` (module defaults), so a deleted upload or disabled ruleset is never offered. `catalog` = module `catalog(ctx)` with `ctx.resources` = built-in and operator resources that are enabled (`DICTIONARIES_ENABLED`, `DICTIONARIES_EXTRA`) plus the **viewer's own** non-deleted uploads; it never contains `blob_key`, `sha256` or `size_bytes`. Public dictionaries carry their versioned, hashed download URL |
 | GET | `/api/health` and `/api/v1/health` **public** | `200 { ok: true }` — no version or config details |
 | GET | `/manifest.webmanifest` **public** | Generated from config (07 §4) |
 
