@@ -62,7 +62,7 @@ describe("caching a game's public word lists", () => {
   it("downloads a list once, without credentials, and keeps it", async () => {
     const url = await nameFor(TEXT);
     await cacheWordLists([list(url)]);
-    expect(fetcher).toHaveBeenCalledWith(url, { credentials: "omit" });
+    expect(fetcher).toHaveBeenCalledWith(url, { credentials: "omit", redirect: "error" });
     expect(storage.stores.get(WORD_LIST_CACHE)?.has(url)).toBe(true);
     await cacheWordLists([list(url)]);
     expect(fetcher).toHaveBeenCalledOnce();
@@ -79,6 +79,8 @@ describe("caching a game's public word lists", () => {
     const url = await nameFor(TEXT);
     await cacheWordLists([
       list(url, "serverOnly"),
+      // A URL on a resource that doesn't say it is public is not followed.
+      { ...list(url), distribution: undefined },
       list(undefined),
       list("https://evil.example/assets/dictionaries/enable-v1.0123456789abcdef.txt"),
       list("/assets/dictionaries/../../api/v1/me"),
@@ -100,6 +102,37 @@ describe("caching a game's public word lists", () => {
     vi.stubGlobal("caches", undefined);
     await cacheWordLists([list(await nameFor(TEXT))]);
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("keeps the three most recently added lists, but not at the cost of the game's own", async () => {
+    const own = ["a", "b", "c", "d"];
+    const urls: string[] = [];
+    for (const id of own) {
+      fetcher.mockResolvedValueOnce(new Response(`${id}\n`));
+      urls.push(await nameFor(`${id}\n`, id));
+    }
+    // A game that itself uses four lists keeps all four while it is open.
+    await cacheWordLists(own.map((id, i) => ({ ...list(urls[i]), id })));
+    expect([...(storage.stores.get(WORD_LIST_CACHE)?.keys() ?? [])]).toEqual(urls);
+    // Another game's list then pushes out the oldest of those, not itself.
+    fetcher.mockResolvedValueOnce(new Response("e\n"));
+    const other = await nameFor("e\n", "e");
+    await cacheWordLists([{ ...list(other), id: "e" }]);
+    expect([...(storage.stores.get(WORD_LIST_CACHE)?.keys() ?? [])]).toEqual([
+      urls[2],
+      urls[3],
+      other,
+    ]);
+  });
+
+  it("runs overlapping calls one after another, so they can't trim the same listing twice", async () => {
+    const texts = ["p\n", "q\n", "r\n", "s\n", "t\n"];
+    const urls = await Promise.all(texts.map((text, i) => nameFor(text, `l${String(i)}`)));
+    fetcher.mockImplementation((path: string) =>
+      Promise.resolve(new Response(texts[urls.indexOf(path)] ?? "")),
+    );
+    await Promise.all(urls.map((url, i) => cacheWordLists([{ ...list(url), id: `l${String(i)}` }])));
+    expect([...(storage.stores.get(WORD_LIST_CACHE)?.keys() ?? [])]).toEqual(urls.slice(2));
   });
 
   it("keeps the three most recently added lists", async () => {
