@@ -60,7 +60,7 @@ exits, even after a crash).
 
 The database, its `-wal`/`-shm` files and the lock file are created readable by the server's user
 only (0600), and the image makes `/data` 0700. A named Docker volume inherits that. With a **bind
-mount** the host directory's own permissions apply: make it owned by the image's `node` user (UID 1000) and mode 0700, and don't put it where other host users can read it.
+mount** the host directory's own permissions apply: make it owned by the image's `node` user (UID 1000) and mode 0700, and don't put it where other host users can read it. The server logs a warning at startup while the database directory has any group or other permission bits.
 
 To build and try it locally:
 
@@ -116,6 +116,15 @@ Developer machines keep the real 5 ms budget, enforced by every local `pnpm test
 developer laptop (2026-11-24), the words engine's worst cases take 0.02 ms median and under 0.1 ms
 at the 99th percentile; budget failures on the runner are pauses (garbage collection, a busy
 host), not engine cost. Revisit the value when the runner changes.
+
+The test jobs (`test`, `test:worker`) keep their scratch files (temporary SQLite databases,
+bundles) on tmpfs: `TMPDIR` points into `/dev/shm`. On the shared amd64 runner the disk is shared
+with other jobs' image builds, and an fsync there can stall for hundreds of ms: tests that open a
+real database file (each committing a dozen or more times while migrating) took 4–19 s instead of
+milliseconds and hit Vitest's 5 s timeout. The test command's scratch files peak at about 7 MB
+(measured 2026-11-25); the jobs refuse to start when `/dev/shm` has under 32 MB free (Docker's
+default is 64 MB), so raise the runner's `shm_size` if they ever need more. Durability on a real
+disk isn't what these tests check; the file modes, locks and migrations behave the same on tmpfs.
 
 ## CI settings and secrets
 

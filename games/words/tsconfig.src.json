@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    // Node types for the tests (kit-words.test.ts reads and writes its generated file) and the
+    // DOM types for the client and its component tests. The engine stays off both through the
+    // engine lint and the import rules (02 §7.5), not through the compiler.
+    "types": ["node"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/sdk" },
+    { "path": "../../packages/testkit" },
+    // Tests only, never the engine: the board-size cap is tied to the dictionaries' word-length
+    // cap (words §9.1), and the property tests build the real word list (test-support.ts).
+    { "path": "../../packages/dictionary/tsconfig.runtime.json" },
+    { "path": "../../packages/dictionary/tsconfig.build.json" }
+  ]
+}

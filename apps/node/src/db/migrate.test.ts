@@ -215,10 +215,82 @@ describe("migrate", () => {
       "INSERT INTO `sessions` VALUES ('s2', 'nobody', 'h2', 0, 0, 0, NULL);",
       1000,
     );
-    expect(() => migrate(sqlite, folder)).toThrow(/breaking a foreign key/u);
+    expect(() => migrate(sqlite, folder)).toThrow(/migrations would leave 1 row\(s\) breaking/u);
     expect(sqlite.prepare("SELECT count(*) AS n FROM sessions").get()).toEqual({ n: 0 });
     expect(sqlite.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
     sqlite.close();
+  });
+
+  describe("a foreign key already broken before the migrations (P2-3)", () => {
+    function breakForeignKey(sqlite: DatabaseSync): void {
+      sqlite.exec("PRAGMA foreign_keys = OFF");
+      sqlite.exec("INSERT INTO `sessions` VALUES ('s2', 'nobody', 'h2', 0, 0, 0, NULL)");
+      sqlite.exec("PRAGMA foreign_keys = ON");
+    }
+
+    it("doesn't stop a start with nothing to migrate", () => {
+      const sqlite = openSqlite(join(dir, "app.sqlite"));
+      migrate(sqlite, MIGRATIONS);
+      breakForeignKey(sqlite);
+      expect(migrate(sqlite, MIGRATIONS)).toEqual({ applied: 0, known: 1 });
+      sqlite.close();
+    });
+
+    it("is reported as already there, not blamed on the pending migrations", () => {
+      const sqlite = openSqlite(join(dir, "app.sqlite"));
+      migrate(sqlite, MIGRATIONS);
+      breakForeignKey(sqlite);
+      const folder = withExtraMigration("CREATE TABLE `extra` (`id` text);", 1000);
+      expect(() => migrate(sqlite, folder)).toThrow(
+        /already has 1 row\(s\) breaking a foreign key, before any migration ran/u,
+      );
+      expect(
+        sqlite.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name = 'extra'").get(),
+      ).toEqual({ n: 0 });
+      sqlite.close();
+    });
+  });
+
+  describe("transaction control in a migration (P2-1)", () => {
+    it.each([
+      "COMMIT;",
+      "END;",
+      "/* hidden */ COMMIT;",
+      "-- hidden\nCOMMIT;",
+      "COMMIT; BEGIN;",
+      "ROLLBACK;",
+      "SAVEPOINT s;",
+      "SAVEPOINT s; RELEASE s;",
+      "BEGIN;",
+    ])("refuses %j and applies nothing", (statement) => {
+      const sqlite = openSqlite(join(dir, "app.sqlite"));
+      const folder = withExtraMigration(
+        `CREATE TABLE \`extra\` (\`id\` text);\n--> statement-breakpoint\n${statement}`,
+        1000,
+      );
+      expect(() => migrate(sqlite, folder)).toThrow(
+        /Migration 1 begins, ends or nests a transaction/u,
+      );
+      expect(sqlite.isTransaction).toBe(false);
+      expect(
+        sqlite
+          .prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name IN ('users', 'extra')")
+          .get(),
+      ).toEqual({ n: 0 });
+      // The authorizer is gone again: the connection's own transactions still work.
+      sqlite.exec("BEGIN; COMMIT;");
+      sqlite.close();
+    });
+
+    it("allows a trigger's BEGIN … END body", () => {
+      const sqlite = openSqlite(join(dir, "app.sqlite"));
+      const folder = withExtraMigration(
+        "CREATE TABLE `extra` (`id` text);\n--> statement-breakpoint\nCREATE TRIGGER `extra_t` AFTER INSERT ON `extra` BEGIN SELECT 1; END;",
+        1000,
+      );
+      expect(migrate(sqlite, folder)).toEqual({ applied: 2, known: 2 });
+      sqlite.close();
+    });
   });
 });
 

@@ -86,19 +86,58 @@ describe("openSqlite", () => {
 });
 
 describe("the proxy driver (M2a review S-7)", () => {
-  it.each(["BEGIN", "begin immediate", " COMMIT", "END", "ROLLBACK", "SAVEPOINT a", "RELEASE a"])(
-    "refuses %j: only the adapter's batch opens and ends transactions",
-    async (statement) => {
-      const sqlite = openSqlite(":memory:");
-      const db = testing.nodeDatabase(sqlite);
-      // Drizzle wraps the driver's error.
-      await expect(db.run(sql.raw(statement))).rejects.toMatchObject({
-        cause: expect.any(TransactionControlError) as unknown,
-      });
-      expect(sqlite.isTransaction).toBe(false);
-      sqlite.close();
-    },
-  );
+  it.each([
+    "BEGIN",
+    "begin immediate",
+    " COMMIT",
+    "END",
+    "ROLLBACK",
+    "SAVEPOINT a",
+    "RELEASE a",
+    // M2a review S2-2: comments, empty statements and odd whitespace before it.
+    "/* x */ BEGIN",
+    "-- x\nBEGIN",
+    "/* a */ -- b\n /* c */\tBEGIN",
+    "; BEGIN",
+    ";;\fBEGIN",
+    "﻿BEGIN",
+  ])("refuses %j: only the adapter's batch opens and ends transactions", async (statement) => {
+    const sqlite = openSqlite(":memory:");
+    const db = testing.nodeDatabase(sqlite);
+    // Drizzle wraps the driver's error.
+    await expect(db.run(sql.raw(statement))).rejects.toMatchObject({
+      cause: expect.any(TransactionControlError) as unknown,
+    });
+    expect(sqlite.isTransaction).toBe(false);
+    sqlite.close();
+  });
+
+  it("rolls back and refuses any statement that leaves a transaction open from autocommit", () => {
+    // The backstop behind the text check: called here without it.
+    const sqlite = openSqlite(":memory:");
+    sqlite.exec("CREATE TABLE t (x INTEGER)");
+    expect(() => testing.runLeavingNoTransaction(sqlite, "BEGIN", [], "run")).toThrow(
+      TransactionControlError,
+    );
+    expect(sqlite.isTransaction).toBe(false);
+    // Inside the adapter's own transaction it leaves the transaction alone.
+    inTransaction(sqlite, () => {
+      testing.runLeavingNoTransaction(sqlite, "INSERT INTO t VALUES (1)", [], "run");
+      expect(sqlite.isTransaction).toBe(true);
+    });
+    expect(sqlite.prepare("SELECT count(*) AS n FROM t").get()).toEqual({ n: 1 });
+    sqlite.close();
+  });
+
+  it("still runs ordinary statements that start with a comment", async () => {
+    const sqlite = openSqlite(":memory:");
+    const db = testing.nodeDatabase(sqlite);
+    await db.run(sql.raw("/* begin */ CREATE TABLE t (x INTEGER)"));
+    await db.run(sql.raw("-- commit\nINSERT INTO t VALUES (1)"));
+    expect(sqlite.prepare("SELECT count(*) AS n FROM t").get()).toEqual({ n: 1 });
+    expect(sqlite.isTransaction).toBe(false);
+    sqlite.close();
+  });
 });
 
 describe("inTransaction", () => {

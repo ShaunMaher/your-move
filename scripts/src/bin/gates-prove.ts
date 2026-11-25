@@ -48,6 +48,34 @@ const base62 = (length: number): string =>
     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz".charAt(byte % 62),
   ).join("");
 
+/** Runs `body` on a scratch copy of the committed migrations, always removed afterwards. */
+function withMigrationsCopy<T>(body: (dir: string) => T): T {
+  const dir = mkdtempSync(join(tmpdir(), "gate-migrations-"));
+  try {
+    cpSync(join(ROOT_DIR, "packages/server/migrations"), dir, { recursive: true });
+    return body(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Appends a migration to the journal of the migrations folder `dir`. */
+function addMigration(dir: string, tag: string, sql: string): void {
+  const journalFile = join(dir, "meta", "_journal.json");
+  const journal = JSON.parse(readFileSync(journalFile, "utf8")) as {
+    entries: { idx: number; when: number; tag: string }[];
+  };
+  const last = journal.entries.at(-1);
+  journal.entries.push({
+    ...last,
+    idx: journal.entries.length,
+    when: (last?.when ?? 0) + 1000,
+    tag,
+  });
+  writeFileSync(journalFile, JSON.stringify(journal, null, 2));
+  writeFileSync(join(dir, `${tag}.sql`), sql);
+}
+
 type Proof = () => string | null; // null when the gate failed as expected, else what went wrong
 
 const proofs: Record<string, Proof> = {
@@ -109,6 +137,43 @@ const proofs: Record<string, Proof> = {
       return "db:check did not report the missing migration";
     }
     return null;
+  },
+
+  "db:check: an unreviewed DROP TABLE hidden behind a comment, in a scratch copy of the migrations"() {
+    return withMigrationsCopy((dir) => {
+      const clean = exec("pnpm", ["db:check", "--migrations", dir]);
+      if (clean.status !== 0) return `db:check fails on an unchanged copy:\n${clean.output}`;
+      // Creating and dropping a table leaves the schema as it was: only the rebuild rule fires.
+      addMigration(
+        dir,
+        "0001_gate_fixture",
+        "CREATE TABLE `gate_fixture` (`id` text);\n--> statement-breakpoint\nDROP/**/TABLE `gate_fixture`;",
+      );
+      const result = exec("pnpm", ["db:check", "--migrations", dir]);
+      if (result.status === 0) return "db:check passed";
+      if (!result.output.includes("0001_gate_fixture.sql drops a table or changes foreign_keys")) {
+        return "db:check did not report the unreviewed DROP TABLE";
+      }
+      return result.output.includes("build a different schema")
+        ? "db:check also reported a schema difference, so the proof isn't of the rebuild rule alone"
+        : null;
+    });
+  },
+
+  "db:check: a hand-edited ON DELETE action in a committed migration, in a scratch copy"() {
+    return withMigrationsCopy((dir) => {
+      const file = join(dir, "0000_init.sql");
+      const original = readFileSync(file, "utf8");
+      const from =
+        "FOREIGN KEY (`actor_user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE set null";
+      if (!original.includes(from)) return "0000_init.sql no longer has the anchor foreign key";
+      writeFileSync(file, original.replace(from, from.replace("set null", "cascade")));
+      const result = exec("pnpm", ["db:check", "--migrations", dir]);
+      if (result.status === 0) return "db:check passed";
+      return result.output.includes("foreign key actor_user_id → users.id")
+        ? null
+        : "db:check did not report the changed foreign key";
+    });
   },
 
   "games:verify: the installed example's engine importing React and reading the clock"() {

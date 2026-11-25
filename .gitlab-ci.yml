@@ -127,6 +127,21 @@ default:
     done
   fi
 
+# Test scratch files (temporary databases, bundles) on tmpfs, not the runner's disk: on the shared
+# amd64 runner each fsync can stall for hundreds of ms behind other jobs' image builds, which made
+# tests that open a real SQLite file take 4-19 s instead of milliseconds (docs/deploy.md "CI
+# runners"). The test command's scratch files peak at about 7 MB (measured 2026-11-25); refuse to
+# run, rather than fall back to the disk, when /dev/shm is too small to hold them with room over.
+.tmp-in-memory: &tmp-in-memory |
+  shm_free_kb="$(df -Pk /dev/shm | awk 'NR == 2 { print $4 }')"
+  if [ "${shm_free_kb:-0}" -lt 32768 ]; then
+    echo "/dev/shm has ${shm_free_kb:-no} KB free; the tests need 32 MB (docs/deploy.md \"CI runners\")"
+    exit 1
+  fi
+  export TMPDIR=/dev/shm/ci-tmp
+  mkdir -p "$TMPDIR"
+  echo "TMPDIR=$TMPDIR (${shm_free_kb} KB free)"
+
 # Node, pnpm (and any MISE_TOOLS) from mise.lock, and the workspace installed.
 .pnpm:
   extends: .caches
@@ -226,6 +241,7 @@ test:
     # Wrangler's own log file goes where the artifacts can keep it.
     WRANGLER_LOG_PATH: $CI_PROJECT_DIR/reports/wrangler-logs
   script:
+    - *tmp-in-memory
     # Unit, integration, property, component and API contract tests. The Worker half of the
     # contract suite and the D1 repository contract suite run in test:worker instead (see there):
     # to fold them back, drop the --excludes and the test:worker job. Vitest matches --exclude
@@ -279,6 +295,7 @@ test:worker:
       paths: [.mise]
       policy: pull-push
   script:
+    - *tmp-in-memory
     # The Worker half of the API contract suite and the repository contract suite against a local
     # D1 (03 §4). The contract project's global setup builds the web app, Node server and Worker
     # first.

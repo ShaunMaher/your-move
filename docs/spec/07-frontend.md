@@ -79,7 +79,7 @@ by the shell for every game.)
 
 ```
 ┌─────────────────────────────┐  safe-area top
-│ You 212  •  Sam 187   ⋯     │  score bar, whose turn, menu (history, swap, pass, resign)
+│ You 212  •  Sam 187   ⋯     │  score bar and whose turn; the shell's menu (history, rules, resign)
 ├─────────────────────────────┤
 │                             │
 │        15×15 board          │  square, fills width; pinch / double-tap to zoom
@@ -87,7 +87,7 @@ by the shell for every game.)
 ├─────────────────────────────┤
 │  +24  QUIZ ✓                │  live preview: score + validity
 │ [A][E][R][?][T][S][N]       │  rack: 7 tiles, ≥ 44 pt targets (≥ 40 pt below 360 pt width)
-│ ⟲ shuffle   ↩ recall  PLAY  │  actions
+│ shuffle recall swap pass PLAY│  actions (the board's own)
 └─────────────────────────────┘  safe-area bottom
 ```
 
@@ -107,6 +107,13 @@ by the shell for every game.)
 - Last move's tiles are highlighted; tapping a word on the board shows its score in the history.
 - Submit button disabled when the client engine says the play is invalid; the server still
   validates.
+- **Swap and Pass are board controls**, each a dialog on the board (swap: pick the rack tiles, with
+  the reason when the bag is too small; pass: confirm). **Resign is the shell's menu** (02 §3): the
+  module's `Action` has no resign, and the shell's `resign` call is not part of `BoardProps`.
+- The board does not wait for a word-list download to show a score: the placement rules and the
+  score come from the engine's view-level analysis at once; whether the words are valid comes from
+  `preview` (below), debounced (250 ms) and shown when it answers, and Play stays enabled meanwhile
+  (the server still validates).
 - After submit: optimistic "submitting" state; on `409 STALE_GAME` or `409 NOT_YOUR_TURN` refetch
   and keep the tentative tiles on the rack.
 
@@ -117,7 +124,9 @@ placement validity, words formed, score, bingo. The game's own `rulesetId@versio
 `dictionaryId` are used. This mirrors the server exactly (same code). For `serverOnly`
 dictionaries the client computes placement and score locally and gets word validity from the
 debounced preview endpoint (05). Until validity is known (either way),
-previews show score only.
+previews show score only. The module itself never downloads a list: it asks the shell's `preview`
+(02 §3: "local when possible, else from the server"), so holding and caching the list for public
+dictionaries is the shell's job and needs no change to the module contract.
 
 ## 4. PWA requirements
 

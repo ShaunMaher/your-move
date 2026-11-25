@@ -40,6 +40,8 @@ const DATABASE_PATH = join(process.env["E2E_DATA_DIR"], "app.sqlite");
 
 export default defineConfig({
   testDir: "src",
+  // Browser specs only: `*.test.ts` files here are Vitest unit tests (e.g. global-teardown.test.ts).
+  testMatch: "**/*.spec.ts",
   globalTeardown: "./src/global-teardown.ts",
   forbidOnly: Boolean(process.env["CI"]),
   // A flaky test is a bug (11 §4): no silent retries.
