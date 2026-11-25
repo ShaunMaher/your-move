@@ -25,8 +25,8 @@ import {
 
 import { migrate } from "./db/migrate.js";
 import { nodeRepositories, openSqlite } from "./db/sqlite.js";
-import type { NodeConfig } from "./node-config.js";
 import { nodeDictionaries } from "./dictionaries.js";
+import type { NodeConfig } from "./node-config.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
