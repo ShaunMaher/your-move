@@ -510,31 +510,87 @@ describe("returning to where a signed-out visit was headed", () => {
     expect(window.location.pathname).toBe("/settings");
   });
 
+  it("keeps it through onboarding, so a new person lands where they were headed", async () => {
+    window.history.replaceState(null, "", "/settings");
+    const { api } = fakeApi({
+      ...signedOut,
+      "POST /api/v1/auth/otp/request": json({}, 202),
+      "POST /api/v1/auth/otp/verify": json({
+        user: { ...ME, displayName: null, needsOnboarding: true },
+        needsOnboarding: true,
+      }),
+      "PATCH /api/v1/me": json(ME),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    typeInto("Email address", "sam@example.org");
+    click("Email me a code");
+    await screen.findByLabelText("Sign-in code");
+    typeInto("Sign-in code", "12345678");
+    click("Sign in");
+    await screen.findByRole("heading", { name: "Welcome to Family Games" });
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/welcome");
+    });
+    typeInto("Display name", "Sam");
+    click("Continue");
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeDefined();
+    expect(window.location.pathname).toBe("/settings");
+    expect(peekReturnPath()).toBeNull();
+  });
+
   it("goes home after an explicit sign-out, not back to where the person was", async () => {
     const { api } = fakeApi({
       ...signedIn(),
       "POST /api/v1/auth/logout": new Response(null, { status: 204 }),
+      "POST /api/v1/auth/otp/request": json({}, 202),
+      "POST /api/v1/auth/otp/verify": json({ user: ME, needsOnboarding: false }),
     });
     window.history.replaceState(null, "", "/settings");
     render(<App api={api} />);
     await screen.findByRole("heading", { name: "Settings" });
+    rememberReturnPath("/settings");
     click("Sign out");
     await screen.findByRole("heading", { name: "Sign in" });
     expect(peekReturnPath()).toBeNull();
+    typeInto("Email address", "sam@example.org");
+    click("Email me a code");
+    await screen.findByLabelText("Sign-in code");
+    typeInto("Sign-in code", "12345678");
+    click("Sign in");
+    expect(await screen.findByRole("heading", { name: "Hi, Sam" })).toBeDefined();
+    expect(window.location.pathname).toBe("/");
   });
 
-  it.each(["//evil.example/x", "https://evil.example/", "/\\evil.example", "/a b", "/signin", "x"])(
-    "never remembers %s",
-    (value) => {
-      expect(isAppPath(value)).toBe(false);
-    },
-  );
+  it.each([
+    "//evil.example/x",
+    "https://evil.example/",
+    "/\\evil.example",
+    "/a b",
+    "/signin",
+    "x",
+    "/api/v1/email/unsubscribe",
+    "/api/v1/email/unsubscribe?token=x",
+    "/api",
+    "/__dev/mail",
+    "/manifest.webmanifest",
+    "/manifest.webmanifest#x",
+  ])("never remembers %s", (value) => {
+    expect(isAppPath(value)).toBe(false);
+  });
 
   it("ignores a tampered stored value", () => {
     window.sessionStorage.setItem("ym.return-path", "//evil.example");
     expect(peekReturnPath()).toBeNull();
     clearReturnPath();
   });
+
+  it.each(["/apiary", "/g/abc", "/manifest.webmanifest.html", "/settings?x=/api/"])(
+    "accepts %s, which only looks like a server path",
+    (value) => {
+      expect(isAppPath(value)).toBe(true);
+    },
+  );
 
   it("accepts an ordinary app path", () => {
     rememberReturnPath("/settings");
@@ -622,6 +678,90 @@ describe("ending the session in every tab", () => {
       expect(calls.filter((call) => call.path === "/api/v1/me").length).toBeGreaterThan(1);
     });
     expect(screen.getByRole("heading", { name: "Hi, Sam" })).toBeDefined();
+  });
+});
+
+describe("when the session is another person's", () => {
+  const OTHER = { ...ME, id: "u2", displayName: "Alex", email: "alex@example.org" };
+
+  it("starts over as them, with nothing of the first person's kept, when the tab is shown again", async () => {
+    let current: object = ME;
+    const { api } = fakeApi({
+      "GET /api/v1/config": json(CONFIG),
+      "GET /api/v1/me": () => json(current),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Hi, Sam" });
+    window.localStorage.setItem("ym.game.words.u1.g1", "rack");
+    current = OTHER;
+    await waitFor(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(screen.getByRole("heading", { name: "Hi, Alex" })).toBeDefined();
+    });
+    expect(window.localStorage.getItem("ym.game.words.u1.g1")).toBeNull();
+    expect(screen.queryByText("sam@example.org")).toBeNull();
+  });
+
+  it("checks who the session is when another tab signs in", async () => {
+    let current: object = ME;
+    const { api } = fakeApi({
+      "GET /api/v1/config": json(CONFIG),
+      "GET /api/v1/me": () => json(current),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Hi, Sam" });
+    window.localStorage.setItem("ym.game.words.u1.g1", "rack");
+    current = OTHER;
+    await waitFor(() => {
+      const other = new BroadcastChannel("session");
+      other.postMessage("signed-in");
+      other.close();
+      expect(screen.getByRole("heading", { name: "Hi, Alex" })).toBeDefined();
+    });
+    expect(window.localStorage.getItem("ym.game.words.u1.g1")).toBeNull();
+  });
+
+  it("tells the other tabs when this one signs in", async () => {
+    const heard = new Promise<unknown>((resolve) => {
+      const channel = new BroadcastChannel("session");
+      channel.onmessage = (event: MessageEvent) => {
+        channel.close();
+        resolve(event.data);
+      };
+    });
+    await signInWith(json({ user: ME, needsOnboarding: false }));
+    expect(await heard).toBe("signed-in");
+  });
+
+  it("changes nothing when it is the same person", async () => {
+    const { api, calls } = fakeApi(signedIn());
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Hi, Sam" });
+    window.localStorage.setItem("ym.game.words.u1.g1", "rack");
+    await waitFor(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(calls.filter((call) => call.path === "/api/v1/me").length).toBeGreaterThan(1);
+    });
+    expect(screen.getByRole("heading", { name: "Hi, Sam" })).toBeDefined();
+    expect(window.localStorage.getItem("ym.game.words.u1.g1")).toBe("rack");
+    window.localStorage.clear();
+  });
+});
+
+describe("launching with no session", () => {
+  it("removes per-game state left behind, but keeps where the visit was headed", async () => {
+    window.localStorage.setItem("ym.game.words.u1.g1", "rack");
+    window.localStorage.setItem("theme", "dark");
+    window.history.replaceState(null, "", "/settings");
+    render(<App api={fakeApi(signedOut).api} />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/signin");
+    });
+    expect(window.localStorage.getItem("ym.game.words.u1.g1")).toBeNull();
+    expect(window.localStorage.getItem("theme")).toBe("dark");
+    expect(peekReturnPath()).toBe("/settings");
+    window.localStorage.clear();
   });
 });
 

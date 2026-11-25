@@ -7,16 +7,16 @@ import { clearReturnPath } from "./return-path.js";
 
 const CHANNEL = "session";
 const SIGNED_OUT = "signed-out";
+const SIGNED_IN = "signed-in";
 
 /** Local-storage keys under this prefix hold per-user game state (06 §4; `ym.game.<type>.<user>.<game>`). */
 const GAME_STORAGE_PREFIX = "ym.game.";
 
 /**
- * Everything the client keeps about the person, cleared whenever their session ends in this tab.
- * Later slices add to it: the push unsubscribe (A5) and anything else the app keeps per user.
+ * Per-user game state, cleared whenever no session is found (at launch, on any 401) as well as
+ * when one ends; the remembered return path is left, because a signed-out visit needs it.
  */
-export function clearClientState(): void {
-  clearReturnPath();
+export function clearGameState(): void {
   try {
     const { localStorage } = window;
     for (let index = localStorage.length - 1; index >= 0; index -= 1) {
@@ -28,26 +28,48 @@ export function clearClientState(): void {
   }
 }
 
+/**
+ * Everything the client keeps about the person, cleared whenever their session ends in this tab.
+ * Later slices add to it: the push unsubscribe (A5) and anything else the app keeps per user.
+ */
+export function clearClientState(): void {
+  clearReturnPath();
+  clearGameState();
+}
+
 function openChannel(): BroadcastChannel | null {
   return typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(CHANNEL);
 }
 
-/** Tells every other tab that the session has ended. */
-export function announceSignedOut(): void {
+function announce(message: string): void {
   const channel = openChannel();
-  channel?.postMessage(SIGNED_OUT);
+  channel?.postMessage(message);
   channel?.close();
 }
 
+/** Tells every other tab that the session has ended. */
+export function announceSignedOut(): void {
+  announce(SIGNED_OUT);
+}
+
+/** Tells every other tab that someone has signed in, so each checks who the session is now. */
+export function announceSignedIn(): void {
+  announce(SIGNED_IN);
+}
+
 /**
- * Calls `onSignedOut` when another tab ends the session. Returns the function that stops
- * listening.
+ * Calls `onSignedOut` when another tab ends the session and `onSignedIn` when another tab signs
+ * someone in. Returns the function that stops listening.
  */
-export function watchSignedOut(onSignedOut: () => void): () => void {
+export function watchSession(handlers: {
+  readonly onSignedOut: () => void;
+  readonly onSignedIn: () => void;
+}): () => void {
   const channel = openChannel();
   if (channel === null) return () => undefined;
   channel.onmessage = (event: MessageEvent) => {
-    if (event.data === SIGNED_OUT) onSignedOut();
+    if (event.data === SIGNED_OUT) handlers.onSignedOut();
+    else if (event.data === SIGNED_IN) handlers.onSignedIn();
   };
   return () => {
     channel.close();
