@@ -123,20 +123,25 @@ test("signing out everywhere ends the session", async ({ page, request }) => {
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Sign in");
 });
 
-test("a rate-limited request says so and keeps the person on the email step", async ({ page }) => {
-  await page.route("**/api/v1/auth/otp/request", (route) =>
-    route.fulfill({
-      status: 429,
-      contentType: "application/json",
-      body: JSON.stringify({ error: { code: "RATE_LIMITED", message: "Too many requests." } }),
-    }),
-  );
-  await page.goto("/signin");
-  await page.getByLabel("Email address").fill(freshAddress());
-  await page.getByRole("button", { name: "Email me a code" }).click();
-  await expect(page.getByRole("alert")).toContainText("Too many attempts");
-  await expectAccessible(page);
-  await expect(page.getByLabel("Sign-in code")).toHaveCount(0);
+test.describe("a rate-limited request", () => {
+  // `page.route` can't intercept what a service worker handles, so keep the worker out.
+  test.use({ serviceWorkers: "block" });
+
+  test("says so and keeps the person on the email step", async ({ page }) => {
+    await page.route("**/api/v1/auth/otp/request", (route) =>
+      route.fulfill({
+        status: 429,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { code: "RATE_LIMITED", message: "Too many requests." } }),
+      }),
+    );
+    await page.goto("/signin");
+    await page.getByLabel("Email address").fill(freshAddress());
+    await page.getByRole("button", { name: "Email me a code" }).click();
+    await expect(page.getByRole("alert")).toContainText("Too many attempts");
+    await expectAccessible(page);
+    await expect(page.getByLabel("Sign-in code")).toHaveCount(0);
+  });
 });
 
 test("the manifest and icons carry the runtime name", async ({ page, request }) => {

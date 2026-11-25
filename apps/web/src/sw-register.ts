@@ -19,9 +19,13 @@ export function watchForUpdates(
   onUpdate: (watch: UpdateWatch) => void,
   reload: () => void,
 ): void {
+  // Reload only once the person has asked for the update: the first worker claiming the page
+  // also fires `controllerchange`, and that must not reload a page that has just loaded.
+  let applying = false;
   const offer = (worker: ServiceWorker) => {
     onUpdate({
       apply: () => {
+        applying = true;
         worker.postMessage("SKIP_WAITING");
       },
     });
@@ -35,10 +39,9 @@ export function watchForUpdates(
       if (installing.state === "installed" && container.controller !== null) offer(installing);
     });
   });
-  let reloading = false;
   container.addEventListener("controllerchange", () => {
-    if (reloading) return;
-    reloading = true;
+    if (!applying) return;
+    applying = false;
     reload();
   });
 }

@@ -71,6 +71,13 @@ describe("watchForUpdates", () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
+  it("does not reload when a worker takes over without being asked to (the first install)", () => {
+    const f = fakes({ controlled: false });
+    const { reload } = watch(f);
+    f.takeOver();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
   it("does not call the very first install an update", () => {
     const f = fakes({ controlled: false });
     const { onUpdate } = watch(f);
