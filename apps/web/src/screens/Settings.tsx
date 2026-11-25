@@ -16,7 +16,7 @@ import {
 } from "../auth-api.js";
 import { type PushChange, pushState, type PushState, turnOffPush, turnOnPush } from "../push.js";
 import { Link } from "../router.js";
-import type { Theme } from "../theme.js";
+import { applyTheme, type Theme } from "../theme.js";
 import { useSignOut } from "../use-sign-out.js";
 import { Page } from "./Page.js";
 import { Problem } from "./Problem.js";
@@ -45,25 +45,27 @@ function useSettingSave<T>(
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function change(value: T) {
-    if (pending) return;
+  /** Saves `value`; answers whether it was saved. A change during a save is ignored. */
+  async function change(value: T): Promise<boolean> {
+    if (pending) return false;
     setPending(true);
     setError(null);
     const outcome = await save(value);
     setPending(false);
     if (outcome.ok) {
       onMeChanged(outcome.data);
-      return;
+      return true;
     }
     if (outcome.failure === "unauthenticated") {
       onSessionLost();
-      return;
+      return false;
     }
     setError(
       outcome.failure === "offline"
         ? "You seem to be offline. Your setting wasn't saved. Try again."
         : "Your setting wasn't saved. Please try again.",
     );
+    return false;
   }
   return { pending, error, change };
 }
@@ -75,10 +77,10 @@ function EmailNudges({
   onMeChanged,
   onSessionLost,
 }: Pick<SettingsProps, "api" | "me" | "onMeChanged" | "onSessionLost">) {
-  const { pending, error, change } = useSettingSave(
-    (value: boolean) => saveEmailNudges(api, value),
-    { onMeChanged, onSessionLost },
-  );
+  const { error, change } = useSettingSave((value: boolean) => saveEmailNudges(api, value), {
+    onMeChanged,
+    onSessionLost,
+  });
 
   return (
     <section className="card stack" aria-labelledby="email-heading">
@@ -87,7 +89,6 @@ function EmailNudges({
         <input
           type="checkbox"
           checked={me.settings.emailNudges}
-          disabled={pending}
           aria-describedby="email-nudges-help email-nudges-problem"
           onChange={(event) => void change(event.target.checked)}
         />
@@ -108,40 +109,58 @@ const THEMES: readonly { value: Theme; label: string }[] = [
   { value: "dark", label: "Dark" },
 ];
 
-/** The colour theme (07 §5, alpha A9): saved at once; the app applies the server's answer. */
+/**
+ * The colour theme (07 §5, alpha A9): shown and applied at once, then saved; a failed save puts
+ * the old theme back. The radios stay enabled, so focus stays on the group.
+ */
 function Appearance({
   api,
   me,
   onMeChanged,
   onSessionLost,
 }: Pick<SettingsProps, "api" | "me" | "onMeChanged" | "onSessionLost">) {
-  const { pending, error, change } = useSettingSave((value: Theme) => saveTheme(api, value), {
+  const { error, change } = useSettingSave((value: Theme) => saveTheme(api, value), {
     onMeChanged,
     onSessionLost,
   });
+  /** The choice while it is being saved. */
+  const [chosen, setChosen] = useState<Theme | null>(null);
+  const [saved, setSaved] = useState(false);
+  const shown = chosen ?? me.settings.theme;
+
+  async function choose(value: Theme) {
+    if (chosen !== null) return;
+    setChosen(value);
+    setSaved(false);
+    applyTheme(value);
+    const ok = await change(value);
+    if (!ok) applyTheme(me.settings.theme);
+    setSaved(ok);
+    setChosen(null);
+  }
 
   return (
-    <section className="card stack" aria-labelledby="appearance-heading">
-      <h2 id="appearance-heading">Appearance</h2>
-      <div role="radiogroup" aria-labelledby="appearance-heading" className="stack">
-        {THEMES.map(({ value, label }) => (
-          <label key={value} className="check">
-            <input
-              type="radio"
-              name="theme"
-              value={value}
-              checked={me.settings.theme === value}
-              disabled={pending}
-              aria-describedby="theme-problem"
-              onChange={() => void change(value)}
-            />
-            {label}
-          </label>
-        ))}
-      </div>
-      <p>System follows your device&apos;s light or dark setting.</p>
+    <fieldset className="card stack">
+      <legend>
+        <h2>Appearance</h2>
+      </legend>
+      {THEMES.map(({ value, label }) => (
+        <label key={value} className="check">
+          <input
+            type="radio"
+            name="theme"
+            value={value}
+            checked={shown === value}
+            aria-describedby="theme-help theme-problem"
+            onChange={() => void choose(value)}
+          />
+          {label}
+        </label>
+      ))}
+      <p id="theme-help">System follows your device&apos;s light or dark setting.</p>
       <Problem id="theme-problem" message={error} />
-    </section>
+      <p role="status">{saved ? "Theme saved" : ""}</p>
+    </fieldset>
   );
 }
 

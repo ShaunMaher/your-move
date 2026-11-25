@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { applyStoredTheme, applyTheme, storedTheme } from "./theme.js";
+import { applyStoredTheme, applyTheme, storedTheme, type Theme } from "./theme.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -27,6 +27,13 @@ describe("the theme", () => {
     window.localStorage.setItem("ym.theme", "purple");
     applyStoredTheme();
     expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+  });
+
+  it("treats a value that isn't one of the three as system (A9-P-2)", () => {
+    applyTheme("dark");
+    applyTheme("purple" as unknown as Theme);
+    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+    expect(storedTheme()).toBe("system");
   });
 
   it("copes with storage that throws", () => {

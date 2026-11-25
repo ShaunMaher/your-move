@@ -21,10 +21,13 @@ export function storedTheme(): Theme {
   }
 }
 
-function show(theme: Theme): void {
+function show(value: unknown): Theme {
+  // Anything but the three words counts as "system" (A9-P-2).
+  const theme = isTheme(value) ? value : "system";
   const root = document.documentElement;
   if (theme === "system") root.removeAttribute("data-theme");
   else root.setAttribute("data-theme", theme);
+  return theme;
 }
 
 /** Shows the theme this device last used; run when the app's module starts. */
@@ -33,8 +36,8 @@ export function applyStoredTheme(): void {
 }
 
 /** Shows `theme` and remembers it for the next launch. */
-export function applyTheme(theme: Theme): void {
-  show(theme);
+export function applyTheme(choice: Theme): void {
+  const theme = show(choice);
   try {
     if (storedTheme() !== theme) window.localStorage.setItem(KEY, theme);
   } catch {

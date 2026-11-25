@@ -151,6 +151,15 @@ h1:focus {
   outline: none;
 }
 
+fieldset.card {
+  min-width: 0;
+  margin: 0;
+}
+
+legend {
+  padding: 0;
+}
+
 .card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);

@@ -271,8 +271,10 @@ dictionaries is the shell's job and needs no change to the module contract.
 
 - Original look — must not imitate any commercial game's colours, tile style or board artwork.
 - Light and dark themes following `prefers-color-scheme`, with a manual override in settings
-  (alpha A9): Settings → Appearance offers System, Light and Dark, saved at once as
-  `settings.theme` (04, 05). Light or Dark sets `data-theme="light"` or `"dark"` on the page's
+  (alpha A9): Settings → Appearance is a group of three radios (System, Light, Dark), saved at
+  once as `settings.theme` (04, 05): the choice shows and applies immediately, the radios stay
+  enabled so focus stays on the group, and a failed save puts the old theme back with the
+  usual problem message. Light or Dark sets `data-theme="light"` or `"dark"` on the page's
   root element; System removes it, and the dark tokens then apply under
   `prefers-color-scheme: dark` unless `data-theme` is `"light"`. Every dark rule in the shell's CSS
   follows the same override, and `color-scheme` follows it too, so form controls match. The app's

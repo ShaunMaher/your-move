@@ -106,9 +106,8 @@ describe("the theme choice (07 §5, alpha A9)", () => {
     expect(radio("System").checked).toBe(true);
     expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
     fireEvent.click(radio("Dark"));
-    await waitFor(() => {
-      expect(radio("Dark").checked).toBe(true);
-    });
+    await screen.findByText("Theme saved");
+    expect(radio("Dark").checked).toBe(true);
     expect(calls.at(-1)).toMatchObject({
       method: "PATCH",
       path: "/api/v1/me",
@@ -117,9 +116,8 @@ describe("the theme choice (07 §5, alpha A9)", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     expect(window.localStorage.getItem("ym.theme")).toBe("dark");
     fireEvent.click(radio("System"));
-    await waitFor(() => {
-      expect(radio("System").checked).toBe(true);
-    });
+    await screen.findByText("Theme saved");
+    expect(radio("System").checked).toBe(true);
     expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
     expect(window.localStorage.getItem("ym.theme")).toBe("system");
   });
@@ -146,21 +144,54 @@ describe("the theme choice (07 §5, alpha A9)", () => {
     render(<App api={api} />);
     await screen.findByRole("heading", { name: "Settings" });
     fireEvent.click(radio("Dark"));
-    await waitFor(() => {
-      expect(radio("Dark").checked).toBe(true);
-    });
+    await screen.findByText("Theme saved");
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     vi.restoreAllMocks();
   });
 
-  it("says so and keeps the old theme when the save fails", async () => {
-    const { api } = routes(problem(500, "INTERNAL"));
+  it("shows and applies a choice at once, and keeps focus on the radio (A9-P-1)", async () => {
+    let answer!: (response: Response) => void;
+    const { api } = routes(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Settings" });
+    radio("Dark").focus();
+    fireEvent.click(radio("Dark"));
+    // Before the server has answered.
+    expect(radio("Dark").checked).toBe(true);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(radio("Dark").disabled).toBe(false);
+    await waitFor(() => {
+      expect(answer).toBeTypeOf("function");
+    });
+    expect(document.activeElement).toBe(radio("Dark"));
+    answer(json({ ...ME, settings: { ...ME.settings, theme: "dark" } }));
+    await screen.findByText("Theme saved");
+    expect(document.activeElement).toBe(radio("Dark"));
+    expect(screen.getByRole("group", { name: "Appearance" })).toBeTruthy();
+  });
+
+  it.each([
+    ["the server errors", problem(500, "INTERNAL"), "Your setting wasn't saved. Please try again."],
+    [
+      "the network is down",
+      new TypeError("offline"),
+      "You seem to be offline. Your setting wasn't saved. Try again.",
+    ],
+  ])("rolls back and says so when %s (A9-P-1)", async (_name, failure, message) => {
+    const { api } = routes(failure);
     render(<App api={api} />);
     await screen.findByRole("heading", { name: "Settings" });
     fireEvent.click(radio("Light"));
-    await screen.findByText("Your setting wasn't saved. Please try again.");
+    await screen.findByText(message);
     expect(radio("System").checked).toBe(true);
+    expect(radio("Light").checked).toBe(false);
     expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+    expect(window.localStorage.getItem("ym.theme")).toBe("system");
   });
 
   it("keeps the device's theme after sign-out", async () => {
