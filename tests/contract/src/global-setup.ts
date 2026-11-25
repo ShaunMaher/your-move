@@ -59,7 +59,14 @@ export default async function setup(project: TestProject): Promise<() => void> {
   const build = (name: string) => {
     execFileSync("pnpm", ["--filter", name, "build"], {
       stdio: "inherit",
-      env: { ...process.env, PUBLIC_URL: CONTRACT_VARS.PUBLIC_URL, BUNDLE_INPUTS_DIR: records },
+      // Vitest sets NODE_ENV=test; a build inheriting it bundles React's development build into
+      // apps/web/dist, which is the one `pnpm build` made. Builds are production builds.
+      env: {
+        ...process.env,
+        NODE_ENV: "production",
+        PUBLIC_URL: CONTRACT_VARS.PUBLIC_URL,
+        BUNDLE_INPUTS_DIR: records,
+      },
     });
   };
   try {
