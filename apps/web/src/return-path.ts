@@ -29,7 +29,15 @@ export function isAppPath(value: unknown): value is string {
   if (!value.startsWith("/") || value.startsWith("//") || /[\\\u0000- \u007f]/u.test(value)) {
     return false;
   }
-  return isDestination(value) && !isServerPath(value);
+  if (!isDestination(value) || isServerPath(value)) return false;
+  // Nothing the URL parser would rewrite: no `%` escapes, no `.` or `..` segments.
+  const pathname = value.split(/[?#]/u)[0] ?? value;
+  if (pathname.includes("%")) return false;
+  try {
+    return new URL(value, "http://x").pathname === pathname;
+  } catch {
+    return false;
+  }
 }
 
 export function rememberReturnPath(path: string): void {
