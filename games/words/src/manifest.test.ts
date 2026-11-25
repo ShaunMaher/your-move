@@ -2,7 +2,6 @@ import { isGameType } from "@your-move/sdk";
 import { checkIcon } from "@your-move/testkit";
 import { describe, expect, it } from "vitest";
 
-import { client } from "./client/index.js";
 import { engines } from "./engine/index.js";
 import { manifest } from "./manifest.js";
 
@@ -41,9 +40,5 @@ describe("words manifest (02 §7.2)", () => {
     expect(checkIcon(manifest.icon)).toEqual([]);
     const elements = [...manifest.icon.matchAll(/<([a-z]+)/gu)].map((match) => match[1]);
     expect(new Set(elements)).toEqual(new Set(["svg", "rect", "circle"]));
-  });
-
-  it("has no client module until the board UI (M3)", () => {
-    expect(client).toBeNull();
   });
 });

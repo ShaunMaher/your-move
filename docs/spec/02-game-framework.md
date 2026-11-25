@@ -249,6 +249,24 @@ error toasts, the stale-state refetch, and the realtime refresh. A game module n
 API directly; it only calls `submit` and `preview`. The client may import the module's pure engine
 to compute previews locally (e.g. word scores), but it is always non-authoritative.
 
+A client module ships **no stylesheet file** (its built output is JavaScript, §7.1.1) and the page's
+CSP allows no inline styles (08 §3): it installs its CSS as a constructable stylesheet
+(`document.adoptedStyleSheets`), which that policy doesn't restrict. There is no `<style>`
+fallback: the supported browsers all have constructable stylesheets (07 §4, browser baseline), and
+a module that finds them missing renders a visible `role="alert"` "Please update your browser to
+play" instead of an unstyled board. Positions and transforms set through the DOM's style object
+are likewise fine.
+
+A client module may keep small per-device conveniences in `localStorage`, **only under the
+reserved prefix** `ym.game.<gameType>.<userId>.<gameId>` (any suffix after the game id): per user
+and game, never shared between accounts on one device. The shell wipes every key starting
+`ym.game.` at sign-out and logout-all (06 §4), so a module need not clean up after itself, but it
+keeps nothing it wouldn't want a later user of the device to find: no letters, hands or other game
+information, only presentation choices such as the order of the rack (a permutation of positions,
+07 §2). It writes only after the player actually changes something, never on mount, and deletes
+its entry when the game is no longer active. Storage may be missing or full; everything works
+without it. Keys outside the prefix are not the module's to use.
+
 ## 4. Game lifecycle (all games)
 
 ```
