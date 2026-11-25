@@ -86,6 +86,8 @@ export interface Harness {
   /** Signs in and returns the cookie pair (`name=value`). */
   signIn(email: string, options?: SendOptions): Promise<string>;
   readonly logs: Record<string, unknown>[];
+  /** Every route and middleware registration of the app, as Hono lists them (`:param` paths). */
+  routes(): readonly { readonly method: string; readonly path: string }[];
   /** Runs one SQL statement directly, for state no endpoint sets yet (e.g. suspension, M3). */
   exec(sql: string, ...params: (string | number | null)[]): void;
   /** Runs one SQL query directly and returns its rows, for checking what was stored. */
@@ -210,6 +212,7 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
       return cookieOf(response);
     },
     logs,
+    routes: () => app.routes.map((route) => ({ method: route.method, path: route.path })),
     exec(sql, ...params) {
       sqlite.prepare(sql).run(...params);
     },

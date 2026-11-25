@@ -1,24 +1,34 @@
 /**
- * The route-wide secrecy test (docs/spec/04-data-model.md invariant 4, 08 T8): through whole games
- * of the hidden-hand reference game and of words, every response of every game route, to every
- * member, is checked against the secrets stored at that moment. No response may contain the
- * module state, the recorded randomness, a raw action, or another seat's final view, and no
- * response may carry a key naming one of those columns.
+ * The route-wide secrecy test (docs/spec/04-data-model.md invariant 4, 08 T8, A2 review S-2 and
+ * P-4). Through whole games of the hidden-hand reference game and of words — lobbies created,
+ * declined, cancelled and started; real word plays, a swap and previews; the frozen `declined`
+ * ending; refusals and non-members' `404`s — every response of every game route, to every member,
+ * is checked three ways:
+ *
+ * 1. no key names a secret column, and no stored secret appears in the body: the state, the
+ *    recorded randomness, raw actions, other seats' final views, and each other seat's hidden
+ *    pieces and the bag or deck on their own;
+ * 2. **perturbation**: at every step, for every seated viewer, the other seats' hidden pieces and
+ *    the bag or deck order are rewritten in the stored state, and every read must answer the viewer
+ *    byte for byte as before — so even a partial leak (one tile, a count derived from the order)
+ *    fails;
+ * 3. **coverage**: every `/api/v1/games*` and `/api/v1/catalog` route the app registers must have
+ *    been exercised, so a new route can't escape the test.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
-  call,
-  createGame,
-  type ExampleView,
-  gameHarness,
-  getGame,
-  type Player,
-  signUp,
-} from "./games-support.js";
-import type { Harness } from "./test-harness.js";
+import { nodeDictionaries } from "./dictionaries.js";
+import { createGame, type ExampleView, gameHarness, type Player, signUp } from "./games-support.js";
+import { type Harness, HOUR } from "./test-harness.js";
+
+/** The served dictionaries the harness reads (built by the dictionary package). */
+const DICTIONARIES = new URL("../../../packages/dictionary/generated/served", import.meta.url)
+  .pathname;
 
 let h: Harness;
+/** Every route exercised, as `METHOD /path/:param`, for the coverage check. */
+const exercised = new Set<string>();
+
 beforeEach(() => {
   h = gameHarness();
 });
@@ -50,9 +60,15 @@ const FORBIDDEN_KEYS = new Set([
   "writeToken",
   "write_token",
   "inviteEmail",
+  "invite_email",
+  "lastSeenVersion",
+  // Hidden parts of the two games' states (racks and hands are public once a game is over).
+  "bag",
+  "deck",
+  "pending",
 ]);
 
-/** Every key in a JSON value that names a secret column. */
+/** Every key in a JSON value that names a secret column or a hidden part of a state. */
 function forbiddenKeys(value: unknown, into: string[] = []): string[] {
   if (Array.isArray(value)) {
     for (const item of value) forbiddenKeys(item, into);
@@ -66,137 +82,704 @@ function forbiddenKeys(value: unknown, into: string[] = []): string[] {
   return into;
 }
 
+interface StoredGame {
+  readonly gameType: string;
+  readonly state: string | null;
+  readonly status: string;
+}
+
+function stored(gameId: string): StoredGame {
+  const [row] = h.query("SELECT game_type, state, status FROM games WHERE id = ?", gameId);
+  return {
+    gameType: String(row?.["game_type"]),
+    state: typeof row?.["state"] === "string" ? row["state"] : null,
+    status: String(row?.["status"]),
+  };
+}
+
+function seatOf(gameId: string, player: Player): number | null {
+  const [row] = h.query(
+    "SELECT seat FROM game_players WHERE game_id = ? AND user_id = ?",
+    gameId,
+    player.id,
+  );
+  return typeof row?.["seat"] === "number" ? row["seat"] : null;
+}
+
+interface WordsState {
+  bag: string[];
+  racks: string[][];
+}
+interface ExampleState {
+  deck: number[];
+  hands: number[][];
+  pending: (number | null)[];
+  discards: number[];
+}
+
+/** Long enough not to turn up in a body by chance (a short array like `[3]` could). */
+const MIN_SECRET = 8;
+
+/** Each other seat's hidden pieces, and the bag or deck, as stored now. */
+function hiddenPieces(game: StoredGame, viewerSeat: number | null): string[] {
+  if (game.state === null || game.status !== "active") return [];
+  const state = JSON.parse(game.state) as Partial<WordsState & ExampleState>;
+  const others = <T>(rows: readonly T[] | undefined) =>
+    (rows ?? []).filter((_row, seat) => seat !== viewerSeat);
+  return [
+    ...others(state.racks).map((rack) => JSON.stringify(rack)),
+    // A short list of numbers could match a list of scores by chance; perturbation covers those.
+    ...others(state.hands)
+      .filter((hand) => hand.length >= 4)
+      .map((hand) => JSON.stringify(hand)),
+    ...(state.bag === undefined ? [] : [JSON.stringify(state.bag)]),
+    ...(state.deck === undefined ? [] : [JSON.stringify(state.deck)]),
+  ];
+}
+
 /** The secrets of a game as stored now, each a string that must never appear in a response. */
 function secretsOf(gameId: string, viewerSeat: number | null): string[] {
   const [game] = h.query("SELECT state, setup_rng, final_views FROM games WHERE id = ?", gameId);
   const secrets: string[] = [];
   for (const column of ["state", "setup_rng"]) {
     const value = game?.[column];
-    if (typeof value === "string" && value !== "[]") secrets.push(value);
+    if (typeof value === "string") secrets.push(value);
   }
   for (const row of h.query("SELECT action, rng FROM game_actions WHERE game_id = ?", gameId)) {
     for (const column of ["action", "rng"]) {
       const value = row[column];
-      if (typeof value === "string" && value !== "[]") secrets.push(value);
+      if (typeof value === "string") secrets.push(value);
     }
   }
-  const stored = game?.["final_views"];
-  if (typeof stored === "string") {
-    const finalViews = JSON.parse(stored) as { seats: { view: unknown }[] };
-    finalViews.seats.forEach((entry, seat) => {
+  const finalViews = game?.["final_views"];
+  if (typeof finalViews === "string") {
+    secrets.push(finalViews);
+    const parsed = JSON.parse(finalViews) as { seats: { view: unknown }[] };
+    parsed.seats.forEach((entry, seat) => {
       if (seat !== viewerSeat) secrets.push(JSON.stringify(entry.view));
     });
   }
-  return secrets;
+  secrets.push(...hiddenPieces(stored(gameId), viewerSeat));
+  return secrets.filter((secret) => secret.length >= MIN_SECRET);
 }
 
-/** Checks one response body against the game's secrets for this viewer. */
-function check(text: string, gameId: string, viewer: Player, label: string): void {
+/** Checks one response body against the games' secrets for this viewer. */
+function check(text: string, gameIds: readonly string[], viewer: Player, label: string): void {
   if (text === "") return;
   const body: unknown = JSON.parse(text);
   expect(forbiddenKeys(body), label).toEqual([]);
-  const [row] = h.query(
-    "SELECT seat FROM game_players WHERE game_id = ? AND user_id = ?",
-    gameId,
-    viewer.id,
-  );
-  const seat = typeof row?.["seat"] === "number" ? row["seat"] : null;
-  for (const secret of secretsOf(gameId, seat)) {
-    expect(text.includes(secret), `${label}: contains a secret`).toBe(false);
-  }
-}
-
-/** Every read route of the game for every player, each response checked. */
-async function readEverything(gameId: string, players: readonly Player[]): Promise<number> {
-  let responses = 0;
-  for (const player of players) {
-    for (const path of [
-      `/api/v1/games/${gameId}`,
-      `/api/v1/games/${gameId}/history`,
-      "/api/v1/games",
-      "/api/v1/games?invitations=true",
-      "/api/v1/catalog",
-    ]) {
-      const response = await h.request("GET", path, undefined, { cookie: player.cookie });
-      check(await response.text(), gameId, player, `GET ${path}`);
-      responses += 1;
+  for (const gameId of gameIds) {
+    for (const secret of secretsOf(gameId, seatOf(gameId, viewer))) {
+      expect(text.includes(secret), `${label}: contains a secret`).toBe(false);
     }
   }
-  return responses;
+  // Nobody's typed address, ever, except the creator's own `invitedAs` (checked by the keys).
+  expect(text.includes("@example.org") && !text.includes('"invitedAs"'), label).toBe(false);
 }
 
-/** A transition or move, its response checked like any read. */
-async function write(gameId: string, player: Player, path: string, body: unknown) {
-  const response = await h.request("POST", path, body, { cookie: player.cookie });
+/** Every game of the scenario, so a list response is checked against all of them. */
+let gamesInPlay: string[] = [];
+
+/**
+ * One request to a templated game route: records the route for the coverage check and checks the
+ * response against every game's secrets for the caller.
+ */
+async function hit(
+  player: Player,
+  method: "GET" | "POST",
+  template: string,
+  params: Record<string, string> = {},
+  body?: unknown,
+) {
+  exercised.add(`${method} ${template}`);
+  const path = template.replace(/:([a-zA-Z]+)/gu, (_match, name: string) => params[name] ?? "");
+  const response = await h.request(method, path, body, { cookie: player.cookie });
   const text = await response.text();
-  check(text, gameId, player, `POST ${path}`);
-  return { status: response.status, text };
+  check(text, gamesInPlay, player, `${method} ${path} as ${player.name}`);
+  return { status: response.status, text, json: (text === "" ? null : JSON.parse(text)) as Answer };
+}
+
+interface Answer {
+  readonly game?: {
+    readonly id: string;
+    readonly version: number;
+    readonly status: string;
+    readonly toAct: number[];
+    readonly players: readonly { readonly seat: number | null; readonly userId: string | null }[];
+  };
+  readonly view?: unknown;
+  readonly error?: { readonly code: string };
+}
+
+/** The read routes of one game for one viewer, bodies in a fixed order. */
+async function reads(gameId: string, viewer: Player): Promise<string[]> {
+  const bodies: string[] = [];
+  for (const [template, params] of [
+    ["/api/v1/games/:id", { id: gameId }],
+    ["/api/v1/games/:id/history", { id: gameId }],
+    ["/api/v1/games", {}],
+    ["/api/v1/catalog", {}],
+  ] as const) {
+    bodies.push((await hit(viewer, "GET", template, params)).text);
+  }
+  for (const query of ["?invitations=true", "?invitations=hidden"]) {
+    exercised.add("GET /api/v1/games");
+    const response = await h.request("GET", `/api/v1/games${query}`, undefined, {
+      cookie: viewer.cookie,
+    });
+    const text = await response.text();
+    check(text, gamesInPlay, viewer, `GET /api/v1/games${query}`);
+    bodies.push(text);
+  }
+  return bodies;
+}
+
+/** A permutation that moves every item: the last one first (a no-op only if all are equal). */
+function rotate<T>(items: readonly T[]): T[] {
+  return items.length < 2 ? [...items] : [items[items.length - 1] as T, ...items.slice(0, -1)];
+}
+
+/** Deals `pool` back into groups of the given sizes, in order. */
+function deal<T>(pool: readonly T[], sizes: readonly number[]): T[][] {
+  let next = 0;
+  return sizes.map((size) => {
+    const group = pool.slice(next, next + size);
+    next += size;
+    return group;
+  });
+}
+
+/**
+ * The stored state with everything hidden from `viewerSeat` rearranged: the other seats' pieces
+ * and the bag or deck pooled, rotated and dealt back in the same sizes. What the viewer may know —
+ * their own pieces, the board, every count — is unchanged.
+ */
+function perturbed(game: StoredGame, viewerSeat: number): string | null {
+  if (game.state === null || game.status !== "active") return null;
+  const others = (seat: number) => seat !== viewerSeat;
+  if (game.gameType === "words") {
+    const state = JSON.parse(game.state) as WordsState;
+    const hidden = state.racks.filter((_rack, seat) => others(seat));
+    const pool = rotate([...hidden.flat(), ...state.bag]);
+    const [bag = [], ...racks] = deal(pool, [state.bag.length, ...hidden.map((r) => r.length)]);
+    let next = 0;
+    return JSON.stringify({
+      ...state,
+      bag,
+      racks: state.racks.map((rack, seat) => (others(seat) ? (racks[next++] ?? []) : rack)),
+    });
+  }
+  const state = JSON.parse(game.state) as ExampleState;
+  const hands = state.hands.filter((_hand, seat) => others(seat));
+  const pending = state.pending.filter((card, seat) => others(seat) && card !== null) as number[];
+  const pool = rotate([...hands.flat(), ...pending, ...state.deck, ...state.discards]);
+  const [newHands, newPending, [deck = [], discards = []]] = (() => {
+    const handGroups = deal(
+      pool,
+      hands.map((hand) => hand.length),
+    );
+    const rest = pool.slice(hands.flat().length);
+    const pendingGroup = rest.slice(0, pending.length);
+    const tail = rest.slice(pending.length);
+    return [
+      handGroups,
+      pendingGroup,
+      deal(tail, [state.deck.length, state.discards.length]),
+    ] as const;
+  })();
+  let hand = 0;
+  let play = 0;
+  return JSON.stringify({
+    ...state,
+    deck,
+    discards,
+    hands: state.hands.map((own, seat) =>
+      others(seat) ? [...(newHands[hand++] ?? [])].sort((a, b) => a - b) : own,
+    ),
+    pending: state.pending.map((card, seat) =>
+      others(seat) && card !== null ? (newPending[play++] ?? card) : card,
+    ),
+  });
+}
+
+/**
+ * The perturbation check: for every seated member, rearrange what they can't see and require
+ * every read to answer them exactly as before. Returns how many viewers it compared.
+ */
+async function unchangedByHiddenState(gameId: string, players: readonly Player[]): Promise<number> {
+  const game = stored(gameId);
+  let compared = 0;
+  for (const viewer of players) {
+    const seat = seatOf(gameId, viewer);
+    if (seat === null) continue;
+    const changed = perturbed(game, seat);
+    if (changed === null) continue;
+    const before = await reads(gameId, viewer);
+    h.exec("UPDATE games SET state = ? WHERE id = ?", changed, gameId);
+    try {
+      const after = await reads(gameId, viewer);
+      expect(after, `${viewer.name} sees hidden state change`).toEqual(before);
+    } finally {
+      h.exec("UPDATE games SET state = ? WHERE id = ?", game.state, gameId);
+    }
+    compared += 1;
+  }
+  return compared;
+}
+
+/** Every route, as a member and as a stranger whose `404` bodies are checked too. */
+async function readEverything(gameId: string, players: readonly Player[], stranger: Player) {
+  for (const player of players) await reads(gameId, player);
+  for (const template of ["/api/v1/games/:id", "/api/v1/games/:id/history"]) {
+    const answer = await hit(stranger, "GET", template, { id: gameId });
+    expect(answer.status).toBe(404);
+  }
+  const bodies: Record<string, unknown> = {
+    actions: { expectedVersion: 0, action: { type: "pass" } },
+    preview: { action: { type: "pass" } },
+  };
+  for (const name of ["actions", "preview", "start", "accept", "decline", "resign", "cancel"]) {
+    const answer = await hit(
+      stranger,
+      "POST",
+      `/api/v1/games/:id/${name}`,
+      { id: gameId },
+      bodies[name] ?? { expectedVersion: 0 },
+    );
+    expect([answer.status, answer.json.error?.code], name).toEqual([404, "NOT_FOUND"]);
+  }
+  const seen = await hit(
+    stranger,
+    "POST",
+    "/api/v1/games/:id/seen",
+    { id: gameId },
+    {
+      version: 0,
+    },
+  );
+  expect(seen.status).toBe(404);
+}
+
+const version = async (gameId: string, player: Player): Promise<number> =>
+  (await hit(player, "GET", "/api/v1/games/:id", { id: gameId })).json.game?.version ?? -1;
+
+/** A lifecycle transition from the current version, its response checked. */
+async function transition(gameId: string, player: Player, name: string) {
+  return hit(
+    player,
+    "POST",
+    `/api/v1/games/:id/${name}`,
+    { id: gameId },
+    {
+      expectedVersion: await version(gameId, player),
+    },
+  );
+}
+
+async function created(player: Player, body: Record<string, unknown>): Promise<string> {
+  // Five email invitees an hour per creator (08 §4).
+  h.advance(HOUR);
+  const answer = await hit(player, "POST", "/api/v1/games", {}, body);
+  expect(answer.status, answer.text).toBe(201);
+  const id = answer.json.game?.id ?? "";
+  gamesInPlay.push(id);
+  return id;
+}
+
+/** Whoever holds `seat` in the game. */
+function playerAt(answer: Answer, seat: number | undefined, players: readonly Player[]): Player {
+  const userId = answer.game?.players.find((row) => row.seat === seat)?.userId;
+  const player = players.find((candidate) => candidate.id === userId);
+  if (player === undefined) throw new Error("nobody holds that seat");
+  return player;
+}
+
+// Words: real plays found in the built-in word list ------------------------------------------
+
+interface WordsView {
+  readonly board: ({ letter: string } | null)[][];
+  readonly yourRack: string[] | null;
+}
+
+interface Placement {
+  readonly row: number;
+  readonly col: number;
+  readonly tile: string;
+  readonly letter?: string;
+}
+
+let wordList: string[] | undefined;
+async function words(): Promise<string[]> {
+  if (wordList === undefined) {
+    const dictionaries = nodeDictionaries(DICTIONARIES);
+    const manifest = dictionaries.index.dictionaries.find((entry) => entry.id === "enable");
+    if (manifest === undefined) throw new Error("no built-in enable list");
+    wordList = (await dictionaries.loadText(manifest)).split("\n").filter((w) => w.length > 1);
+  }
+  return wordList;
+}
+
+/** The rack tiles that spell `letters` (blanks standing in), or null. */
+function spell(
+  letters: string,
+  rack: readonly string[],
+): { tile: string; letter?: string }[] | null {
+  const left = [...rack];
+  const tiles: { tile: string; letter?: string }[] = [];
+  for (const letter of letters) {
+    const index = left.indexOf(letter);
+    if (index >= 0) {
+      left.splice(index, 1);
+      tiles.push({ tile: letter });
+      continue;
+    }
+    const blank = left.indexOf("?");
+    if (blank < 0) return null;
+    left.splice(blank, 1);
+    tiles.push({ tile: "?", letter });
+  }
+  return tiles;
+}
+
+type Board = WordsView["board"];
+
+/** The board turned on its diagonal: rows become columns. */
+function transpose(board: Board): Board {
+  return board.map((_row, r) => board.map((row) => row[r] ?? null));
+}
+
+/**
+ * Words down through one letter already on the board, in a column with no tiles beside the new
+ * ones and none just past either end, so the play forms only that word.
+ */
+function downThroughLetters(word: string, board: Board, rack: readonly string[]): Placement[][] {
+  const size = board.length;
+  const at = (r: number, c: number) => board[r]?.[c] ?? null;
+  const plays: Placement[][] = [];
+  board.forEach((row, r) => {
+    row.forEach((square, c) => {
+      if (square === null) return;
+      const index = word.indexOf(square.letter);
+      const top = r - index;
+      if (index < 0 || top < 0 || top + word.length > size) return;
+      if (at(top - 1, c) !== null || at(top + word.length, c) !== null) return;
+      const rest: string[] = [];
+      for (let i = 0; i < word.length; i++) {
+        if (i === index) continue;
+        const rr = top + i;
+        if (at(rr, c) !== null || at(rr, c - 1) !== null || at(rr, c + 1) !== null) return;
+        rest.push(word[i] ?? "");
+      }
+      const tiles = spell(rest.join(""), rack);
+      if (tiles === null) return;
+      const rows = Array.from({ length: word.length }, (_unused, i) => top + i).filter(
+        (rr) => rr !== r,
+      );
+      plays.push(tiles.map((tile, i) => ({ row: rows[i] ?? 0, col: c, ...tile })));
+    });
+  });
+  return plays;
+}
+
+/**
+ * Candidate plays: on an empty board, words across the centre; otherwise words through one letter
+ * already on the board, down or across.
+ */
+async function candidates(view: WordsView): Promise<Placement[][]> {
+  const rack = view.yourRack ?? [];
+  const size = view.board.length;
+  const centre = Math.floor(size / 2);
+  const empty = view.board.every((row) => row.every((square) => square === null));
+  const across = transpose(view.board);
+  const plays: Placement[][] = [];
+  for (const word of await words()) {
+    if (word.length > rack.length + (empty ? 0 : 1)) continue;
+    if (empty) {
+      const tiles = spell(word, rack);
+      if (tiles === null) continue;
+      for (let offset = 0; offset < word.length; offset++) {
+        const start = centre - offset;
+        if (start < 0 || start + word.length > size) continue;
+        plays.push(tiles.map((tile, i) => ({ row: centre, col: start + i, ...tile })));
+      }
+    } else {
+      plays.push(...downThroughLetters(word, view.board, rack));
+      plays.push(
+        ...downThroughLetters(word, across, rack).map((play) =>
+          play.map((placement) => ({ ...placement, row: placement.col, col: placement.row })),
+        ),
+      );
+    }
+    if (plays.length >= 200) break;
+  }
+  return plays;
+}
+
+/**
+ * Plays a real word for `player` if one is found — each candidate previewed first, as a client
+ * would — and passes otherwise. Returns whether a word was played.
+ */
+async function playAWord(gameId: string, player: Player): Promise<boolean> {
+  const view = (await hit(player, "GET", "/api/v1/games/:id", { id: gameId })).json
+    .view as WordsView;
+  let action: unknown = { type: "pass" };
+  for (const placements of await candidates(view)) {
+    const candidate = { type: "play", placements };
+    const preview = await hit(
+      player,
+      "POST",
+      "/api/v1/games/:id/preview",
+      { id: gameId },
+      {
+        action: candidate,
+      },
+    );
+    if (preview.status === 200) {
+      action = candidate;
+      break;
+    }
+  }
+  const played = await hit(
+    player,
+    "POST",
+    "/api/v1/games/:id/actions",
+    { id: gameId },
+    {
+      expectedVersion: await version(gameId, player),
+      action,
+    },
+  );
+  expect(played.status, played.text).toBe(200);
+  return (action as { type: string }).type === "play";
 }
 
 describe("route-wide secrecy (04 invariant 4)", () => {
-  it("never serialises state, randomness, raw actions or another seat's final view: example", async () => {
+  beforeEach(() => {
+    gamesInPlay = [];
+  });
+
+  it("the example game: lobbies, a full game with previews and refusals, the frozen declined ending", async () => {
     const players = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
     const [a, b, c] = players as [Player, Player, Player];
-    const game = await createGame(h, a, {
+    const stranger = await signUp(h, "Stranger");
+
+    // A lobby declined by one invitee (204) and cancelled by the creator.
+    const cancelled = await created(a, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: b.email }, { email: c.email }],
+    });
+    expect((await transition(cancelled, b, "decline")).status).toBe(204);
+    expect((await transition(cancelled, a, "cancel")).status).toBe(200);
+    await readEverything(cancelled, players, stranger);
+
+    // A lobby started by the creator below the maximum: c's invitation is dropped.
+    const startedByCreator = await created(a, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: b.email }, { email: c.email }],
+    });
+    expect((await transition(startedByCreator, b, "accept")).status).toBe(200);
+    expect((await transition(startedByCreator, a, "start")).status).toBe(200);
+    await readEverything(startedByCreator, players, stranger);
+    expect(await unchangedByHiddenState(startedByCreator, players)).toBe(2);
+
+    // The frozen declined ending: one seat acts, the other declines before acting.
+    const frozen = await created(a, { gameType: "example", invitees: [{ email: b.email }] });
+    const accepted = await transition(frozen, b, "accept");
+    expect(accepted.json.game?.status).toBe("active");
+    const bCard = (accepted.json.view as ExampleView).seats[seatOf(frozen, b) ?? 0]?.hand?.[0];
+    const played = await hit(
+      b,
+      "POST",
+      "/api/v1/games/:id/actions",
+      { id: frozen },
+      {
+        expectedVersion: await version(frozen, b),
+        action: { card: bCard },
+      },
+    );
+    expect(played.status, played.text).toBe(200);
+    await unchangedByHiddenState(frozen, players);
+    const declined = await transition(frozen, a, "decline");
+    expect(declined.json.game?.status).toBe("declined");
+    await readEverything(frozen, players, stranger);
+    // Both members still see the game, each only their own final view.
+    for (const viewer of [a, b]) {
+      const own = await hit(viewer, "GET", "/api/v1/games/:id", { id: frozen });
+      expect(own.json.view).not.toBeNull();
+    }
+
+    // A full three-player game with random seats: every step read, perturbed and refused.
+    const game = await created(a, {
       gameType: "example",
       seats: 3,
       seatOrder: "random",
       options: { lives: 2 },
       invitees: [{ email: b.email }, { email: c.email }],
     });
-    let responses = await readEverything(game.id, players);
-    for (const who of [b, c]) {
-      const version = (await getGame(h, who, game.id)).game.version;
-      await write(game.id, who, `/api/v1/games/${game.id}/accept`, { expectedVersion: version });
-      h.advance(1000);
-    }
-    for (let step = 0; step < 300; step++) {
-      const { game: now } = await getGame(h, a, game.id);
-      if (now.status !== "active") break;
-      // Not vacuous: there is something secret to leak at every step.
-      expect(secretsOf(game.id, null).length).toBeGreaterThan(0);
-      responses += await readEverything(game.id, players);
-      const seat = now.toAct[0];
-      const userId = now.players.find((row) => row.seat === seat)?.userId;
-      const player = players.find((p) => p.id === userId);
-      if (seat === undefined || player === undefined) throw new Error("nobody to act");
-      const { view } = await getGame(h, player, game.id);
-      const card = (view as ExampleView).seats[seat]?.hand?.[0];
-      await write(game.id, player, `/api/v1/games/${game.id}/preview`, { action: { card } });
-      const moved = await write(game.id, player, `/api/v1/games/${game.id}/actions`, {
-        expectedVersion: now.version,
-        action: { card },
-      });
+    await readEverything(game, players, stranger);
+    for (const who of [b, c]) await transition(game, who, "accept");
+    let steps = 0;
+    for (; steps < 300; steps++) {
+      const now = (await hit(a, "GET", "/api/v1/games/:id", { id: game })).json;
+      if (now.game?.status !== "active") break;
+      // Not vacuous: there is something hidden to leak at every step.
+      expect(hiddenPieces(stored(game), 0).length).toBeGreaterThan(0);
+      if (steps % 3 === 0) {
+        await readEverything(game, players, stranger);
+        expect(await unchangedByHiddenState(game, players)).toBeGreaterThan(0);
+      }
+      const seat = now.game.toAct[0];
+      const player = playerAt(now, seat, players);
+      const { view } = (await hit(player, "GET", "/api/v1/games/:id", { id: game })).json;
+      const hand = (view as ExampleView).seats[seat ?? 0]?.hand ?? [];
+      const expectedVersion = now.game.version;
+      // Refusals: a card not in hand, a stale version, and a seat that isn't to act.
+      const notInHand = await hit(
+        player,
+        "POST",
+        "/api/v1/games/:id/actions",
+        { id: game },
+        {
+          expectedVersion,
+          action: { card: 999 },
+        },
+      );
+      expect(notInHand.status).toBe(400);
+      const stale = await hit(
+        player,
+        "POST",
+        "/api/v1/games/:id/actions",
+        { id: game },
+        {
+          expectedVersion: expectedVersion - 1,
+          action: { card: hand[0] },
+        },
+      );
+      expect(stale.json.error?.code).toBe("STALE_GAME");
+      await hit(
+        player,
+        "POST",
+        "/api/v1/games/:id/preview",
+        { id: game },
+        {
+          action: { card: hand[0] },
+        },
+      );
+      const moved = await hit(
+        player,
+        "POST",
+        "/api/v1/games/:id/actions",
+        { id: game },
+        {
+          expectedVersion,
+          action: { card: hand[0] },
+        },
+      );
       expect(moved.status, moved.text).toBe(200);
-      responses += 2;
+      await hit(
+        player,
+        "POST",
+        "/api/v1/games/:id/seen",
+        { id: game },
+        {
+          version: expectedVersion + 1,
+        },
+      );
     }
-    expect((await getGame(h, a, game.id)).game.status).toBe("finished");
-    responses += await readEverything(game.id, players);
-    expect(responses).toBeGreaterThan(100);
+    expect(steps).toBeGreaterThan(3);
+    expect(stored(game).status).toBe("finished");
+    await readEverything(game, players, stranger);
+    await hit(a, "GET", "/api/v1/games/types/:type/rules", { type: "example" });
   });
 
-  it("never serialises them in words either, through a resignation", async () => {
+  it("words: real plays, a swap, previews and a resignation", async () => {
+    const players = [await signUp(h, "Ada"), await signUp(h, "Bo")];
+    const [a, b] = players as [Player, Player];
+    const stranger = await signUp(h, "Stranger");
+    const game = await created(a, { gameType: "words", invitees: [{ email: b.email }] });
+    await readEverything(game, players, stranger);
+    await transition(game, b, "accept");
+    const toAct = async () => {
+      const now = (await hit(a, "GET", "/api/v1/games/:id", { id: game })).json;
+      return playerAt(now, now.game?.toAct[0], players);
+    };
+    const step = async () => {
+      await readEverything(game, players, stranger);
+      expect(await unchangedByHiddenState(game, players)).toBe(2);
+    };
+
+    await step();
+    // The opening: a rack of seven always spells some word across the centre.
+    expect(await playAWord(game, await toAct())).toBe(true);
+    await step();
+    // A swap: its record says how many tiles, never which.
+    const swapper = await toAct();
+    const rack =
+      ((await hit(swapper, "GET", "/api/v1/games/:id", { id: game })).json.view as WordsView)
+        .yourRack ?? [];
+    const swapped = await hit(
+      swapper,
+      "POST",
+      "/api/v1/games/:id/actions",
+      { id: game },
+      {
+        expectedVersion: await version(game, swapper),
+        action: { type: "swap", tiles: rack.slice(0, 3) },
+      },
+    );
+    expect(swapped.status, swapped.text).toBe(200);
+    await step();
+    // Then words through the tiles on the board, until a second one is played.
+    let played = 1;
+    for (let turn = 0; turn < 4 && played < 2; turn++) {
+      if (await playAWord(game, await toAct())) played += 1;
+      await step();
+    }
+    expect(played).toBe(2);
+    const resigned = await transition(game, await toAct(), "resign");
+    expect(resigned.json.game?.status).toBe("finished");
+    await readEverything(game, players, stranger);
+    await hit(a, "GET", "/api/v1/games/types/:type/rules", { type: "words" });
+    // A member's own final view is theirs to see; only another seat's is a secret.
+    expect((await hit(b, "GET", "/api/v1/games/:id", { id: game })).json.view).not.toBeNull();
+  });
+
+  it("perturbation can fail: a body that showed one hidden tile would differ", async () => {
     const players = [await signUp(h, "Ada"), await signUp(h, "Bo")];
     const [a, b] = players as [Player, Player];
     const game = await createGame(h, a, { gameType: "words", invitees: [{ email: b.email }] });
-    await readEverything(game.id, players);
-    await write(game.id, b, `/api/v1/games/${game.id}/accept`, { expectedVersion: 0 });
-    for (let turn = 0; turn < 4; turn++) {
-      await readEverything(game.id, players);
-      const { game: now } = await getGame(h, a, game.id);
-      const player = now.toAct[0] === 0 ? a : b;
-      const swapped = await write(game.id, player, `/api/v1/games/${game.id}/actions`, {
-        expectedVersion: now.version,
-        action: { type: "pass" },
-      });
-      expect(swapped.status, swapped.text).toBe(200);
-    }
-    const { game: now } = await getGame(h, a, game.id);
-    await write(game.id, a, `/api/v1/games/${game.id}/resign`, { expectedVersion: now.version });
-    expect((await getGame(h, b, game.id)).game.status).toBe("finished");
-    await readEverything(game.id, players);
-    // A member's own final view is theirs to see; only another seat's is a secret.
-    const own = await call<{ view: unknown }>(h, b, "GET", `/api/v1/games/${game.id}`);
-    expect(own.body.view).not.toBeNull();
+    gamesInPlay = [game.id];
+    await transition(game.id, b, "accept");
+    const before = stored(game.id);
+    const seat = seatOf(game.id, a) ?? 0;
+    const changed = JSON.parse(perturbed(before, seat) ?? "null") as WordsState;
+    const original = JSON.parse(before.state ?? "null") as WordsState;
+    // What a leak of the other seat's first tile, or of the bag's top, would show.
+    expect([changed.racks[1 - seat], changed.bag.at(-1)]).not.toEqual([
+      original.racks[1 - seat],
+      original.bag.at(-1),
+    ]);
+    expect(changed.racks[seat]).toEqual(original.racks[seat]);
+  });
+});
+
+describe("coverage (A2 review S-2)", () => {
+  it("exercised every game route the app registers", () => {
+    const registered = new Set(
+      h
+        .routes()
+        .filter(
+          (route) =>
+            route.method !== "ALL" &&
+            (route.path.startsWith("/api/v1/games") || route.path === "/api/v1/catalog"),
+        )
+        .map((route) => `${route.method} ${route.path}`),
+    );
+    expect(registered.size).toBeGreaterThan(10);
+    expect([...registered].filter((route) => !exercised.has(route)).sort()).toEqual([]);
+    // And nothing exercised that the app doesn't have: the templates match Hono's own paths.
+    expect([...exercised].filter((route) => !registered.has(route)).sort()).toEqual([]);
   });
 });
