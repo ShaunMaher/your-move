@@ -22,7 +22,7 @@ loaded runner passes would leave a test that detects nothing.
 ## Decision
 
 - **Statistical timing tests are measurements.** They run in a job of their own, `test:timing`,
-  and never alongside another suite. The `test` job excludes them. `test:timing` runs on the arm64
+  and never alongside another suite. `pnpm test` skips them, so the `test` job does too. `test:timing` runs on the arm64
   runner, after this pipeline's other arm64 jobs (`test:worker` and `build:image:arm64`) have
   finished. It is a required job.
 - **The suite is designed to pass on a quiet machine**, with the evidence recorded in the file's
@@ -35,8 +35,8 @@ loaded runner passes would leave a test that detects nothing.
   same repository calls with the same amounts on every path (`apps/node/src/auth-parity.test.ts`).
   They catch most regressions without timing anything.
 - **Developers and coders run the timing file locally** before handing off any change to the
-  sign-in paths (`pnpm exec vitest run --project apps/node src/auth-timing.test.ts`; plain
-  `pnpm test` runs it too). A real timing difference is cheaper to find on a quiet laptop than in
+  sign-in paths (`pnpm test:timing`, which runs only that file; plain `pnpm test`
+  skips it). A real timing difference is cheaper to find on a quiet laptop than in
   CI.
 - **If the arm64 runner proves noisy, re-measure; never retry.** Take the job log's shifts and the
   runner report, compare them with the header's local numbers, and change the job, the runner or

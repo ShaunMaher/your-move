@@ -138,8 +138,10 @@ default:
     echo "/dev/shm has ${shm_free_kb:-no} KB free; the tests need 32 MB (docs/deploy.md \"CI runners\")"
     exit 1
   fi
-  export TMPDIR=/dev/shm/ci-tmp
-  mkdir -p "$TMPDIR"
+  # A directory of this job's own, not a fixed path another job on the runner could have made.
+  # Kept short: tsx's socket path under it must stay under 108 bytes.
+  TMPDIR="$(mktemp -d /dev/shm/ci-tmp.XXXXXX)"
+  export TMPDIR
   echo "TMPDIR=$TMPDIR (${shm_free_kb} KB free)"
 
 # Node, pnpm (and any MISE_TOOLS) from mise.lock, and the workspace installed.
@@ -245,9 +247,9 @@ test:
     # Unit, integration, property, component and API contract tests. The Worker half of the
     # contract suite and the D1 repository contract suite run in test:worker instead (see there):
     # to fold them back, drop those two --excludes and the test:worker job. The statistical timing
-    # suite runs alone in test:timing, never here (ADR 0006). Vitest matches --exclude against each
-    # project's own directory, so only an absolute path names one file and no other.
-    - pnpm test --exclude "$CI_PROJECT_DIR/tests/contract/src/worker.test.ts" --exclude "$CI_PROJECT_DIR/tests/contract/src/d1-repositories.test.ts" --exclude "$CI_PROJECT_DIR/apps/node/src/auth-timing.test.ts"
+    # suite runs alone in test:timing; `pnpm test` skips it (ADR 0006). Vitest matches --exclude
+    # against each project's own directory, so only an absolute path names one file and no other.
+    - pnpm test --exclude "$CI_PROJECT_DIR/tests/contract/src/worker.test.ts" --exclude "$CI_PROJECT_DIR/tests/contract/src/d1-repositories.test.ts"
     # The full game kit and every other games:verify check on each installed game (02 §6, 11 §4);
     # the build stage runs the fast kit.
     - pnpm games:verify
@@ -334,7 +336,7 @@ test:timing:
   script:
     # The harness's databases are files: on tmpfs, disk stalls don't land in the measurements.
     - *tmp-in-memory
-    - pnpm exec vitest run --project apps/node src/auth-timing.test.ts
+    - pnpm test:timing
   after_script:
     - *runner-report
     # How busy the runner was while it measured.

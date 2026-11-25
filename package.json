@@ -24,6 +24,7 @@
     "lint:pins": "tsx scripts/src/bin/pins-check.ts",
     "typecheck": "pnpm games:generate && tsc --build",
     "test": "pnpm games:generate && vitest run --coverage",
+    "test:timing": "YM_TIMING=1 vitest run --project apps/node",
     "test:watch": "vitest",
     "test:e2e": "pnpm --filter @your-move/e2e test",
     "games:generate": "tsx scripts/src/bin/games-generate.ts",
