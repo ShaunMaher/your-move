@@ -19,7 +19,10 @@ export function seatedRows(players: readonly GamePlayerRecord[]): GamePlayerReco
   );
 }
 
-/** One seated row's name: its display name, "New player" without one, "Deleted player" without a user. */
+/**
+ * One seated row's name: its display name, "New player" without one, "Deleted player" without a
+ * user.
+ */
 export function playerName(
   row: GamePlayerRecord,
   users: ReadonlyMap<string, Pick<UserRecord, "displayName">>,

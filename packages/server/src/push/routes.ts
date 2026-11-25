@@ -9,6 +9,7 @@ import { subscribePushRoute, unsubscribePushRoute } from "@your-move/shared";
 
 import { checkLimits } from "../auth/limits.js";
 import { requireSession } from "../auth/require-session.js";
+import { liveSessionCutoffs } from "../auth/session.js";
 import type { UserRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
 import type { AppEnv, Platform } from "../platform.js";
@@ -47,7 +48,7 @@ export function registerPushRoutes(app: OpenAPIHono<AppEnv>, platform: Platform)
         auth: body.keys.auth,
         createdAt: now(),
       },
-      MAX_SUBSCRIPTIONS_PER_USER,
+      { maxPerUser: MAX_SUBSCRIPTIONS_PER_USER, live: liveSessionCutoffs(now()) },
     );
     return c.body(null, 204);
   });

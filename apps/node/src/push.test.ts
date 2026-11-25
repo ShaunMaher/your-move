@@ -226,7 +226,7 @@ describe("the push subscription endpoints (05, 08 T12)", () => {
 });
 
 describe("pushes from a game's transitions (03 §7, 08 T18)", () => {
-  it("tells each player when it's their turn and when the game is over, never the actor", async () => {
+  it("tells each player of their turn and of the game's end, never the actor", async () => {
     const ada = await signUp(h, "Ada");
     const bo = await signUp(h, "Bo");
     const [adaPhone, boPhone] = [await device(), await device()];
@@ -270,7 +270,7 @@ describe("pushes from a game's transitions (03 §7, 08 T18)", () => {
     expect(await received(boPhone)).toHaveLength(1);
   });
 
-  it("carries nothing a device could learn hidden state from: no rack, no state, no address", async () => {
+  it("carries no hidden state: no rack, no state, no address", async () => {
     const ada = await signUp(h, "Ada");
     const bo = await signUp(h, "Bo");
     const boPhone = await device();
@@ -323,7 +323,7 @@ describe("pushes from a game's transitions (03 §7, 08 T18)", () => {
     expect(row?.["last_success_at"]).toBe(h.platform.now().getTime());
   });
 
-  it("never fails or delays the move: a push service that errors is logged by class only", async () => {
+  it("never fails the move: a push service's error is logged by class only", async () => {
     const ada = await signUp(h, "Ada");
     const bo = await signUp(h, "Bo");
     const [boPhone, boTablet] = [await device(), await device()];
@@ -392,10 +392,14 @@ describe("a decline before the first move ends the game (A8-P-3)", () => {
       invitees: [{ email: bo.email }],
     });
     expect((await transition(h, bo, created.id, "accept")).status).toBe(200);
+    // The start's "your turn" push has gone out before the decline, so the order is fixed.
+    expect(await received(adaPhone)).toHaveLength(1);
     const declined = await transition(h, bo, created.id, "decline");
     expect(declined.status).toBe(200);
     expect(declined.body.game.status).toBe("declined");
-    expect((await received(adaPhone)).at(-1)).toEqual({
+    const pushes = await received(adaPhone);
+    expect(pushes).toHaveLength(2);
+    expect(pushes[1]).toEqual({
       title: "Family Games",
       body: "Bo declined the game, so it's over.",
       url: `/g/${created.id}`,

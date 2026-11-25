@@ -462,15 +462,19 @@ export type NewPushSubscription = Omit<PushSubscriptionRecord, "lastSuccessAt">;
 export interface PushSubscriptionRepo {
   /**
    * Saves a subscription bound to its session (05 §Push subscriptions), then keeps only the user's
-   * `maxPerUser` most recently useful (04: by last success, else creation; the least recently
-   * useful evicted), in one atomic batch. An endpoint already stored for the same user and
-   * session is updated in place (an idempotent upsert, keeping its id). One stored for another
-   * user or session moves to this user and session only if the keys sent equal the stored ones
-   * (the same browser subscription); otherwise nothing changes. A move keeps the id;
-   * `created_at` and `last_success_at` are kept when the user is the same and start afresh when
-   * the endpoint changes hands. The saved subscription is never the one evicted.
+   * `maxPerUser` most useful (04): rows of live sessions before the rest, then by last success,
+   * else creation; the others are evicted, in one atomic batch. An endpoint already stored for
+   * the same user and session is updated in place (an idempotent upsert, keeping its id). One
+   * stored for another user or session moves to this user and session only if the keys sent
+   * equal the stored ones (the same browser subscription) or its session is no longer live;
+   * otherwise nothing changes. A move keeps the id; `created_at` and `last_success_at` are kept
+   * when the user is the same and start afresh when the endpoint changes hands. The saved
+   * subscription is never the one evicted.
    */
-  save(subscription: NewPushSubscription, maxPerUser: number): Promise<void>;
+  save(
+    subscription: NewPushSubscription,
+    rules: { readonly maxPerUser: number; readonly live: SessionCutoffs },
+  ): Promise<void>;
   /** Deletes the user's subscription with this endpoint, if it is theirs. */
   remove(userId: string, endpoint: string): Promise<void>;
   /** Every subscription of these users whose session is live (A8-S-2). */

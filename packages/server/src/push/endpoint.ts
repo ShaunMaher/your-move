@@ -19,7 +19,7 @@ export const MAX_SUBSCRIPTIONS_PER_USER = 10;
 /** The longest endpoint accepted; real ones are a few hundred characters. */
 const MAX_ENDPOINT_LENGTH = 2048;
 
-/** A dotted IPv4 address as the URL parser writes every IPv4 host (hex and octal forms included). */
+/** A dotted IPv4 address, as the URL parser writes every IPv4 host (hex and octal forms too). */
 const IPV4 = /^\d{1,3}(?:\.\d{1,3}){3}$/u;
 
 /**

@@ -1,8 +1,9 @@
 /**
  * The push subscription half of the repository contract suite (docs/spec/04-data-model.md
- * `push_subscriptions`, alpha A8): the upsert bound to a session and its key check when an
- * endpoint changes hands, the per-user cap with the least recently useful evicted, removal,
- * delivery marks, live sessions only, and the cascade from sessions, run against every adapter. The database is shared with other tests, so every check looks only at its own rows.
+ * `push_subscriptions`, alpha A8): the upsert bound to a session and its checks when an endpoint
+ * changes hands, the per-user cap with the least useful evicted, removal, delivery marks, live
+ * sessions only, and the cascade from sessions, run against every adapter. The database is
+ * shared with other tests, so every check looks only at its own rows.
  */
 import { describe, expect, it } from "vitest";
 
@@ -15,9 +16,11 @@ const DAY = 86_400_000;
 const MAX = 10;
 /** What the session check calls live at T0. */
 const LIVE = liveSessionCutoffs(T0);
+const RULES = { maxPerUser: MAX, live: LIVE };
 
 interface PushTarget {
   readonly repos: Repositories;
+  sql(statement: string, ...params: (string | number | null)[]): Promise<Record<string, unknown>[]>;
 }
 
 export function pushRepositoryContract(target: () => PushTarget): void {
@@ -68,7 +71,7 @@ export function pushRepositoryContract(target: () => PushTarget): void {
     it("saves a subscription and lists it for its user only", async () => {
       const [alice, bob] = [await user(), await user()];
       const saved = subscription(alice, await session(alice));
-      await repos().pushSubscriptions.save(saved, MAX);
+      await repos().pushSubscriptions.save(saved, RULES);
       expect(await repos().pushSubscriptions.forUsers([alice], LIVE)).toEqual([
         { ...saved, lastSuccessAt: null },
       ]);
@@ -76,11 +79,11 @@ export function pushRepositoryContract(target: () => PushTarget): void {
       expect(await repos().pushSubscriptions.forUsers([], LIVE)).toEqual([]);
     });
 
-    it("updates in place when the same session saves it again, keeping id, age and last success", async () => {
+    it("updates in place when the same session saves it again, keeping its history", async () => {
       const alice = await user();
       const sessionId = await session(alice);
       const first = subscription(alice, sessionId);
-      await repos().pushSubscriptions.save(first, MAX);
+      await repos().pushSubscriptions.save(first, RULES);
       await repos().pushSubscriptions.delivered([first.id], T0 + 5);
       await repos().pushSubscriptions.save(
         subscription(alice, sessionId, {
@@ -89,7 +92,7 @@ export function pushRepositoryContract(target: () => PushTarget): void {
           auth: "new",
           createdAt: T0 + 9,
         }),
-        MAX,
+        RULES,
       );
       expect(await repos().pushSubscriptions.forUsers([alice], LIVE)).toEqual([
         { ...first, p256dh: "new", auth: "new", lastSuccessAt: T0 + 5 },
@@ -99,7 +102,7 @@ export function pushRepositoryContract(target: () => PushTarget): void {
     it("moves to the same user's new session only with the same keys (A8-S-1)", async () => {
       const alice = await user();
       const first = subscription(alice, await session(alice));
-      await repos().pushSubscriptions.save(first, MAX);
+      await repos().pushSubscriptions.save(first, RULES);
       await repos().pushSubscriptions.delivered([first.id], T0 + 5);
       const later = await session(alice);
       await repos().pushSubscriptions.save(
@@ -108,14 +111,14 @@ export function pushRepositoryContract(target: () => PushTarget): void {
           p256dh: "other",
           createdAt: T0 + 9,
         }),
-        MAX,
+        RULES,
       );
       expect(await repos().pushSubscriptions.forUsers([alice], LIVE)).toEqual([
         { ...first, lastSuccessAt: T0 + 5 },
       ]);
       await repos().pushSubscriptions.save(
         subscription(alice, later, { endpoint: first.endpoint, createdAt: T0 + 9 }),
-        MAX,
+        RULES,
       );
       expect(await repos().pushSubscriptions.forUsers([alice], LIVE)).toEqual([
         { ...first, sessionId: later, lastSuccessAt: T0 + 5 },
@@ -125,13 +128,13 @@ export function pushRepositoryContract(target: () => PushTarget): void {
     it("moves to another user only with the same keys, starting afresh (A8-S-1)", async () => {
       const [alice, bob] = [await user(), await user()];
       const first = subscription(alice, await session(alice));
-      await repos().pushSubscriptions.save(first, MAX);
+      await repos().pushSubscriptions.save(first, RULES);
       await repos().pushSubscriptions.delivered([first.id], T0 + 5);
       const bobSession = await session(bob);
       for (const keys of [{ p256dh: "guess" }, { auth: "guess" }]) {
         await repos().pushSubscriptions.save(
           subscription(bob, bobSession, { endpoint: first.endpoint, ...keys, createdAt: T0 + 9 }),
-          MAX,
+          RULES,
         );
       }
       expect(await repos().pushSubscriptions.forUsers([alice], LIVE)).toEqual([
@@ -140,12 +143,55 @@ export function pushRepositoryContract(target: () => PushTarget): void {
       expect(await repos().pushSubscriptions.forUsers([bob], LIVE)).toEqual([]);
       await repos().pushSubscriptions.save(
         subscription(bob, bobSession, { endpoint: first.endpoint, createdAt: T0 + 9 }),
-        MAX,
+        RULES,
       );
       expect(await repos().pushSubscriptions.forUsers([alice], LIVE)).toEqual([]);
       expect(await repos().pushSubscriptions.forUsers([bob], LIVE)).toEqual([
         { ...first, userId: bob, sessionId: bobSession, createdAt: T0 + 9, lastSuccessAt: null },
       ]);
+    });
+
+    it("moves, whatever the keys, once the stored row's session isn't live (A8-R2-2)", async () => {
+      const [alice, bob] = [await user(), await user()];
+      const dead = await session(alice, { createdAt: T0 - DAY, expiresAt: T0 });
+      const first = subscription(alice, dead);
+      await repos().pushSubscriptions.save(first, RULES);
+      const bobSession = await session(bob);
+      await repos().pushSubscriptions.save(
+        subscription(bob, bobSession, {
+          endpoint: first.endpoint,
+          p256dh: "fresh",
+          auth: "fresh",
+          createdAt: T0 + 9,
+        }),
+        RULES,
+      );
+      expect(await endpointsOf(bob)).toEqual([first.endpoint]);
+      const [row] = await repos().pushSubscriptions.forUsers([bob], LIVE);
+      expect(row).toMatchObject({ id: first.id, sessionId: bobSession, p256dh: "fresh" });
+    });
+
+    it("evicts the rows of sessions that aren't live first (A8-R2-2)", async () => {
+      const alice = await user();
+      const liveSession = await session(alice);
+      const dead = await session(alice, { createdAt: T0 - DAY, expiresAt: T0 });
+      // The newest and most recently delivered row, but its session has expired.
+      const stale = subscription(alice, dead, { createdAt: T0 + 500 });
+      await repos().pushSubscriptions.save(stale, RULES);
+      await repos().pushSubscriptions.delivered([stale.id], T0 + 600);
+      const lives: NewPushSubscription[] = [];
+      for (let index = 0; index < MAX; index++) {
+        const next = subscription(alice, liveSession, { createdAt: T0 + index });
+        lives.push(next);
+        await repos().pushSubscriptions.save(next, RULES);
+      }
+      const stored = (
+        await target().sql(
+          "SELECT endpoint FROM push_subscriptions WHERE user_id = ? ORDER BY endpoint",
+          alice,
+        )
+      ).map((row) => row["endpoint"]);
+      expect(stored).toEqual(lives.map((row) => row.endpoint).sort());
     });
 
     it("lists only subscriptions whose session is live (A8-S-2)", async () => {
@@ -159,7 +205,7 @@ export function pushRepositoryContract(target: () => PushTarget): void {
         alice,
         await session(alice, { createdAt: T0 - 400 * DAY, expiresAt: T0 + DAY }),
       );
-      for (const row of [live, idle, tooOld]) await repos().pushSubscriptions.save(row, MAX);
+      for (const row of [live, idle, tooOld]) await repos().pushSubscriptions.save(row, RULES);
       expect(await endpointsOf(alice)).toEqual([live.endpoint]);
     });
 
@@ -167,12 +213,12 @@ export function pushRepositoryContract(target: () => PushTarget): void {
       const [alice, bob] = [await user(), await user()];
       const sessionId = await session(alice);
       const bobs = subscription(bob, await session(bob));
-      await repos().pushSubscriptions.save(bobs, MAX);
+      await repos().pushSubscriptions.save(bobs, RULES);
       const saved: NewPushSubscription[] = [];
       for (let index = 0; index < 12; index++) {
         const next = subscription(alice, sessionId, { createdAt: T0 + index });
         saved.push(next);
-        await repos().pushSubscriptions.save(next, MAX);
+        await repos().pushSubscriptions.save(next, RULES);
       }
       expect(await endpointsOf(alice)).toEqual(
         saved
@@ -184,7 +230,7 @@ export function pushRepositoryContract(target: () => PushTarget): void {
       const [, , oldest, nextOldest] = saved;
       await repos().pushSubscriptions.delivered([oldest?.id ?? ""], T0 + 100);
       const latest = subscription(alice, sessionId, { createdAt: T0 + 50 });
-      await repos().pushSubscriptions.save(latest, MAX);
+      await repos().pushSubscriptions.save(latest, RULES);
       const endpoints = await endpointsOf(alice);
       expect(endpoints).toContain(oldest?.endpoint);
       expect(endpoints).toContain(latest.endpoint);
@@ -199,11 +245,11 @@ export function pushRepositoryContract(target: () => PushTarget): void {
       for (let index = 0; index < MAX; index++) {
         await repos().pushSubscriptions.save(
           subscription(alice, sessionId, { createdAt: T0 + 100 + index }),
-          MAX,
+          RULES,
         );
       }
       const oldest = subscription(alice, sessionId, { createdAt: T0 });
-      await repos().pushSubscriptions.save(oldest, MAX);
+      await repos().pushSubscriptions.save(oldest, RULES);
       const endpoints = await endpointsOf(alice);
       expect(endpoints).toHaveLength(MAX);
       expect(endpoints).toContain(oldest.endpoint);
@@ -212,7 +258,7 @@ export function pushRepositoryContract(target: () => PushTarget): void {
     it("removes a subscription only for the user it belongs to", async () => {
       const [alice, bob] = [await user(), await user()];
       const saved = subscription(alice, await session(alice));
-      await repos().pushSubscriptions.save(saved, MAX);
+      await repos().pushSubscriptions.save(saved, RULES);
       await repos().pushSubscriptions.remove(bob, saved.endpoint);
       expect(await endpointsOf(alice)).toEqual([saved.endpoint]);
       await repos().pushSubscriptions.remove(alice, saved.endpoint);
@@ -223,7 +269,7 @@ export function pushRepositoryContract(target: () => PushTarget): void {
       const alice = await user();
       const sessionId = await session(alice);
       const rows = [1, 2, 3, 4].map(() => subscription(alice, sessionId));
-      for (const row of rows) await repos().pushSubscriptions.save(row, MAX);
+      for (const row of rows) await repos().pushSubscriptions.save(row, RULES);
       const [kept, alsoKept, gone, alsoGone] = rows as [
         NewPushSubscription,
         NewPushSubscription,
@@ -246,10 +292,10 @@ export function pushRepositoryContract(target: () => PushTarget): void {
       const alice = await user();
       const [one, two, three] = [await session(alice), await session(alice), await session(alice)];
       const first = subscription(alice, one);
-      await repos().pushSubscriptions.save(first, MAX);
+      await repos().pushSubscriptions.save(first, RULES);
       const second = subscription(alice, two);
-      await repos().pushSubscriptions.save(second, MAX);
-      await repos().pushSubscriptions.save(subscription(alice, three), MAX);
+      await repos().pushSubscriptions.save(second, RULES);
+      await repos().pushSubscriptions.save(subscription(alice, three), RULES);
       await repos().sessions.delete(alice, one);
       expect(await endpointsOf(alice)).not.toContain(first.endpoint);
       expect(await endpointsOf(alice)).toContain(second.endpoint);

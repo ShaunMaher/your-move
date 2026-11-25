@@ -1467,7 +1467,7 @@
         "security": [{ "sessionCookie": [] }],
         "tags": ["Push"],
         "summary": "Save this device's push subscription",
-        "description": "Session only. An idempotent upsert bound to the current session: an endpoint already stored moves to this account and session. At most 10 per account; the oldest is evicted. The subscription is deleted with its session.",
+        "description": "Session only. An idempotent upsert bound to the current session. An endpoint already stored for another account or session moves to this one only with the same keys, or once that session has ended; otherwise nothing changes. At most 10 per account; the least recently useful is evicted. The subscription is deleted with its session.",
         "requestBody": {
           "required": true,
           "content": {

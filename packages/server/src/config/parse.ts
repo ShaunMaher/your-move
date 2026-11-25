@@ -286,7 +286,8 @@ function crossFieldIssues(raw: RawEnv, options: ParseConfigOptions): string[] {
     !vapidKeyShapes(raw.VAPID_PUBLIC_KEY, raw.VAPID_PRIVATE_KEY)
   ) {
     issues.push(
-      "VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY: must be an unpadded base64url P-256 key pair as `pnpm gen:vapid` writes it (a 65-byte public point and a 32-byte private key)",
+      "VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY: must be an unpadded base64url P-256 key pair as " +
+        "`pnpm gen:vapid` writes it (a 65-byte public point and a 32-byte private key)",
     );
   }
 

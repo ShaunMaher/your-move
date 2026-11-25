@@ -7,10 +7,12 @@ import type { Text } from "@your-move/sdk";
 import { describe, expect, it } from "vitest";
 
 import type { GamePlayerRecord, GameRecord, GameWriteSet, LoadedGame } from "../db/repositories.js";
+import type { Platform } from "../platform.js";
 import {
   interleaveByRecipient,
   type PushedTransition,
   pushMessage,
+  sendTransitionPushes,
   transitionPushes,
 } from "./notify.js";
 
@@ -364,5 +366,62 @@ describe("cutting long text (A8-P-8)", () => {
     expect(Array.from(body)).toHaveLength(240);
     expect(body.endsWith("🎲…")).toBe(true);
     expect(body).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/u);
+  });
+});
+
+describe("sendTransitionPushes and the per-transition cap (A8-R2-3)", () => {
+  it("reaches every recipient when their devices are more than the cap", async () => {
+    const ids = ["alice", "bob", "cara", "dan", "eve", "fay"];
+    const before: LoadedGame = {
+      game: { ...game("active"), seats: ids.length },
+      players: ids.map((id, seat) => row(id, { seat, toAct: seat === 0 ? 1 : 0 })),
+    };
+    const ended = transition(
+      before,
+      { game: { status: "finished", endReason: "done", updatedAt: T0 + 1 } },
+      "alice",
+      PLAYED,
+    );
+    // Five recipients with ten devices each, listed one recipient after another: 50 > 40.
+    const subscriptions = ids.slice(1).flatMap((userId) =>
+      Array.from({ length: 10 }, (_, n) => ({
+        id: `${userId}-${String(n)}`,
+        userId,
+        sessionId: "s",
+        endpoint: `https://fcm.googleapis.com/fcm/send/${userId}-${String(n)}`,
+        p256dh: "p",
+        auth: "a",
+        createdAt: T0,
+        lastSuccessAt: null,
+      })),
+    );
+    const sentTo: string[] = [];
+    const platform = {
+      repos: {
+        pushSubscriptions: {
+          forUsers: () => Promise.resolve(subscriptions),
+          delivered: () => Promise.resolve(),
+          delete: () => Promise.resolve(),
+        },
+        users: {
+          findByIds: () => Promise.resolve(ids.map((id) => ({ id, displayName: id }))),
+        },
+      },
+      push: {
+        enabled: true,
+        send: (target: { endpoint: string }) => {
+          sentTo.push(target.endpoint);
+          return Promise.resolve({ kind: "delivered" as const });
+        },
+      },
+      config: { appName: "G" },
+      now: () => new Date(T0),
+      log: { warn: () => undefined, info: () => undefined },
+    } as unknown as Platform;
+    await sendTransitionPushes(platform, ended);
+    expect(sentTo).toHaveLength(40);
+    for (const userId of ids.slice(1)) {
+      expect(sentTo.filter((endpoint) => endpoint.includes(`/${userId}-`)).length).toBe(8);
+    }
   });
 });

@@ -36,11 +36,16 @@ const jsonBody = <T extends z.ZodType>(schema: T) => ({
   content: { "application/json": { schema } },
 });
 
-const Endpoint = z.string().min(1).max(2048).openapi({
-  description:
-    "The subscription's endpoint: an `https` URL at an allow-listed push service (08 T12), as `PushSubscription.endpoint` gives it.",
-  example: "https://fcm.googleapis.com/fcm/send/abc123",
-});
+const Endpoint = z
+  .string()
+  .min(1)
+  .max(2048)
+  .openapi({
+    description:
+      "The subscription's endpoint: an `https` URL at an allow-listed push service (08 T12), " +
+      "as `PushSubscription.endpoint` gives it.",
+    example: "https://fcm.googleapis.com/fcm/send/abc123",
+  });
 
 /** `POST /api/v1/push/subscriptions`: the parts of `PushSubscription.toJSON()` the server keeps. */
 export const PushSubscriptionBodySchema = z
@@ -77,7 +82,10 @@ export const subscribePushRoute = createRoute({
   tags: ["Push"],
   summary: "Save this device's push subscription",
   description:
-    "Session only. An idempotent upsert bound to the current session: an endpoint already stored moves to this account and session. At most 10 per account; the oldest is evicted. The subscription is deleted with its session.",
+    "Session only. An idempotent upsert bound to the current session. An endpoint already " +
+    "stored for another account or session moves to this one only with the same keys, or once " +
+    "that session has ended; otherwise nothing changes. At most 10 per account; the least " +
+    "recently useful is evicted. The subscription is deleted with its session.",
   request: { body: jsonBody(PushSubscriptionBodySchema) },
   responses: {
     204: { description: "Saved." },
@@ -94,7 +102,8 @@ export const unsubscribePushRoute = createRoute({
   tags: ["Push"],
   summary: "Remove a push subscription",
   description:
-    "Session only. Removes the subscription with this endpoint if it belongs to you; otherwise does nothing.",
+    "Session only. Removes the subscription with this endpoint if it belongs to you; " +
+    "otherwise does nothing.",
   request: { body: jsonBody(PushUnsubscribeBodySchema) },
   responses: {
     204: { description: "Removed, or there was nothing of yours to remove." },
