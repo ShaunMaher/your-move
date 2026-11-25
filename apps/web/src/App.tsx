@@ -97,6 +97,11 @@ export function App({ api }: AppProps) {
 
   const me = boot.status === "ready" ? boot.me : null;
   const place = boot.status === "ready" ? placeFor(me, path, boot.returnTo) : path;
+  // Arrived at a real destination: the remembered path has been used, so state forgets it too
+  // (adjusting state during render, from state and props only, never from storage).
+  if (boot.status === "ready" && me !== null && boot.returnTo !== null) {
+    if (place === path && isDestination(path)) setBoot({ ...boot, returnTo: null });
+  }
   useEffect(() => {
     if (boot.status !== "ready") return;
     if (me === null) {
@@ -126,9 +131,10 @@ export function App({ api }: AppProps) {
   const meId = me?.id ?? null;
   useEffect(() => {
     if (meId === null) return undefined;
+    let live = true;
     const recheck = () => {
       void loadSession(api).then((session) => {
-        if (!session.ok) return;
+        if (!live || !session.ok) return;
         if (session.data === null) endSession(false);
         else if (session.data.id !== meId) {
           clearClientState();
@@ -144,6 +150,7 @@ export function App({ api }: AppProps) {
     });
     const stopVisible = onBecameVisible(recheck);
     return () => {
+      live = false;
       stopChannel();
       stopVisible();
     };
@@ -163,8 +170,16 @@ export function App({ api }: AppProps) {
     }
   }, [screenKey]);
 
+  // Onboarding is done: the person is the same, with a name now. The remembered path is read here,
+  // in the handler, so it survives a reload during Welcome. A late reply for someone who is no
+  // longer signed in (another account took over meanwhile) is dropped.
   const setMe = (next: Me) => {
-    setBoot((current) => (current.status === "ready" ? { ...current, me: next } : current));
+    const returnTo = peekReturnPath();
+    setBoot((current) =>
+      current.status === "ready" && current.me?.id === next.id
+        ? { ...current, me: next, returnTo }
+        : current,
+    );
   };
   const signedInHere = (next: Me) => {
     const returnTo = peekReturnPath();

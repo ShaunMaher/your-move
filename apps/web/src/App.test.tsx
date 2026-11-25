@@ -539,6 +539,37 @@ describe("returning to where a signed-out visit was headed", () => {
     expect(peekReturnPath()).toBeNull();
   });
 
+  it("keeps it through a reload during Welcome", async () => {
+    window.history.replaceState(null, "", "/settings");
+    const newUser = { ...ME, displayName: null, needsOnboarding: true };
+    const first = fakeApi({
+      ...signedOut,
+      "POST /api/v1/auth/otp/request": json({}, 202),
+      "POST /api/v1/auth/otp/verify": json({ user: newUser, needsOnboarding: true }),
+    });
+    const view = render(<App api={first.api} />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    typeInto("Email address", "sam@example.org");
+    click("Email me a code");
+    await screen.findByLabelText("Sign-in code");
+    typeInto("Sign-in code", "12345678");
+    click("Sign in");
+    await screen.findByRole("heading", { name: "Welcome to Family Games" });
+    view.unmount();
+    expect(peekReturnPath()).toBe("/settings");
+    // The reload: a fresh app, the session now exists, the page is /welcome.
+    window.history.replaceState(null, "", "/welcome");
+    const second = fakeApi({ ...signedIn(newUser), "PATCH /api/v1/me": json(ME) });
+    render(<App api={second.api} />);
+    await screen.findByRole("heading", { name: "Welcome to Family Games" });
+    expect(peekReturnPath()).toBe("/settings");
+    typeInto("Display name", "Sam");
+    click("Continue");
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeDefined();
+    expect(window.location.pathname).toBe("/settings");
+    expect(peekReturnPath()).toBeNull();
+  });
+
   it("goes home after an explicit sign-out, not back to where the person was", async () => {
     const { api } = fakeApi({
       ...signedIn(),
@@ -575,6 +606,12 @@ describe("returning to where a signed-out visit was headed", () => {
     "/__dev/mail",
     "/manifest.webmanifest",
     "/manifest.webmanifest#x",
+    "/%2e%2e/api/v1/x",
+    "/a%2Fb",
+    "/a/../b",
+    "/a/./b",
+    "/..",
+    "/a/..?x=1",
   ])("never remembers %s", (value) => {
     expect(isAppPath(value)).toBe(false);
   });
@@ -700,6 +737,36 @@ describe("when the session is another person's", () => {
     });
     expect(window.localStorage.getItem("ym.game.words.u1.g1")).toBeNull();
     expect(screen.queryByText("sam@example.org")).toBeNull();
+  });
+
+  it("ignores a late reply for the first person once another has taken over", async () => {
+    let current: object = { ...ME, displayName: null, needsOnboarding: true };
+    let release: (response: Response) => void = () => undefined;
+    const held = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const { api, calls } = fakeApi({
+      "GET /api/v1/config": json(CONFIG),
+      "GET /api/v1/me": () => json(current),
+      "PATCH /api/v1/me": held,
+    });
+    window.history.replaceState(null, "", "/welcome");
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Welcome to Family Games" });
+    typeInto("Display name", "Sam");
+    click("Continue");
+    await waitFor(() => {
+      expect(calls.some((call) => call.method === "PATCH")).toBe(true);
+    });
+    current = OTHER;
+    await waitFor(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(screen.getByRole("heading", { name: "Hi, Alex" })).toBeDefined();
+    });
+    release(json(ME));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole("heading", { name: "Hi, Alex" })).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "Hi, Sam" })).toBeNull();
   });
 
   it("checks who the session is when another tab signs in", async () => {
