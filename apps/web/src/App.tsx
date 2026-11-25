@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { type ClientConfig, type Me, loadConfig, loadSession } from "./auth-api.js";
 import { applyAppName } from "./document-meta.js";
+import { InstallBanner } from "./InstallBanner.js";
 import {
   clearReturnPath,
   isDestination,
@@ -12,6 +13,7 @@ import {
 import { navigate, usePath } from "./router.js";
 import { Game } from "./screens/Game.js";
 import { Home } from "./screens/Home.js";
+import { Install } from "./screens/Install.js";
 import { NewGame } from "./screens/NewGame.js";
 import { Settings } from "./screens/Settings.js";
 import { SignIn } from "./screens/SignIn.js";
@@ -247,6 +249,8 @@ export function App({ api }: AppProps) {
         onSessionLost={sessionLost}
       />
     );
+  } else if (place === "/install") {
+    screen = <Install appName={boot.config.appName} />;
   } else if (place === "/settings") {
     screen = (
       <Settings
@@ -260,8 +264,14 @@ export function App({ api }: AppProps) {
     );
   } else screen = <NotFound appName={boot.config.appName} />;
 
+  // Signed in and onboarded, on a screen that isn't a game's, the guide or sign-in (07 §4).
+  const banner =
+    boot.status === "ready" &&
+    me !== null &&
+    (place === "/" || place === "/new" || place === "/settings");
   return (
     <>
+      {banner && <InstallBanner appName={boot.config.appName} />}
       {screen}
       <UpdateToast />
     </>

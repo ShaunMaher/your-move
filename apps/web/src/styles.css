@@ -502,3 +502,48 @@ summary {
   max-width: 32rem;
   border-radius: var(--radius) var(--radius) 0 0;
 }
+
+/* The install guide (07 §4): a banner in the page flow, and numbered steps with a drawn glyph. */
+.install-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+  max-width: 32rem;
+  margin: 0 auto;
+  padding: calc(var(--space) / 2) calc(var(--space) + env(safe-area-inset-right))
+    calc(var(--space) / 2) calc(var(--space) + env(safe-area-inset-left));
+  box-sizing: border-box;
+  background: var(--color-surface);
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.install-banner p {
+  margin: 0;
+  flex: 1 1 14rem;
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.steps li {
+  padding-left: 0.25rem;
+}
+
+.steps li > .glyph {
+  float: left;
+  margin: 0 0.75rem 0.25rem 0;
+}
+
+.glyph {
+  display: inline-block;
+  width: 2rem;
+  height: 2rem;
+  color: var(--color-accent);
+}

@@ -120,6 +120,12 @@ export function Settings({
           <dd>{me.email}</dd>
         </dl>
       </section>
+      <section className="card stack" aria-labelledby="install-heading">
+        <h2 id="install-heading">Home Screen</h2>
+        <p>
+          <Link to="/install">How to add {appName} to your Home Screen</Link>
+        </p>
+      </section>
       <EmailNudges api={api} me={me} onMeChanged={onMeChanged} onSessionLost={onSessionLost} />
       <section className="card stack" aria-labelledby="signout-heading">
         <h2 id="signout-heading">Sign out</h2>
