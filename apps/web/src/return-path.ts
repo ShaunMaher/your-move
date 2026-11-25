@@ -1,7 +1,8 @@
 /**
  * Where a signed-out visit was headed (07 §1): remembered across the sign-in screens, then used
  * once to land the person where they meant to go. Only same-origin app paths are accepted, so
- * the value can never send anyone to another site.
+ * the value can never send anyone to another site, and the paths the server handles (its API,
+ * its pages) are never one of them.
  */
 const KEY = "ym.return-path";
 const MAX_LENGTH = 200;
@@ -11,14 +12,24 @@ const AUTH_PATHS: ReadonlySet<string> = new Set(["/signin", "/welcome"]);
 
 let inMemory: string | null = null;
 
-/** An absolute path on this origin: one slash first, no `//`, backslash or control characters. */
+/** Whether a path (query and fragment aside) is one the server handles, not a screen of the app. */
+function isServerPath(value: string): boolean {
+  const pathname = value.split(/[?#]/u)[0] ?? value;
+  return __SERVER_PATHS__.some((pattern) =>
+    pattern.endsWith("/*")
+      ? pathname === pattern.slice(0, -2) || pathname.startsWith(pattern.slice(0, -1))
+      : pathname === pattern,
+  );
+}
+
+/** An app path on this origin: one slash first, no `//`, backslash or control characters. */
 export function isAppPath(value: unknown): value is string {
   if (typeof value !== "string" || value.length > MAX_LENGTH) return false;
   // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
   if (!value.startsWith("/") || value.startsWith("//") || /[\\\u0000- \u007f]/u.test(value)) {
     return false;
   }
-  return !AUTH_PATHS.has(value);
+  return isDestination(value) && !isServerPath(value);
 }
 
 export function rememberReturnPath(path: string): void {
@@ -40,6 +51,11 @@ export function peekReturnPath(): string | null {
     // Use the in-memory copy.
   }
   return isAppPath(stored) ? stored : null;
+}
+
+/** Whether the screen shown is a real destination, which the remembered path was for. */
+export function isDestination(path: string): boolean {
+  return !AUTH_PATHS.has(path);
 }
 
 export function clearReturnPath(): void {

@@ -3,7 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { type ClientConfig, type Me, loadConfig, loadSession } from "./auth-api.js";
 import { applyAppName } from "./document-meta.js";
-import { clearReturnPath, peekReturnPath, rememberReturnPath } from "./return-path.js";
+import {
+  clearReturnPath,
+  isDestination,
+  peekReturnPath,
+  rememberReturnPath,
+} from "./return-path.js";
 import { navigate, usePath } from "./router.js";
 import { Home } from "./screens/Home.js";
 import { Settings } from "./screens/Settings.js";
@@ -11,17 +16,25 @@ import { SignIn } from "./screens/SignIn.js";
 import { Loading, NotFound, Unreachable } from "./screens/Status.js";
 import { Welcome } from "./screens/Welcome.js";
 import {
+  announceSignedIn,
   announceSignedOut,
   clearClientState,
+  clearGameState,
   onBecameVisible,
-  watchSignedOut,
+  watchSession,
 } from "./session-sync.js";
 import { UpdateToast } from "./UpdateToast.js";
 
 type Boot =
   | { readonly status: "loading" }
   | { readonly status: "unreachable"; readonly offline: boolean }
-  | { readonly status: "ready"; readonly config: ClientConfig; readonly me: Me | null };
+  | {
+      readonly status: "ready";
+      readonly config: ClientConfig;
+      readonly me: Me | null;
+      /** Where a signed-out visit was headed, taken when the person signs in (never at render). */
+      readonly returnTo: string | null;
+    };
 
 interface AppProps {
   readonly api: ApiClient;
@@ -51,7 +64,7 @@ export function App({ api }: AppProps) {
     void Promise.all([loadConfig(api), loadSession(api)]).then(([config, session]) => {
       if (cancelled) return;
       if (config.ok && session.ok) {
-        setBoot({ status: "ready", config: config.data, me: session.data });
+        setBoot({ status: "ready", config: config.data, me: session.data, returnTo: null });
       } else {
         const offline = [config, session].some((r) => !r.ok && r.failure === "offline");
         setBoot({ status: "unreachable", offline });
@@ -83,12 +96,18 @@ export function App({ api }: AppProps) {
   }, [config]);
 
   const me = boot.status === "ready" ? boot.me : null;
-  const place = boot.status === "ready" ? placeFor(me, path, peekReturnPath()) : path;
+  const place = boot.status === "ready" ? placeFor(me, path, boot.returnTo) : path;
   useEffect(() => {
     if (boot.status !== "ready") return;
-    // A signed-out visit to a page is remembered, so signing in lands back there.
-    if (me === null && path !== "/signin") rememberReturnPath(path);
-    if (me !== null && place === path) clearReturnPath();
+    if (me === null) {
+      // No session: nothing of a previous person's may remain. A signed-out visit to a page is
+      // remembered, so signing in lands back there.
+      clearGameState();
+      if (path !== "/signin") rememberReturnPath(path);
+    } else if (place === path && isDestination(path)) {
+      // Arrived at a real destination (not a sign-in screen on the way): the memory is spent.
+      clearReturnPath();
+    }
     if (place !== path) navigate(place, { replace: true });
   }, [boot.status, me, place, path]);
 
@@ -98,24 +117,37 @@ export function App({ api }: AppProps) {
     clearClientState();
     if (announce) announceSignedOut();
     navigate("/signin", { replace: true });
-    setBoot((current) => (current.status === "ready" ? { ...current, me: null } : current));
+    setBoot((current) =>
+      current.status === "ready" ? { ...current, me: null, returnTo: null } : current,
+    );
   }, []);
-  const signedIn = me !== null;
+  // Asks the server who the session is now. Nobody ends it here; a different person ends it for
+  // this tab as surely (their games are not for this screen), and the app starts over as them.
+  const meId = me?.id ?? null;
   useEffect(() => {
-    if (!signedIn) return undefined;
-    const stopChannel = watchSignedOut(() => {
-      endSession(false);
-    });
-    const stopVisible = onBecameVisible(() => {
+    if (meId === null) return undefined;
+    const recheck = () => {
       void loadSession(api).then((session) => {
-        if (session.ok && session.data === null) endSession(false);
+        if (!session.ok) return;
+        if (session.data === null) endSession(false);
+        else if (session.data.id !== meId) {
+          clearClientState();
+          retry();
+        }
       });
+    };
+    const stopChannel = watchSession({
+      onSignedOut: () => {
+        endSession(false);
+      },
+      onSignedIn: recheck,
     });
+    const stopVisible = onBecameVisible(recheck);
     return () => {
       stopChannel();
       stopVisible();
     };
-  }, [signedIn, api, endSession]);
+  }, [meId, api, endSession, retry]);
 
   // After a move to another screen, focus goes to its heading so a screen reader starts reading
   // there. A field the new screen has focused itself (its effects run first) keeps focus.
@@ -134,6 +166,13 @@ export function App({ api }: AppProps) {
   const setMe = (next: Me) => {
     setBoot((current) => (current.status === "ready" ? { ...current, me: next } : current));
   };
+  const signedInHere = (next: Me) => {
+    const returnTo = peekReturnPath();
+    setBoot((current) =>
+      current.status === "ready" ? { ...current, me: next, returnTo } : current,
+    );
+    announceSignedIn();
+  };
   const signedOut = () => {
     endSession(true);
   };
@@ -143,7 +182,7 @@ export function App({ api }: AppProps) {
   else if (boot.status === "unreachable") {
     screen = <Unreachable offline={boot.offline} onRetry={retry} />;
   } else if (me === null) {
-    screen = <SignIn api={api} appName={boot.config.appName} onSignedIn={setMe} />;
+    screen = <SignIn api={api} appName={boot.config.appName} onSignedIn={signedInHere} />;
   } else if (place === "/welcome") {
     screen = (
       <Welcome api={api} appName={boot.config.appName} onDone={setMe} onSignedOut={signedOut} />
