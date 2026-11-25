@@ -165,6 +165,7 @@ and slices without a dependency on each other are built in parallel.
 | A4 — shell UI | M3 | Game list, new-game flow (game picker → options → players), lobby, game frame (header, menu with resign — a confirm dialog, then the API's resign call; 02 §3 keeps resign out of the module — history drawer, finished screen), lazy module loading, the public word list's download and cache for the module's previews; the players step says the other person must have signed in first (A2 seats only onboarded users; the onboarding claim of an address's seat stays in M4); catalog icons rendered as `<img>` from a `data:` URL, never inline SVG; Playwright two-player words game, including a resignation, on the WebKit iPhone viewport | A1, A2, A3 |
 | A5 — deployment | M4 | `gmail` provider and the shared MIME builder (with T14's hostile-name tests), `docker-compose.tunnel.yml` with `*_FILE` secrets and the tunnel acceptance tests, the deploy docs for both | M2b |
 | A6 — email nudges | M4 | The optional "It's your turn" email nudge (03 §7): `settings.emailNudges` in `PATCH /api/v1/me` (default off) and its Settings toggle, `users.email_id`, the unsubscribe route with `List-Unsubscribe` and RFC 8058 one-click (05 §Email links, T17), and a `sweep()` with only its "send due email nudges" step, run by a Node `setInterval` and the Worker's Cron Trigger (03 §8); tests for the token, the one-click POST, the 24 h and once-a-day rules, suppression, provider failure and the nudge text (T18) | A2, A5 |
+| A7 — install guide | M4 | The `/install` screen (07 §1, §4): "Add to Home Screen" steps for iOS Safari, a note for Android Chrome and an "already installed" state, and the dismissible banner that points iOS Safari visitors to it; component tests and a Playwright check on the WebKit iPhone viewport | A1, A4 |
 
 Not in the alpha, kept at their milestones: API tokens, the Admin API (operators use
 `ADMIN_EMAILS` and the database), AI assistance, realtime (the alpha refetches on focus and on a
@@ -275,7 +276,7 @@ tests are green in CI.
   address is suppressed as `bounced` or `complained`, so the toggle isn't silently ineffective.
   The alpha writes no such rows, and an `unsubscribed` row doesn't stop nudges (alpha A6 review
   P-3 and S2-1, 2026-11-25).
-- Install guide banner, update toast, dark mode, accessibility pass.
+- Dark mode, accessibility pass (the install guide banner is alpha A7; the update toast is built).
 - Docker deployment: `apps/node/docker-compose.tunnel.yml` (the proof-of-concept deployment behind a
   Cloudflare Tunnel, Q6) and `docker-compose.caddy.yml`, with the two-network layout and `*_FILE`
   secrets (09 §4), deploy docs (incl. the `gmail` operator setup, 09 §2), backup docs.
