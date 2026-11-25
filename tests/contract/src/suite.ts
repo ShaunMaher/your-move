@@ -62,6 +62,49 @@ export function contractSuite(name: string, target: () => Target): void {
       expect(ClientConfigSchema.parse(data)).toEqual(data);
     });
 
+    describe("games (05 §Games)", () => {
+      it("serves a game type's rules publicly", async () => {
+        const { data, response } = await client().GET("/api/v1/games/types/{type}/rules", {
+          params: { path: { type: "words" } },
+        });
+        expect(response.status).toBe(200);
+        expect(data?.type).toBe("words");
+        expect(data?.markdown.length).toBeGreaterThan(0);
+        const unknown = await raw("/api/v1/games/types/nope/rules");
+        expect(unknown.status).toBe(404);
+      });
+
+      it.each(["/api/v1/catalog", "/api/v1/games", `/api/v1/games/${crypto.randomUUID()}`])(
+        "GET %s needs a session",
+        async (path) => {
+          const response = await raw(path);
+          expect(response.status).toBe(401);
+          expect(ErrorResponseSchema.parse(await response.json()).error.code).toBe(
+            "UNAUTHENTICATED",
+          );
+        },
+      );
+
+      it("serves the built-in word lists to clients by their versioned, hashed names", async () => {
+        const index = JSON.parse(
+          readFileSync(
+            new URL("../../../packages/dictionary/generated/served/index.json", import.meta.url),
+            "utf8",
+          ),
+        ) as {
+          dictionaries: { id: string; version: number; wordsSha256: string; bytes: number }[];
+        };
+        const manifest = index.dictionaries[0];
+        expect(manifest).toBeDefined();
+        if (manifest === undefined) return;
+        const name = `${manifest.id}-v${String(manifest.version)}.${manifest.wordsSha256.slice(0, 16)}.txt`;
+        const response = await raw(`/assets/dictionaries/${name}`);
+        expect(response.status).toBe(200);
+        expect((await response.text()).length).toBe(manifest.bytes);
+        expect(response.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+      });
+    });
+
     it("GET /api/v1/openapi.json serves the committed document", async () => {
       const response = await raw("/api/v1/openapi.json");
       expect(response.status).toBe(200);

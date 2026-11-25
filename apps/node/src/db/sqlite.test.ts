@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { repositoryContract } from "@your-move/server/testing";
+import { gameRaceContract, repositoryContract } from "@your-move/server/testing";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { installedGames } from "../../../../generated/server-registry.js";
 import { migrate } from "./migrate.js";
 import {
   inTransaction,
@@ -44,6 +45,26 @@ repositoryContract("node:sqlite", () => {
     },
   });
 });
+
+// The lifecycle races on a real file (03 §5.2): on Node the requests interleave at await points
+// on one connection, so the version check and the token guard still decide them.
+gameRaceContract(
+  "node:sqlite",
+  () => {
+    const sqlite = openSqlite(join(dir, "races", "app.sqlite"));
+    migrate(sqlite, MIGRATIONS);
+    return Promise.resolve({
+      repos: nodeRepositories(sqlite),
+      sql: (statement: string, ...params: (string | number | null)[]) =>
+        Promise.resolve(sqlite.prepare(statement).all(...params) as Record<string, unknown>[]),
+      close: () => {
+        sqlite.close();
+        return Promise.resolve();
+      },
+    });
+  },
+  installedGames,
+);
 
 describe("openSqlite", () => {
   it("creates the directory and turns on WAL and foreign keys", () => {

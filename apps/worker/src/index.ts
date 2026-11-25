@@ -8,15 +8,18 @@ import {
   coreEmailSender,
   createApp,
   createJsonLogger,
+  GameConfigError,
   installedSchema,
   parseConfig,
   registryMismatches,
   resolveClientIp,
+  ResourceConfigError,
 } from "@your-move/server";
 
 import installedJson from "../../../generated/installed.json" with { type: "json" };
 import { installedGames as games } from "../../../generated/server-registry.js";
 import { d1Repositories } from "./d1.js";
+import { assetDictionaries } from "./dictionaries.js";
 
 type App = ReturnType<typeof createApp>;
 
@@ -30,10 +33,14 @@ class StartupError extends Error {
  * request-scoped is captured here: background work goes through each request's own `ctx`
  * (`waitUntil`), which `fetch` below hands to the app.
  */
-function build(env: Readonly<Record<string, unknown>>): App {
+async function build(env: Readonly<Record<string, unknown>>): Promise<App> {
   const db = env["DB"];
   if (db === undefined || db === null || typeof db !== "object") {
     throw new StartupError("The D1 binding DB is missing (09 §3).");
+  }
+  const assets = env["ASSETS"];
+  if (assets === undefined || assets === null || typeof assets !== "object") {
+    throw new StartupError("The static assets binding ASSETS is missing (09 §3).");
   }
   const strings = Object.fromEntries(
     Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
@@ -60,9 +67,11 @@ function build(env: Readonly<Record<string, unknown>>): App {
       console.log(line);
     },
   });
+  const dictionaries = await assetDictionaries(assets as Fetcher);
   return createApp({
     platform: {
       repos: d1Repositories(db as D1Database),
+      dictionaries,
       config,
       log,
       now,
@@ -80,17 +89,27 @@ function build(env: Readonly<Record<string, unknown>>): App {
   });
 }
 
-let app: App | null = null;
+let app: Promise<App> | null = null;
 
 export default {
-  fetch(request, env, ctx) {
+  async fetch(request, env, ctx) {
+    let ready: App;
     try {
       app ??= build(env);
+      ready = await app;
     } catch (error) {
-      // Workers can't refuse to start: log what is wrong and answer 500. ConfigError messages are
-      // already redacted and StartupError messages carry no values; anything else is logged by
-      // class only, since its message might quote configuration.
-      const safe = error instanceof ConfigError || error instanceof StartupError;
+      // A failed build is retried by the next request (the dictionary index may have been briefly
+      // unavailable).
+      app = null;
+      // Workers can't refuse to start: log what is wrong and answer 500. ConfigError and the game
+      // and resource configuration errors name variables, never values, and StartupError messages
+      // carry no values; anything else is logged by class only, since its message might quote
+      // configuration.
+      const safe =
+        error instanceof ConfigError ||
+        error instanceof StartupError ||
+        error instanceof GameConfigError ||
+        error instanceof ResourceConfigError;
       console.error(safe ? error.message : "startup failed", {
         errorClass: error instanceof Error ? error.name : typeof error,
       });
@@ -99,6 +118,6 @@ export default {
         { status: 500, headers: { "Cache-Control": "no-store" } },
       );
     }
-    return app.fetch(request, env, ctx);
+    return ready.fetch(request, env, ctx);
   },
 } satisfies ExportedHandler<Record<string, unknown>>;

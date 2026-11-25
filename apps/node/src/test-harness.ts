@@ -14,6 +14,7 @@ import {
   createConsoleEmailSender,
   createJsonLogger,
   type Env,
+  type InstalledGame,
   parseConfig,
   type Platform,
   type Repositories,
@@ -21,9 +22,14 @@ import {
 
 import { migrate } from "./db/migrate.js";
 import { nodeRepositories, openSqlite } from "./db/sqlite.js";
+import { nodeDictionaries } from "./dictionaries.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
+/** The dictionary package's served layout, built by `pnpm build`. */
+const DICTIONARIES = fileURLToPath(
+  new URL("../../../packages/dictionary/generated/served", import.meta.url),
+);
 
 export const T0 = Date.UTC(2026, 0, 1, 9, 0, 0);
 export const MINUTE = 60_000;
@@ -81,6 +87,8 @@ export interface Harness {
   readonly logs: Record<string, unknown>[];
   /** Runs one SQL statement directly, for state no endpoint sets yet (e.g. suspension, M3). */
   exec(sql: string, ...params: (string | number | null)[]): void;
+  /** Runs one SQL query directly and returns its rows, for checking what was stored. */
+  query(sql: string, ...params: (string | number | null)[]): Record<string, unknown>[];
   close(): void;
 }
 
@@ -102,6 +110,8 @@ export function cookieOf(response: Response): string {
 export interface HarnessOptions {
   /** Wraps the repositories, e.g. to slow one path down in a test of the timing test itself. */
   readonly wrapRepos?: (repos: Repositories) => Repositories;
+  /** The installed games (the generated registry); none by default. */
+  readonly games?: readonly InstalledGame[];
 }
 
 export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {}): Harness {
@@ -116,7 +126,14 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     now,
     sink: (line) => logs.push(JSON.parse(line) as Record<string, unknown>),
   });
-  const config = parseConfig(env, { runtime: "node", installedGames: [] });
+  const games = options.games ?? [];
+  const config = parseConfig(env, {
+    runtime: "node",
+    installedGames: games.map((game) => ({
+      type: game.manifest.type,
+      enabledByDefault: game.enabledByDefault,
+    })),
+  });
   const capture = createConsoleEmailSender(log, now);
   const platform = createNodePlatform({
     repos: (options.wrapRepos ?? ((repos) => repos))(nodeRepositories(sqlite)),
@@ -124,9 +141,10 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     nodeConfig: { trustProxy: "xff", trustProxyHops: 1, trustProxyPeers: ["127.0.0.0/8"] },
     log,
     now,
+    dictionaries: nodeDictionaries(DICTIONARIES),
     smtp: capture,
   });
-  const app = createApp({ platform, games: [] });
+  const app = createApp({ platform, games });
   const background = createBackgroundTracker();
   const origin = config.publicUrl;
   const captured = (): readonly CapturedEmail[] => (platform.email.captured ?? capture.captured)();
@@ -187,6 +205,9 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     logs,
     exec(sql, ...params) {
       sqlite.prepare(sql).run(...params);
+    },
+    query(sql, ...params) {
+      return sqlite.prepare(sql).all(...params);
     },
     close() {
       sqlite.close();

@@ -53,6 +53,14 @@ export function userRepo(db: Database): UserRepo {
     async findById(id) {
       return asUser(await db.select().from(users).where(eq(users.id, id)).get());
     },
+    async findByIds(ids) {
+      if (ids.length === 0) return [];
+      const rows = await db
+        .select()
+        .from(users)
+        .where(inArray(users.id, [...ids]));
+      return rows as UserRecord[];
+    },
     async findByEmail(email) {
       return asUser(await db.select().from(users).where(eq(users.email, email)).get());
     },

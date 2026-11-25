@@ -1,9 +1,12 @@
+import { RESERVED_ERROR_CODES } from "@your-move/sdk";
 import { describe, expect, it } from "vitest";
 
 import {
   API_V1,
   ClientConfigSchema,
   configRoute,
+  ERROR_CODES,
+  ERROR_STATUS,
   ErrorResponseSchema,
   HealthResponseSchema,
   healthRoute,
@@ -51,5 +54,14 @@ describe("schemas reject unknown fields (.strict())", () => {
 
   it("only accepts ok: true for health", () => {
     expect(HealthResponseSchema.safeParse({ ok: false }).success).toBe(false);
+  });
+});
+
+describe("the framework error table (05 §Errors)", () => {
+  it("holds exactly the codes the SDK reserves, each with its status", () => {
+    expect([...ERROR_CODES].sort()).toEqual([...RESERVED_ERROR_CODES].sort());
+    expect(ERROR_STATUS.NOT_YOUR_TURN).toBe(409);
+    expect(ERROR_STATUS.ONBOARDING_REQUIRED).toBe(403);
+    expect(ERROR_STATUS.UPLOADS_FULL).toBe(503);
   });
 });

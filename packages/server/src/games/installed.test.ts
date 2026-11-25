@@ -1,3 +1,4 @@
+import type { AnyGameDefinition } from "@your-move/sdk";
 import { describe, expect, it } from "vitest";
 
 import type { InstalledGame } from "../app.js";
@@ -31,7 +32,8 @@ function game(type: string, versions: number[]): InstalledGame {
       players: { min: 2, max: 2 },
       rules: {},
     },
-    engines: Object.fromEntries(versions.map((version) => [version, {}])),
+    // Only the exported versions matter here, not the definitions.
+    engines: Object.fromEntries(versions.map((version) => [version, {} as AnyGameDefinition])),
     enabledByDefault: true,
   };
 }

@@ -9,7 +9,7 @@
     ".": "./src/server.ts"
   },
   "scripts": {
-    "dev": "pnpm --filter @your-move/web build && DATABASE_PATH=\"$(cd ../.. && pwd)/data/dev.sqlite\" node --disallow-code-generation-from-strings --env-file=../../config/local-dev.env --import tsx src/main.ts --static ../web/dist --migrations ../../packages/server/migrations",
+    "dev": "pnpm --filter @your-move/web --filter @your-move/dictionary build && DATABASE_PATH=\"$(cd ../.. && pwd)/data/dev.sqlite\" node --disallow-code-generation-from-strings --env-file=../../config/local-dev.env --import tsx src/main.ts --static ../web/dist --migrations ../../packages/server/migrations --dictionaries ../../packages/dictionary/generated/served",
     "build": "tsx scripts/build.ts",
     "start": "node --disallow-code-generation-from-strings dist/main.js"
   },
@@ -22,6 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@your-move/dictionary": "workspace:*",
     "@your-move/web": "workspace:*",
     "esbuild": "catalog:",
     "fast-check": "catalog:",

@@ -5,6 +5,7 @@ import { LOCAL_DEV_APP_SECRET } from "./config/local-dev.js";
 import { parseConfig, type Env } from "./config/parse.js";
 import { detachedRepositories } from "./db/detached.js";
 import { createConsoleEmailSender } from "./email/sender.js";
+import { NO_DICTIONARIES } from "./games/resources.js";
 import { createJsonLogger } from "./log.js";
 
 /** A minimal valid local-dev environment. */
@@ -51,6 +52,7 @@ export function testPlatform(env: Env = LOCAL_ENV): TestPlatform {
         hops: 1,
         trustedPeers: [],
       }),
+    dictionaries: NO_DICTIONARIES,
     now,
     lines,
   };

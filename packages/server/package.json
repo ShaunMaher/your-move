@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@hono/zod-openapi": "catalog:",
+    "@your-move/dictionary": "workspace:*",
     "@your-move/sdk": "workspace:*",
     "@your-move/shared": "workspace:*",
     "drizzle-orm": "catalog:",

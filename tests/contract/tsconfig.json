@@ -11,6 +11,7 @@
   "include": ["src", "vitest.config.ts"],
   "references": [
     { "path": "../../packages/api-client" },
+    { "path": "../../games/example/tsconfig.src.json" },
     { "path": "../../packages/server" },
     { "path": "../../packages/shared" },
     { "path": "../../apps/worker" }

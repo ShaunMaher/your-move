@@ -327,7 +327,8 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
 - Server: a `DictionaryProvider` loads dictionaries lazily by id and caches them per
   isolate/process. Each compact sorted word list is either bundled into the Worker / Node build as a
   text module or, on Cloudflare once the total exceeds the bundle budget, fetched once per isolate
-  from the static-assets binding (Node reads it from disk). Lookup is a binary search directly over
+  from the static-assets binding (Node reads it from disk). Since alpha A2 the Worker always
+  fetches them, so it and the clients share one copy of each list (the served layout below). Lookup is a binary search directly over
   the text (no parse), or any index is built outside request handling, never inside a request.
   Memory < 25 MB per loaded dictionary. Measure Worker startup time and per-lookup CPU in M1 and
   record the numbers (M1, in `packages/dictionary/README.md`: under 1 µs CPU per ENABLE lookup,
@@ -336,6 +337,16 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
   list as a text module; the real startup time is recorded at the first Workers deployment).
   Each built-in list is checked against its manifest's size and SHA-256 once per load, before
   first use.
+- **Served layout (alpha A2).** The dictionary build also writes `generated/served/`: the index
+  (`index.json`) and each word list, with its `.gz` and `.br` copies, under its versioned, hashed
+  name `<id>-v<version>.<first 16 hex digits of wordsSha256>.txt`. Clients download it at
+  `/assets/dictionaries/<that name>` (the `downloadUrl` the framework sets for public lists, words
+  §9.4), cached as immutable like every hashed asset. On Cloudflare the build copies the layout
+  into the static assets, and the Worker reads the index (once per isolate, when the app is built)
+  and each list (on first use) through the `ASSETS` binding; on Node the build copies it to
+  `dist/dictionaries`, which the server reads from disk and serves at the same path. Around the
+  runtime's `loadText` the core adds a 10 s timeout and remembers a failure for 30 s before
+  loading that list again (10 M3).
 - `serverOnly` dictionaries (operator and uploaded, words §9.5) are loaded from `BlobStore` on first
   use into an in-memory LRU cache **sized by bytes** (default 60 MB per isolate or process, below the
   Worker's 128 MB limit). Lookup is a binary search over the raw sorted text with no index build,

@@ -24,6 +24,7 @@ RUN pnpm install --frozen-lockfile
 ARG KIT_CPU_BUDGET_MS=""
 RUN pnpm games:generate \
  && pnpm games:verify --fast \
+ && pnpm --filter @your-move/dictionary build \
  && pnpm --filter @your-move/web build \
  && pnpm --filter @your-move/node build \
  && pnpm games:check-inputs --only web,node
