@@ -24,7 +24,8 @@
     "dist",
     "!dist/**/*.test.*",
     "!dist/test-support.*",
-    "!dist/.tsbuildinfo"
+    "!dist/client/dom-setup.*",
+    "!dist/**/.tsbuildinfo"
   ],
   "scripts": {
     "build": "tsc --build"

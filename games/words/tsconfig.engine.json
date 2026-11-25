@@ -4,14 +4,14 @@
     "rootDir": "src",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo",
-    // Node types for the tests (kit-words.test.ts reads and writes its generated file) and the
-    // DOM types for the client and its component tests. The engine stays off both through the
-    // engine lint and the import rules (02 §7.5), not through the compiler.
+    // Node types for the tests (kit-words.test.ts reads and writes its generated file). No DOM
+    // library: the engine and everything beside it compile without `window`, `document` or
+    // `crypto` typings, so a DOM use in the engine is a type error, not just a lint finding.
     "types": ["node"],
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "jsx": "react-jsx"
+    "lib": ["ES2023"]
   },
   "include": ["src"],
+  "exclude": ["src/client"],
   "references": [
     { "path": "../../packages/sdk" },
     { "path": "../../packages/testkit" },

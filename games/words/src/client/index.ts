@@ -19,7 +19,7 @@ import { RulesSheet } from "./RulesSheet.js";
 
 export const client: GameClientModule<Options, Action, View, PreviewResult> = {
   type: "words",
-  versions: [engines[1].version],
+  versions: Object.keys(engines).map(Number),
   OptionsForm,
   Board,
   RulesSheet,
