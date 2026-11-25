@@ -127,9 +127,9 @@ describe("the game list", () => {
     });
   });
 
-  it("refetches on focus, and polls only while a game waits on someone else", async () => {
+  it("refetches on focus and polls every 15 s, whether or not a game is waiting", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    let games = [summary({ yourTurn: false })];
+    let games = [summary({ yourTurn: true })];
     const { api, calls } = fakeApi({
       "GET /api/v1/games": () => list(...games),
       "GET /api/v1/catalog": json(CATALOG),
@@ -138,19 +138,40 @@ describe("the game list", () => {
     await screen.findByRole("link", { name: /Alex/u });
     const fetched = () => calls.filter((call) => call.path === "/api/v1/games").length;
     expect(fetched()).toBe(1);
-    games = [summary({ yourTurn: true })];
+    // Nothing is waiting on anyone else, and a new invitation still turns up by itself.
+    games = [
+      summary({ yourTurn: true }),
+      summary({ id: "inv", yourInvitation: "normal", status: "lobby", yourTurn: false }),
+    ];
     await vi.advanceTimersByTimeAsync(15_000);
     await waitFor(() => {
-      expect(screen.getByText("Your turn", { selector: ".badge" })).toBeDefined();
+      expect(screen.getAllByRole("link")).toHaveLength(2);
     });
-    expect(fetched()).toBe(2);
-    // Now nothing is waiting: no more polling, but focus still refetches.
-    await vi.advanceTimersByTimeAsync(60_000);
     expect(fetched()).toBe(2);
     window.dispatchEvent(new Event("focus"));
     await waitFor(() => {
       expect(fetched()).toBe(3);
     });
+  });
+
+  it("does not poll while the tab is hidden, and refetches when it is shown again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { api, calls } = fakeApi({
+      "GET /api/v1/games": list(summary()),
+      "GET /api/v1/catalog": json(CATALOG),
+    });
+    render(<GameList api={api} onSessionLost={vi.fn()} />);
+    await screen.findByRole("link", { name: /Alex/u });
+    const fetched = () => calls.filter((call) => call.path === "/api/v1/games").length;
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetched()).toBe(1);
+    visibility.mockReturnValue("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => {
+      expect(fetched()).toBe(2);
+    });
+    visibility.mockRestore();
   });
 
   it("loads more when there are more pages", async () => {

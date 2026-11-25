@@ -1,7 +1,8 @@
 /**
  * The game list (07 §1): your turn, invitations, waiting (their turn and lobbies) and finished
- * games, with a badge for what needs you. The alpha has no realtime: it refetches on focus and on
- * a short poll while any game is waiting on someone else (10, Alpha).
+ * games, with a badge for what needs you. The alpha has no realtime: it refetches on focus and
+ * every 15 s while the tab is visible, so a new invitation or a move appears without a visit (07
+ * §4, 10 Alpha).
  */
 import type { ApiClient } from "@your-move/api-client";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -79,15 +80,31 @@ export function GameList({ api, onSessionLost }: GameListProps) {
   const [types, setTypes] = useState<ReadonlyMap<string, CatalogGame>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const loading = useRef(false);
+  /** Whether "Show more" has been used: a refresh then keeps the older pages already shown. */
+  const expanded = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const refresh = useCallback(() => {
     if (loading.current) return;
     loading.current = true;
     void listGames(api).then((result) => {
       loading.current = false;
+      if (!mounted.current) return;
       if (result.ok) {
-        setGames(result.data.games);
-        setMore(result.data.nextCursor);
+        const first = result.data.games;
+        if (expanded.current) {
+          const ids = new Set(first.map((game) => game.id));
+          setGames((now) => [...first, ...(now ?? []).filter((game) => !ids.has(game.id))]);
+        } else {
+          setGames(first);
+          setMore(result.data.nextCursor);
+        }
         setError(null);
       } else if (result.status === 401) onSessionLost();
       else {
@@ -107,17 +124,21 @@ export function GameList({ api, onSessionLost }: GameListProps) {
     });
   }, [api, refresh]);
 
-  const waiting = games?.some((game) => sectionOf(game) === "waiting") === true;
-  useRefresh(refresh, waiting ? POLL_MS : null);
+  useRefresh(refresh, POLL_MS);
 
   function showMore() {
     if (more === null) return;
     void listGames(api, more).then((result) => {
+      if (!mounted.current) return;
       if (!result.ok) {
         setError("Couldn't load more games.");
         return;
       }
-      setGames((now) => [...(now ?? []), ...result.data.games]);
+      expanded.current = true;
+      setGames((now) => {
+        const seen = new Set((now ?? []).map((game) => game.id));
+        return [...(now ?? []), ...result.data.games.filter((game) => !seen.has(game.id))];
+      });
       setMore(result.data.nextCursor);
     });
   }
