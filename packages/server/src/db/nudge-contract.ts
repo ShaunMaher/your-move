@@ -272,6 +272,27 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
       expect((await dueIds()).has(again.playerId)).toBe(true);
     });
 
+    it("due lists one seat per recipient, recipients nudged least recently first (A6-P3-1)", async () => {
+      // A rules version of this test's own, so the page holds only its seats.
+      const version = 1000 + Math.floor(Math.random() * 1_000_000);
+      const installed = [{ gameType: "contract", gameVersion: version }];
+      // A recipient nudged recently in another game, with two never-nudged seats waiting longest.
+      const capped = await user();
+      await seat(
+        capped.id,
+        { toAct: 0, toActSince: null, lastNudgedAt: T0 + DAY },
+        "active",
+        version,
+      );
+      const first = await seat(capped.id, { toActSince: T0 - 3 * DAY }, "active", version);
+      await seat(capped.id, { toActSince: T0 - 2 * DAY }, "active", version);
+      // Another recipient, never nudged, waiting least long.
+      const other = await seat((await user()).id, { toActSince: T0 }, "active", version);
+      const page = await repos().nudges.due(WINDOW, 2, installed);
+      expect(page.map((row) => row.playerId)).toEqual([other.playerId, first.playerId]);
+      expect(await repos().nudges.due(WINDOW, 10, installed)).toHaveLength(2);
+    });
+
     it("due lists the longest waiting first and honours the limit", async () => {
       const earlier = await seat((await user()).id, { toActSince: T0 - 2 * DAY - 1 });
       const later = await seat((await user()).id, { toActSince: T0 - 2 * DAY });
@@ -345,6 +366,26 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
           moved.playerId,
         ),
       ).toEqual([{ n: 0 }]);
+    });
+
+    it("suppress lets a bounce or complaint replace an unsubscribe, never the reverse (A6-P3-2)", async () => {
+      const row = (emailId: string) =>
+        target().sql(
+          "SELECT reason, created_at FROM email_suppressions WHERE email_hash = ?",
+          emailId,
+        );
+      for (const stronger of ["bounced", "complained"] as const) {
+        const emailId = freshEmailId();
+        await repos().emailSuppressions.suppress(emailId, "unsubscribed", T0);
+        await repos().emailSuppressions.suppress(emailId, stronger, T0 + 1);
+        expect(await row(emailId)).toEqual([{ reason: stronger, created_at: T0 + 1 }]);
+        await repos().emailSuppressions.suppress(emailId, "unsubscribed", T0 + 2);
+        expect(await row(emailId)).toEqual([{ reason: stronger, created_at: T0 + 1 }]);
+      }
+      const complained = freshEmailId();
+      await repos().emailSuppressions.suppress(complained, "complained", T0);
+      await repos().emailSuppressions.suppress(complained, "bounced", T0 + 1);
+      expect(await row(complained)).toEqual([{ reason: "complained", created_at: T0 }]);
     });
 
     it("suppress adds an emailId once and keeps the first reason", async () => {

@@ -44,16 +44,30 @@ export function nudgeRepo(db: Database): NudgeRepo {
   return {
     async due(window, limit, installed) {
       if (installed.length === 0) return [];
-      const rows = await db
+      const seatNudged = sql`coalesce(${gamePlayers.lastNudgedAt}, 0)`;
+      // Every due seat, numbered within its recipient (their least recently nudged seat first),
+      // and with when that recipient was last nudged in any game. Each column is named, since
+      // the outer query reads them by name and several tables have an `id`.
+      const candidates = db
         .select({
-          playerId: gamePlayers.id,
-          gameId: games.id,
-          gameType: games.gameType,
-          gameVersion: games.gameVersion,
-          seat: gamePlayers.seat,
-          userId: users.id,
-          email: users.email,
-          emailId: users.emailId,
+          playerId: sql<string>`${gamePlayers.id}`.as("player_id"),
+          gameId: sql<string>`${games.id}`.as("game_id"),
+          gameType: sql<string>`${games.gameType}`.as("game_type"),
+          gameVersion: sql<number>`${games.gameVersion}`.as("game_version"),
+          seat: sql<number | null>`${gamePlayers.seat}`.as("seat"),
+          userId: sql<string>`${users.id}`.as("user_id"),
+          email: sql<string | null>`${users.email}`.as("email"),
+          emailId: sql<string | null>`${users.emailId}`.as("email_id"),
+          toActSince: sql<number>`${gamePlayers.toActSince}`.as("to_act_since"),
+          seatNudged: sql<number>`${seatNudged}`.as("seat_nudged"),
+          recipientNudged:
+            sql<number>`(SELECT coalesce(max(recipient_seats.last_nudged_at), 0) FROM ${gamePlayers} AS recipient_seats WHERE recipient_seats.user_id = ${users.id})`.as(
+              "recipient_nudged",
+            ),
+          place:
+            sql<number>`row_number() OVER (PARTITION BY ${users.id} ORDER BY ${seatNudged}, ${gamePlayers.toActSince}, ${gamePlayers.id})`.as(
+              "place",
+            ),
         })
         .from(gamePlayers)
         .innerJoin(games, eq(games.id, gamePlayers.gameId))
@@ -71,11 +85,28 @@ export function nudgeRepo(db: Database): NudgeRepo {
             USER_ELIGIBLE,
           ),
         )
-        // Least recently nudged first, so one recipient's many games can't hold the queue (A6-S2-2).
+        .as("candidates");
+      // One seat per recipient per page, the least recently nudged recipients first, so neither
+      // one recipient's many games nor a recipient held back by their own daily cap can keep
+      // everyone else waiting (A6-S2-2, P3-1).
+      const rows = await db
+        .select({
+          playerId: candidates.playerId,
+          gameId: candidates.gameId,
+          gameType: candidates.gameType,
+          gameVersion: candidates.gameVersion,
+          seat: candidates.seat,
+          userId: candidates.userId,
+          email: candidates.email,
+          emailId: candidates.emailId,
+        })
+        .from(candidates)
+        .where(eq(candidates.place, 1))
         .orderBy(
-          asc(sql`coalesce(${gamePlayers.lastNudgedAt}, 0)`),
-          asc(gamePlayers.toActSince),
-          asc(gamePlayers.id),
+          asc(candidates.recipientNudged),
+          asc(candidates.seatNudged),
+          asc(candidates.toActSince),
+          asc(candidates.playerId),
         )
         .limit(limit);
       // The filters above make these non-null; the checks keep the types honest.
@@ -114,10 +145,16 @@ export function nudgeRepo(db: Database): NudgeRepo {
 export function emailSuppressionRepo(db: Database): EmailSuppressionRepo {
   return {
     async suppress(emailHash, reason, createdAt) {
+      // A bounce or complaint replaces an unsubscribe (it stops more mail, 04), never the
+      // reverse; created_at says when the row's current reason was recorded.
       await db
         .insert(emailSuppressions)
         .values({ emailHash, reason, createdAt })
-        .onConflictDoNothing({ target: emailSuppressions.emailHash });
+        .onConflictDoUpdate({
+          target: emailSuppressions.emailHash,
+          set: { reason: sql`excluded.reason`, createdAt: sql`excluded.created_at` },
+          setWhere: sql`${emailSuppressions.reason} = 'unsubscribed' AND excluded.reason IN ('bounced', 'complained')`,
+        });
     },
   };
 }

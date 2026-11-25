@@ -386,8 +386,9 @@ type SuppressionReason = InferSelectModel<typeof emailSuppressions>["reason"];
 
 export interface EmailSuppressionRepo {
   /**
-   * Adds an `emailId` to `email_suppressions` (04); an address already there keeps its row and
-   * reason, so repeating it changes nothing.
+   * Adds an `emailId` to `email_suppressions` (04). An address already there keeps its row, except
+   * that `bounced` or `complained` replaces `unsubscribed` (reason and `created_at`); repeating a
+   * call changes nothing.
    */
   suppress(emailHash: string, reason: SuppressionReason, createdAt: number): Promise<void>;
 }
@@ -427,7 +428,8 @@ export interface NudgeRepo {
    * take a place in the queue), idle and not nudged within the window, whose user is an onboarded
    * human, not suspended or being deleted, with `settings.emailNudges` true and an `email_id`
    * that hasn't bounced or complained (an `unsubscribed` row is about invite emails; nudges have
-   * their own opt-out, 03 §7). The least recently nudged come first, then the longest waiting.
+   * their own opt-out, 03 §7). At most one seat per recipient (their least recently nudged,
+   * then longest waiting); recipients nudged least recently in any game come first.
    */
   due(
     window: NudgeWindow,

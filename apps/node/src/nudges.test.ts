@@ -247,7 +247,7 @@ describe("the sweep's email nudges (03 §7)", () => {
     expect(await nudgesTo(bo)).toHaveLength(2);
   });
 
-  it("nudges for each game separately", async () => {
+  it("nudges for each game separately, one game per recipient per run", async () => {
     h = gameHarness();
     const { ada, bo } = await started({ bo: true });
     const second = await createGame(h, ada, {
@@ -256,8 +256,12 @@ describe("the sweep's email nudges (03 §7)", () => {
     });
     await transition(h, bo, second.id, "accept");
     h.setTime(T0 + DAY);
-    expect((await h.sweep()).nudges?.sent).toBe(1 + 1);
+    expect((await h.sweep()).nudges).toMatchObject({ due: 1, sent: 1 });
+    h.advance(15 * MINUTE);
+    expect((await h.sweep()).nudges).toMatchObject({ due: 1, sent: 1 });
     expect(await nudgesTo(bo)).toHaveLength(2);
+    h.advance(15 * MINUTE);
+    expect((await h.sweep()).nudges).toMatchObject({ due: 0 });
   });
 
   it("restarts the idle clock when the seat acts and is to act again", async () => {
@@ -376,27 +380,27 @@ describe("the sweep's email nudges (03 §7)", () => {
     expect(days).toEqual(["2026-01-02", "2026-01-03"]);
   });
 
-  it("caps each recipient's nudges a day without claiming or counting the rest (A6-S2-2)", async () => {
-    h = gameHarness({ LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY: "2" });
-    const { ada, bo } = await started({ bo: true });
-    for (let i = 0; i < 2; i++) {
+  /** `bo` in `extra` more games with `ada` than the one `started` made. */
+  async function moreGames(ada: Player, bo: Player, extra: number): Promise<void> {
+    for (let i = 0; i < extra; i++) {
       const game = await createGame(h, ada, {
         gameType: "example",
         invitees: [{ email: bo.email }],
       });
       await transition(h, bo, game.id, "accept");
     }
-    const other = await started({ bo: true });
+  }
+
+  it("caps each recipient's nudges a day without claiming or counting the rest (A6-S2-2)", async () => {
+    h = gameHarness({ LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY: "2" });
+    const { ada, bo } = await started({ bo: true });
+    await moreGames(ada, bo, 2);
     h.setTime(T0 + DAY);
-    expect((await h.sweep()).nudges).toEqual({
-      due: 4,
-      sent: 3,
-      failed: 0,
-      skipped: 1,
-      capped: false,
-    });
+    for (let run = 0; run < 4; run++) {
+      await h.sweep();
+      h.advance(15 * MINUTE);
+    }
     expect(await nudgesTo(bo)).toHaveLength(2);
-    expect(await nudgesTo(other.bo)).toHaveLength(1);
     expect(counted(`NUDGE_EMAILS_PER_USER_PER_DAY:${bo.id}`)).toBe(2);
     expect(
       h.query(
@@ -405,6 +409,28 @@ describe("the sweep's email nudges (03 §7)", () => {
       ),
     ).toEqual([{ n: 2 }]);
   });
+
+  // Two seats a page: one seat per recipient is what lets Eve in. One: the recipients nudged
+  // least recently come first.
+  it.each([2, 1])(
+    "a recipient held back by their own cap doesn't starve anyone else, %i a run (A6-P3-1)",
+    async (nudgesPerRun) => {
+      h = gameHarness({ LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY: "1" }, { nudgesPerRun });
+      // Bo: three games from T0, so two stay due and never nudged once Bo is at the cap.
+      const { ada, bo } = await started({ bo: true });
+      await moreGames(ada, bo, 2);
+      h.setTime(T0 + DAY);
+      await h.sweep();
+      expect(await nudgesTo(bo)).toHaveLength(1);
+      // Eve's turn starts half a day later, so her seat has waited less long than Bo's.
+      h.setTime(T0 + 12 * HOUR);
+      const eve = await started({ bo: true });
+      h.setTime(T0 + 36 * HOUR);
+      expect((await h.sweep()).nudges).toMatchObject({ sent: 1, skipped: nudgesPerRun - 1 });
+      expect(await nudgesTo(eve.bo)).toHaveLength(1);
+      expect(await nudgesTo(bo)).toHaveLength(1);
+    },
+  );
 
   it("names a deleted account's seat 'Deleted player' and a missing name 'New player' (02 §5, 04)", async () => {
     h = gameHarness();

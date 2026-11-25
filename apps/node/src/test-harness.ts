@@ -129,6 +129,8 @@ export interface HarnessOptions {
   readonly wrapRepos?: (repos: Repositories) => Repositories;
   /** Replaces the capturing email sender (e.g. one that fails). */
   readonly sender?: EmailSender;
+  /** The sweep's nudges per run; Node's own by default. */
+  readonly nudgesPerRun?: number;
   /** Wraps the capturing email sender (e.g. to fail some messages and still capture the rest). */
   readonly wrapSender?: (capture: EmailSender) => EmailSender;
   /** The installed games (the generated registry); none by default. */
@@ -177,7 +179,11 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     games,
     ...(options.random === undefined ? {} : { random: options.random }),
   });
-  const sweep = createSweep({ platform, games, nudgesPerRun: NODE_NUDGES_PER_RUN });
+  const sweep = createSweep({
+    platform,
+    games,
+    nudgesPerRun: options.nudgesPerRun ?? NODE_NUDGES_PER_RUN,
+  });
   const background = createBackgroundTracker();
   let scheduled = 0;
   const countedContext = (): ReturnType<typeof background.context> => {
