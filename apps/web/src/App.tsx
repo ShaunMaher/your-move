@@ -10,7 +10,9 @@ import {
   rememberReturnPath,
 } from "./return-path.js";
 import { navigate, usePath } from "./router.js";
+import { Game } from "./screens/Game.js";
 import { Home } from "./screens/Home.js";
+import { NewGame } from "./screens/NewGame.js";
 import { Settings } from "./screens/Settings.js";
 import { SignIn } from "./screens/SignIn.js";
 import { Loading, NotFound, Unreachable } from "./screens/Status.js";
@@ -48,6 +50,17 @@ function placeFor(me: Me | null, path: string, returnTo: string | null): string 
   if (me === null) return "/signin";
   if (me.needsOnboarding) return "/welcome";
   return path === "/signin" || path === "/welcome" ? (returnTo ?? "/") : path;
+}
+
+/** The game id of a `/g/:id` path, or `null` for any other path. */
+function gameIdOf(path: string): string | null {
+  const encoded = /^\/g\/([^/]+)$/u.exec(path)?.[1];
+  if (encoded === undefined) return null;
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -97,6 +110,7 @@ export function App({ api }: AppProps) {
 
   const me = boot.status === "ready" ? boot.me : null;
   const place = boot.status === "ready" ? placeFor(me, path, boot.returnTo) : path;
+  const gameId = gameIdOf(place);
   useEffect(() => {
     if (boot.status !== "ready") return;
     if (me === null) {
@@ -176,6 +190,10 @@ export function App({ api }: AppProps) {
   const signedOut = () => {
     endSession(true);
   };
+  // A game call answered 401: the session ended elsewhere, so end it here too.
+  const sessionLost = useCallback(() => {
+    endSession(false);
+  }, [endSession]);
 
   let screen;
   if (boot.status === "loading") screen = <Loading />;
@@ -188,7 +206,26 @@ export function App({ api }: AppProps) {
       <Welcome api={api} appName={boot.config.appName} onDone={setMe} onSignedOut={signedOut} />
     );
   } else if (place === "/") {
-    screen = <Home appName={boot.config.appName} me={me} />;
+    screen = <Home api={api} appName={boot.config.appName} me={me} onSessionLost={sessionLost} />;
+  } else if (place === "/new") {
+    screen = (
+      <NewGame
+        api={api}
+        appName={boot.config.appName}
+        ownEmail={me.email ?? ""}
+        onSessionLost={sessionLost}
+      />
+    );
+  } else if (gameId !== null) {
+    screen = (
+      <Game
+        key={gameId}
+        api={api}
+        appName={boot.config.appName}
+        id={gameId}
+        onSessionLost={sessionLost}
+      />
+    );
   } else if (place === "/settings") {
     screen = <Settings api={api} appName={boot.config.appName} me={me} onSignedOut={signedOut} />;
   } else screen = <NotFound appName={boot.config.appName} />;

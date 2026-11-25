@@ -257,7 +257,10 @@ describe("onboarding", () => {
     click("Continue");
     expect(await screen.findByRole("heading", { name: "Hi, Sam" })).toBeDefined();
     expect(window.location.pathname).toBe("/");
-    expect(calls.at(-1)).toMatchObject({ method: "PATCH", body: { displayName: "Sam" } });
+    expect(calls.filter((call) => call.method !== "GET").at(-1)).toMatchObject({
+      method: "PATCH",
+      body: { displayName: "Sam" },
+    });
   });
 
   it("explains a refused name", async () => {
