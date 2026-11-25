@@ -118,19 +118,30 @@ describe("the table", () => {
     expect(screen.getByText("Your turn. Place tiles to make a word.")).toBeTruthy();
   });
 
-  it("labels every square: position, premium, start, tile and last play", () => {
+  it("labels every square: position, premium (its face text first), start, tile and last play", () => {
     setup();
     expect(square(SR + 1, SC).getAttribute("aria-label")).toBe("Row 9, column 8, empty");
     const tw = CLASSIC.premiums.flatMap((line, row) =>
       Array.from(line).flatMap((code, col) => (code === "T" ? [[row, col] as const] : [])),
     )[0] ?? [0, 0];
     expect(square(tw[0], tw[1]).getAttribute("aria-label")).toBe(
-      `Row ${String(tw[0] + 1)}, column ${String(tw[1] + 1)}, triple word, empty`,
+      `Row ${String(tw[0] + 1)}, column ${String(tw[1] + 1)}, 3W, triple word, empty`,
     );
     expect(square(SR, SC - 1).getAttribute("aria-label")).toBe("Row 8, column 7, C, 3 points");
     expect(rackTile("S, 1 point")).toBeTruthy();
     expect(rackTile("Blank tile")).toBeTruthy();
     expect(screen.getAllByRole("button", { name: /^Row \d+, column \d+/u })).toHaveLength(225);
+  });
+
+  it("puts every square's visible text in its accessible name (WCAG 2.5.3)", () => {
+    setup();
+    const squares = screen.getAllByRole("button", { name: /^Row \d+, column \d+/u });
+    const faces = squares.flatMap((el) => {
+      const face = el.querySelector(".ym-w-face")?.textContent ?? "";
+      return face === "" ? [] : [{ face, name: el.getAttribute("aria-label") ?? "" }];
+    });
+    expect(faces.length).toBeGreaterThan(40);
+    for (const { face, name } of faces) expect(name).toContain(face);
   });
 
   it("names the start square when it is empty and has no premium", () => {

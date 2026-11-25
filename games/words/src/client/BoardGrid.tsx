@@ -238,7 +238,7 @@ export function BoardGrid({ frame, ...props }: GridProps): ReactElement {
               const what =
                 tile === null
                   ? [
-                      premium === null ? null : PREMIUM_NAME[premium],
+                      premium === null ? null : `${PREMIUM_LABEL[premium]}, ${PREMIUM_NAME[premium]}`,
                       isStart ? "start square" : null,
                       "empty",
                     ]
