@@ -26,7 +26,14 @@ export {
   type EmailMessage,
   type EmailSender,
 } from "./email/sender.js";
-export { coreEmailSender } from "./email/providers.js";
+export { coreEmailSender, type CoreEmailSender } from "./email/providers.js";
+export {
+  GMAIL_SEND_SCOPE,
+  GmailTokenRefused,
+  grantedScopes,
+  idTokenClaims,
+  isSendOnly,
+} from "./email/gmail.js";
 export { DEFAULT_APP_NAME } from "./config/defaults.js";
 export { isLocalDev, isLocalDevUrl } from "./config/local-dev.js";
 export {

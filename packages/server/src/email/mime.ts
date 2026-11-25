@@ -1,0 +1,192 @@
+/**
+ * The one MIME builder (docs/spec/09-operations.md §2, 08 T14): turns an {@link EmailMessage}
+ * into a raw RFC 5322 message for providers that take raw MIME (`gmail` now, SMTP later). Web
+ * standards only, so it runs on both runtimes.
+ *
+ * - Every header value is checked for control characters (CR, LF, NUL, ...), and anything that
+ *   isn't printable ASCII is RFC 2047 encoded, so no input can end its header or start another.
+ * - Display names are quoted strings (backslash and quote escaped) or encoded words.
+ * - Addresses must be plain ASCII `addr-spec`s; an internationalised domain is converted to
+ *   punycode. A non-ASCII local part is refused rather than sent where it may not be accepted.
+ * - The body is `multipart/alternative`: plain text, then HTML, both quoted-printable UTF-8.
+ */
+import { EmailHeaderError } from "./sender.js";
+
+interface MimeMailbox {
+  /** The display name, or null for a bare address. */
+  readonly name: string | null;
+  readonly address: string;
+}
+
+export interface MimeInput {
+  readonly from: MimeMailbox;
+  /** The recipient's address. */
+  readonly to: string;
+  readonly subject: string;
+  readonly text: string;
+  readonly html: string;
+  readonly date: Date;
+  /** `local@domain`, without angle brackets; unique per message. */
+  readonly messageId: string;
+  /** Extra headers; only the names in {@link EXTRA_HEADERS}. Values must be printable ASCII. */
+  readonly headers?: Readonly<Record<string, string>>;
+}
+
+/** The extra headers a caller may add (09 §2: unsubscribe links on every non-OTP email). */
+export const EXTRA_HEADERS: readonly string[] = ["List-Unsubscribe", "List-Unsubscribe-Post"];
+
+/**
+ * The multipart boundary. A body can't contain it: quoted-printable writes every `=` as `=3D`, so
+ * no body line can read `--=_ym_...`.
+ */
+const BOUNDARY = "=_ym_alt_boundary";
+const CRLF = "\r\n";
+const LOCAL_PART = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/u;
+const DOMAIN =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/u;
+const PRINTABLE_ASCII = /^[ -~]*$/u;
+/** Bytes per encoded word: 36 bytes become 48 base64 characters, 60 with the word's wrapper. */
+const WORD_BYTES = 36;
+const encoder = new TextEncoder();
+
+function refuseControls(value: string, what: string): void {
+  if (/\p{Cc}/u.test(value)) throw new EmailHeaderError(`${what} contains a control character`);
+}
+
+function base64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+/** RFC 2047 `B` encoded words for `value`, never splitting a character, joined by folding. */
+function encodedWords(value: string): string {
+  const words: string[] = [];
+  let chunk: number[] = [];
+  const flush = (): void => {
+    if (chunk.length > 0) words.push(`=?UTF-8?B?${base64(Uint8Array.from(chunk))}?=`);
+    chunk = [];
+  };
+  for (const character of value) {
+    const bytes = encoder.encode(character);
+    if (chunk.length + bytes.length > WORD_BYTES) flush();
+    chunk.push(...bytes);
+  }
+  flush();
+  return words.join(`${CRLF} `);
+}
+
+/** An unstructured header value such as a subject. */
+function encodeText(value: string, what: string): string {
+  refuseControls(value, what);
+  if (PRINTABLE_ASCII.test(value) && value.length <= 60 && !value.includes("=?")) return value;
+  return encodedWords(value);
+}
+
+/** The display name of a mailbox, as a quoted string or encoded words. */
+function encodePhrase(name: string): string {
+  refuseControls(name, "display name");
+  if (PRINTABLE_ASCII.test(name) && name.length <= 40) {
+    return `"${name.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+  }
+  return encodedWords(name);
+}
+
+/** A checked ASCII `addr-spec`; the domain of an internationalised address becomes punycode. */
+function encodeAddress(address: string, what: string): string {
+  refuseControls(address, what);
+  const at = address.lastIndexOf("@");
+  const local = address.slice(0, at);
+  let domain = address.slice(at + 1);
+  if (!PRINTABLE_ASCII.test(domain)) {
+    try {
+      domain = new URL(`http://${domain}`).hostname;
+    } catch {
+      throw new EmailHeaderError(`${what} is not a valid address`);
+    }
+  }
+  if (at < 1 || address.length > 254 || !LOCAL_PART.test(local) || !DOMAIN.test(domain)) {
+    throw new EmailHeaderError(`${what} is not a valid ASCII address`);
+  }
+  return `${local}@${domain}`;
+}
+
+function mailbox({ name, address }: MimeMailbox, what: string): string {
+  const spec = encodeAddress(address, what);
+  if (name === null || name === "") return spec;
+  const phrase = encodePhrase(name);
+  // After encoded words the address goes on its own folded line, to stay within 78 columns.
+  return `${phrase}${phrase.startsWith('"') ? " " : `${CRLF} `}<${spec}>`;
+}
+
+/** RFC 5322 `date-time` in UTC, e.g. `Thu, 01 Jan 1970 00:00:00 +0000`. */
+function formatDate(date: Date): string {
+  if (Number.isNaN(date.getTime())) throw new EmailHeaderError("date is not valid");
+  return date.toUTCString().replace(/ GMT$/u, " +0000");
+}
+
+/** Quoted-printable (RFC 2045 §6.7) of `text`'s UTF-8 bytes, with CRLF line ends. */
+export function quotedPrintable(text: string): string {
+  const lines = text.replace(/\r\n|\r|\n/gu, "\n").split("\n");
+  const out: string[] = [];
+  for (const line of lines) {
+    const bytes = encoder.encode(line);
+    let current = "";
+    bytes.forEach((byte, index) => {
+      const last = index === bytes.length - 1;
+      const literal =
+        (byte >= 33 && byte <= 126 && byte !== 61) || ((byte === 32 || byte === 9) && !last);
+      const token = literal
+        ? String.fromCharCode(byte)
+        : `=${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+      if (current.length + token.length > 75) {
+        out.push(`${current}=`);
+        current = "";
+      }
+      current += token;
+    });
+    out.push(current);
+  }
+  return out.join(CRLF);
+}
+
+function part(type: string, body: string): string[] {
+  return [
+    `--${BOUNDARY}`,
+    `Content-Type: ${type}; charset=UTF-8`,
+    "Content-Transfer-Encoding: quoted-printable",
+    "",
+    quotedPrintable(body),
+  ];
+}
+
+/** Builds the raw message. Throws {@link EmailHeaderError} for anything unsafe in a header. */
+export function buildMime(input: MimeInput): string {
+  refuseControls(input.messageId, "message id");
+  if (!/^[A-Za-z0-9._~+-]+@[A-Za-z0-9.-]+$/u.test(input.messageId)) {
+    throw new EmailHeaderError("message id is not valid");
+  }
+  const headers: string[] = [
+    `From: ${mailbox(input.from, "sender")}`,
+    `To: ${mailbox({ name: null, address: input.to }, "recipient")}`,
+    `Subject: ${encodeText(input.subject, "subject")}`,
+    `Date: ${formatDate(input.date)}`,
+    `Message-ID: <${input.messageId}>`,
+    "MIME-Version: 1.0",
+  ];
+  for (const [name, value] of Object.entries(input.headers ?? {})) {
+    if (!EXTRA_HEADERS.includes(name)) throw new EmailHeaderError(`header ${name} is not allowed`);
+    if (!PRINTABLE_ASCII.test(value)) {
+      throw new EmailHeaderError(`${name} must be printable ASCII`);
+    }
+    headers.push(`${name}: ${value}`);
+  }
+  headers.push(`Content-Type: multipart/alternative; boundary="${BOUNDARY}"`);
+  const body = [
+    ...part("text/plain", input.text),
+    ...part("text/html", input.html),
+    `--${BOUNDARY}--`,
+    "",
+  ];
+  return `${headers.join(CRLF)}${CRLF}${CRLF}${body.join(CRLF)}`;
+}

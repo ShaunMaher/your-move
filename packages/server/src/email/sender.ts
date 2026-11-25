@@ -1,8 +1,7 @@
 /**
  * Email delivery (docs/spec/09-operations.md §2): the `EmailSender` port each runtime provides,
  * the message type every template produces, and the providers that need nothing but Web-standard
- * APIs. SMTP (Node only) lives in `apps/node`; `gmail` and the HTTP-API providers arrive later
- * (10 M4).
+ * APIs. SMTP (Node only) lives in `apps/node`; `gmail` is in `gmail.ts`; the HTTP-API providers arrive later.
  */
 import type { NormalisedEmail } from "../accounts/email.js";
 import type { Logger } from "../log.js";
@@ -69,7 +68,7 @@ export function createConsoleEmailSender(log: Logger, now: () => Date): ConsoleE
 }
 
 /**
- * Stands in for a provider whose implementation hasn't landed yet (`gmail` in M4; `resend`,
+ * Stands in for a provider whose implementation hasn't landed yet (`smtp`, `resend`,
  * `postmark`, `ses`, `cloudflare` later): every send is dropped with an alert in the log, so the
  * operator sees at once that no mail goes out, while the API keeps its normal responses.
  */

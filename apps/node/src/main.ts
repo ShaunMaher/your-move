@@ -8,7 +8,7 @@
  * 3. scrub secrets from `process.env`;
  * 4. check code generation from strings is really off, then load the generated game registry with
  *    a dynamic `import()`, and refuse to start unless it matches `installed.json`;
- * 5. serve.
+ * 5. check the gmail token's scope and account (when that is the provider), then serve.
  */
 import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -28,7 +28,7 @@ import { codeGenerationFromStringsAllowed } from "./code-generation.js";
 import { scrubSecrets } from "./env.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
 import { createNodeApp } from "./server.js";
-import { isRefusal, startup, type Started } from "./startup.js";
+import { isRefusal, startup, type Started, verifyEmail } from "./startup.js";
 
 function exitWith(message: string): never {
   console.error(message);
@@ -110,9 +110,17 @@ if (mismatches.length > 0) {
   exitWith(`The game registry does not match installed.json:\n  - ${mismatches.join("\n  - ")}`);
 }
 
-// 5. Serve.
+// 5. Serve. The gmail provider first checks its token's scope and account (09 §2): a token that
+// could do more than send, or belongs to another user, refuses the start.
+const platform = createNodePlatform({ repos: storage.repos, config, nodeConfig, log, now });
+try {
+  await verifyEmail(platform.email);
+} catch (error) {
+  if (isRefusal(error)) exitWith(`Refusing to start: ${error.message}`);
+  throw error;
+}
 const app = createNodeApp({
-  platform: createNodePlatform({ repos: storage.repos, config, nodeConfig, log, now }),
+  platform,
   games,
   staticRoot: args.static,
 });

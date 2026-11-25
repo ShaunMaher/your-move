@@ -7,12 +7,17 @@
  * 2. take the single-instance lock, apply migrations and run the orphan check against
  *    `installed.json` only (no game code is loaded yet).
  *
+ * Once the platform exists, {@link verifyEmail} checks the email provider's credentials (the
+ * `gmail` token's scope and account, 09 §2) before the server listens.
+ *
  * The caller then scrubs the secrets from the environment, imports the registry and serves; the
  * scrub always comes before the import (02 §7.5).
  */
 import {
   ConfigError,
+  type CoreEmailSender,
   type Env,
+  GmailTokenRefused,
   type Installed,
   isLocalDev,
   parseConfig,
@@ -50,6 +55,16 @@ export function isRefusal(error: unknown): error is Error {
     error instanceof InstanceLockedError ||
     error instanceof MigrationError
   );
+}
+
+/** Refuses to start when the email provider's credentials are wrong; a Google outage doesn't. */
+export async function verifyEmail(email: CoreEmailSender): Promise<void> {
+  try {
+    await email.verifyCredentials?.();
+  } catch (error) {
+    if (error instanceof GmailTokenRefused) throw new StartupRefusal(`${error.message} (09 §2)`);
+    throw error;
+  }
 }
 
 /** Steps 1 and 2 above; throws to refuse the start. */
