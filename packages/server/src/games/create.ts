@@ -194,6 +194,9 @@ export async function createGame(
   }
 
   const emailIds = await Promise.all(emails.map((email) => emailId(keys, email)));
+  // The live-game caps are read before the insert, so concurrent creates can pass them together
+  // and go a few games over. That is accepted: the atomic daily limits below (30 games a day, 5 a
+  // pair) bound how far, and the caps exist to stop slow accumulation (A2 review S-7).
   // An overdue lobby isn't live: expire the creator's before counting them (lazy expiry).
   await expireOverdueLobbies(repos, creator.id, platform.now().getTime());
   const live = await repos.games.countLiveCreated(creator.id);
