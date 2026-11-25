@@ -1,6 +1,6 @@
 /**
- * Builds what the suite runs against, exactly as the build stage does: the web app, the Node
- * server bundle and the Worker bundle with its `_headers`. Then starts the Node build
+ * Builds what the suite runs against, exactly as the build stage does: the built-in dictionaries,
+ * the web app, the Node server bundle and the Worker bundle with its `_headers`. Then starts the Node build
  * (`node apps/node/dist/main.js`) on a free port; the Worker half runs in Wrangler's test harness.
  * The builds record their bundler inputs in a temporary directory, not generated/bundles/, so a
  * test run never stands in for `pnpm build`'s records (02 §7.3).
@@ -61,6 +61,7 @@ export default async function setup(project: TestProject): Promise<() => void> {
     });
   };
   try {
+    build("@your-move/dictionary");
     build("@your-move/web");
     build("@your-move/node");
     build("@your-move/worker");

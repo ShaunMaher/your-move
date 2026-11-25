@@ -781,6 +781,9 @@ importers:
       '@your-move/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@your-move/game-example':
+        specifier: workspace:*
+        version: link:../../games/example
       '@your-move/server':
         specifier: workspace:*
         version: link:../../packages/server
