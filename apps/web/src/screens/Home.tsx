@@ -14,7 +14,7 @@ interface HomeProps {
 export function Home({ appName, me }: HomeProps) {
   return (
     <Page appName={appName} nav={<Link to="/settings">Settings</Link>}>
-      <h1>Hi, {me.displayName}</h1>
+      <h1 tabIndex={-1}>Hi, {me.displayName}</h1>
       <section className="card" aria-labelledby="games-heading" data-slot="game-list">
         <h2 id="games-heading">Your games</h2>
         <p>Your games will appear here.</p>

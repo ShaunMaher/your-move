@@ -34,7 +34,11 @@ const config: KnipConfig = {
       // Build-order dependency: the build copies the web app's output (pnpm builds it first).
       ignoreDependencies: ["@your-move/web"],
     },
-    "apps/web": { project: ["src/**/*.{ts,tsx}"] },
+    "apps/web": {
+      project: ["src/**/*.{ts,tsx}", "sw/**/*.ts"],
+      // Imported by the build (vite.config.ts, via build/service-worker.ts) for the server paths.
+      ignoreDependencies: ["@your-move/shared"],
+    },
     scripts: { entry: ["src/bin/*.ts"], project: ["src/**/*.ts"] },
     "tests/contract": { entry: ["src/**/*.test.ts"], project: ["src/**/*.ts"] },
     "tests/e2e": { entry: ["src/**/*.spec.ts"], project: ["src/**/*.ts"] },

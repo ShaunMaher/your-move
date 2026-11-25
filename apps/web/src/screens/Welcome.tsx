@@ -8,6 +8,7 @@ import { type SyntheticEvent, useEffect, useRef, useState } from "react";
 
 import { type Failure, type Me, saveDisplayName } from "../auth-api.js";
 import { DISPLAY_NAME_MAX, graphemeCount } from "../text.js";
+import { useSignOut } from "../use-sign-out.js";
 import { Page } from "./Page.js";
 import { Problem } from "./Problem.js";
 
@@ -15,7 +16,6 @@ interface WelcomeProps {
   readonly api: ApiClient;
   readonly appName: string;
   readonly onDone: (me: Me) => void;
-  readonly onSignOut: () => void;
   /** The session is gone (401). */
   readonly onSignedOut: () => void;
 }
@@ -31,11 +31,12 @@ function nameMessage(failure: Failure): string {
   }
 }
 
-export function Welcome({ api, appName, onDone, onSignOut, onSignedOut }: WelcomeProps) {
+export function Welcome({ api, appName, onDone, onSignedOut }: WelcomeProps) {
   const [name, setName] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const field = useRef<HTMLInputElement>(null);
+  const leaving = useSignOut(api, onSignedOut);
 
   useEffect(() => {
     field.current?.focus();
@@ -67,7 +68,7 @@ export function Welcome({ api, appName, onDone, onSignOut, onSignedOut }: Welcom
 
   return (
     <Page appName={appName}>
-      <h1>Welcome to {appName}</h1>
+      <h1 tabIndex={-1}>Welcome to {appName}</h1>
       <form className="stack" onSubmit={(event) => void submit(event)} noValidate>
         <div className="field">
           <label htmlFor="display-name">Display name</label>
@@ -94,12 +95,13 @@ export function Welcome({ api, appName, onDone, onSignOut, onSignedOut }: Welcom
           {pending ? "Saving…" : "Continue"}
         </button>
       </form>
-      <p>
-        Not you?{" "}
-        <button type="button" className="link" onClick={onSignOut}>
-          Sign out
+      <p className="aside">
+        Not you?
+        <button type="button" className="link" disabled={leaving.pending} onClick={leaving.signOut}>
+          {leaving.pending ? "Signing out…" : "Sign out"}
         </button>
       </p>
+      <Problem id="signout-problem" message={leaving.error} />
     </Page>
   );
 }

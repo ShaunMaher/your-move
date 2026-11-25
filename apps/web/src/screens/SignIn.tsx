@@ -27,7 +27,9 @@ function requestMessage(failure: Failure): string {
     case "rate-limited":
       return "Too many attempts from your connection. Please wait a while and try again.";
     case "rejected":
-      return "That doesn't look like an email address. Check it and try again.";
+      // The address passed the app's own check, so what the server refused isn't something the
+      // person can fix by retyping it; say the same thing whatever the address (06 §6.1).
+      return "Something went wrong sending your code. Try again later.";
     default:
       return "Something went wrong. Please try again.";
   }
@@ -124,7 +126,7 @@ export function SignIn({ api, appName, onSignedIn }: SignInProps) {
 
   return (
     <Page appName={appName}>
-      <h1>Sign in</h1>
+      <h1 tabIndex={-1}>Sign in</h1>
       {step === "email" ? (
         <form className="stack" onSubmit={submitEmail} noValidate>
           <p>Enter your email address and we&apos;ll email you a code. No password needed.</p>
@@ -181,7 +183,7 @@ export function SignIn({ api, appName, onSignedIn }: SignInProps) {
             />
           </div>
           <Problem id="problem" message={error} />
-          {notice !== null && <p role="status">{notice}</p>}
+          <div role="status">{notice}</div>
           <button type="submit" className="button" disabled={pending}>
             {pending ? "Checking…" : "Sign in"}
           </button>

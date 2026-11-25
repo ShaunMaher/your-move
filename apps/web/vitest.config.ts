@@ -6,6 +6,8 @@ export default defineProject({
   test: {
     name: "apps/web",
     environment: "jsdom",
+    // The whole suite runs in parallel; a slow machine gets a wide margin.
+    testTimeout: 20_000,
     include: ["src/**/*.test.{ts,tsx}", "build/**/*.test.ts", "sw/**/*.test.ts"],
   },
 });

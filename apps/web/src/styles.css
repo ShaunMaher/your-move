@@ -96,19 +96,34 @@ a,
   color: var(--color-accent);
 }
 
-a {
+/* Links standing alone (navigation) get a full-size target; links in a sentence stay inline. */
+.bar a {
   display: inline-flex;
   align-items: center;
   min-height: var(--target);
 }
 
 .link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
   background: none;
   border: 0;
   padding: 0;
   font: inherit;
   text-decoration: underline;
   cursor: pointer;
+}
+
+.aside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+h1:focus {
+  outline: none;
 }
 
 .card {
@@ -252,6 +267,10 @@ input[aria-invalid="true"] {
   background: var(--color-surface);
   border: 2px solid var(--color-accent);
   border-radius: var(--radius);
+}
+
+.toast-room {
+  height: 6rem;
 }
 
 .visually-hidden {

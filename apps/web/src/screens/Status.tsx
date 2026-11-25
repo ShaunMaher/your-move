@@ -6,7 +6,9 @@ export function Loading() {
   return (
     <div className="shell">
       <main className="stack">
-        <h1 className="visually-hidden">Loading</h1>
+        <h1 tabIndex={-1} className="visually-hidden">
+          Loading
+        </h1>
         <p role="status">Loading…</p>
       </main>
     </div>
@@ -23,7 +25,7 @@ export function Unreachable({ offline, onRetry }: UnreachableProps) {
   return (
     <div className="shell">
       <main className="stack">
-        <h1>{offline ? "You're offline" : "Can't reach the server"}</h1>
+        <h1 tabIndex={-1}>{offline ? "You're offline" : "Can't reach the server"}</h1>
         <p role="status">
           {offline
             ? "Check your connection. We'll try again when you're back online."
@@ -40,7 +42,7 @@ export function Unreachable({ offline, onRetry }: UnreachableProps) {
 export function NotFound({ appName }: { readonly appName: string }) {
   return (
     <Page appName={appName}>
-      <h1>Page not found</h1>
+      <h1 tabIndex={-1}>Page not found</h1>
       <p>
         There&apos;s nothing at this address. <Link to="/">Go to the home screen</Link>.
       </p>

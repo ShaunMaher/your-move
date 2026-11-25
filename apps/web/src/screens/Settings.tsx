@@ -8,6 +8,7 @@ import { useState } from "react";
 
 import { type Me, signOutEverywhere } from "../auth-api.js";
 import { Link } from "../router.js";
+import { useSignOut } from "../use-sign-out.js";
 import { Page } from "./Page.js";
 import { Problem } from "./Problem.js";
 
@@ -15,15 +16,15 @@ interface SettingsProps {
   readonly api: ApiClient;
   readonly appName: string;
   readonly me: Me;
-  readonly onSignOut: () => void;
   readonly onSignedOut: () => void;
 }
 
-export function Settings({ api, appName, me, onSignOut, onSignedOut }: SettingsProps) {
+export function Settings({ api, appName, me, onSignedOut }: SettingsProps) {
   const [confirming, setConfirming] = useState(false);
   const [revokeTokens, setRevokeTokens] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const leaving = useSignOut(api, onSignedOut);
 
   async function everywhere() {
     if (pending) return;
@@ -45,7 +46,7 @@ export function Settings({ api, appName, me, onSignOut, onSignedOut }: SettingsP
 
   return (
     <Page appName={appName} nav={<Link to="/">Home</Link>}>
-      <h1>Settings</h1>
+      <h1 tabIndex={-1}>Settings</h1>
       <section className="card stack" aria-labelledby="account-heading">
         <h2 id="account-heading">Account</h2>
         <dl className="details">
@@ -57,9 +58,15 @@ export function Settings({ api, appName, me, onSignOut, onSignedOut }: SettingsP
       </section>
       <section className="card stack" aria-labelledby="signout-heading">
         <h2 id="signout-heading">Sign out</h2>
-        <button type="button" className="button secondary" onClick={onSignOut}>
-          Sign out
+        <button
+          type="button"
+          className="button secondary"
+          disabled={leaving.pending}
+          onClick={leaving.signOut}
+        >
+          {leaving.pending ? "Signing out…" : "Sign out"}
         </button>
+        <Problem id="signout-problem" message={leaving.error} />
         {confirming ? (
           <div className="stack" role="group" aria-labelledby="everywhere-heading">
             <h3 id="everywhere-heading">Sign out everywhere?</h3>

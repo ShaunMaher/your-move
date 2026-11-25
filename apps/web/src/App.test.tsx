@@ -1,7 +1,9 @@
 import { cleanup, configure, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App.js";
+import { clearReturnPath, isAppPath, peekReturnPath, rememberReturnPath } from "./return-path.js";
+import { clearClientState } from "./session-sync.js";
 import { CONFIG, fakeApi, json, ME, problem } from "./test-support.js";
 
 const signedOut = {
@@ -18,12 +20,20 @@ configure({ asyncUtilTimeout: 10_000 });
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/");
+  clearReturnPath();
 });
 afterEach(cleanup);
 
 const typeInto = (label: string, value: string) => {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 };
+/** What every live alert region says now (the empty ones are always in the page). */
+const alertText = () =>
+  screen
+    .getAllByRole("alert")
+    .map((alert) => alert.textContent)
+    .join(" ")
+    .trim();
 const click = (name: string | RegExp) => {
   fireEvent.click(screen.getByRole("button", { name }));
 };
@@ -65,7 +75,9 @@ describe("signed out", () => {
     window.history.replaceState(null, "", "/settings");
     render(<App api={fakeApi(signedOut).api} />);
     await screen.findByRole("heading", { name: "Sign in" });
-    expect(window.location.pathname).toBe("/signin");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/signin");
+    });
   });
 
   it("checks the address before asking for a code", async () => {
@@ -195,8 +207,9 @@ describe("signed out", () => {
     expect(screen.getByLabelText<HTMLInputElement>("Email address").value).toBe("sam@example.org");
   });
 
-  it("looks the same whatever the address: the same screens and words", async () => {
-    // The API answers every address identically (06 §6.1); the app adds nothing of its own.
+  it("shows the server's answer identically for any address (the app adds nothing of its own)", async () => {
+    // The fake answers every address identically, as the API does (06 §6.1); this checks that the
+    // screens and words don't depend on the address. The API's own parity is tested server-side.
     const run = async (email: string) => {
       const { api } = fakeApi({ ...signedOut, "POST /api/v1/auth/otp/request": json({}, 202) });
       const view = render(<App api={api} />);
@@ -236,7 +249,9 @@ describe("onboarding", () => {
 
   it("asks for a display name with the warning, then shows the home screen", async () => {
     const calls = await toWelcome(json(ME));
-    expect(window.location.pathname).toBe("/welcome");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/welcome");
+    });
     expect(screen.getByText(/Don't use your full name/u)).toBeDefined();
     typeInto("Display name", "Sam");
     click("Continue");
@@ -249,19 +264,25 @@ describe("onboarding", () => {
     await toWelcome(problem(400, "BAD_REQUEST"));
     typeInto("Display name", "admin");
     click("Continue");
-    expect((await screen.findByRole("alert")).textContent).toContain("can't be used");
-    expect(window.location.pathname).toBe("/welcome");
+    await waitFor(() => {
+      expect(alertText()).toContain("can't be used");
+    });
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/welcome");
+    });
   });
 
   it("checks the length before asking", async () => {
     const calls = await toWelcome(json(ME));
     typeInto("Display name", "   ");
     click("Continue");
-    expect((await screen.findByRole("alert")).textContent).toContain("Enter a display name");
+    await waitFor(() => {
+      expect(alertText()).toContain("Enter a display name");
+    });
     typeInto("Display name", "x".repeat(25));
     click("Continue");
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("up to 24");
+      expect(alertText()).toContain("up to 24");
     });
     expect(calls.some((call) => call.method === "PATCH")).toBe(false);
   });
@@ -281,7 +302,9 @@ describe("onboarding", () => {
       <App api={fakeApi(signedIn({ ...ME, displayName: null, needsOnboarding: true })).api} />,
     );
     await screen.findByRole("heading", { name: "Welcome to Family Games" });
-    expect(window.location.pathname).toBe("/welcome");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/welcome");
+    });
   });
 
   it("lets them sign out instead", async () => {
@@ -332,21 +355,65 @@ describe("signed in", () => {
     expect(screen.getByText("sam@example.org")).toBeDefined();
     click("Sign out");
     await screen.findByRole("heading", { name: "Sign in" });
-    expect(window.location.pathname).toBe("/signin");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/signin");
+    });
     expect(calls.at(-1)).toMatchObject({ method: "POST", path: "/api/v1/auth/logout" });
   });
 
-  it("stays signed in when signing out fails", async () => {
-    const { api } = fakeApi({
-      ...signedIn(),
-      "POST /api/v1/auth/logout": new TypeError("offline"),
-    });
-    window.history.replaceState(null, "", "/settings");
-    render(<App api={api} />);
-    await screen.findByRole("heading", { name: "Settings" });
-    click("Sign out");
-    await waitFor(() => {
+  describe("when signing out fails", () => {
+    it.each([
+      ["the network is down", new TypeError("offline")],
+      ["the server errors", problem(500, "INTERNAL")],
+      ["the request is rate limited", problem(429, "RATE_LIMITED")],
+    ])("says so and stays signed in when %s", async (_name, answer) => {
+      const { api, calls } = fakeApi({ ...signedIn(), "POST /api/v1/auth/logout": answer });
+      window.history.replaceState(null, "", "/settings");
+      render(<App api={api} />);
+      await screen.findByRole("heading", { name: "Settings" });
+      click("Sign out");
+      await waitFor(() => {
+        expect(calls.some((call) => call.path === "/api/v1/auth/logout")).toBe(true);
+      });
+      await waitFor(() => {
+        expect(alertText()).toBe("Couldn't sign out. You're still signed in. Try again.");
+      });
+      expect(window.location.pathname).toBe("/settings");
       expect(screen.getByRole("heading", { name: "Settings" })).toBeDefined();
+      expect(screen.queryByRole("heading", { name: "Sign in" })).toBeNull();
+      // The button is usable again, and trying again works.
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Sign out" }).disabled).toBe(
+        false,
+      );
+    });
+
+    it("shows it is working while it waits", async () => {
+      const fake = fakeApi({
+        ...signedIn(),
+        "POST /api/v1/auth/logout": new Response(null, { status: 204 }),
+      });
+      window.history.replaceState(null, "", "/settings");
+      render(<App api={fake.api} />);
+      await screen.findByRole("heading", { name: "Settings" });
+      click("Sign out");
+      expect(screen.getByRole<HTMLButtonElement>("button", { name: "Signing out…" }).disabled).toBe(
+        true,
+      );
+      await screen.findByRole("heading", { name: "Sign in" });
+    });
+
+    it("says so on the welcome screen too", async () => {
+      const { api } = fakeApi({
+        ...signedIn({ ...ME, displayName: null, needsOnboarding: true }),
+        "POST /api/v1/auth/logout": problem(500, "INTERNAL"),
+      });
+      render(<App api={api} />);
+      await screen.findByRole("heading", { name: "Welcome to Family Games" });
+      click("Sign out");
+      await waitFor(() => {
+        expect(alertText()).toContain("Couldn't sign out. You're still signed in.");
+      });
+      expect(window.location.pathname).toBe("/welcome");
     });
   });
 
@@ -417,6 +484,197 @@ describe("when the server can't be reached", () => {
 
   it("shows loading first", () => {
     render(<App api={fakeApi({}).api} />);
-    expect(screen.getByRole("status").textContent).toBe("Loading…");
+    expect(screen.getByText("Loading…").getAttribute("role")).toBe("status");
+  });
+});
+
+describe("returning to where a signed-out visit was headed", () => {
+  it("lands on the page that was asked for once signed in", async () => {
+    window.history.replaceState(null, "", "/settings");
+    const { api } = fakeApi({
+      ...signedOut,
+      "POST /api/v1/auth/otp/request": json({}, 202),
+      "POST /api/v1/auth/otp/verify": json({ user: ME, needsOnboarding: false }),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/signin");
+    });
+    typeInto("Email address", "sam@example.org");
+    click("Email me a code");
+    await screen.findByLabelText("Sign-in code");
+    typeInto("Sign-in code", "12345678");
+    click("Sign in");
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeDefined();
+    expect(window.location.pathname).toBe("/settings");
+  });
+
+  it("goes home after an explicit sign-out, not back to where the person was", async () => {
+    const { api } = fakeApi({
+      ...signedIn(),
+      "POST /api/v1/auth/logout": new Response(null, { status: 204 }),
+    });
+    window.history.replaceState(null, "", "/settings");
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Settings" });
+    click("Sign out");
+    await screen.findByRole("heading", { name: "Sign in" });
+    expect(peekReturnPath()).toBeNull();
+  });
+
+  it.each(["//evil.example/x", "https://evil.example/", "/\\evil.example", "/a b", "/signin", "x"])(
+    "never remembers %s",
+    (value) => {
+      expect(isAppPath(value)).toBe(false);
+    },
+  );
+
+  it("ignores a tampered stored value", () => {
+    window.sessionStorage.setItem("ym.return-path", "//evil.example");
+    expect(peekReturnPath()).toBeNull();
+    clearReturnPath();
+  });
+
+  it("accepts an ordinary app path", () => {
+    rememberReturnPath("/settings");
+    expect(peekReturnPath()).toBe("/settings");
+    clearReturnPath();
+    expect(peekReturnPath()).toBeNull();
+  });
+});
+
+describe("moving focus", () => {
+  it("goes to the new screen's heading after navigating", async () => {
+    render(<App api={fakeApi(signedIn()).api} />);
+    await screen.findByRole("heading", { name: "Hi, Sam" });
+    fireEvent.click(screen.getByRole("link", { name: "Settings" }));
+    const heading = await screen.findByRole("heading", { name: "Settings" });
+    expect(document.activeElement).toBe(heading);
+    expect(heading.getAttribute("tabindex")).toBe("-1");
+  });
+});
+
+describe("ending the session in every tab", () => {
+  it("clears this tab when another tab signs out", async () => {
+    render(<App api={fakeApi(signedIn()).api} />);
+    await screen.findByRole("heading", { name: "Hi, Sam" });
+    window.localStorage.setItem("ym.game.words.u1.g1", "rack");
+    // The tab starts listening just after it first shows the screen, so say it until heard.
+    await waitFor(() => {
+      const other = new BroadcastChannel("session");
+      other.postMessage("signed-out");
+      other.close();
+      expect(screen.getByRole("heading", { name: "Sign in" })).toBeDefined();
+    });
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/signin");
+    });
+    expect(window.localStorage.getItem("ym.game.words.u1.g1")).toBeNull();
+  });
+
+  it("tells the other tabs when this one signs out", async () => {
+    const heard = new Promise<unknown>((resolve) => {
+      const channel = new BroadcastChannel("session");
+      channel.onmessage = (event: MessageEvent) => {
+        channel.close();
+        resolve(event.data);
+      };
+    });
+    const { api } = fakeApi({
+      ...signedIn(),
+      "POST /api/v1/auth/logout": new Response(null, { status: 204 }),
+    });
+    window.history.replaceState(null, "", "/settings");
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Settings" });
+    click("Sign out");
+    expect(await heard).toBe("signed-out");
+  });
+
+  it("checks the session again when the tab becomes visible", async () => {
+    let signedInStill = true;
+    const { api } = fakeApi({
+      "GET /api/v1/config": json(CONFIG),
+      "GET /api/v1/me": () => (signedInStill ? json(ME) : problem(401, "UNAUTHENTICATED")),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Hi, Sam" });
+    signedInStill = false;
+    // The tab starts listening just after it first shows the screen, so say it until heard.
+    await waitFor(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(screen.getByRole("heading", { name: "Sign in" })).toBeDefined();
+    });
+  });
+
+  it("stays signed in when the check can't reach the server", async () => {
+    let up = true;
+    const { api, calls } = fakeApi({
+      "GET /api/v1/config": json(CONFIG),
+      "GET /api/v1/me": () => (up ? json(ME) : new TypeError("offline")),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Hi, Sam" });
+    up = false;
+    await waitFor(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(calls.filter((call) => call.path === "/api/v1/me").length).toBeGreaterThan(1);
+    });
+    expect(screen.getByRole("heading", { name: "Hi, Sam" })).toBeDefined();
+  });
+});
+
+describe("clearClientState", () => {
+  it("removes per-game local state and nothing else", () => {
+    window.localStorage.setItem("ym.game.words.u1.g1", "a");
+    window.localStorage.setItem("ym.game.paths.u1.g2", "b");
+    window.localStorage.setItem("ym.gamer", "keep");
+    window.localStorage.setItem("theme", "dark");
+    clearClientState();
+    expect(window.localStorage.length).toBe(2);
+    expect(window.localStorage.getItem("theme")).toBe("dark");
+    window.localStorage.clear();
+  });
+
+  it("copes with storage that throws", () => {
+    const spy = vi.spyOn(Storage.prototype, "key").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    window.localStorage.setItem("ym.game.words.u1.g1", "a");
+    expect(() => {
+      clearClientState();
+    }).not.toThrow();
+    spy.mockRestore();
+    window.localStorage.clear();
+  });
+});
+
+describe("the sign-in request refused as malformed", () => {
+  it("says the same neutral thing whatever the address", async () => {
+    const { api } = fakeApi({
+      ...signedOut,
+      "POST /api/v1/auth/otp/request": problem(400, "BAD_REQUEST"),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    typeInto("Email address", "sam@example.org");
+    click("Email me a code");
+    await waitFor(() => {
+      expect(alertText()).toBe("Something went wrong sending your code. Try again later.");
+    });
+  });
+});
+
+describe("live regions", () => {
+  it("are in the page before they have anything to say", async () => {
+    const { api } = fakeApi({ ...signedOut, "POST /api/v1/auth/otp/request": json({}, 202) });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    expect(screen.getAllByRole("status")).toHaveLength(1); // the update toast's
+    typeInto("Email address", "sam@example.org");
+    click("Email me a code");
+    await screen.findByLabelText("Sign-in code");
+    expect(screen.getAllByRole("status")).toHaveLength(2); // and the "sent another code" notice
   });
 });
