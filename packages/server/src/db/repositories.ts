@@ -72,12 +72,10 @@ export interface UserRepo {
     remember: { gameType: string; input: string | null; updatedAt: number },
   ): Promise<void>;
   /**
-   * Sets `settings.emailNudges`, leaving every other key as it is now in the database, in one
-   * atomic batch. `users.email_id` (04) is set exactly while nudges are on: turning them on
-   * records the address's `emailId`, which a `nudges` unsubscribe token looks the account up by
-   * (05 §Email links), and removes an `unsubscribed` suppression of it (signed-in consent
-   * outranks an earlier link click; `bounced` and `complained` rows stay); turning them off
-   * clears it.
+   * Sets `settings.emailNudges`, leaving every other key as it is now in the database.
+   * `users.email_id` (04) is set exactly while nudges are on: turning them on records the
+   * address's `emailId`, which a `nudges` unsubscribe token looks the account up by (05 §Email
+   * links); turning them off clears it. Suppressions are left alone.
    */
   setEmailNudges(id: string, change: EmailNudgesChange): Promise<void>;
   /**
@@ -428,7 +426,8 @@ export interface NudgeRepo {
    * of an `active` game of one of the `installed` type and version pairs (so orphaned games never
    * take a place in the queue), idle and not nudged within the window, whose user is an onboarded
    * human, not suspended or being deleted, with `settings.emailNudges` true and an `email_id`
-   * that isn't suppressed.
+   * that hasn't bounced or complained (an `unsubscribed` row is about invite emails; nudges have
+   * their own opt-out, 03 §7). The least recently nudged come first, then the longest waiting.
    */
   due(
     window: NudgeWindow,

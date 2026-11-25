@@ -136,25 +136,50 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
       expect((await repos().users.findById(id))?.updatedAt).toBe(T0 + 4);
     });
 
-    it("turning nudges on lifts an unsubscribed suppression of the address, never a bounce or complaint (A6-P-3)", async () => {
-      const reasons = ["unsubscribed", "bounced", "complained"] as const;
-      const left: Record<string, unknown[]> = {};
-      for (const reason of reasons) {
+    it("turning nudges on leaves suppressions alone (A6-S2-1)", async () => {
+      for (const reason of ["unsubscribed", "bounced", "complained"] as const) {
         const id = crypto.randomUUID();
         const emailId = freshEmailId();
         await repos().users.create({ id, email: address(id), createdAt: T0, updatedAt: T0 });
         await repos().emailSuppressions.suppress(emailId, reason, T0);
         await repos().users.setEmailNudges(id, { enabled: true, emailId, updatedAt: T0 });
-        left[reason] = await target().sql(
-          "SELECT reason FROM email_suppressions WHERE email_hash = ?",
-          emailId,
-        );
+        expect(
+          await target().sql("SELECT reason FROM email_suppressions WHERE email_hash = ?", emailId),
+        ).toEqual([{ reason }]);
       }
-      expect(left).toEqual({
-        unsubscribed: [],
-        bounced: [{ reason: "bounced" }],
-        complained: [{ reason: "complained" }],
+    });
+
+    it("an unsubscribed row doesn't stop nudges; a bounce or complaint does, in due and in claim", async () => {
+      const due = new Map<string, string>();
+      for (const reason of ["unsubscribed", "bounced", "complained"] as const) {
+        const { id, emailId } = await user();
+        await repos().emailSuppressions.suppress(emailId, reason, T0);
+        due.set(reason, (await seat(id)).playerId);
+      }
+      const listed = await dueIds();
+      expect([...due].map(([reason, playerId]) => [reason, listed.has(playerId)])).toEqual([
+        ["unsubscribed", true],
+        ["bounced", false],
+        ["complained", false],
+      ]);
+      const claims = [];
+      for (const playerId of due.values()) {
+        claims.push(await repos().nudges.claim(playerId, T0 + DAY, WINDOW));
+      }
+      expect(claims).toEqual([true, false, false]);
+    });
+
+    it("due lists the least recently nudged first, then the longest waiting (A6-S2-2)", async () => {
+      // Nudged a day ago and due again, though waiting longest of all.
+      const again = await seat((await user()).id, {
+        toActSince: T0 - 5 * DAY,
+        lastNudgedAt: T0 - DAY,
       });
+      const never = await seat((await user()).id, { toActSince: T0 - DAY });
+      const order = (await repos().nudges.due(WINDOW, 10_000, INSTALLED)).map(
+        (row) => row.playerId,
+      );
+      expect(order.indexOf(never.playerId)).toBeLessThan(order.indexOf(again.playerId));
     });
 
     it("setEmailNudges treats unreadable settings as empty", async () => {

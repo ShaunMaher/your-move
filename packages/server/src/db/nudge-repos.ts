@@ -24,8 +24,10 @@ function seatDue(window: NudgeWindow) {
 
 /**
  * The user may be nudged (03 §7): an onboarded human, not suspended or being deleted, with nudges
- * on and an `email_id` that isn't suppressed. Columns of `users` only, so it serves both the join
- * in `due` and the subquery in `claim`.
+ * on and an `email_id` that hasn't bounced or complained. An `unsubscribed` suppression doesn't
+ * stop nudges: it is written only for invite emails, and nudges have their own opt-out (the
+ * setting and `email_id`). Columns of `users` only, so it serves both the join in `due` and the
+ * subquery in `claim`.
  */
 const USER_ELIGIBLE = and(
   eq(users.kind, "human"),
@@ -35,7 +37,7 @@ const USER_ELIGIBLE = and(
   isNull(users.suspendedAt),
   isNull(users.deletionRequestedAt),
   NUDGES_ON,
-  sql`NOT EXISTS (SELECT 1 FROM ${emailSuppressions} WHERE ${emailSuppressions.emailHash} = ${users.emailId})`,
+  sql`NOT EXISTS (SELECT 1 FROM ${emailSuppressions} WHERE ${emailSuppressions.emailHash} = ${users.emailId} AND ${emailSuppressions.reason} IN ('bounced', 'complained'))`,
 );
 
 export function nudgeRepo(db: Database): NudgeRepo {
@@ -69,7 +71,12 @@ export function nudgeRepo(db: Database): NudgeRepo {
             USER_ELIGIBLE,
           ),
         )
-        .orderBy(asc(gamePlayers.toActSince), asc(gamePlayers.id))
+        // Least recently nudged first, so one recipient's many games can't hold the queue (A6-S2-2).
+        .orderBy(
+          asc(sql`coalesce(${gamePlayers.lastNudgedAt}, 0)`),
+          asc(gamePlayers.toActSince),
+          asc(gamePlayers.id),
+        )
         .limit(limit);
       // The filters above make these non-null; the checks keep the types honest.
       return rows.flatMap((row) =>
