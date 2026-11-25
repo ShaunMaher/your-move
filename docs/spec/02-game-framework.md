@@ -50,7 +50,9 @@ per supported rules version, typed by `@your-move/sdk`:
 ```ts
 // All of these types are exported by @your-move/sdk (§7.4). Schema<T> is a Zod schema: the SDK
 // declares zod (one pinned major) as a peer dependency and re-exports it as
-// "@your-move/sdk/schema", so engines build schemas without importing anything else.
+// "@your-move/sdk/schema", so engines build schemas without importing anything else. A game uses
+// that one Zod and no compiled parser: the browser runs it jitless under a CSP without
+// unsafe-eval (08 §3; §7 Dependencies).
 type Schema<T> = z.ZodType<T>;
 type Seat = number;                                        // 0..seats-1, fixed at start (§4)
 type GameError = { code: string; detail?: unknown };       // module codes, never a reserved code (§2.2)
@@ -243,9 +245,16 @@ The shell's history drawer reads `GET /api/v1/games/:id/history` (05), which ret
 transition's public `record` and stored `describe` text; `HistoryItem` renders the record, falling
 back to the `describe` text for any record it can't render. Module views never carry history.
 
-The **game shell** (framework UI) supplies everything around the board: header with players,
-scores or ranks and whose turn it is, the menu (resign, rules, history, game info), lobby screens,
-error toasts, the stale-state refetch, and the realtime refresh. A game module never talks to the
+The **game shell** (framework UI) supplies everything around the board: the header, the menu
+(resign, rules, history, game info), lobby screens, the result card of a finished game (ranks,
+scores, how it ended), error notices, the stale-state refetch, and the realtime refresh. Each piece
+of game state has **one owner on screen**: while a module's board is shown, the *board* draws the
+scores and whose turn it is, with its own live status, and the shell adds neither (no player chips,
+no turn line, no second live region); the shell's player list and turn line appear only in place
+of a board that can't be shown (loading, unsupported version). The board is kept above the fold on
+a 320 px phone. The history drawer hands each entry to the module's `HistoryItem` together with
+the stored `describe` text, and shows nothing else for it: the module chooses between its own
+drawing and the fallback. A game module never talks to the
 API directly; it only calls `submit` and `preview`. The client may import the module's pure engine
 to compute previews locally (e.g. word scores), but it is always non-authoritative.
 
@@ -603,7 +612,9 @@ package except through these three entry points.
   (publishing replaces them); `games:verify` resolves them only for this repository's workspace
   packages, whose own top-level `node_modules` (pnpm's links) it skips.
 - **Dependencies**: `@your-move/sdk`, `zod` and (for the client) `react` are **peerDependencies**
-  only (the instance supplies them); the SDK range is the package's statement of compatibility
+  only (the instance supplies them); a game takes Zod only as that peer dependency, because the web
+  app runs Zod `jitless` (08 §3) and a game that bundled its own copy, or used a compiled parser,
+  would need `unsafe-eval` in the browser; the SDK range is the package's statement of compatibility
   (§7.4). An engine may **bundle** pure third-party code into its built output (inlined, e.g. a
   small algorithm library; not as a bundled dependency); bundled code is held to the same rules as the engine's own code. The built
   engine and manifest output import nothing but `@your-move/sdk` and `@your-move/sdk/schema`,

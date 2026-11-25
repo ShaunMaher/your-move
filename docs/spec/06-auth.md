@@ -122,7 +122,9 @@ mostly painless.
   02 §3, 07 §2), so one `clearClientState()` removes every such key, and nothing else of a
   module's survives the session. It runs on sign-out and sign-out everywhere, in every open tab (a
   `BroadcastChannel` message), and a tab that becomes visible checks `/api/v1/me` again, so a
-  session ended from another device clears it too.
+  session ended from another device clears it too. The shell's **public word-list cache**
+  (`dictionaries-v1`, 07 §4) deliberately survives sign-out: it holds only public, content-addressed
+  lists (each stored under the digest of its own contents) and nothing of any user.
 - **Suspension** (05 §Admin API): suspending a user deletes their sessions and revokes their tokens
   (with the same socket closing as above), cancels the lobbies they created and declines their
   pending invitations (realtime only); their active games continue and time out normally. The
