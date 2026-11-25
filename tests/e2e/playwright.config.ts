@@ -74,6 +74,11 @@ export default defineConfig({
       EMAIL_FROM: "no-reply@localhost",
       OPERATOR_CONTACT: "ops@localhost",
       DATABASE_PATH,
+      // Every test signs in from the one address of this machine; the limits are exercised by the
+      // server's own tests, not here.
+      LIMIT_OTP_REQUEST_IP_HOUR: "10000",
+      LIMIT_OTP_VERIFY_IP_HOUR: "10000",
+      LIMIT_NEW_ACCOUNTS_IP_DAY: "10000",
     },
   },
 });

@@ -123,11 +123,18 @@ describe("Worker static assets (generated _headers)", () => {
   });
 
   it("never serves the shell for server paths", async () => {
-    for (const path of ["/api/nope", "/__dev/emails", "/manifest.webmanifest"]) {
+    for (const path of ["/api/nope", "/__dev/emails"]) {
       const response = await send(path);
       expect(response.status).toBe(404);
       expect(response.headers.get("Content-Type")).toMatch(/^application\/json/u);
     }
+  });
+
+  it("generates the manifest from config in the Worker, not from the static assets", async () => {
+    const response = await send("/manifest.webmanifest");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("application/manifest+json");
+    expectSecurityHeaders(response);
   });
 });
 

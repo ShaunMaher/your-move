@@ -20,13 +20,13 @@ export const ME = {
   isAdmin: false,
 };
 
-export interface Call {
+interface Call {
   readonly method: string;
   readonly path: string;
   readonly body: unknown;
 }
 
-export type Handler = (call: Call) => Response | Error;
+type Handler = (call: Call) => Response | Error;
 type Routes = Record<string, Handler | Response | Error>;
 
 export const json = (body: unknown, status = 200): Response =>

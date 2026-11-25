@@ -82,19 +82,17 @@ describe("GET /api/v1/openapi.json", () => {
 });
 
 describe("server-handled paths", () => {
-  it.each([
-    "/api/nope",
-    "/api/v1/nope",
-    "/api/v2/health",
-    "/__dev/emails",
-  ])("%s is a JSON 404, never the SPA", async (path) => {
-    const { app } = setup();
-    for (const method of ["GET", "POST"]) {
-      const res = await app.request(path, { method });
-      expect(res.status).toBe(404);
-      expect(await res.json()).toEqual({ error: { code: "NOT_FOUND", message: "Not found." } });
-    }
-  });
+  it.each(["/api/nope", "/api/v1/nope", "/api/v2/health", "/__dev/emails"])(
+    "%s is a JSON 404, never the SPA",
+    async (path) => {
+      const { app } = setup();
+      for (const method of ["GET", "POST"]) {
+        const res = await app.request(path, { method });
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual({ error: { code: "NOT_FOUND", message: "Not found." } });
+      }
+    },
+  );
 });
 
 describe("/manifest.webmanifest", () => {
