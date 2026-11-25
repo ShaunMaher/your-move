@@ -4,8 +4,8 @@ import { type AnyGameDefinition, OK } from "@your-move/sdk";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { ApiError } from "../http/api-error.js";
 import type { GamePlayerRecord, GameRecord } from "../db/repositories.js";
+import { ApiError } from "../http/api-error.js";
 import { accept, rerank } from "./lifecycle.js";
 import { recordedCryptoRandom } from "./random.js";
 import { createGameRegistry, GameConfigError } from "./registry.js";
