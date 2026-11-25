@@ -626,6 +626,14 @@ describe("GAME_SEED (A2 review P2-7)", () => {
     try {
       process.env["GAME_SEED"] = "12abc";
       expect(() => gameSeed()).toThrow(/GAME_SEED must be an integer/u);
+      for (const bad of ["0x10", "1e3", "-1", "1.5", " 7"]) {
+        process.env["GAME_SEED"] = bad;
+        expect(() => gameSeed(), bad).toThrow(/GAME_SEED must be an integer/u);
+      }
+      process.env["GAME_SEED"] = "";
+      expect(Number.isSafeInteger(gameSeed())).toBe(true);
+      process.env["GAME_SEED"] = "0";
+      expect(gameSeed()).toBe(0);
       process.env["GAME_SEED"] = "42";
       expect(gameSeed()).toBe(42);
     } finally {
