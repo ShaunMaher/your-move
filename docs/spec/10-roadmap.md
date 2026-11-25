@@ -138,6 +138,17 @@ The project's foundation, built to 11 (engineering standards) from the first com
   logout-all test; Origin/JSON enforcement tests; `/__dev/emails` 404 in production config;
   zero CSP violations in Playwright; verified on a real iPhone home-screen install that sign-in
   persists across app restarts and that the home-screen label uses the runtime `APP_NAME`.
+- **Deferred from M2b (the server half, review round 1), each with its target:**
+  - `smtp`: pending **Q26** (the library's MIT-0 licence is an owner/legal decision). Until a
+    sending provider exists (`gmail` in M4, or `smtp` once Q26 is decided) only `console` sends,
+    so **M2 can't be accepted** — the real-device sign-in check needs real email — before then.
+  - `GET /api/v1/me/sessions` and `DELETE /api/v1/me/sessions/:id`: M2c (with the sign-in UI).
+  - `settings` in `PATCH /api/v1/me` (`emailNudges`, `whoCanAddMe`, theme): M4, which also sets
+    the `emailNudges` default.
+  - Turnstile: not built; configuring `TURNSTILE_*` refuses to start until it is (M4). The global
+    caps alert instead (F-12).
+  - Account deletion's game steps, `deletion_requested_at` and nulling `admin_audit.target_id`
+    (04 §Account deletion): M3, with games and the Admin API.
 
 ## Alpha — the first playable release (a cut across M2–M4)
 
@@ -168,6 +179,8 @@ creates a words game and adds the other, and they play it to the end; the slices
 tests are green in CI.
 
 ## M3 — Framework + play words
+- Cookie plus bearer on one request is refused on every route (05 §Conventions): done in M2b, so
+  bearer tokens inherit it.
 - Framework in `packages/server`: games registry, generic `games` / `game_players` /
   `game_actions` / `game_resources` / `past_opponents` storage, membership rules, lifecycle (lobby,
   auto-join of past opponents vs invitation per `whoCanAddMe`, accept, remove seat, start with seat

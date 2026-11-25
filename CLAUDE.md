@@ -63,7 +63,9 @@ Toolchain: `mise install` (Node, pnpm and the scanners pinned in `mise.toml` and
 - `pnpm install` · `pnpm dev:node` · `pnpm dev:worker` · `pnpm build`
 - Quality: `pnpm format` · `pnpm format:check` · `pnpm lint` · `pnpm lint:arch` ·
   `pnpm lint:unused` · `pnpm lint:licences` · `pnpm lint:vulns` · `pnpm lint:pins` ·
-  `pnpm typecheck` · `pnpm test` ·
+  `pnpm typecheck` · `pnpm test` · `pnpm test:timing` (the statistical sign-in timing suite, about
+  25 s, on a quiet machine; `pnpm test` skips it; coders run it before handing off sign-in
+  changes, ADR 0006) ·
   `pnpm test:e2e` (after `pnpm build`) · `pnpm gates:prove`
 - Games: `pnpm games:generate` (also runs on `prepare`) · `pnpm games:verify` (`--fast` in builds; never in deploy jobs) ·
   `pnpm games:check-inputs` (after the builds; `--only web,node` in the Docker build) ·

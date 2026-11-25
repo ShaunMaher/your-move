@@ -106,9 +106,16 @@ interface Platform {
   config: AppConfig;               // validated env (APP_NAME, PUBLIC_URL, secrets...) — see 09
   now(): Date;                     // injectable clock for tests
   log: Logger;                     // structured JSON logs, never logs secrets/OTPs
-  waitUntil(p: Promise<unknown>): void; // background work after response (CF ctx.waitUntil / Node: fire-and-track)
+  clientIp(request, env): ClientIp; // the client address (08 §4.1): CF-Connecting-IP on Workers, by TRUST_PROXY on Node
 }
 ```
+
+**Background work is per request.** `waitUntil` is not a `Platform` member: on Workers it belongs
+to each request's `ctx`, and an app built once per isolate must not capture one. The runtime passes
+an execution context with every request (`app.fetch(request, env, ctx)`: the Worker's own `ctx`;
+on Node, one whose `waitUntil` tracks the task so shutdown waits for it), and the core reaches it
+through Hono's `c.executionCtx.waitUntil`. Background tasks start after the response and their
+errors are logged by class only.
 
 **Database boundary.** Drizzle's D1 driver is async and supports `batch()` but not interactive
 transactions; `node:sqlite` is synchronous and has transactions but no batch API. So core code

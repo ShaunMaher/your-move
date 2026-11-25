@@ -5,6 +5,7 @@
  */
 import {
   createApp,
+  createConsoleEmailSender,
   createJsonLogger,
   DEFAULT_APP_NAME,
   detachedRepositories,
@@ -26,12 +27,15 @@ const DOCUMENT_ENV = {
 export async function buildOpenApiDocument(): Promise<unknown> {
   const config = parseConfig(DOCUMENT_ENV, { runtime: "node", installedGames: [] });
   const now = (): Date => new Date(0);
+  const log = createJsonLogger({ level: "error", now, sink: () => undefined });
   const app = createApp({
     platform: {
       repos: detachedRepositories(),
       config,
       now,
-      log: createJsonLogger({ level: "error", now, sink: () => undefined }),
+      log,
+      email: createConsoleEmailSender(log, now),
+      clientIp: () => ({ ok: false, reason: "missing" }),
     },
     games: [],
   });

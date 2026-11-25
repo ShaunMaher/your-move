@@ -1,8 +1,10 @@
 /** Helpers shared by this package's tests. Not exported from the package. */
 import type { Platform } from "./app.js";
+import { resolveClientIp } from "./auth/client-ip.js";
 import { LOCAL_DEV_APP_SECRET } from "./config/local-dev.js";
 import { parseConfig, type Env } from "./config/parse.js";
 import { detachedRepositories } from "./db/detached.js";
+import { createConsoleEmailSender } from "./email/sender.js";
 import { createJsonLogger } from "./log.js";
 
 /** A minimal valid local-dev environment. */
@@ -32,14 +34,23 @@ export interface TestPlatform extends Platform {
 export function testPlatform(env: Env = LOCAL_ENV): TestPlatform {
   const lines: Record<string, unknown>[] = [];
   const now = (): Date => new Date(Date.UTC(2026, 0, 1));
+  const log = createJsonLogger({
+    level: "debug",
+    now,
+    sink: (line) => lines.push(JSON.parse(line) as Record<string, unknown>),
+  });
   return {
     repos: detachedRepositories(),
     config: parseConfig(env, { runtime: "node", installedGames: [] }),
-    log: createJsonLogger({
-      level: "debug",
-      now,
-      sink: (line) => lines.push(JSON.parse(line) as Record<string, unknown>),
-    }),
+    log,
+    email: createConsoleEmailSender(log, now),
+    clientIp: (request) =>
+      resolveClientIp(request.headers, {
+        mode: "xff",
+        socketAddress: null,
+        hops: 1,
+        trustedPeers: [],
+      }),
     now,
     lines,
   };

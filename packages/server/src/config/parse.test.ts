@@ -100,8 +100,6 @@ describe("parseConfig: valid configurations", () => {
         VAPID_PUBLIC_KEY: "vapid-public",
         VAPID_PRIVATE_KEY: "vapid-private",
         VAPID_SUBJECT: "mailto:ops@example.org",
-        TURNSTILE_SITE_KEY: "site-key",
-        TURNSTILE_SECRET: "turnstile-secret",
         ADMIN_EMAILS: " Admin@Example.org ,other@example.org,admin@example.org",
         DICTIONARIES_ENABLED: "enable",
         DICTIONARY_UPLOADS: "false",
@@ -123,7 +121,7 @@ describe("parseConfig: valid configurations", () => {
         privateKey: "vapid-private",
         subject: "mailto:ops@example.org",
       },
-      turnstile: { siteKey: "site-key", secret: "turnstile-secret" },
+      turnstile: null,
       adminEmails: ["admin@example.org", "other@example.org"],
       dictionariesEnabled: ["enable"],
       dictionaryUploads: false,
@@ -287,6 +285,11 @@ describe("parseConfig: invalid configurations", () => {
     ],
     ["partial Turnstile", { ...PROD_ENV, TURNSTILE_SITE_KEY: "k" }, "set both to enable Turnstile"],
     [
+      "Turnstile before enforcement exists (M2b review S-3)",
+      { ...PROD_ENV, TURNSTILE_SITE_KEY: "k", TURNSTILE_SECRET: "s" },
+      "Turnstile enforcement is not built yet",
+    ],
+    [
       "MIN_AGE below 13",
       { ...PROD_ENV, MIN_AGE: "12" },
       "MIN_AGE: must be a whole number of at least 13",
@@ -310,7 +313,12 @@ describe("parseConfig: invalid configurations", () => {
     [
       "ADMIN_EMAILS malformed",
       { ...PROD_ENV, ADMIN_EMAILS: "admin" },
-      "ADMIN_EMAILS: each entry must be a plain email address",
+      "ADMIN_EMAILS: each entry must be an email address sign-in accepts",
+    ],
+    [
+      "ADMIN_EMAILS an address sign-in would refuse (M2b review P-15)",
+      { ...PROD_ENV, ADMIN_EMAILS: "admin@localhost" },
+      "ADMIN_EMAILS: each entry must be an email address sign-in accepts",
     ],
     [
       "DICTIONARIES_EXTRA bad id",

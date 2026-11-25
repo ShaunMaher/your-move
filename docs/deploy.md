@@ -103,6 +103,12 @@ least an x86-64-v2 model. Until the shared amd64 runner offers it, the Worker co
 in the `test:worker` job on the arm64 runner (`arch-arm64`); when it does, delete that job and the
 `--exclude` in `test`. Caches are kept per architecture (`CACHE_ARCH`).
 
+`test:timing` (the statistical sign-in timing suite, ADR 0006) measures on the arm64 runner, after
+this pipeline's other arm64 jobs. Jobs of other pipelines can still share that runner while it
+measures unless the runner's concurrency is 1; that is the operator's runner setting (`concurrent`
+in its `config.toml`), and the repository doesn't record it. A shifted measurement on a busy runner
+is a reason to re-measure, not to retry (ADR 0006).
+
 The game kit's CPU budget (08 T25) is measured on the host running the kit, and the shared amd64
 runner (a `qemu64` VM, 2–3× slower than a developer laptop, often running several pipelines at
 once) can't hold the 5 ms reference budget reliably. CI therefore sets one calibrated budget,

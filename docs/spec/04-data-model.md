@@ -220,7 +220,7 @@ to sign in).
 Index on `owner_id`.
 
 ### `rate_limits`
-| key | TEXT | e.g. `otp:email:<hash>`, `otp:ip:<hash>`, `invite:user:<id>` |
+| key | TEXT | e.g. `otp:email:<hash>`, `otp:ip:<hash>`, `invite:user:<id>`, and the fixed keys `all` (instance-wide sends) and `silent` (requests that sent nothing; written, never read, 06 §3.2) |
 | window_start | INTEGER | |
 | count | INTEGER | PK(key, window_start); swept hourly |
 

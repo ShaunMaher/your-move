@@ -138,8 +138,11 @@ default:
     echo "/dev/shm has ${shm_free_kb:-no} KB free; the tests need 32 MB (docs/deploy.md \"CI runners\")"
     exit 1
   fi
-  export TMPDIR=/dev/shm/ci-tmp
-  mkdir -p "$TMPDIR"
+  # A directory of this job's own, not a fixed path another job on the runner could have made.
+  # Kept short: tsx's socket path under it must stay under 108 bytes.
+  # The Docker executor gives each job container its own /dev/shm, so nothing outlives the job.
+  TMPDIR="$(mktemp -d /dev/shm/ci-tmp.XXXXXX)"
+  export TMPDIR
   echo "TMPDIR=$TMPDIR (${shm_free_kb} KB free)"
 
 # Node, pnpm (and any MISE_TOOLS) from mise.lock, and the workspace installed.
@@ -244,7 +247,8 @@ test:
     - *tmp-in-memory
     # Unit, integration, property, component and API contract tests. The Worker half of the
     # contract suite and the D1 repository contract suite run in test:worker instead (see there):
-    # to fold them back, drop the --excludes and the test:worker job. Vitest matches --exclude
+    # to fold them back, drop those two --excludes and the test:worker job. The statistical timing
+    # suite runs alone in test:timing; `pnpm test` skips it (ADR 0006). Vitest matches --exclude
     # against each project's own directory, so only an absolute path names one file and no other.
     - pnpm test --exclude "$CI_PROJECT_DIR/tests/contract/src/worker.test.ts" --exclude "$CI_PROJECT_DIR/tests/contract/src/d1-repositories.test.ts"
     # The full game kit and every other games:verify check on each installed game (02 §6, 11 §4);
@@ -282,7 +286,7 @@ test:worker:
   variables:
     CACHE_ARCH: arm64
     WRANGLER_LOG_PATH: $CI_PROJECT_DIR/reports/wrangler-logs
-  # The only job on the arm64 runner that uses the caches, so it writes that architecture's.
+  # The only job on the arm64 runner that writes the caches (test:timing only reads them).
   cache:
     - key:
         prefix: pnpm-$CACHE_ARCH
@@ -309,6 +313,38 @@ test:worker:
     access: developer
     paths:
       - reports/wrangler-logs/
+    reports:
+      junit: reports/junit.xml
+
+# The statistical enumeration-timing suite (06 §3.2, Q3), on its own (ADR 0006). It is a
+# measurement, not an ordinary test: on the shared amd64 runner, a slow VM often running several
+# pipelines, other work skewed it and it failed. So it runs on the arm64 runner after this
+# pipeline's other arm64 jobs (test:worker, build:image:arm64) have finished, so none of this
+# pipeline's own work runs beside it. The stage only satisfies `needs` (a job may need only earlier
+# stages); `needs` sets when it starts, and it downloads neither job's artifacts. Required: on a
+# quiet runner it passes, and a failure is re-measured, never retried (ADR 0006).
+test:timing:
+  stage: e2e
+  extends: [.pnpm, .every-pipeline]
+  tags: [arch-arm64]
+  needs:
+    - job: test:worker
+      artifacts: false
+    - job: build:image:arm64
+      artifacts: false
+  variables:
+    CACHE_ARCH: arm64
+  script:
+    # The harness's databases are files: on tmpfs, disk stalls don't land in the measurements.
+    - *tmp-in-memory
+    - pnpm test:timing
+  after_script:
+    - *runner-report
+    # How busy the runner was while it measured.
+    - 'if [ "$CI_JOB_STATUS" = "failed" ]; then echo "loadavg: $(cat /proc/loadavg)"; fi'
+  artifacts:
+    when: always
+    expire_in: 1 week
     reports:
       junit: reports/junit.xml
 
@@ -537,7 +573,17 @@ publish:packages:
     - if: $CI_COMMIT_TAG =~ /^v/
       when: manual
       allow_failure: true
-  needs: [validate, test, test:worker, build:app, e2e, security:secrets, security:dependencies]
+  needs:
+    [
+      validate,
+      test,
+      test:worker,
+      test:timing,
+      build:app,
+      e2e,
+      security:secrets,
+      security:dependencies,
+    ]
   variables:
     # A fresh clone, never a checkout left on the runner by another pipeline.
     GIT_STRATEGY: clone
@@ -579,6 +625,7 @@ publish:image:
     - validate
     - test
     - test:worker
+    - test:timing
     - build:app
     - build:image:amd64
     - build:image:arm64
