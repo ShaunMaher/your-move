@@ -235,6 +235,9 @@ export function createGmailEmailSender(options: GmailOptions): GmailEmailSender 
           html: message.html,
           date: options.now(),
           messageId: `${crypto.randomUUID()}@${from.address.slice(from.address.lastIndexOf("@") + 1)}`,
+          ...(message.listUnsubscribe === undefined
+            ? {}
+            : { listUnsubscribe: message.listUnsubscribe }),
         });
         let response = await sendRaw(raw, await accessToken());
         if (response.status === 401) {

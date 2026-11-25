@@ -14,6 +14,7 @@ import { registerAuthRoutes } from "./auth/routes.js";
 import { readSessionCookie } from "./auth/session.js";
 import { isLocalDev } from "./config/local-dev.js";
 import { deriveSubkeys, type Subkeys } from "./crypto/subkeys.js";
+import { registerUnsubscribeRoutes } from "./email/unsubscribe-routes.js";
 import { EngineFault } from "./games/engine-fault.js";
 import { cryptoRandom, type RandomFactory } from "./games/random.js";
 import { createGameRegistry, type InstalledGame } from "./games/registry.js";
@@ -235,6 +236,7 @@ export function createApp(options: AppOptions): App {
   let subkeys: Promise<Subkeys> | null = null;
   const keys = (): Promise<Subkeys> => (subkeys ??= deriveSubkeys(config.appSecret));
   registerAuthRoutes(app, { platform, keys });
+  registerUnsubscribeRoutes(app, { platform, keys });
   registerGameRoutes(app, {
     platform,
     registry,

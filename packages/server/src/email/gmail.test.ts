@@ -164,6 +164,18 @@ describe("gmail sender", () => {
     expect(mime).toContain("1234 5678");
   });
 
+  it("sends the unsubscribe headers of a message that has them (05 §Email links)", async () => {
+    const { sender, sends } = setup();
+    const url = "https://play.example.org/api/v1/email/unsubscribe?t=abc";
+    await sender.send({ ...message, listUnsubscribe: url });
+    const { raw } = JSON.parse(sends()[0]?.body ?? "{}") as { raw: string };
+    const mime = new TextDecoder().decode(
+      Uint8Array.from(atob(raw.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)),
+    );
+    expect(mime).toContain(`List-Unsubscribe: <${url}>\r\n`);
+    expect(mime).toContain("List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n");
+  });
+
   it("caches the access token until a minute before it expires, then refreshes", async () => {
     const { sender, tokens, advance } = setup();
     await sender.send(message);

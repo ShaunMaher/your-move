@@ -102,6 +102,38 @@ describe("buildMime", () => {
   });
 });
 
+describe("List-Unsubscribe (05 §Email links, RFC 8058)", () => {
+  const url = "https://play.example.org/api/v1/email/unsubscribe?t=abc_-123";
+
+  it("adds the unsubscribe URL and the one-click header after MIME-Version", () => {
+    const raw = buildMime({ ...base, listUnsubscribe: url });
+    expect(header(raw, "List-Unsubscribe")).toBe(`<${url}>`);
+    expect(header(raw, "List-Unsubscribe-Post")).toBe("List-Unsubscribe=One-Click");
+    expect(
+      parse(raw)
+        .headers.map(([name]) => name)
+        .slice(5, 8),
+    ).toEqual(["MIME-Version", "List-Unsubscribe", "List-Unsubscribe-Post"]);
+  });
+
+  it("adds neither header without one", () => {
+    expect(buildMime(base)).not.toContain("List-Unsubscribe");
+  });
+
+  it.each([
+    ["a line break", `${url}\r\nBcc: x@example.org`],
+    ["a closing bracket", `${url}>, <mailto:x@example.org`],
+    ["a space", `${url} x`],
+    ["non-ASCII", `${url}é`],
+    ["another scheme", "javascript:alert(1)"],
+    ["a mailto", "mailto:x@example.org"],
+    ["no URL at all", "unsubscribe"],
+    ["too long", `${url}${"a".repeat(900)}`],
+  ])("refuses an unsubscribe URL with %s", (_name, listUnsubscribe) => {
+    expect(() => buildMime({ ...base, listUnsubscribe })).toThrow(EmailHeaderError);
+  });
+});
+
 describe("hostile input (08 T14)", () => {
   const injected = [
     "Evil\r\nBcc: victim@example.org",

@@ -3,16 +3,19 @@
  * state-changing requests, JSON-only bodies and the 16 kB body limit.
  *
  * The exemptions are listed here and nowhere else (05): the unsubscribe route is exempt from both
- * rules and the dictionary upload route from the JSON rule only. Neither exists yet (M4, M6).
+ * rules (mail clients post its one-click form cross-origin, RFC 8058), and the dictionary upload
+ * route (M6) will be exempt from the JSON rule only.
  */
 import type { MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 
+import { UNSUBSCRIBE_PATH } from "../email/unsubscribe-token.js";
+
 /** Paths exempt from the Origin rule (05 §Conventions). */
-const ORIGIN_EXEMPT: ReadonlySet<string> = new Set<string>([]);
+const ORIGIN_EXEMPT: ReadonlySet<string> = new Set<string>([UNSUBSCRIBE_PATH]);
 /** Paths exempt from the JSON rule (05 §Conventions). */
-const JSON_EXEMPT: ReadonlySet<string> = new Set<string>([]);
+const JSON_EXEMPT: ReadonlySet<string> = new Set<string>([UNSUBSCRIBE_PATH]);
 
 const STATE_CHANGING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const BODY_LIMIT_BYTES = 16 * 1024;

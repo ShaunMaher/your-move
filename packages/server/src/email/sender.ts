@@ -12,6 +12,11 @@ export interface EmailMessage {
   readonly subject: string;
   readonly text: string;
   readonly html: string;
+  /**
+   * The unsubscribe URL of a non-OTP email (05 §Email links, 09 §2): sent as `List-Unsubscribe`
+   * with `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058).
+   */
+  readonly listUnsubscribe?: string;
 }
 
 export interface EmailSender {
@@ -45,7 +50,7 @@ export function wasAlerted(error: unknown): boolean {
  * template mistake or unexpected input can inject headers (08 T14). Every provider calls it.
  */
 export function assertSafeHeaders(message: EmailMessage): void {
-  for (const value of [message.to, message.subject]) {
+  for (const value of [message.to, message.subject, message.listUnsubscribe ?? ""]) {
     if (/\p{Cc}/u.test(value))
       throw new EmailHeaderError("header value contains a control character");
   }

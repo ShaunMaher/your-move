@@ -12,6 +12,7 @@ import {
   accountDeletedEmail,
   deleteAccountCodeEmail,
   escapeHtml,
+  nudgeEmail,
   signInCodeEmail,
   suspendedNoticeEmail,
 } from "./templates.js";
@@ -78,6 +79,46 @@ describe("templates (06 §3.3, §7)", () => {
   });
 });
 
+describe("the email nudge (03 §7, 08 T18)", () => {
+  const nudge = {
+    appName: context.appName,
+    gameName: "Words",
+    opponents: ['Ann <img src=x onerror="y">', "Bo\r\nBcc: x@example.org", "Cy"],
+    lastMove: "Ann <b>played</b> QUIZ for 64",
+    gameUrl: "https://play.example.org/g/g1",
+    settingsUrl: "https://play.example.org/settings",
+    unsubscribeUrl: 'https://play.example.org/api/v1/email/unsubscribe?t=a"b',
+  };
+
+  it("names the game and the others, links the game, and carries the unsubscribe link", () => {
+    const message = nudgeEmail(to, nudge);
+    expect(message.subject).toBe(`It's your turn in Words on ${context.appName}`);
+    expect(message.listUnsubscribe).toBe(nudge.unsubscribeUrl);
+    expect(message.text).toContain(
+      `in your Words game with ${nudge.opponents[0] ?? ""}, ${nudge.opponents[1] ?? ""} and Cy.`,
+    );
+    expect(message.text).toContain(`Last move: ${nudge.lastMove}`);
+    expect(message.text).toContain(`Play now: ${nudge.gameUrl}`);
+    expect(message.text).toContain(`Or unsubscribe with one click: ${nudge.unsubscribeUrl}`);
+  });
+
+  it("escapes every value in the HTML, links included", () => {
+    const { html } = nudgeEmail(to, nudge);
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<b>");
+    expect(html).toContain("&lt;img src=x onerror=&quot;y&quot;&gt;");
+    expect(html).toContain('<a href="https://play.example.org/g/g1">');
+    expect(html).toContain('href="https://play.example.org/api/v1/email/unsubscribe?t=a&quot;b"');
+  });
+
+  it("leaves out what it doesn't have", () => {
+    const message = nudgeEmail(to, { ...nudge, opponents: [], lastMove: null });
+    expect(message.text).toContain("in your Words game. It has been");
+    expect(message.text).not.toContain("Last move");
+    expect(nudgeEmail(to, { ...nudge, opponents: ["Ann"] }).text).toContain("game with Ann.");
+  });
+});
+
 describe("header safety (08 T14)", () => {
   it.each([
     "Hello\r\nBcc: victim@example.org",
@@ -88,6 +129,18 @@ describe("header safety (08 T14)", () => {
   ])("refuses a subject with a control character: %j", (subject) => {
     expect(() => {
       assertSafeHeaders({ to, subject, text: "", html: "" });
+    }).toThrow(EmailHeaderError);
+  });
+
+  it("refuses an unsubscribe URL with a control character", () => {
+    expect(() => {
+      assertSafeHeaders({
+        to,
+        subject: "x",
+        text: "",
+        html: "",
+        listUnsubscribe: "https://a\r\nB: c",
+      });
     }).toThrow(EmailHeaderError);
   });
 

@@ -30,6 +30,8 @@ export interface MimeInput {
   readonly date: Date;
   /** `local@domain`, without angle brackets; unique per message. */
   readonly messageId: string;
+  /** An http(s) unsubscribe URL: adds `List-Unsubscribe` and the RFC 8058 one-click header. */
+  readonly listUnsubscribe?: string;
 }
 
 /**
@@ -101,6 +103,30 @@ function mailbox({ name, address }: MimeMailbox, what: string): string {
   return `${phrase}${phrase.startsWith('"') ? " " : `${CRLF} `}<${spec}>`;
 }
 
+/** The longest unsubscribe URL accepted: the header line stays well inside RFC 5322's 998. */
+const MAX_UNSUBSCRIBE_URL = 900;
+
+/**
+ * A checked `List-Unsubscribe` value (RFC 2369): one http(s) URL of printable ASCII with no
+ * spaces or angle brackets, so it can't end its brackets or its header.
+ */
+function unsubscribeHeader(url: string): string {
+  refuseControls(url, "unsubscribe URL");
+  if (url.length > MAX_UNSUBSCRIBE_URL || !/^[!-~]+$/u.test(url) || /[<>]/u.test(url)) {
+    throw new EmailHeaderError("unsubscribe URL is not valid");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new EmailHeaderError("unsubscribe URL is not valid");
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new EmailHeaderError("unsubscribe URL is not http(s)");
+  }
+  return `<${url}>`;
+}
+
 /** RFC 5322 `date-time` in UTC, e.g. `Thu, 01 Jan 1970 00:00:00 +0000`. */
 function formatDate(date: Date): string {
   if (Number.isNaN(date.getTime())) throw new EmailHeaderError("date is not valid");
@@ -156,6 +182,12 @@ export function buildMime(input: MimeInput): string {
     `Message-ID: <${input.messageId}>`,
     "MIME-Version: 1.0",
   ];
+  if (input.listUnsubscribe !== undefined) {
+    headers.push(
+      `List-Unsubscribe: ${unsubscribeHeader(input.listUnsubscribe)}`,
+      "List-Unsubscribe-Post: List-Unsubscribe=One-Click",
+    );
+  }
   headers.push(`Content-Type: multipart/alternative; boundary="${BOUNDARY}"`);
   const body = [
     ...part("text/plain", input.text),

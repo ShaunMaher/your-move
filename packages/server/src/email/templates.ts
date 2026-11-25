@@ -1,7 +1,7 @@
 /**
- * The fixed sign-in and account email templates (docs/spec/06-auth.md §3.3, §4, §7): plain text
+ * The fixed email templates (docs/spec/06-auth.md §3.3, §4, §7; 03 §7 for the nudge): plain text
  * plus minimal HTML, no remote images or tracking (09 §2), `APP_NAME` from config. Every
- * interpolated value is HTML-escaped in the HTML part. None carries the code in a link.
+ * interpolated value is HTML-escaped in the HTML part. None carries a code in a link.
  */
 import type { NormalisedEmail } from "../accounts/email.js";
 import type { EmailMessage } from "./sender.js";
@@ -32,17 +32,26 @@ export function approximateTime(date: Date): string {
   return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
+/** A paragraph of plain text, or text followed by one of our own links. */
+type Paragraph = string | { readonly text: string; readonly href: string };
+
 function message(
   to: NormalisedEmail,
   subject: string,
-  paragraphs: readonly string[],
+  paragraphs: readonly Paragraph[],
 ): EmailMessage {
+  const plain = (paragraph: Paragraph): string =>
+    typeof paragraph === "string" ? paragraph : `${paragraph.text} ${paragraph.href}`;
+  const html = (paragraph: Paragraph): string =>
+    typeof paragraph === "string"
+      ? escapeHtml(paragraph)
+      : `${escapeHtml(paragraph.text)} <a href="${escapeHtml(paragraph.href)}">${escapeHtml(paragraph.href)}</a>`;
   return {
     to,
     subject,
-    text: `${paragraphs.join("\n\n")}\n`,
+    text: `${paragraphs.map(plain).join("\n\n")}\n`,
     html: `<!doctype html><html><body>${paragraphs
-      .map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`)
+      .map((paragraph) => `<p>${html(paragraph)}</p>`)
       .join("")}</body></html>`,
   };
 }
@@ -99,4 +108,44 @@ export function accountDeletedEmail(to: NormalisedEmail, context: TemplateContex
     `Your ${context.appName} account was deleted at about ${context.requestedAt}.`,
     "You can sign up again with this address at any time.",
   ]);
+}
+
+/** "Ann", "Ann and Bo", "Ann, Bo and Cy". */
+function namesList(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names.at(-1) ?? ""}`;
+}
+
+export interface NudgeContext {
+  readonly appName: string;
+  /** The game type's display name, from its manifest. */
+  readonly gameName: string;
+  /** The display names of the other seated players. */
+  readonly opponents: readonly string[];
+  /** The game's last public `describe` text with the names filled in, if it has one. */
+  readonly lastMove: string | null;
+  readonly gameUrl: string;
+  readonly settingsUrl: string;
+  readonly unsubscribeUrl: string;
+}
+
+/**
+ * The "It's your turn" email nudge (03 §7, 08 T18): built only from the game type's name, display
+ * names and public `describe` text, never from state, options or addresses; with the unsubscribe
+ * link and headers (05 §Email links).
+ */
+export function nudgeEmail(to: NormalisedEmail, context: NudgeContext): EmailMessage {
+  const withWhom = context.opponents.length === 0 ? "" : ` with ${namesList(context.opponents)}`;
+  const paragraphs: Paragraph[] = [
+    `It's your turn in your ${context.gameName} game${withWhom}. It has been waiting for you for a day.`,
+    ...(context.lastMove === null ? [] : [`Last move: ${context.lastMove}`]),
+    { text: "Play now:", href: context.gameUrl },
+    `You're getting this because you turned on email nudges in ${context.appName}: at most one a day for each game that's waiting for you.`,
+    { text: "Turn them off in Settings:", href: context.settingsUrl },
+    { text: "Or unsubscribe with one click:", href: context.unsubscribeUrl },
+  ];
+  return {
+    ...message(to, `It's your turn in ${context.gameName} on ${context.appName}`, paragraphs),
+    listUnsubscribe: context.unsubscribeUrl,
+  };
 }
