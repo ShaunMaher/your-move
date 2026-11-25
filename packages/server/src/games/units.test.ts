@@ -383,6 +383,8 @@ describe("start and accept at the lobby's expiry (A2 review S2-5)", () => {
     definition: {
       players: () => ({ min: 2, max: 3 }),
       validateStart: () => OK,
+      setup: () => ({}),
+      toAct: () => [0],
     } as unknown as AnyGameDefinition,
     options: {},
     state: null,
@@ -392,11 +394,13 @@ describe("start and accept at the lobby's expiry (A2 review S2-5)", () => {
 
   it("refuse a lobby at or past its expiry, even one still marked lobby", () => {
     expect(start(ctx, creator, due)).toEqual({ refused: "WRONG_STATUS" });
+    expect(accept(ctx, invited, due)).toEqual({ refused: "WRONG_STATUS" });
     expect(accept(ctx, invited, due + 5)).toEqual({ refused: "WRONG_STATUS" });
   });
 
-  it("accept a lobby a moment before it", () => {
+  it("accept and start a lobby a moment before it", () => {
     expect(accept(ctx, invited, due - 1)).not.toHaveProperty("refused");
+    expect(start(ctx, creator, due - 1)).not.toHaveProperty("refused");
   });
 });
 
