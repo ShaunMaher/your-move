@@ -1,10 +1,47 @@
 /**
- * A modal sheet: labelled, focus moves into it and is kept inside, Escape closes it, and focus
+ * A modal sheet: labelled, focus moves into it and is kept inside (Tab and Shift-Tab wrap), the
+ * page behind it is `inert` while it is open, Escape or a tap on the backdrop closes it, and focus
  * returns to what had it when it opened. `variant="drawer"` slides it up from the bottom edge.
+ *
+ * It renders into its own container on `document.body`, beside the app's root, so the root can be
+ * made inert without making the dialog inert with it.
  */
-import { type ReactNode, useEffect, useId, useRef } from "react";
+import { type PointerEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
-const FOCUSABLE = "button:not(:disabled), [href], input:not(:disabled), select:not(:disabled)";
+const FOCUSABLE = [
+  "a[href]",
+  "button",
+  "input:not([type=hidden])",
+  "select",
+  "textarea",
+  "summary",
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
+
+/** The sheet's tabbable elements, in order: not disabled, hidden or inside something that is. */
+function tabbable(sheet: HTMLElement | null): HTMLElement[] {
+  if (sheet === null) return [];
+  return Array.from(sheet.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (element) =>
+      !element.matches(":disabled") &&
+      element.closest("[hidden], [inert], fieldset:disabled") === null &&
+      element.getAttribute("tabindex") !== "-1",
+  );
+}
+
+/** Makes everything else on the page inert; returns what puts it back as it was. */
+function isolate(container: HTMLElement): () => void {
+  const made: Element[] = [];
+  for (const other of Array.from(document.body.children)) {
+    if (other === container || other.tagName === "SCRIPT" || other.hasAttribute("inert")) continue;
+    other.setAttribute("inert", "");
+    made.push(other);
+  }
+  return () => {
+    for (const other of made) other.removeAttribute("inert");
+  };
+}
 
 interface DialogProps {
   readonly title: string;
@@ -16,17 +53,28 @@ interface DialogProps {
 export function Dialog(props: DialogProps) {
   const { title, children, variant = "dialog" } = props;
   const titleId = useId();
+  const [container] = useState(() => document.createElement("div"));
   const scrim = useRef<HTMLDivElement>(null);
   const sheet = useRef<HTMLDivElement>(null);
+  /** Whether the press that ends in a click began on the backdrop itself. */
+  const pressedBackdrop = useRef(false);
   const latest = useRef(props);
   useEffect(() => {
     latest.current = props;
   });
 
   useEffect(() => {
+    document.body.append(container);
+    const restore = isolate(container);
+    return () => {
+      restore();
+      container.remove();
+    };
+  }, [container]);
+
+  useEffect(() => {
     const opener = document.activeElement;
-    const items = sheet.current?.querySelectorAll<HTMLElement>(FOCUSABLE);
-    (items?.[0] ?? sheet.current)?.focus();
+    (tabbable(sheet.current)[0] ?? sheet.current)?.focus();
     return () => {
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
@@ -44,7 +92,7 @@ export function Dialog(props: DialogProps) {
         return;
       }
       if (event.key !== "Tab") return;
-      const items = Array.from(sheet.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
+      const items = tabbable(sheet.current);
       const first = items[0];
       const last = items.at(-1);
       const active = document.activeElement;
@@ -63,8 +111,19 @@ export function Dialog(props: DialogProps) {
     };
   }, []);
 
-  return (
-    <div ref={scrim} className="scrim" data-variant={variant}>
+  return createPortal(
+    <div
+      ref={scrim}
+      className="scrim"
+      data-variant={variant}
+      onPointerDown={(event: PointerEvent) => {
+        pressedBackdrop.current = event.target === event.currentTarget;
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget && pressedBackdrop.current) props.onClose();
+        pressedBackdrop.current = false;
+      }}
+    >
       <div
         ref={sheet}
         className="sheet stack"
@@ -76,6 +135,7 @@ export function Dialog(props: DialogProps) {
         <h2 id={titleId}>{title}</h2>
         {children}
       </div>
-    </div>
+    </div>,
+    container,
   );
 }
