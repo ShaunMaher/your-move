@@ -22,7 +22,7 @@ function Page(props: { onClose?: () => void; inside?: React.ReactNode; dismissib
       {open ? (
         <Dialog
           title="Sheet"
-          dismissible={props.dismissible}
+          dismissible={props.dismissible ?? true}
           onClose={() => {
             props.onClose?.();
             setOpen(false);

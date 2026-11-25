@@ -73,15 +73,24 @@ export async function signUp(page: Page, address: string, name: string): Promise
 /** The one shape a cached word list is stored at (apps/web/src/word-lists.ts). */
 const WORD_LIST_PATH = /^\/assets\/dictionaries\/[A-Za-z0-9_-]+-v\d+\.[0-9a-f]{16}\.txt$/u;
 
-/** Starts recording the `/api/` responses the page gets from the service worker (there must be none). */
-export function watchWorkerResponses(page: Page): string[] {
-  const fromWorker: string[] = [];
+/** What the page got from the service worker: `api` must stay empty; `assets` is the positive control. */
+export interface WorkerResponses {
+  readonly api: string[];
+  readonly assets: string[];
+}
+
+/**
+ * Starts recording the responses the page gets from the service worker: any `/api/` one is a bug
+ * (07 §4); the others show the worker is answering at all, so an empty `api` list means something.
+ */
+export function watchWorkerResponses(page: Page): WorkerResponses {
+  const seen: WorkerResponses = { api: [], assets: [] };
   page.on("response", (response) => {
-    if (new URL(response.url()).pathname.startsWith("/api/") && response.fromServiceWorker()) {
-      fromWorker.push(response.url());
-    }
+    if (!response.fromServiceWorker()) return;
+    const url = new URL(response.url());
+    (url.pathname.startsWith("/api/") ? seen.api : seen.assets).push(url.pathname);
   });
-  return fromWorker;
+  return seen;
 }
 
 /**
@@ -108,5 +117,7 @@ export async function expectOnlyShellAndWordLists(
   });
   const shell = Object.entries(stored).filter(([name]) => name !== "dictionaries-v1");
   expect(shell.flatMap(([, paths]) => paths).sort()).toEqual([...build.precache].sort());
+  // The game that was played downloaded its list, and nothing else is in that cache.
+  expect((stored["dictionaries-v1"] ?? []).length).toBeGreaterThanOrEqual(1);
   for (const path of stored["dictionaries-v1"] ?? []) expect(path).toMatch(WORD_LIST_PATH);
 }

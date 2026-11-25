@@ -184,7 +184,10 @@ test("two people play a words game on phones and one resigns", async ({
   for (const player of players) {
     await refocus(player.page);
     await expect
-      .poll(async () => (await scoresOf(player.page)).every((score) => score > 0), FAR)
+      .poll(async () => {
+        const scores = await scoresOf(player.page);
+        return scores.length === 2 && scores.every((score) => score > 0);
+      }, FAR)
       .toBe(true);
   }
 
@@ -200,6 +203,9 @@ test("two people play a words game on phones and one resigns", async ({
   await expectAccessible(ann);
   await shot(ann, "history");
   await ann.keyboard.press("Escape");
+  await expect(ann.getByRole("dialog")).toHaveCount(0);
+  // Focus is back on the Menu button, which opened the menu the drawer was opened from.
+  await expect(ann.getByRole("button", { name: "Menu" })).toBeFocused();
 
   // Bob resigns from the menu, after being asked, and changes his mind once.
   await refocus(bob);
@@ -210,6 +216,7 @@ test("two people play a words game on phones and one resigns", async ({
   await shot(bob, "resign-confirm");
   await bob.getByRole("button", { name: "Keep playing" }).click();
   await expect(bob.getByRole("dialog")).toHaveCount(0);
+  await expect(bob.getByRole("button", { name: "Menu" })).toBeFocused();
   await bob.getByRole("button", { name: "Menu" }).click();
   await bob.getByRole("button", { name: "Resign…" }).click();
   await bob.getByRole("dialog").getByRole("button", { name: "Resign" }).click();
@@ -238,7 +245,10 @@ test("two people play a words game on phones and one resigns", async ({
 
   // The worker answered no API request for either person, and Cache Storage holds the shell plus
   // the word list the game downloaded, nothing else.
-  expect(fromWorker).toEqual([[], []]);
+  expect(fromWorker.map((seen) => seen.api)).toEqual([[], []]);
+  // Positive control: the worker was answering (shell files), so the empty list above means
+  // something. Playwright reports `fromServiceWorker()` in every project this suite runs.
+  for (const seen of fromWorker) expect(seen.assets.length).toBeGreaterThan(0);
   for (const page of [ann, bob]) await expectOnlyShellAndWordLists(page, request);
 
   // Signing out wipes the per-game state this device kept (06 §4).
@@ -262,6 +272,14 @@ test("a game can be resigned straight after it starts", async ({ page: ann, frie
   // The game is under way for both, and Bob's list shows it among the games waiting on someone.
   await refocus(ann);
   await expect(ann.getByRole("region", { name: "Words board" })).toBeVisible(FAR);
+  // On the smallest supported phone the board's top is on the first screen (02 §3).
+  await ann.setViewportSize({ width: 320, height: 568 });
+  const board = ann.getByRole("region", { name: "Words board" });
+  await expect(board).toBeVisible();
+  expect(await ann.evaluate(() => window.scrollY)).toBe(0);
+  expect((await board.boundingBox())?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(568);
+  const firstSquare = ann.locator("[data-square]").first();
+  expect((await firstSquare.boundingBox())?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(568);
   await ann.getByRole("link", { name: "Games", exact: true }).click();
   await expect(ann.getByRole("region", { name: /Your turn|Waiting/u })).toBeVisible();
   await expectAccessible(ann);

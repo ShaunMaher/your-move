@@ -25,7 +25,7 @@ function inClosedDetails(element: HTMLElement): boolean {
   for (let up = element.parentElement; up !== null; up = up.parentElement) {
     if (up instanceof HTMLDetailsElement && !up.open) {
       const summary = Array.from(up.children).find((child) => child.tagName === "SUMMARY");
-      if (!(summary !== undefined && summary.contains(element))) return true;
+      if (summary?.contains(element) !== true) return true;
     }
   }
   return false;
