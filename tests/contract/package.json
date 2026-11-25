@@ -2,7 +2,7 @@
   "name": "@your-move/contract-tests",
   "version": "0.0.0",
   "private": true,
-  "description": "The API contract suite, run against the Node and the Worker builds (11 \u00a74)",
+  "description": "The API contract suite, run against the Node and the Worker builds (11 §4)",
   "license": "BSD-2-Clause",
   "type": "module",
   "devDependencies": {

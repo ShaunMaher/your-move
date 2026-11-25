@@ -58,7 +58,7 @@ function enableWords(): string[] {
 
 /**
  * An opening play: a word of the built-in list spelled from the rack (blanks standing in), across
- * the centre. A rack of seven always spells one.
+ * the centre, or null when the rack spells none (a few racks, about 1 in 120, don't).
  */
 function openingPlay(size: number, rack: readonly string[]) {
   const centre = Math.floor(size / 2);
@@ -80,7 +80,7 @@ function openingPlay(size: number, rack: readonly string[]) {
       placements: tiles.map((tile, i) => ({ row: centre, col: centre + i, ...tile })),
     };
   }
-  throw new Error("the rack spells no word");
+  return null;
 }
 
 export function contractSuite(name: string, target: () => Target): void {
@@ -173,35 +173,48 @@ export function contractSuite(name: string, target: () => Target): void {
         const token = await createSession(repos, id, now, undefined);
         return { id, email, cookie: `__Host-sid=${token}` };
       };
-      const [a, b] = [await player("Ada"), await player("Bo")];
-      const as = (who: { cookie: string }) => ({
-        Cookie: who.cookie,
-        Origin: CONTRACT_ORIGIN,
-      });
-      const created = await client().POST("/api/v1/games", {
-        body: { gameType: "words", invitees: [{ email: b.email }] },
-        headers: as(a),
-      });
-      expect(created.response.status).toBe(201);
-      const gameId = created.data?.game.id ?? "";
-      const accepted = await client().POST("/api/v1/games/{id}/accept", {
-        params: { path: { id: gameId } },
-        body: { expectedVersion: created.data?.game.version ?? 0 },
-        headers: as(b),
-      });
-      expect(accepted.data?.game.status).toBe("active");
-      const seat = accepted.data?.game.toAct[0];
-      const mover =
-        accepted.data?.game.players.find((row) => row.seat === seat)?.userId === a.id ? a : b;
-      const read = await client().GET("/api/v1/games/{id}", {
-        params: { path: { id: gameId } },
-        headers: as(mover),
-      });
-      const view = read.data?.view as {
-        board: unknown[][];
-        yourRack: string[];
-      };
-      const action = openingPlay(view.board.length, view.yourRack);
+      const as = (who: { cookie: string }) => ({ Cookie: who.cookie, Origin: CONTRACT_ORIGIN });
+      /** Fresh players and a fresh game (so no pair limit) until a rack spells a word; bounded. */
+      const ATTEMPTS = 25;
+      let setup: {
+        gameId: string;
+        mover: Awaited<ReturnType<typeof player>>;
+        version: number;
+        action: NonNullable<ReturnType<typeof openingPlay>>;
+      } | null = null;
+      for (let attempt = 0; attempt < ATTEMPTS && setup === null; attempt++) {
+        const [a, b] = [await player("Ada"), await player("Bo")];
+        const created = await client().POST("/api/v1/games", {
+          body: { gameType: "words", invitees: [{ email: b.email }] },
+          headers: as(a),
+        });
+        expect(created.response.status).toBe(201);
+        const gameId = created.data?.game.id ?? "";
+        const accepted = await client().POST("/api/v1/games/{id}/accept", {
+          params: { path: { id: gameId } },
+          body: { expectedVersion: created.data?.game.version ?? 0 },
+          headers: as(b),
+        });
+        expect(accepted.data?.game.status).toBe("active");
+        const seat = accepted.data?.game.toAct[0];
+        const mover =
+          accepted.data?.game.players.find((row) => row.seat === seat)?.userId === a.id ? a : b;
+        const read = await client().GET("/api/v1/games/{id}", {
+          params: { path: { id: gameId } },
+          headers: as(mover),
+        });
+        const view = read.data?.view as { board: unknown[][]; yourRack: string[] };
+        const action = openingPlay(view.board.length, view.yourRack);
+        if (action !== null) {
+          setup = { gameId, mover, version: read.data?.game.version ?? 0, action };
+        }
+      }
+      if (setup === null) {
+        throw new Error(
+          `no rack spelled a word in ${String(ATTEMPTS)} games: the dealer is broken`,
+        );
+      }
+      const { gameId, mover, action } = setup;
       const preview = await client().POST("/api/v1/games/{id}/preview", {
         params: { path: { id: gameId } },
         body: { action },
@@ -210,7 +223,7 @@ export function contractSuite(name: string, target: () => Target): void {
       expect(preview.response.status).toBe(200);
       const played = await client().POST("/api/v1/games/{id}/actions", {
         params: { path: { id: gameId } },
-        body: { expectedVersion: read.data?.game.version ?? 0, action },
+        body: { expectedVersion: setup.version, action },
         headers: as(mover),
       });
       expect(played.response.status).toBe(200);
