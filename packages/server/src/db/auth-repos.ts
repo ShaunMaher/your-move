@@ -67,6 +67,16 @@ export function userRepo(db: Database): UserRepo {
     async update(id, set) {
       await db.update(users).set(set).where(eq(users.id, id));
     },
+    async pastOpponentsOf(userId, candidates) {
+      if (candidates.length === 0) return [];
+      const rows = await db
+        .select({ otherId: pastOpponents.otherId })
+        .from(pastOpponents)
+        .where(
+          and(eq(pastOpponents.userId, userId), inArray(pastOpponents.otherId, [...candidates])),
+        );
+      return rows.map((row) => row.otherId);
+    },
     async rememberGameOptions(id, remember) {
       // Only the two keys change, in SQL, so a concurrent change to any other setting survives
       // (A2 review S-3). Settings that aren't a JSON object count as empty.

@@ -2,8 +2,8 @@
  * Tests from the review of alpha slice A2 (docs/reviews/alpha-a2.md), each named by its finding:
  * the real app on a real SQLite database with the installed games, like `games.test.ts`.
  */
-import type { AnyGameDefinition } from "@your-move/sdk";
-import type { InstalledGame } from "@your-move/server";
+import type { AnyGameDefinition, GameEnvelope } from "@your-move/sdk";
+import type { InstalledGame, Repositories } from "@your-move/server";
 import { seededRandom } from "@your-move/testkit";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -18,7 +18,7 @@ import {
   signUp,
   transition,
 } from "./games-support.js";
-import { createHarness, DAY, type Harness, PROD_ENV, T0 } from "./test-harness.js";
+import { createHarness, DAY, type Harness, MINUTE, PROD_ENV, T0 } from "./test-harness.js";
 
 const open: Harness[] = [];
 afterEach(() => {
@@ -309,3 +309,166 @@ describe("S-4: an overdue lobby expires when it is next read or written", () => 
     ]);
   });
 });
+
+describe("S-1: the inbound invitation cap (06 §6.7, 08 T20)", () => {
+  /** Invites `target` to a new words game and returns the creator's response body. */
+  const invite = async (h: Harness, creator: Player, email: string) => {
+    const created = await call<{ game: GameEnvelope }>(h, creator, "POST", "/api/v1/games", {
+      gameType: "words",
+      invitees: [{ email }],
+    });
+    expect(created.status).toBe(201);
+    return created.body;
+  };
+
+  /** The response with what differs between any two games blanked out. */
+  const shape = (body: { game: GameEnvelope }) =>
+    JSON.parse(
+      JSON.stringify(body)
+        .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gu, "<id>")
+        .replace(/"invitedAs":"[^"]*"/gu, '"invitedAs":"<address>"')
+        .replace(/"(createdAt|lastActionAt)":[0-9]+/gu, '"$1":0'),
+    ) as unknown;
+
+  const delivery = (h: Harness, gameId: string, userId: string) =>
+    h.query(
+      "SELECT delivery FROM game_players WHERE game_id = ? AND user_id = ?",
+      gameId,
+      userId,
+    )[0]?.["delivery"];
+
+  it("hides a second invitation from the same creator within a day, the response unchanged", async () => {
+    const h = harness();
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    const first = await invite(h, a, b.email);
+    h.advance(MINUTE);
+    const second = await invite(h, a, b.email);
+    expect(delivery(h, first.game.id, b.id)).toBe("normal");
+    expect(delivery(h, second.game.id, b.id)).toBe("hidden");
+    expect(shape(second)).toEqual(shape(first));
+    // Only in the collapsed list, never badged, and still b's to accept.
+    expect((await list(h, b)).map((row) => row.id)).toEqual([first.game.id]);
+    expect((await list(h, b, "?invitations=true")).map((row) => row.id)).toEqual([first.game.id]);
+    const hidden = await list(h, b, "?invitations=hidden");
+    expect(hidden).toEqual([
+      expect.objectContaining({ id: second.game.id, yourInvitation: "hidden", unread: false }),
+    ]);
+    expect((await transition(h, b, second.game.id, "accept")).body.game.status).toBe("active");
+    // A day later the same creator's invitation is delivered again.
+    h.advance(2 * DAY);
+    const later = await invite(h, a, b.email);
+    expect(delivery(h, later.game.id, b.id)).toBe("normal");
+  });
+
+  it("hides the fourth invitation in a day from different creators", async () => {
+    const h = harness();
+    const b = await signUp(h, "Bo");
+    const games: string[] = [];
+    for (const name of ["Ada", "Cy", "Di", "Ed"]) {
+      games.push((await invite(h, await signUp(h, name), b.email)).game.id);
+    }
+    expect(games.map((id) => delivery(h, id, b.id))).toEqual([
+      "normal",
+      "normal",
+      "normal",
+      "hidden",
+    ]);
+  });
+
+  it("never caps a past opponent, and a past opponent's invitations don't count", async () => {
+    const h = harness();
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    for (const [userId, otherId] of [
+      [a.id, b.id],
+      [b.id, a.id],
+    ]) {
+      h.exec(
+        "INSERT INTO past_opponents (user_id, other_id, last_finished_at) VALUES (?, ?, ?)",
+        userId ?? "",
+        otherId ?? "",
+        T0,
+      );
+    }
+    const fromA: string[] = [];
+    for (let i = 0; i < 4; i++) fromA.push((await invite(h, a, b.email)).game.id);
+    expect(fromA.map((id) => delivery(h, id, b.id))).toEqual([
+      "normal",
+      "normal",
+      "normal",
+      "normal",
+    ]);
+    const strangers: string[] = [];
+    for (const name of ["Cy", "Di", "Ed", "Flo"]) {
+      strangers.push((await invite(h, await signUp(h, name), b.email)).game.id);
+    }
+    expect(strangers.map((id) => delivery(h, id, b.id))).toEqual([
+      "normal",
+      "normal",
+      "normal",
+      "hidden",
+    ]);
+  });
+
+  it("does the same reads and writes, and answers the same, whatever the address is (Q3)", async () => {
+    const calls: string[] = [];
+    const h = harness({}, { wrapRepos: (repos) => recording(repos, calls) });
+    const a = await signUp(h, "Ada");
+    const fresh = await signUp(h, "Bo");
+    const capped = await signUp(h, "Cy");
+    const opponent = await signUp(h, "Di");
+    const unOnboarded = await signUp(h, null);
+    h.exec(
+      "INSERT INTO past_opponents (user_id, other_id, last_finished_at) VALUES (?, ?, ?)",
+      opponent.id,
+      a.id,
+      T0,
+    );
+    await invite(h, await signUp(h, "Ed"), capped.email);
+    await invite(h, await signUp(h, "Flo"), capped.email);
+    await invite(h, await signUp(h, "Gus"), capped.email);
+    const seen: { calls: string[]; shape: unknown }[] = [];
+    for (const email of [
+      fresh.email,
+      capped.email,
+      opponent.email,
+      unOnboarded.email,
+      "no-account@example.org",
+    ]) {
+      calls.length = 0;
+      const body = await invite(h, a, email);
+      seen.push({ calls: [...calls], shape: shape(body) });
+      h.advance(MINUTE);
+    }
+    // The capped address really was over the cap: its invitation is the hidden one.
+    expect(
+      h.query(
+        "SELECT delivery FROM game_players WHERE user_id = ? AND delivery = 'hidden'",
+        capped.id,
+      ),
+    ).toHaveLength(1);
+    for (const other of seen.slice(1)) expect(other).toEqual(seen[0]);
+  });
+});
+
+/** The repositories, each call's name (and for rate limits, how many counters) recorded. */
+function recording(repos: Repositories, calls: string[]): Repositories {
+  const wrap = <T extends object>(group: string, repo: T): T =>
+    new Proxy(repo, {
+      get(target, key, receiver) {
+        const value: unknown = Reflect.get(target, key, receiver);
+        if (typeof value !== "function") return value;
+        return (...args: unknown[]) => {
+          const first = args[0];
+          calls.push(
+            `${group}.${String(key)}${Array.isArray(first) ? `(${String(first.length)})` : ""}`,
+          );
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      },
+    });
+  return Object.fromEntries(
+    Object.entries(repos).map(([group, repo]) => [group, wrap(group, repo as object)]),
+  ) as unknown as Repositories;
+}

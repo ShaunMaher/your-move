@@ -307,6 +307,24 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         return id;
       };
 
+      it("tells which candidates are a user's past opponents", async () => {
+        const user = await human();
+        const [past, other, onlyTheirs] = [await human(), await human(), await human()];
+        await target.sql(
+          "INSERT INTO past_opponents (user_id, other_id, last_finished_at) VALUES (?, ?, ?), (?, ?, ?)",
+          user,
+          past,
+          T0,
+          onlyTheirs,
+          user,
+          T0,
+        );
+        expect(await repos.users.pastOpponentsOf(user, [past, other, onlyTheirs, ""])).toEqual([
+          past,
+        ]);
+        expect(await repos.users.pastOpponentsOf(user, [])).toEqual([]);
+      });
+
       it("finds a user's overdue lobbies, oldest first (lazy expiry)", async () => {
         const user = await human();
         const other = await human();

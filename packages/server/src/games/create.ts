@@ -8,7 +8,7 @@
  * it belongs to an onboarded user (an invitation), to nobody or to an account that hasn't finished
  * onboarding (an email-invite seat, claimed at onboarding once email invites exist, M4). No email
  * is sent yet (M4). Per-pair counts use the typed address's `emailId`, never the user it resolves
- * to (Q3).
+ * to (Q3). An invitation over the target's inbound cap is `hidden` (06 §6.7).
  */
 import type { z } from "@hono/zod-openapi";
 import { isGameError, type GameError, type OptionsContext } from "@your-move/sdk";
@@ -102,6 +102,61 @@ function invitees(
   return valid;
 }
 
+/** Stands in for "no user" in the past-opponent lookup, so it runs the same for every address. */
+const NO_USER = "";
+
+/**
+ * The inbound invitation cap (06 §6.7, 08 T20): a user receives at most 1 invitation a day from
+ * any one creator who isn't a past opponent, and 3 a day in total from such creators; over the cap
+ * the invitation is `hidden`. Counted in `rate_limits` keyed by the target's `emailId` (per
+ * creator: creator and `emailId`), so it is counted, with the same lookups and writes, for every
+ * typed address whatever it resolves to (Q3): a past opponent's invitation reads the counters
+ * without adding to them, and one already over the per-creator cap adds nothing to the total. The
+ * creator's response is the same either way. Returns each address's delivery.
+ */
+async function inboundDelivery(
+  deps: CreateDeps,
+  creator: UserRecord,
+  emailIds: readonly string[],
+  invitable: readonly (UserRecord | null)[],
+  now: number,
+): Promise<("normal" | "hidden")[]> {
+  if (emailIds.length === 0) return [];
+  const { repos, config } = deps.platform;
+  const pastOpponents = new Set(
+    await repos.users.pastOpponentsOf(
+      creator.id,
+      invitable.map((user) => user?.id ?? NO_USER),
+    ),
+  );
+  const strangers = invitable.map((user) => user === null || !pastOpponents.has(user.id));
+  const perCreator = await checkLimits(
+    repos,
+    config,
+    now,
+    emailIds.map((hash, i) => ({
+      name: "INVITATIONS_RECEIVED_PAIR_DAY",
+      key: `${creator.id}:${hash}`,
+      amount: strangers[i] === true ? 1 : 0,
+    })),
+  );
+  const total = await checkLimits(
+    repos,
+    config,
+    now,
+    emailIds.map((hash, i) => ({
+      name: "INVITATIONS_RECEIVED_DAY",
+      key: hash,
+      amount: strangers[i] === true && perCreator[i]?.exceeded !== true ? 1 : 0,
+    })),
+  );
+  return emailIds.map((_hash, i) =>
+    strangers[i] === true && (perCreator[i]?.exceeded === true || total[i]?.exceeded === true)
+      ? "hidden"
+      : "normal",
+  );
+}
+
 /** Creates the game and returns its id. Throws {@link ApiError} for every refusal. */
 export async function createGame(
   deps: CreateDeps,
@@ -169,6 +224,10 @@ export async function createGame(
 
   // The same lookup and the same row for every address, whatever it resolves to (Q3).
   const found = await Promise.all(emails.map((email) => repos.users.findByEmail(email)));
+  const invitable = found.map((user) =>
+    user?.kind === "human" && user.onboardedAt !== null ? user : null,
+  );
+  const delivery = await inboundDelivery(deps, creator, emailIds, invitable, now);
   const gameId = crypto.randomUUID();
   const players: NewGamePlayer[] = [
     {
@@ -178,19 +237,15 @@ export async function createGame(
       joinedVia: "creator",
       joinedAt: now,
     },
-    ...emails.map((email, i): NewGamePlayer => {
-      const user = found[i];
-      const invitable = user?.kind === "human" && user.onboardedAt !== null;
-      return {
-        id: crypto.randomUUID(),
-        userId: invitable ? user.id : null,
-        inviteEmail: email,
-        state: "invited",
-        delivery: "normal",
-        // Never seen: a new invitation is unread (A2 review P-6).
-        lastSeenVersion: NEVER_SEEN,
-      };
-    }),
+    ...emails.map((email, i): NewGamePlayer => ({
+      id: crypto.randomUUID(),
+      userId: invitable[i]?.id ?? null,
+      inviteEmail: email,
+      state: "invited",
+      delivery: delivery[i] ?? "normal",
+      // Never seen: a new invitation is unread (A2 review P-6).
+      lastSeenVersion: NEVER_SEEN,
+    })),
   ];
   await repos.games.create(
     {

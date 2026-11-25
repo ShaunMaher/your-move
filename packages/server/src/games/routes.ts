@@ -54,6 +54,7 @@ import {
   memberRow,
   plainText,
   type PresentInput,
+  shownUserIds,
   summaryOf,
   viewOf,
 } from "./present.js";
@@ -165,12 +166,9 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     loaded: LoadedGame,
     viewer: GamePlayerRecord,
   ): Promise<PresentInput> => {
-    const ids = [
-      ...new Set(loaded.players.flatMap((row) => (row.userId === null ? [] : [row.userId]))),
-    ];
     const [gameResources, users] = await Promise.all([
       repos.games.resources(loaded.game.id),
-      repos.users.findByIds(ids),
+      repos.users.findByIds(shownUserIds(loaded.players)),
     ]);
     return {
       game: loaded.game,
@@ -368,10 +366,9 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       repos.games.playersOf(ids),
       repos.games.lastActions(ids),
     ]);
-    const userIds = [
-      ...new Set(players.flatMap((row) => (row.userId === null ? [] : [row.userId]))),
-    ];
-    const users = new Map((await repos.users.findByIds(userIds)).map((u) => [u.id, u]));
+    const users = new Map(
+      (await repos.users.findByIds(shownUserIds(players))).map((u) => [u.id, u]),
+    );
     const games = page.map(({ game, member }) => {
       const input: PresentInput = {
         game,

@@ -43,11 +43,23 @@ export function memberRow(
   return players.find((row) => row.userId === userId && isMemberRow(row));
 }
 
+/**
+ * The users whose names a game's rows may show: only rows that have joined. Reading no others
+ * keeps a lobby's reads the same whatever its typed addresses resolve to (Q3).
+ */
+export function shownUserIds(players: readonly GamePlayerRecord[]): string[] {
+  return [
+    ...new Set(
+      players.flatMap((row) => (row.userId === null || row.joinedAt === null ? [] : [row.userId])),
+    ),
+  ];
+}
+
 export interface PresentInput {
   readonly game: GameRecord;
   readonly players: readonly GamePlayerRecord[];
   readonly resources: readonly GameResourceRecord[];
-  /** Users of the game's rows, by id; a missing one has been deleted. */
+  /** Users of the game's joined rows ({@link shownUserIds}), by id; a missing one was deleted. */
   readonly users: ReadonlyMap<string, UserRecord>;
   readonly viewer: GamePlayerRecord;
   /** The installed game type, if any; its engine for this version decides `available`. */
@@ -59,7 +71,7 @@ function playerOf(row: ShownRow, input: PresentInput, creatorView: boolean): Env
   const { game, viewer } = input;
   // A row never joined shows no name or id to anyone (05 §Who sees what, Q3).
   const joined = row.joinedAt !== null;
-  const user = row.userId === null ? undefined : input.users.get(row.userId);
+  const user = joined && row.userId !== null ? input.users.get(row.userId) : undefined;
   const lobby = game.status === "lobby";
   const deadline = deadlineOf(row, game.turnTimeoutDays);
   return {

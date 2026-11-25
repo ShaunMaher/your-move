@@ -33,6 +33,7 @@ const METHODS = {
     findById: true,
     findByIds: true,
     findByEmail: true,
+    pastOpponentsOf: true,
     update: true,
     rememberGameOptions: true,
     deleteAccount: true,

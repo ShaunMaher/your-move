@@ -36,7 +36,7 @@ const LIMITS = {
   DISPLAY_NAME_CHANGES_30D: { limit: 3, windowMs: 30 * DAY },
   STEP_UP_USER_HOUR: { limit: 5, windowMs: HOUR },
   STEP_UP_USER_DAY: { limit: 10, windowMs: DAY },
-  // Games (A2): writes, moves, previews, game creation and email invitees per user.
+  // Games (A2): writes, moves, previews, game creation, email invitees and invitations received.
   WRITES_USER_MINUTE: { limit: 300, windowMs: MINUTE },
   MOVES_USER_MINUTE: { limit: 120, windowMs: MINUTE },
   PREVIEWS_USER_MINUTE: { limit: 300, windowMs: MINUTE },
@@ -44,6 +44,9 @@ const LIMITS = {
   GAMES_CREATED_PAIR_DAY: { limit: 5, windowMs: DAY },
   EMAIL_INVITEES_USER_HOUR: { limit: 5, windowMs: HOUR },
   EMAIL_INVITEES_USER_DAY: { limit: 10, windowMs: DAY },
+  // The inbound invitation cap (06 §6.7): per target and creator, and per target in total.
+  INVITATIONS_RECEIVED_PAIR_DAY: { limit: 1, windowMs: DAY },
+  INVITATIONS_RECEIVED_DAY: { limit: 3, windowMs: DAY },
 } as const satisfies Record<string, LimitRule>;
 
 export type LimitName = keyof typeof LIMITS;

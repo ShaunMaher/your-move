@@ -49,6 +49,11 @@ export interface UserRepo {
   /** The users with these ids that exist, in no particular order. */
   findByIds(ids: readonly string[]): Promise<UserRecord[]>;
   findByEmail(email: NormalisedEmail): Promise<UserRecord | null>;
+  /**
+   * Which of `candidates` are past opponents of the user (04 `past_opponents`). Ids that match no
+   * user simply aren't returned, so callers can pass a placeholder to keep the query the same.
+   */
+  pastOpponentsOf(userId: string, candidates: readonly string[]): Promise<string[]>;
   update(id: string, set: UserUpdate): Promise<void>;
   /**
    * Sets `settings.lastGameType` and, unless `input` is null, `settings.lastOptions[gameType]` to
