@@ -38,3 +38,15 @@ where the fix lives. The spec changes are in the v0.9.17 history line of the REA
 | A1-S2-3 | Fixed. Whenever the app finds no session (at launch, or any ending of it) the `ym.game.` keys are cleared; the remembered return path is kept for a signed-out visit. Test. | `apps/web/src/session-sync.ts` (`clearGameState`), `App.tsx`, `App.test.tsx` |
 | A1-S2-4 | Fixed. A dependency-cruiser rule forbids `apps/web/src` and `sw` from importing `vite-plugin/` or the Vite configurations (tests excepted); the existing server-package rule also exempts `vitest.config.ts`. | `.dependency-cruiser.mjs` |
 | A1-S2-5 | Fixed. A return path under a server-handled path (`SERVER_PATHS`, query and fragment ignored) is refused, in and out. The list reaches the app as a build-time constant (`define`) from `vite-plugin/defines.ts`, used by the build and the tests, so the app imports no server package. Tests for server paths and for look-alikes that are allowed. | `apps/web/vite-plugin/defines.ts`, `src/return-path.ts`, `src/globals.d.ts`, `App.test.tsx` |
+
+## Round 3
+
+| ID | Outcome | Where |
+|---|---|---|
+| A1-R3-1 | Fixed. `setMe` accepts a reply only when it is for the user now in state, so a held `PATCH /me` for the first person cannot put them back after another took over. Test: the held reply is released after a switch; the new person stays. | `apps/web/src/App.tsx`, `App.test.tsx` |
+| A1-R3-2 | Fixed. `isDestination` stays; Welcome's completion reads the remembered path in the handler (`peekReturnPath()`), so a reload on Welcome still lands on the destination. Tests: sign in as a new user, reload on Welcome, finish, land on `/settings`; removing `isDestination` makes both onboarding tests fail (checked by hand). | `apps/web/src/App.tsx`, `App.test.tsx` |
+| A1-R3-3 | Fixed. The session re-check effect has a `live` flag, cleared in cleanup and checked in the reply. | `apps/web/src/App.tsx` |
+| A1-R3-4 | Fixed. `isAppPath` refuses `%` in the path and any path the URL parser would rewrite (`.`/`..` segments). Tests for encoded dots, encoded slashes and dot segments. | `apps/web/src/return-path.ts`, `App.test.tsx` |
+| A1-R3-5 | Done. A fixture where `src/` imports `vite-plugin/` is added and `gates:prove` requires `web-src-not-to-build-code` in the report. | `scripts/test-fixtures/gates/arch/apps/web/`, `scripts/src/bin/gates-prove.ts` |
+| A1-R3-6 | Fixed. Arriving at a destination also clears `returnTo` from state. | `apps/web/src/App.tsx` |
+| A1-R3-7 | Fixed. The `entry` for `vite-plugin/` is gone from knip's `apps/web` configuration; the project globs stay and `lint:unused` passes. | `knip.config.ts` |
