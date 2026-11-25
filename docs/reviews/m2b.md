@@ -59,7 +59,7 @@ Round 2 reviewed HEAD 40e0a12. The security review passed; the remaining picky a
 
 ## Round 3
 
-Round 3 reviewed HEAD 8ce3822 (both reviewers: merge). The fixes are in the follow-up branch `m2b-round3`; the spec change is v0.9.18 (06 §3.2, 04 `rate_limits`).
+Round 3 reviewed HEAD 8ce3822 (both reviewers: merge). The fixes are in the follow-up branch `m2b-round3`; the spec change is v0.9.17 (06 §3.2, 04 `rate_limits`).
 
 | ID | Outcome | Where |
 |---|---|---|
