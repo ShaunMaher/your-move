@@ -12,7 +12,13 @@ import { writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { GMAIL_SEND_SCOPE, grantedScopes, idTokenClaims } from "@your-move/server";
+import {
+  GMAIL_SEND_SCOPE,
+  grantedScopes,
+  idTokenClaims,
+  isExpectedScopes,
+  toBase64Url,
+} from "@your-move/server";
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -38,12 +44,6 @@ export interface AuthorizeOptions {
 /** A refusal with a message that is safe to print. */
 export class AuthorizeError extends Error {
   override readonly name = "AuthorizeError";
-}
-
-function base64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
 /** Waits for the one redirect to `/callback` that carries our `state`, then answers it. */
@@ -94,17 +94,27 @@ function waitForCode(server: Server, state: string, timeoutMs: number): Promise<
   });
 }
 
-async function revoke(options: AuthorizeOptions, token: string): Promise<void> {
+/** Revokes `token`; true only when Google answered success. */
+async function revoke(options: AuthorizeOptions, token: string): Promise<boolean> {
   try {
-    await options.fetch(REVOKE_URL, {
+    const response = await options.fetch(REVOKE_URL, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ token }),
       signal: AbortSignal.timeout(15_000),
     });
+    await response.body?.cancel();
+    return response.ok;
   } catch {
-    // Best effort; the operator is told to revoke it themselves.
+    return false;
   }
+}
+
+/** The sentence for the operator after a revoke attempt. */
+async function revokeAndDescribe(options: AuthorizeOptions, token: string): Promise<string> {
+  return (await revoke(options, token))
+    ? "The token was discarded and revoked"
+    : "The token was discarded, but revocation failed: remove the app's access in the account's security settings";
 }
 
 /** Runs the flow; throws {@link AuthorizeError} when the result can't be used. */
@@ -113,9 +123,9 @@ export async function authorize(options: AuthorizeOptions): Promise<void> {
   const stateBytes = new Uint8Array(24);
   options.random(verifierBytes);
   options.random(stateBytes);
-  const verifier = base64Url(verifierBytes);
-  const state = base64Url(stateBytes);
-  const challenge = base64Url(
+  const verifier = toBase64Url(verifierBytes);
+  const state = toBase64Url(stateBytes);
+  const challenge = toBase64Url(
     new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))),
   );
 
@@ -181,9 +191,7 @@ export async function authorize(options: AuthorizeOptions): Promise<void> {
     }
 
     const problem = ((): string | null => {
-      const granted = grantedScopes(body?.scope);
-      const wanted = grantedScopes(REQUESTED_SCOPE);
-      if (granted.size !== wanted.size || [...wanted].some((scope) => !granted.has(scope))) {
+      if (!isExpectedScopes(grantedScopes(body?.scope))) {
         return "the granted scopes are not exactly openid, email and gmail.send";
       }
       const claims = typeof body?.id_token === "string" ? idTokenClaims(body.id_token) : null;
@@ -207,18 +215,16 @@ export async function authorize(options: AuthorizeOptions): Promise<void> {
       return null;
     })();
     if (problem !== null) {
-      await revoke(options, refreshToken);
       throw new AuthorizeError(
-        `refused: ${problem}. The token was discarded and revoked; nothing was written`,
+        `refused: ${problem}. ${await revokeAndDescribe(options, refreshToken)}; nothing was written`,
       );
     }
 
     try {
       await writeFile(options.outFile, `${refreshToken}\n`, { flag: "wx", mode: 0o600 });
     } catch {
-      await revoke(options, refreshToken);
       throw new AuthorizeError(
-        "could not create the output file (it must not exist yet); the token was revoked, run it again",
+        `could not create the output file (it must not exist yet). ${await revokeAndDescribe(options, refreshToken)}; run it again`,
       );
     }
     options.print(`Refresh token written to ${options.outFile} (mode 0600).`);

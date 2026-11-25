@@ -3,13 +3,13 @@
  * token for the sender user. The client id and secret come from the environment or, preferably,
  * files (`GMAIL_CLIENT_ID_FILE`, `GMAIL_CLIENT_SECRET_FILE`), never from the command line;
  * `GMAIL_SENDER` is the sender's address. The token goes to a new 0600 file, never to the
- * terminal. The file must be outside the repository.
+ * terminal. The file must be outside the repository and any Git working tree.
  */
 import { readFileSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import { authorize } from "../gmail/authorize.js";
+import { checkOutFile } from "../gmail/out-file.js";
 import { ROOT_DIR, run } from "./cli.js";
 
 /** A value from `NAME_FILE` (one trailing newline trimmed) or else `NAME`. */
@@ -30,11 +30,7 @@ function secret(name: string): string {
 run("gmail:authorize", async () => {
   const { values } = parseArgs({ options: { out: { type: "string" } } });
   if (values.out === undefined) throw new Error("--out <file> is required: where the token goes");
-  const outFile = resolve(values.out);
-  const fromRoot = relative(ROOT_DIR, outFile);
-  if (!fromRoot.startsWith("..") && !isAbsolute(fromRoot)) {
-    throw new Error("--out must be outside the repository, so the token can't be committed");
-  }
+  const outFile = checkOutFile(values.out, ROOT_DIR);
   const sender = process.env["GMAIL_SENDER"];
   if (sender === undefined || sender === "") throw new Error("GMAIL_SENDER is required");
   await authorize({

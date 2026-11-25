@@ -43,6 +43,7 @@ async function run(
     outFile?: string;
     timeoutMs?: number;
     callback?: (redirect: string) => Promise<void>;
+    revokeStatus?: number;
   } = {},
 ) {
   const printed: string[] = [];
@@ -67,7 +68,7 @@ async function run(
         return Promise.resolve(new Response("{}", { status: Number(token.status) }));
       return Promise.resolve(Response.json(token));
     }
-    return Promise.resolve(new Response("", { status: 200 }));
+    return Promise.resolve(new Response("", { status: options.revokeStatus ?? 200 }));
   };
   const config: AuthorizeOptions = {
     clientId: CLIENT_ID,
@@ -223,6 +224,21 @@ describe("gmail:authorize (09 §2)", () => {
       expect(revoked?.body.get("token")).toBe(FAKE_TOKEN);
       expect(printed.join("\n")).not.toContain(FAKE_TOKEN);
     });
+  });
+
+  it("says so when revocation fails, and when it works", async () => {
+    const token = {
+      refresh_token: FAKE_TOKEN,
+      scope: GOOD_SCOPE,
+      id_token: jwt({ ...goodClaims, email: "admin@example.org" }),
+    };
+    const failed = await run({ token, revokeStatus: 400 });
+    expect((failed.result as Error).message).toContain("revocation failed");
+    expect((failed.result as Error).message).toContain("security settings");
+    expect((failed.result as Error).message).not.toContain(FAKE_TOKEN);
+    const worked = await run({ token });
+    expect((worked.result as Error).message).toContain("revoked");
+    expect((worked.result as Error).message).not.toContain("revocation failed");
   });
 
   it("accepts Google's plain `email` scope name and a string email_verified", async () => {
