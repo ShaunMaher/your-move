@@ -22,11 +22,13 @@ export class EngineFault extends Error {
 
 /**
  * The definition with every function member wrapped: a throw becomes an {@link EngineFault}.
- * A schema member (`actionSchema`, `optionsSchema`, `configSchema`) has its `parse` and
- * `safeParse` wrapped the same way, as a refinement of a module's schema is module code too.
+ * A schema member (`actionSchema`, `optionsSchema`, `configSchema`) has its synchronous `parse`
+ * and `safeParse` wrapped the same way, as a refinement of a module's schema is module code too.
+ * Async refinements are not supported: the engine contract is synchronous (02 §2), so the async
+ * parse methods are not wrapped.
  * Everything else (version, error codes) is the module's own.
  */
-const PARSERS = new Set<PropertyKey>(["parse", "safeParse", "parseAsync", "safeParseAsync"]);
+const PARSERS = new Set<PropertyKey>(["parse", "safeParse"]);
 
 function isSchema(value: unknown): value is object {
   return typeof value === "object" && value !== null && "safeParse" in value;

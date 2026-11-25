@@ -216,6 +216,7 @@ function gameRepo(db: Database): GameRepo {
         .where(
           and(
             eq(gamePlayers.userId, userId),
+            IS_MEMBER,
             eq(games.status, "lobby"),
             lte(games.createdAt, createdBefore),
           ),

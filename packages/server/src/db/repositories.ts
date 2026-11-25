@@ -337,7 +337,7 @@ export interface GameRepo {
   markSeen(gameId: string, userId: string, version: number): Promise<void>;
   /**
    * Up to `limit` ids of `lobby` games created at or before `createdBefore` in which the user
-   * holds a row, oldest first: the lobbies lazy expiry looks at (02 §4).
+   * is a member (04 §Membership: not a declined, left or inert row), oldest first: the lobbies lazy expiry looks at (02 §4).
    */
   overdueLobbies(userId: string, createdBefore: number, limit: number): Promise<string[]>;
   /** How many `lobby`/`active` games the user created (05 `TOO_MANY_GAMES`). */

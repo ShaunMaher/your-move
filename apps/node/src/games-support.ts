@@ -10,12 +10,13 @@ import { expect, onTestFailed } from "vitest";
 import { installedGames } from "../../../generated/server-registry.js";
 import { createHarness, type Harness, type HarnessOptions, PROD_ENV } from "./test-harness.js";
 
-/** The seed of a test's games: `GAME_SEED` to replay a failure, otherwise a fresh one. */
+/** The seed of a test's games: `GAME_SEED` to replay a failure, otherwise a fresh one (an empty value counts as unset). */
 export function gameSeed(): number {
   const given = process.env["GAME_SEED"];
-  if (given === undefined) return crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
+  if (given === undefined || given === "")
+    return crypto.getRandomValues(new Uint32Array(1))[0] ?? 0;
   const seed = Number(given);
-  if (!Number.isSafeInteger(seed)) {
+  if (!/^\d+$/u.test(given) || !Number.isSafeInteger(seed)) {
     throw new Error(`GAME_SEED must be an integer, got ${JSON.stringify(given)}`);
   }
   return seed;

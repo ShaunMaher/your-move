@@ -331,6 +331,43 @@ describe("S-4: an overdue lobby expires when it is next read or written", () => 
       { n: 20 },
     ]);
   });
+
+  it("is not starved by older overdue lobbies the user holds no member row in (A2-R3-1)", async () => {
+    const h = harness();
+    const a = await signUp(h, "Ada");
+    const other = await signUp(h, "Bo");
+    const insert = (createdAt: number, state: string, userId: string) => {
+      const id = crypto.randomUUID();
+      h.exec(
+        "INSERT INTO games (id, game_type, game_version, options, status, created_by, seats, turn_timeout_days, seat_order, ai_assistance, last_action_at, created_at, updated_at) VALUES (?, 'words', 1, '{}', 'lobby', ?, 2, 14, 'join', 'off', ?, ?, ?)",
+        id,
+        other.id,
+        createdAt,
+        createdAt,
+        createdAt,
+      );
+      h.exec(
+        "INSERT INTO game_players (id, game_id, user_id, state, joined_via, joined_at) VALUES (?, ?, ?, ?, 'creator', ?)",
+        crypto.randomUUID(),
+        id,
+        userId,
+        state,
+        createdAt,
+      );
+      return id;
+    };
+    for (let i = 0; i < 25; i++) insert(T0 - 1000 + i, "declined", a.id);
+    const own = createGame(h, a, { gameType: "words", invitees: [] });
+    const ownId = (await own).id;
+    h.advance(LIFETIME);
+    const listed = await call<{ games: { id: string; status: string }[] }>(
+      h,
+      a,
+      "GET",
+      "/api/v1/games",
+    );
+    expect(listed.body.games.find((game) => game.id === ownId)?.status).toBe("expired");
+  });
 });
 
 describe("S-1: the inbound invitation cap (06 §6.7, 08 T20)", () => {
@@ -589,6 +626,14 @@ describe("GAME_SEED (A2 review P2-7)", () => {
     try {
       process.env["GAME_SEED"] = "12abc";
       expect(() => gameSeed()).toThrow(/GAME_SEED must be an integer/u);
+      for (const bad of ["0x10", "1e3", "-1", "1.5", " 7"]) {
+        process.env["GAME_SEED"] = bad;
+        expect(() => gameSeed(), bad).toThrow(/GAME_SEED must be an integer/u);
+      }
+      process.env["GAME_SEED"] = "";
+      expect(Number.isSafeInteger(gameSeed())).toBe(true);
+      process.env["GAME_SEED"] = "0";
+      expect(gameSeed()).toBe(0);
       process.env["GAME_SEED"] = "42";
       expect(gameSeed()).toBe(42);
     } finally {

@@ -120,6 +120,29 @@ export default {
       to: { path: "^(games/|apps/|generated/)|(^|/)node_modules/@[^/]+/game-" },
     },
     {
+      name: "production-not-to-testing-entry",
+      comment:
+        "Production code never imports the test-only entry @your-move/server/testing (A2-R3-7); only test files, tests/contract and the contract suites themselves do.",
+      severity: "error",
+      from: {
+        pathNot: [
+          "[.]test[.]tsx?$",
+          "^tests/",
+          "^packages/server/src/db/(testing|repository-contract)[.]ts$",
+          "^packages/server/src/games/race-contract[.]ts$",
+        ],
+      },
+      to: { path: "^packages/server/src/db/testing[.]ts$" },
+    },
+    {
+      name: "production-not-to-node-db-entry",
+      comment:
+        "@your-move/node/db (the SQLite adapter as a package entry) is for tests/contract; no other package or app imports it (A2-R3-7).",
+      severity: "error",
+      from: { pathNot: ["^apps/node/", "^tests/"] },
+      to: { path: "^apps/node/src/db/sqlite[.]ts$" },
+    },
+    {
       name: "generated-only-from-apps",
       comment: "Only apps/worker, apps/node and apps/web import generated/ (11 §5).",
       severity: "error",

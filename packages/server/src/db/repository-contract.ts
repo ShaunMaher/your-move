@@ -340,8 +340,14 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         const older = await make(T0 - 2, "lobby", [
           player({ userId: user, state: "invited", joinedAt: null }),
         ]);
-        // Any row of the user's counts, one giving no access included.
-        const old = await make(T0 - 1, "lobby", [player({ userId: user, state: "declined" })]);
+        const old = await make(T0 - 1, "lobby", [player({ userId: user })]);
+        // Rows giving no access are not the user's lobbies: they never expire for them (A2-R3-1).
+        await make(T0 - 1, "lobby", [player({ userId: user, state: "declined" })]);
+        await make(T0 - 1, "lobby", [player({ userId: user, state: "left" })]);
+        await make(T0 - 1, "lobby", [player({ userId: user, state: "removed" })]);
+        await make(T0 - 1, "lobby", [
+          player({ userId: user, state: "invited", delivery: "inert", joinedAt: null }),
+        ]);
         await make(T0 + 1, "lobby", [player({ userId: user })]); // not overdue yet
         await make(T0 - 3, "cancelled", [player({ userId: user })]); // not a lobby
         await make(T0 - 4, "lobby", [player({ userId: other })]); // not the user's
