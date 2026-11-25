@@ -16,6 +16,9 @@ export function assertRange(maxExclusive: number): void;
 export type ExitReason = "resign" | "decline";
 
 // @public
+export function formatText(text: Text, names: readonly string[]): string;
+
+// @public
 export type FrameworkError = z.infer<typeof frameworkErrorSchema>;
 
 // @public

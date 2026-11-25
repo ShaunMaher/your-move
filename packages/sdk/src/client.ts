@@ -9,6 +9,7 @@ import { createElement, Fragment, type ComponentType, type ReactElement } from "
 
 import type { SubmitResult, GameEnvelope } from "./api.js";
 import type { GameError, Text } from "./contract.js";
+import { formatText } from "./text.js";
 
 /**
  * Props of a client module's board (02 §3).
@@ -83,19 +84,8 @@ export interface GameClientModule<
   readonly HistoryItem: ComponentType<HistoryItemProps>;
 }
 
-/**
- * Fills a `Text`'s seat placeholders with names (02 §5). A seat without a name renders as
- * "Seat n" (numbered from 1).
- *
- * @public
- */
-export function formatText(text: Text, names: readonly string[]): string {
-  return text
-    .map((part) =>
-      typeof part === "string" ? part : (names[part.seat] ?? `Seat ${String(part.seat + 1)}`),
-    )
-    .join("");
-}
+// The main entry's helper, re-exported so client modules keep importing it from here.
+export { formatText } from "./text.js";
 
 /**
  * Renders a `Text` as React text, with the names filled in.
