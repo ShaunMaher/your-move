@@ -85,3 +85,17 @@ review (P2, changes required). Owner decisions are marked. Accepted risks are in
 | A2-P2-7 | Fixed. A `GAME_SEED` that is not an integer throws a clear error. Test: `12abc` refused, `42` replayed. | `apps/node/src/games-support.ts`, `games-review.test.ts` |
 | A2-P2-8 | Fixed. The `§` in `tests/contract/package.json` is as it was on `main`. | `tests/contract/package.json` |
 | A2-P2-9 | Noted. The example kit test's 60 s budget was measured locally; it is to be re-measured from a CI run and the comment's figures replaced. | `games/example/src/kit.test.ts`, ADR 0004 |
+
+# Round 3
+
+Small fixes after round 2.
+
+| ID | Outcome | Where |
+|---|---|---|
+| A2-R3-1 | Fixed. `overdueLobbies` now requires a member row (the `IS_MEMBER` predicate), so declined, left, removed and inert rows no longer fill the 20-per-request batch. Tests: the repository contract (both drivers) has declined, left, removed and inert rows that must not be returned; an end-to-end test has 25 older declined overdue lobbies and shows a list still expires the user's own overdue lobby (fails without the fix). | `packages/server/src/db/repos.ts`, `repositories.ts`, `repository-contract.ts`, `apps/node/src/games-review.test.ts` |
+| A2-R3-2 | Fixed, by dropping. `parseAsync` and `safeParseAsync` are no longer in the wrapped set (nothing uses them; the engine contract is synchronous), and the A2-S2-6 record above and the module comment say so. | `packages/server/src/games/engine-fault.ts` |
+| A2-R3-3 | Fixed. The registry parses `configSchema` and runs `checkConfig` through the guarded definitions; an `EngineFault` becomes a `GameConfigError` naming only `GAMES_<TYPE>_*`, never a value or the original message. Test: a throwing refinement and a throwing `checkConfig`. | `packages/server/src/games/registry.ts`, `units.test.ts` |
+| A2-R3-4 | Fixed. F-16 and 03 §8 say nothing accepts or starts an overdue lobby, and that past the per-request bound a list may still show some as open until a later request. | `docs/security/findings.md`, 03 §8 |
+| A2-R3-5 | Fixed. Tests: `accept` at exactly `due` gives `WRONG_STATUS`; `start` at `due - 1` gives no refusal (as `accept` does). | `packages/server/src/games/units.test.ts` |
+| A2-R3-6 | Fixed. `GAME_SEED` must match `/^\d+$/`; an empty value counts as unset. Test: `""`, `0x10`, `1e3`, `-1`, `1.5`, a leading space, `0` and `42`. | `apps/node/src/games-support.ts`, `games-review.test.ts` |
+| A2-R3-7 | Done. Two dependency-cruiser rules: nothing but test files, `tests/` and the contract suites may import the `@your-move/server/testing` entry file, and nothing outside `apps/node/` and `tests/` may import the `@your-move/node/db` entry file (`apps/node` itself uses it for the running server). Checked by a deliberate violation of each. | `.dependency-cruiser.mjs` |
