@@ -133,9 +133,13 @@
             "type": "string",
             "enum": ["pastOpponents", "nobody"],
             "description": "Who can add me to games (06 §6.2)."
+          },
+          "emailNudges": {
+            "type": "boolean",
+            "description": "Email me \"It's your turn\" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default."
           }
         },
-        "required": ["whoCanAddMe"]
+        "required": ["whoCanAddMe", "emailNudges"]
       },
       "OtpVerify": {
         "type": "object",
@@ -173,6 +177,17 @@
             "type": "string",
             "maxLength": 256,
             "description": "1–24 characters; no links, addresses, long digit runs or reserved words (06 §5.1). Setting it completes onboarding."
+          },
+          "settings": { "$ref": "#/components/schemas/UserSettingsPatch" }
+        },
+        "additionalProperties": false
+      },
+      "UserSettingsPatch": {
+        "type": "object",
+        "properties": {
+          "emailNudges": {
+            "type": "boolean",
+            "description": "Email me \"It's your turn\" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default."
           }
         },
         "additionalProperties": false
@@ -1215,8 +1230,8 @@
         "x-scope": "session",
         "security": [{ "sessionCookie": [] }],
         "tags": ["Account"],
-        "summary": "Change the display name; completes onboarding",
-        "description": "Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`).",
+        "summary": "Change the display name or settings; completes onboarding",
+        "description": "Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`). `settings` changes only the keys given.",
         "requestBody": {
           "required": true,
           "content": {

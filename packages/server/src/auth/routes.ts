@@ -1,7 +1,7 @@
 /**
  * The sign-in and account endpoints (docs/spec/05-api.md §Auth & account, 06 §3–§5, §7): OTP
- * request and verify, logout and logout-all, `GET`/`PATCH /me`, and account deletion with a
- * step-up code.
+ * request and verify, logout and logout-all, `GET`/`PATCH /me` (with the `emailNudges` setting,
+ * 03 §7), and account deletion with a step-up code.
  */
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import {
@@ -22,7 +22,7 @@ import type { Context } from "hono";
 import { validateDisplayName } from "../accounts/display-name.js";
 import { normaliseAddress } from "../accounts/email.js";
 import { isLocalDev } from "../config/local-dev.js";
-import { hmacHex, type Subkeys } from "../crypto/subkeys.js";
+import { emailId, hmacHex, type Subkeys } from "../crypto/subkeys.js";
 import type { UserRecord } from "../db/repositories.js";
 import type { EmailMessage } from "../email/sender.js";
 import {
@@ -90,7 +90,11 @@ function toMe(user: UserRecord, adminEmails: readonly string[], minAge: number):
     kind: user.kind,
     email: user.email,
     displayName: user.displayName,
-    settings: { whoCanAddMe: settings.whoCanAddMe ?? "pastOpponents" },
+    settings: {
+      whoCanAddMe: settings.whoCanAddMe ?? "pastOpponents",
+      // Off unless turned on (03 §7).
+      emailNudges: settings.emailNudges ?? false,
+    },
     ageAttested: user.ageAttestedMinAge !== null && user.ageAttestedMinAge >= minAge,
     // M2b: onboarding is the display name; the age confirmation joins in M4 (10 M2).
     needsOnboarding: user.onboardedAt === null,
@@ -296,6 +300,16 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
         });
         user = { ...user, displayName: result.name, updatedAt: at };
       }
+    }
+    const nudges = body.settings?.emailNudges;
+    if (nudges !== undefined) {
+      // Turning nudges on records the address's emailId, which a nudges unsubscribe link finds
+      // the account by (04 `users.email_id`, 05 §Email links).
+      const id =
+        nudges && user.email !== null ? await emailId(await options.keys(), user.email) : null;
+      await repos.users.setEmailNudges(user.id, { enabled: nudges, emailId: id, updatedAt: now() });
+      // The settings were changed in SQL, key by key: read back what is stored now.
+      user = (await repos.users.findById(user.id)) ?? user;
     }
     return c.json(toMe(user, config.adminEmails, config.minAge), 200);
   });

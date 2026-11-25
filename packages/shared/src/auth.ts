@@ -64,13 +64,25 @@ const jsonBody = <T extends z.ZodType>(schema: T, required = true) => ({
   content: { "application/json": { schema } },
 });
 
+const EmailNudgesSetting = z.boolean().openapi({
+  description:
+    'Email me "It\'s your turn" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default.',
+});
+
 export const UserSettingsSchema = z
   .object({
     whoCanAddMe: z
       .enum(["pastOpponents", "nobody"])
       .openapi({ description: "Who can add me to games (06 §6.2)." }),
+    emailNudges: EmailNudgesSetting,
   })
   .openapi("UserSettings");
+
+/** The settings `PATCH /api/v1/me` changes: each key optional, only the keys given change. */
+const UserSettingsPatchSchema = z
+  .object({ emailNudges: EmailNudgesSetting.optional() })
+  .strict()
+  .openapi("UserSettingsPatch");
 
 /** `GET /api/v1/me` and the `user` of a successful verify (05 §Auth & account). */
 export const MeSchema = z
@@ -228,6 +240,7 @@ export const PatchMeBodySchema = z
       description:
         "1–24 characters; no links, addresses, long digit runs or reserved words (06 §5.1). Setting it completes onboarding.",
     }),
+    settings: UserSettingsPatchSchema.optional(),
   })
   .strict()
   .openapi("PatchMe");
@@ -239,9 +252,9 @@ export const patchMeRoute = createRoute({
   method: "patch",
   path: `${API_V1}/me`,
   tags: ["Account"],
-  summary: "Change the display name; completes onboarding",
+  summary: "Change the display name or settings; completes onboarding",
   description:
-    "Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`).",
+    "Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`). `settings` changes only the keys given.",
   request: { body: jsonBody(PatchMeBodySchema) },
   responses: {
     200: {

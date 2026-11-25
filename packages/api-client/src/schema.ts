@@ -142,8 +142,8 @@ export interface paths {
     options?: never;
     head?: never;
     /**
-     * Change the display name; completes onboarding
-     * @description Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`).
+     * Change the display name or settings; completes onboarding
+     * @description Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`). `settings` changes only the keys given.
      */
     patch: operations["updateMe"];
     trace?: never;
@@ -498,6 +498,8 @@ export interface components {
        * @enum {string}
        */
       whoCanAddMe: "pastOpponents" | "nobody";
+      /** @description Email me "It's your turn" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default. */
+      emailNudges: boolean;
     };
     OtpVerify: {
       /**
@@ -518,6 +520,11 @@ export interface components {
     PatchMe: {
       /** @description 1–24 characters; no links, addresses, long digit runs or reserved words (06 §5.1). Setting it completes onboarding. */
       displayName?: string;
+      settings?: components["schemas"]["UserSettingsPatch"];
+    };
+    UserSettingsPatch: {
+      /** @description Email me "It's your turn" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default. */
+      emailNudges?: boolean;
     };
     DeleteMe: {
       /**
