@@ -332,6 +332,8 @@ test:timing:
   variables:
     CACHE_ARCH: arm64
   script:
+    # The harness's databases are files: on tmpfs, disk stalls don't land in the measurements.
+    - *tmp-in-memory
     - pnpm exec vitest run --project apps/node src/auth-timing.test.ts
   after_script:
     - *runner-report
