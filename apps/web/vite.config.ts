@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
-import { serviceWorker } from "./build/service-worker.js";
+import { serviceWorker } from "./vite-plugin/service-worker.js";
 
 /**
  * Records every module the build read in generated/bundles/web.json, for `pnpm games:check-inputs`

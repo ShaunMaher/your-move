@@ -4,7 +4,7 @@
  * the shell only: it never touches `/api/*` or any other server-handled path, and there is no
  * offline move queue.
  */
-/* global BUILD -- prepended by the build (build/service-worker.ts) */
+/* global BUILD -- prepended by the build (vite-plugin/service-worker.ts) */
 
 const CACHE = `shell-${BUILD.version}`;
 
