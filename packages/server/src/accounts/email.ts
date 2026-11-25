@@ -22,8 +22,29 @@ const LABEL = String.raw`[^\s\p{Cc}\p{Cf}@<>()[\]\\,;:".]+`;
 const ADDRESS = new RegExp(String.raw`^${LOCAL}@${LABEL}(?:\.${LABEL})+$`, "u");
 
 /** A delivery-safe domain: ASCII labels of letters, digits and inner hyphens, at least two. */
-export const ASCII_DOMAIN =
+const ASCII_DOMAIN =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/u;
+
+/** An ASCII dot-atom local part (RFC 5322): no leading, trailing or consecutive dots. */
+const ASCII_LOCAL_PART = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/u;
+
+/**
+ * Whether `address` is one the mail builder can send as it stands: an ASCII dot-atom local part of
+ * at most 64 characters, an ASCII domain of letters, digits and inner hyphens with labels of at
+ * most 63 characters, at most 253 in all, and a top-level label that isn't all digits (which would
+ * read as an IP address). The one rule shared by {@link normaliseAddress}, the MIME builder and the
+ * `EMAIL_FROM` check, so what is accepted can never be wider than what can be sent.
+ */
+export function isSendableAddress(address: string): boolean {
+  const at = address.lastIndexOf("@");
+  if (at < 1 || address.length > MAX_EMAIL_LENGTH) return false;
+  const local = address.slice(0, at);
+  const domain = address.slice(at + 1);
+  if (local.length > 64 || !ASCII_LOCAL_PART.test(local)) return false;
+  if (domain.length > 253 || !ASCII_DOMAIN.test(domain)) return false;
+  const labels = domain.split(".");
+  return labels.every((label) => label.length <= 63) && !/^\d+$/u.test(labels.at(-1) ?? "");
+}
 
 /**
  * The ASCII form of `domain`, or `null` when it can't be one that means the same thing. Any ASCII
@@ -60,5 +81,5 @@ export function normaliseAddress(input: string): NormalisedEmail | null {
   const domain = asciiDomain(value.slice(at + 1));
   if (domain === null) return null;
   const address = `${value.slice(0, at)}@${domain}`;
-  return address.length > MAX_EMAIL_LENGTH ? null : (address as NormalisedEmail);
+  return isSendableAddress(address) ? (address as NormalisedEmail) : null;
 }

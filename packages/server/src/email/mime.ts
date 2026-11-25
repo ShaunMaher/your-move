@@ -10,7 +10,7 @@
  *   part is refused rather than sent somewhere other than the stored address.
  * - The body is `multipart/alternative`: plain text, then HTML, both quoted-printable UTF-8.
  */
-import { ASCII_DOMAIN } from "../accounts/email.js";
+import { isSendableAddress } from "../accounts/email.js";
 import { toBase64 } from "../base64.js";
 import { EmailHeaderError } from "./sender.js";
 
@@ -38,7 +38,6 @@ export interface MimeInput {
  */
 const BOUNDARY = "=_ym_alt_boundary";
 const CRLF = "\r\n";
-const LOCAL_PART = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/u;
 const PRINTABLE_ASCII = /^[ -~]*$/u;
 /** Bytes per encoded word: 36 bytes become 48 base64 characters, 60 with the word's wrapper. */
 const WORD_BYTES = 36;
@@ -88,13 +87,10 @@ function encodePhrase(name: string): string {
  */
 function encodeAddress(address: string, what: string): string {
   refuseControls(address, what);
-  const at = address.lastIndexOf("@");
-  const local = address.slice(0, at);
-  const domain = address.slice(at + 1);
-  if (at < 1 || address.length > 254 || !LOCAL_PART.test(local) || !ASCII_DOMAIN.test(domain)) {
+  if (!isSendableAddress(address)) {
     throw new EmailHeaderError(`${what} is not a valid ASCII address`);
   }
-  return `${local}@${domain}`;
+  return address;
 }
 
 function mailbox({ name, address }: MimeMailbox, what: string): string {

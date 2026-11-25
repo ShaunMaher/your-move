@@ -16,7 +16,12 @@ Conventions:
   ≤ 254 chars. The stored domain is **ASCII**, so the stored address is the one mail is delivered
   to (09 §2): a domain with any ASCII character other than letters, digits, `.` and `-`, or one
   that NFKC would rewrite, is refused; an internationalised domain is stored as punycode with the
-  same number of labels. This happens before any limit or lookup, identically for every address.
+  same number of labels. An address is accepted only if the mail builder can send it as it stands:
+  an ASCII dot-atom local part of at most 64 characters (no leading, trailing or consecutive
+  dots, no non-ASCII), labels of at most 63 characters, a domain of at most 253, and a top-level
+  label that isn't all digits; one shared rule, so the two can't drift (a non-ASCII local part is
+  refused, with the same `400` as any invalid address). `EMAIL_FROM` must satisfy the same rule
+  unless the provider is `console`. This happens before any limit or lookup, identically for every address.
 - Columns marked 🔒 are **secret game state** and must never be serialised to a client (02 §2.1
   rule 4, invariant 4 below).
 
