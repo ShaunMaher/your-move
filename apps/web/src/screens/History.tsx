@@ -1,11 +1,13 @@
 /**
  * The history drawer (07 §1, 02 §3): the game's public log, oldest first, each entry drawn by the
- * module's `HistoryItem` with the stored text as its fallback. Pages are fetched in turn until
- * the log is complete or the cap is reached, so the newest entries are at the bottom.
+ * module's `HistoryItem`, which is given the stored text to fall back on for a record it can't
+ * draw (02 §3); the drawer itself never shows that text beside the module's own drawing. Pages
+ * are fetched in turn until the log is complete or the cap is reached; the newest entries are at
+ * the bottom, and the list is scrolled to them when it opens.
  */
 import type { ApiClient } from "@your-move/api-client";
 import type { GameClientModule } from "@your-move/sdk/client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Dialog } from "../Dialog.js";
 import { type GameEnvelope, getHistory, type HistoryItem } from "../game-api.js";
@@ -26,6 +28,7 @@ export function History({ api, game, client, onClose, onSessionLost }: HistoryPr
   const [problem, setProblem] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const names = namesBySeat(game.players);
+  const newest = useRef<HTMLLIElement>(null);
   const { id } = game;
 
   useEffect(() => {
@@ -58,6 +61,11 @@ export function History({ api, game, client, onClose, onSessionLost }: HistoryPr
     };
   }, [api, id, attempt, onSessionLost]);
 
+  const loaded = items !== null;
+  useEffect(() => {
+    if (loaded) newest.current?.scrollIntoView?.({ block: "end" });
+  }, [loaded]);
+
   return (
     <Dialog title="History" onClose={onClose} variant="drawer">
       {problem === null ? null : (
@@ -81,8 +89,8 @@ export function History({ api, game, client, onClose, onSessionLost }: HistoryPr
       {items?.length === 0 ? <p>Nothing has happened yet.</p> : null}
       {items === null || items.length === 0 ? null : (
         <ol className="history" aria-label="Moves, oldest first">
-          {items.map((item) => (
-            <li key={item.seq}>
+          {items.map((item, index) => (
+            <li key={item.seq} ref={index === items.length - 1 ? newest : undefined}>
               <client.HistoryItem
                 record={item.record}
                 describe={item.describe}
