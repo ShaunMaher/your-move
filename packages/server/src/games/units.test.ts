@@ -265,6 +265,44 @@ describe("the games registry (02 §7.3)", () => {
     expect(unknownKey).toThrow(GameConfigError);
     expect(unknownKey).not.toThrow(/secret-value/u);
   });
+
+  it("turns a throwing config refinement or checkConfig into a GameConfigError naming only variables (A2-R3-2/3)", () => {
+    const secret = "tile-rack-secret";
+    const build = (overrides: Partial<AnyGameDefinition>) => () =>
+      createGameRegistry(
+        [
+          {
+            manifest: toyManifest,
+            engines: { 1: definition(1, overrides) },
+            enabledByDefault: true,
+          },
+        ],
+        { gameConfig: { toy: {} }, enabledGames: [], resources: [] },
+      );
+    const refinement = build({
+      configSchema: z.object({}).refine(() => {
+        throw new Error(secret);
+      }),
+    });
+    const check = build({
+      checkConfig: () => {
+        throw new Error(secret);
+      },
+    });
+    for (const build of [refinement, check]) {
+      let caught: unknown;
+      try {
+        build();
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(GameConfigError);
+      expect((caught as GameConfigError).issues).toEqual([
+        "GAMES_TOY_*: the toy game failed while checking its configuration",
+      ]);
+      expect((caught as GameConfigError).message).not.toContain(secret);
+    }
+  });
 });
 
 describe("ApiError", () => {

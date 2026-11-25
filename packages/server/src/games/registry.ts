@@ -12,7 +12,7 @@ import type {
   ResourceCatalog,
 } from "@your-move/sdk";
 
-import { guardEngine } from "./engine-fault.js";
+import { EngineFault, guardEngine } from "./engine-fault.js";
 
 /** One installed game package, as the generated server registry lists it (02 §7.3). */
 export interface InstalledGame {
@@ -88,7 +88,18 @@ export function createGameRegistry(
       issues.push(`${type}: the package exports no rules version`);
       continue;
     }
-    const parsed = latest.configSchema.safeParse(options.gameConfig[type] ?? {});
+    // Module code (a config refinement, `checkConfig`) runs behind the fault boundary too (S-5):
+    // an exception names the variables, never a value.
+    const guarded = definitions.map((definition) => guardEngine(definition));
+    const guardedLatest = guarded.at(-1) ?? latest;
+    let parsed: ReturnType<typeof latest.configSchema.safeParse>;
+    try {
+      parsed = guardedLatest.configSchema.safeParse(options.gameConfig[type] ?? {});
+    } catch (error) {
+      if (!(error instanceof EngineFault)) throw error;
+      issues.push(`${prefix}*: the ${type} game failed while checking its configuration`);
+      continue;
+    }
     if (!parsed.success) {
       // Zod's messages can quote the received value, so only the key is named.
       const keys = new Set(parsed.error.issues.map((issue) => String(issue.path[0] ?? "")));
@@ -100,8 +111,15 @@ export function createGameRegistry(
       continue;
     }
     const config: ModuleConfig = parsed.data;
-    for (const definition of definitions) {
-      const checked = definition.checkConfig(config, options.resources);
+    for (const definition of guarded) {
+      let checked: ReturnType<typeof definition.checkConfig>;
+      try {
+        checked = definition.checkConfig(config, options.resources);
+      } catch (error) {
+        if (!(error instanceof EngineFault)) throw error;
+        issues.push(`${prefix}*: the ${type} game failed while checking its configuration`);
+        continue;
+      }
       if (!("ok" in checked)) {
         const key = keyOf(checked.detail);
         issues.push(
@@ -109,10 +127,7 @@ export function createGameRegistry(
         );
       }
     }
-    // Module calls behind the fault boundary: an exception is logged without its message (S-5).
-    const byVersion = new Map(
-      definitions.map((definition) => [definition.version, guardEngine(definition)]),
-    );
+    const byVersion = new Map(guarded.map((definition) => [definition.version, definition]));
     types.set(type, {
       type,
       manifest: game.manifest,
