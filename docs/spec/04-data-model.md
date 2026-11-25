@@ -34,8 +34,9 @@ Conventions:
 | kind | TEXT NOT NULL DEFAULT 'human' | `human` · `agent` (an AI account, 02 §9.2) |
 | owner_user_id | TEXT NULL FK → users ON DELETE CASCADE | set exactly when `kind = 'agent'`: the human who owns it (≤ 3 per owner) |
 | email | TEXT UNIQUE NULL | normalised; NOT NULL exactly when `kind = 'human'` (agents have no email and can't sign in) |
+| email_id | TEXT UNIQUE NULL | the address's `emailId` (09 §1.1), set when the user turns email nudges on, so a `nudges` unsubscribe token, which carries only the `emailId` (05 §Email links), can find the account; set whenever `settings.emailNudges` is true |
 | display_name | TEXT NULL | NULL until onboarding completed (06 §5). Wherever a name is shown (UI, push, email) and it is NULL, the fallback label "New player" is used |
-| settings | TEXT NOT NULL DEFAULT '{}' | JSON: `{ emailNudges: boolean, whoCanAddMe: "pastOpponents" \| "nobody" (default "pastOpponents", 06 §6.2), lastGameType?: string, lastOptions?: { [gameType]: unknown }, ... }` |
+| settings | TEXT NOT NULL DEFAULT '{}' | JSON: `{ emailNudges: boolean (default false, 03 §7), whoCanAddMe: "pastOpponents" \| "nobody" (default "pastOpponents", 06 §6.2), lastGameType?: string, lastOptions?: { [gameType]: unknown }, ... }` |
 | age_attested_at | INTEGER NULL | when the user confirmed they meet `MIN_AGE` (06 §5); NULL until onboarding completed |
 | age_attested_min_age | INTEGER NULL | the `MIN_AGE` value in force when they confirmed. If the operator raises `MIN_AGE` above it, the user is **re-prompted** (06 §5): `onboarded_at` is never cleared, the sweep never deletes them, but they get `403 ONBOARDING_REQUIRED` on the gated endpoints until they confirm again |
 | onboarded_at | INTEGER NULL | set when display name and age confirmation are both done (06 §5). Until then the account is treated as unknown for invitations and is deleted by the sweep after 7 days |

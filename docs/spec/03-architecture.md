@@ -273,7 +273,18 @@ filesystems are unsupported for the database anyway).
   vetted Workers-compatible library; must work on both runtimes.
 - Optional email nudge (default off, per-user setting): "It's your turn" after 24 h idle, max one
   per game per day; and at most one email per normal invitation, sent when it's created or claimed
-  (06 §6.2), not by the sweep.
+  (06 §6.2), not by the sweep. Precisely (alpha A6): the sweep nudges a `playing` seat of an
+  `active` game whose `to_act_since` is at least 24 h old ("idle": in `toAct` that long without
+  acting) and whose `last_nudged_at` is unset or at least 24 h old, if its user is a human with
+  `settings.emailNudges` true, onboarded, not suspended or being deleted, whose `email_id` is set
+  and not in `email_suppressions`; a game whose type or rules version isn't installed is skipped.
+  `last_nudged_at` is claimed with one conditional update **before** the email is sent (so two
+  sweeps can't both send, and a failed send isn't retried that day), and it is a notification
+  throttle, not game state: it is not a transition (§5.2) and doesn't bump `version`. The email
+  is a fixed template: the game type's name, the other seated players' display names, the last
+  public `describe` text (names filled in, "You" for the recipient), a link to the game, and the
+  unsubscribe link and headers (05 §Email links) — never state, options, scores or addresses
+  (08 T18). At most 100 nudges per sweep run; the rest wait for the next run.
 
 ## 8. Scheduled work
 
@@ -286,11 +297,14 @@ its status says), and its typed addresses are cleared (06 §6.5) as soon as anyo
 transition like any other (§5.2), so it bumps the game's version: a member sees the game unread,
 and a request in flight with the earlier `expectedVersion` gets `STALE_GAME`. `start` and `accept`
 also refuse a lobby at or past its expiry. Past the 20-per-request bound a list may still show
-some overdue lobbies as open until a later request expires them. The alpha has no sweep at all;
-once the sweep exists it expires the lobbies no one comes back to.)
+some overdue lobbies as open until a later request expires them. The alpha's sweep (A6) has only
+the email-nudge step; once the lobby step exists it expires the lobbies no one comes back to.)
 
 One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * * *`) or a Node
-`setInterval`. Every step is idempotent and uses the same transition mechanism as actions:
+`setInterval` (every 15 minutes, first run 15 minutes after start; a run still going when the next
+is due skips that one). A failing step is logged (by class, never its message, 09 §5) and the
+other steps still run. Every step is idempotent and uses the same transition mechanism as actions
+(except notification throttles such as `last_nudged_at`, §7):
 
 - Expire OTPs, sessions, invites, join links and rate-limit buckets.
 - Delete accounts that haven't completed onboarding 7 days after creation — only rows with

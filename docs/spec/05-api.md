@@ -74,7 +74,7 @@ app, the MCP server (02 §9.4) and anyone else's tools are clients of the same A
 | POST | `/api/v1/auth/logout` | `{}` | `204`, clears cookie, deletes session |
 | POST | `/api/v1/auth/logout-all` | `{ revokeTokens?: boolean }` | `204`, deletes all of the user's sessions; with `revokeTokens: true` (the app offers it, checked by default) also revokes every API token of the user and their AI accounts |
 | GET | `/api/v1/me` | | `200 { id, kind, email, displayName, settings, ageAttested, needsOnboarding, isAdmin }` or `401` (`kind` is `agent` and `email` null for an AI account's token; `isAdmin` lets the client show admin links, it grants nothing). `needsOnboarding` is true until onboarding is complete, and again for a re-prompted user after a `MIN_AGE` rise (06 §5) |
-| PATCH | `/api/v1/me` | `{ displayName?, settings?, ageAttested?: true }` | `200` user. `settings` accepts only known keys (`emailNudges`, `whoCanAddMe`, theme). The request that completes onboarding sets `onboarded_at` and claims email-invite seats (06 §6.4). Display-name changes after onboarding: at most 3 per 30 days (`429 RATE_LIMITED`), each logged (06 §5) |
+| PATCH | `/api/v1/me` | `{ displayName?, settings?, ageAttested?: true }` | `200` user. `settings` accepts only known keys (`emailNudges`, `whoCanAddMe`, theme; alpha A6 accepts `emailNudges` only, M4 the rest), each optional, and changes only the keys given. The request that completes onboarding sets `onboarded_at` and claims email-invite seats (06 §6.4). Display-name changes after onboarding: at most 3 per 30 days (`429 RATE_LIMITED`), each logged (06 §5) |
 | POST | `/api/v1/me/under-age` | `{}` | Only while `needsOnboarding` is true. A new account (`onboarded_at` NULL): deletes the account and its sessions at once, with no step-up code (06 §5, 04 §Account deletion), suppresses invite emails to the address and makes its email seats `inert`. A re-prompted account (onboarded, after a `MIN_AGE` rise): signs out this session only and deletes nothing (deletion needs the step-up flow below). `204`, clears cookie; `409 WRONG_STATUS` when `needsOnboarding` is false |
 | POST | `/api/v1/me/delete/otp` | `{}` | `202` — emails a `delete_account`-purpose code (06 §7) |
 | DELETE | `/api/v1/me` | `{ code }` | `204` if the code is a valid `delete_account` code; else `400 INVALID_CODE` |
@@ -335,12 +335,17 @@ The route lives under `/api/` so it is always server-handled: on Cloudflare it i
 `run_worker_first`, and the service worker's navigation fallback never serves the SPA shell for it
 (03 §9, 07 §4). The token is `base64url(payload ‖ HMAC(K_unsub, payload))` with payload
 `{ v: 1, purpose: "invites" | "nudges", emailId }`; it doesn't expire, and it never contains the
-address.
+address. Concretely (alpha A6): the payload is the UTF-8 JSON text `{"v":1,"purpose":…,"emailId":…}`
+and the MAC its raw 32 bytes, appended; a token is accepted only if it is unpadded base64url of at
+most 512 characters, its MAC verifies (constant time), and its payload parses strictly to exactly
+that shape (`emailId` 64 lower-case hex). Anything else is invalid, with no detail. A `nudges`
+token finds the account by `users.email_id` (04); one that finds none (the account was deleted)
+changes nothing and answers the same page.
 
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/v1/email/unsubscribe?t=` **public** | Server-rendered HTML page (`text/html`, shared security headers, `Cache-Control: no-store`) with a confirm button. **Never changes state.** Invalid token → the same page with a generic message |
-| POST | `/api/v1/email/unsubscribe?t=` **public** | Form-encoded (`List-Unsubscribe=One-Click` per RFC 8058, or the page's button). Adds the `emailId` to `email_suppressions` (`invites`) or turns off email nudges for that user (`nudges`). Exempt from the Origin and JSON rules (mail clients post cross-origin). Always `200` with the same page |
+| POST | `/api/v1/email/unsubscribe?t=` **public** | Form-encoded (`List-Unsubscribe=One-Click` per RFC 8058, or the page's button); the body isn't needed or read, the token is the authority. Adds the `emailId` to `email_suppressions` (`invites`; an existing row keeps its reason) or turns off email nudges for that user (`nudges`). Idempotent. Exempt from the Origin and JSON rules (mail clients post cross-origin). Always `200` with the same page: "done" for a valid token whatever it changed, the generic message for an invalid one |
 
 ## API tokens and AI accounts (06 §8, 02 §9) — session only
 

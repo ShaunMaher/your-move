@@ -65,13 +65,13 @@ HMAC-SHA256 key), each with a distinct, versioned `info` label:
 | `otp/v1` | OTP code hashing | live codes stop working (≤ 10 min impact) |
 | `ip/v1` | IP-bucket hashing in rate limits and audit events | rate-limit counters reset; audit correlation breaks |
 | `unsub/v1` | unsubscribe token MAC | old unsubscribe links stop working — **avoid**; if rotated, keep verifying `v1` too |
-| `email-id/v1` | `emailId` = HMAC of normalised email: suppression list, per-target invite limits, log identifiers | **suppression list silently empties** → previously unsubscribed/bounced addresses get mailed again. Never rotate this subkey without re-keying the table. |
+| `email-id/v1` | `emailId` = HMAC of normalised email: suppression list, per-target invite limits, `users.email_id` (nudge unsubscribe), log identifiers | **suppression list silently empties** → previously unsubscribed/bounced addresses get mailed again, and nudge unsubscribe links stop finding their account. Never rotate this subkey without re-keying the tables. |
 | `token/v1` | API token hashing (06 §8) | every API token stops working — users must create new ones |
 
 Rotation procedure (documented in `docs/deploy.md`): introduce `APP_SECRET_PREVIOUS`; derive `v1`
 keys from the previous secret for verification of `unsub` and for `email-id` lookups while a
-one-off job re-hashes `email_suppressions` (and new `v2` labels are used for writes). Until that job
-exists, **rotating `APP_SECRET` is unsupported** and the docs say so.
+one-off job re-hashes `email_suppressions` and `users.email_id` (and new `v2` labels are used for
+writes). Until that job exists, **rotating `APP_SECRET` is unsupported** and the docs say so.
 
 ### 1.2 Admin commands
 
