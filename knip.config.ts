@@ -37,7 +37,6 @@ const config: KnipConfig = {
     "apps/web": {
       // The build's own code (vite.config.ts and vite-plugin/, which import @your-move/shared for
       // the server paths) is checked like the rest.
-      entry: ["vite-plugin/*.ts"],
       project: ["src/**/*.{ts,tsx}", "sw/**/*.ts", "vite-plugin/**/*.ts", "*.ts"],
     },
     scripts: { entry: ["src/bin/*.ts"], project: ["src/**/*.ts"] },
