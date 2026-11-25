@@ -6,7 +6,7 @@ import type { ClientIp } from "./auth/client-ip.js";
 import type { ActiveSession } from "./auth/session.js";
 import type { AppConfig } from "./config/parse.js";
 import type { Repositories } from "./db/repositories.js";
-import type { CapturedEmail, EmailSender } from "./email/sender.js";
+import type { CoreEmailSender } from "./email/providers.js";
 import type { Logger } from "./log.js";
 
 /**
@@ -24,7 +24,7 @@ export interface Platform {
   readonly config: AppConfig;
   readonly log: Logger;
   /** Sends email (09 §2); called only in the background (06 §3.2). */
-  readonly email: EmailSender & { captured?: () => readonly CapturedEmail[] };
+  readonly email: CoreEmailSender;
   /**
    * The client address of a request (08 §4.1): `CF-Connecting-IP` on Workers; on Node by
    * `TRUST_PROXY`. `env` is what the runtime passed to `app.fetch`.

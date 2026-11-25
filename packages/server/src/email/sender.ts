@@ -1,8 +1,7 @@
 /**
  * Email delivery (docs/spec/09-operations.md §2): the `EmailSender` port each runtime provides,
  * the message type every template produces, and the providers that need nothing but Web-standard
- * APIs. SMTP (Node only) lives in `apps/node`; `gmail` and the HTTP-API providers arrive later
- * (10 M4).
+ * APIs. SMTP (Node only) lives in `apps/node`; `gmail` is in `gmail.ts`; the HTTP-API providers arrive later.
  */
 import type { NormalisedEmail } from "../accounts/email.js";
 import type { Logger } from "../log.js";
@@ -23,6 +22,22 @@ export interface EmailSender {
 /** Thrown for a message that would break out of its header (08 T14). */
 export class EmailHeaderError extends Error {
   override readonly name = "EmailHeaderError";
+}
+
+const alerted = new WeakSet<object>();
+
+/**
+ * Marks a send failure whose provider has already logged its alert, so the caller logs nothing
+ * more (09 §2); returns the error for `throw markAlerted(...)`.
+ */
+export function markAlerted<T extends Error>(error: T): T {
+  alerted.add(error);
+  return error;
+}
+
+/** Whether the provider already alerted for `error` ({@link markAlerted}). */
+export function wasAlerted(error: unknown): boolean {
+  return typeof error === "object" && error !== null && alerted.has(error);
 }
 
 /**
@@ -69,7 +84,7 @@ export function createConsoleEmailSender(log: Logger, now: () => Date): ConsoleE
 }
 
 /**
- * Stands in for a provider whose implementation hasn't landed yet (`gmail` in M4; `resend`,
+ * Stands in for a provider whose implementation hasn't landed yet (`smtp`, `resend`,
  * `postmark`, `ses`, `cloudflare` later): every send is dropped with an alert in the log, so the
  * operator sees at once that no mail goes out, while the API keeps its normal responses.
  */

@@ -13,6 +13,7 @@ import {
   createApp,
   createConsoleEmailSender,
   createJsonLogger,
+  type EmailSender,
   type Env,
   parseConfig,
   type Platform,
@@ -21,6 +22,7 @@ import {
 
 import { migrate } from "./db/migrate.js";
 import { nodeRepositories, openSqlite } from "./db/sqlite.js";
+import type { NodeConfig } from "./node-config.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
@@ -102,8 +104,12 @@ export function cookieOf(response: Response): string {
 }
 
 export interface HarnessOptions {
+  /** Proxy settings instead of the default `xff` from loopback. */
+  readonly nodeConfig?: Pick<NodeConfig, "trustProxy" | "trustProxyHops" | "trustProxyPeers">;
   /** Wraps the repositories, e.g. to slow one path down in a test of the timing test itself. */
   readonly wrapRepos?: (repos: Repositories) => Repositories;
+  /** Replaces the capturing email sender (e.g. one that fails). */
+  readonly sender?: EmailSender;
 }
 
 export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {}): Harness {
@@ -123,10 +129,14 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
   const platform = createNodePlatform({
     repos: (options.wrapRepos ?? ((repos) => repos))(nodeRepositories(sqlite)),
     config,
-    nodeConfig: { trustProxy: "xff", trustProxyHops: 1, trustProxyPeers: ["127.0.0.0/8"] },
+    nodeConfig: options.nodeConfig ?? {
+      trustProxy: "xff",
+      trustProxyHops: 1,
+      trustProxyPeers: ["127.0.0.0/8"],
+    },
     log,
     now,
-    smtp: capture,
+    smtp: options.sender ?? capture,
   });
   const app = createApp({ platform, games: [] });
   const background = createBackgroundTracker();

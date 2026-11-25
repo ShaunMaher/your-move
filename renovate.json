@@ -10,7 +10,7 @@
   "schedule": ["* * * * 0,6"],
   "osvVulnerabilityAlerts": true,
   "lockFileMaintenance": { "enabled": true, "schedule": ["* * 1 * *"] },
-  "enabledManagers": ["npm", "mise", "dockerfile", "gitlabci", "custom.regex"],
+  "enabledManagers": ["npm", "mise", "dockerfile", "docker-compose", "gitlabci", "custom.regex"],
   "customManagers": [
     {
       "customType": "regex",

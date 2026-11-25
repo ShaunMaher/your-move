@@ -24,7 +24,7 @@ import { normaliseAddress } from "../accounts/email.js";
 import { isLocalDev } from "../config/local-dev.js";
 import { hmacHex, type Subkeys } from "../crypto/subkeys.js";
 import type { UserRecord } from "../db/repositories.js";
-import type { EmailMessage } from "../email/sender.js";
+import { type EmailMessage, wasAlerted } from "../email/sender.js";
 import {
   accountDeletedEmail,
   approximateTime,
@@ -111,6 +111,8 @@ function background(c: Context, platform: Platform, task: () => Promise<unknown>
   const run = new Promise((resolve) => setTimeout(resolve, 0))
     .then(task)
     .catch((error: unknown) => {
+      // A provider that already logged its own alert for this failure is not logged again (09 §2).
+      if (wasAlerted(error)) return;
       platform.log.error("background task failed", {
         errorClass: error instanceof Error ? error.name : typeof error,
       });

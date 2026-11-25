@@ -128,8 +128,8 @@ whatever notification the operator uses.
   request in one bucket); `cloudflare` (Cloudflare Tunnel) → `CF-Connecting-IP`.
 - In `xff` and `cloudflare` modes the **socket peer must be in `TRUST_PROXY_PEERS`** (CIDR list,
   default the private ranges `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`, loopback,
-  as a fallback only — the compose files pin the `front` subnet and set `TRUST_PROXY_PEERS` to it
-  plus loopback, 09 §4); a request from any other peer gets `400` on every route that uses the
+  as a fallback only — the compose files pin the proxy's address on `front` and set `TRUST_PROXY_PEERS`
+  to it alone (loopback is not trusted), never the whole subnet: the Docker host has an address there, 09 §4); a request from any other peer gets `400` on every route that uses the
   client IP (the next bullet), and startup logs a warning naming
   the mode, and another when the broad default is in use. This stops
   header spoofing if the app port is ever reachable some other way; the deployment must still keep

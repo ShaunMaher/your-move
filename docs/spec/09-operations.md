@@ -19,7 +19,7 @@ equal.
 | `PUBLIC_URL` | yes | `https://play.example.org` | Canonical origin; used for links, Origin checks, cookie mode. Must be `https`, except the local-dev origins (`http://localhost`, `127.0.0.1`, `[::1]`, 06 §4); no credentials, path, query or fragment |
 | `APP_SECRET` | yes (secret) | base64 of ≥ 32 random bytes (validated after decoding) | Root secret for HKDF subkeys — see §1.1 before ever rotating it. The public value in `config/local-dev.env` is refused outside local-dev mode |
 | `EMAIL_PROVIDER` | yes | `gmail` · `smtp` · `resend` · `postmark` · `ses` · `cloudflare` · `console` | `console` only in local-dev mode (`isLocalDev`, 06 §4); `smtp` only on Node and `cloudflare` only on Workers; refuse to start otherwise. See §2 |
-| `EMAIL_FROM` | yes | `"Your Move" <no-reply@example.org>` | |
+| `EMAIL_FROM` | yes | `"Your Move" <no-reply@example.org>` | An address sign-in would accept (04 conventions), except with `console`; refuse to start otherwise |
 | `EMAIL_API_KEY` | per provider (secret) | | Required for `resend`, `postmark` and `ses` (how SES credentials are given is settled with the SES provider) |
 | `SMTP_URL` | if `smtp` (secret) | `smtp://user:pass@mail.example.org:587` (STARTTLS) or `smtps://user:pass@host:465` | Node only; for operators with their own SMTP relay |
 | `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` | if `gmail` (secret) | | The Internal OAuth client (§2); both runtimes |
@@ -31,7 +31,7 @@ equal.
 | `MIN_AGE` | no | `13` | Integer ≥ 13 (refuse to start otherwise). Minimum age confirmed at onboarding (06 §5); set 16 where GDPR Art. 8 requires it. Raising it makes users who confirmed a lower value confirm again |
 | `TRUST_PROXY` | no | `false` | Node only; where the client IP comes from: `false` (socket address), `xff` (`X-Forwarded-For`, right-to-left by `TRUST_PROXY_HOPS`) or `cloudflare` (`CF-Connecting-IP`, for a Cloudflare Tunnel) (08 §4.1) |
 | `TRUST_PROXY_HOPS` | no | `1` | Node only, with `TRUST_PROXY=xff`; number of trusted proxies in front of the app |
-| `TRUST_PROXY_PEERS` | no | private ranges + loopback (fallback; the compose files set the pinned `front` subnet + loopback, §4) | Node only, with `xff`/`cloudflare`: CIDR list the socket peer must be in, else `400` (08 §4.1) |
+| `TRUST_PROXY_PEERS` | no | private ranges + loopback (fallback; the compose files set the proxy's pinned address, §4) | Node only, with `xff`/`cloudflare`: CIDR list the socket peer must be in, else `400` (08 §4.1) |
 | `PORT` | no | `8080` | Node only |
 | `DATABASE_PATH` | Node | `/data/app.sqlite` | An absolute file path; `:memory:` and relative paths are refused outside local-dev mode. The file is created 0600 in a 0700 directory, with its single-instance lock beside it (`<DATABASE_PATH>.lock`, 03 §5.3). An existing directory keeps its mode, and startup logs a warning if group or others have any permission on it |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | no | | Enables Turnstile on OTP request (manually or via the circuit breaker). On Cloudflare the web build also needs `TURNSTILE_ENABLED=true` for the static CSP (03 §9). |
@@ -115,7 +115,10 @@ that work on both runtimes, plus SMTP for Node only.
     whole mailbox over IMAP/POP. A leaked refresh token can only send mail as the sender user
     (08 T15).
   - Messages are raw MIME built by the shared MIME builder (RFC 2047 encoding, CR/LF rejected in
-    every header, 08 T14).
+    every header, 08 T14). The builder converts nothing in an address: a recipient that isn't
+    already an ASCII `addr-spec` is refused, because the stored address (04 conventions) must be
+    the one delivered to. Requests to Google never follow a redirect (`redirect: "manual"`, which
+    both runtimes support; any `3xx` is a failure).
   - Gmail keeps a copy of every sent message in the sender's *Sent* folder; that is an accepted
     proof-of-concept residual with mitigations (08 §5).
   - Gmail's per-user sending limit (about 2,000 messages/day for Workspace) is well above the
@@ -128,8 +131,9 @@ that work on both runtimes, plus SMTP for Node only.
      for it; set up a regular purge of its *Sent* folder (or a retention rule if the edition
      supports one). Purged messages stay in Trash for 30 days, and any Vault hold keeps them longer;
      the privacy page's retention statement must allow for both (08 §5).
-  2. In a Google Cloud project, enable the Gmail API and create an OAuth client with user type
-     **Internal** and the single scope `gmail.send`.
+  2. In a Google Cloud project, enable the Gmail API, set the consent screen's user type to
+     **Internal** with the single scope `gmail.send`, and create an OAuth client of type **Desktop
+     app** (the only type that accepts a loopback redirect on a random port).
   3. Sign in as the sender user once with the `pnpm gmail:authorize` helper to obtain the refresh
      token. The helper:
      - runs the OAuth authorization-code flow with **PKCE** and a random `state`, on a loopback
@@ -139,16 +143,33 @@ that work on both runtimes, plus SMTP for Node only.
      - refuses the result unless the `id_token`'s verified `email` equals `GMAIL_SENDER` and the
        granted scope set is exactly the requested one (so authorising while signed in as the
        wrong account, e.g. an admin, fails instead of sending from their mailbox);
-     - reads the client id and secret from the environment or a file, never from argv;
-     - writes the refresh token to a new file with mode `0600` (or prints it once to stdout).
+     - reads the client id and secret from the environment or a file (`GMAIL_CLIENT_ID_FILE`,
+       `GMAIL_CLIENT_SECRET_FILE`), never from argv;
+     - writes the refresh token to a new file with mode `0600` outside the repository, and never
+       prints it; on any refusal it revokes the token it was just given and writes nothing.
 
-     At startup the server re-checks the token's granted scope and refuses to start if it is
-     anything other than `gmail.send` (plus `openid`/`email`).
+     The server re-checks the token on **every refresh** (so on Workers too, which have no startup
+     step), and the check **fails closed**: the granted scope set must be exactly `openid`, `email`
+     and `gmail.send`, and the response must carry a parseable `id_token` for this client (`aud` is
+     the client id) whose `email` is `GMAIL_SENDER` and `email_verified` is true. Anything else
+     (another scope, a missing or unparseable `id_token`, another audience, an unverified or
+     different address) refuses to send and logs an error-level alert (`email_token_scope`,
+     `email_token_account`), which names only the known scope names and a count of the others. On
+     Node it also refreshes once at startup and, for those two refusals, refuses to start; Google being unreachable or having revoked the
+     token does not stop the server starting (it logs `email_token_failed` or
+     `email_credentials_rejected`, and then the same on every message).
   4. Store `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` and `GMAIL_SENDER` as
      Worker secrets or Docker secrets (`*_FILE`). To revoke, remove the app's access from the sender
      user's Google account and repeat step 3.
 - The generic `smtp` provider (Node only) stays available for operators with their own SMTP relay.
-- **Providers not built yet.** Until a provider's implementation lands (`gmail` in M4; `smtp` once
+- **Failures and alerts.** A message that can't be sent rejects, and the background task that
+  sent it logs nothing more: the sender has already logged one error-level entry with a fixed
+  `alert` (`email_send_failed` with the HTTP `status` where there is one, `email_token_failed`,
+  `email_credentials_rejected`) and the provider, never an address, a message, a token or
+  Google's response text, and the background task that called it is told the failure was already
+  alerted (it logs no "background task failed" on top). A `401` from Gmail refreshes the token once and retries once; nothing
+  else is retried (the person asks for a new code, 06 §3).
+- **Providers not built yet.** Until a provider's implementation lands (`smtp` once
   Q26 is decided, 10 M2; `resend`, `postmark`, `ses` and `cloudflare` when scheduled), a configuration naming it still
   starts, logs an error-level `email_provider_unavailable` alert at startup and on every message, and sends
   nothing; the API keeps its normal responses. Only `console` (local-dev) sends in M2.
@@ -218,9 +239,13 @@ that work on both runtimes, plus SMTP for Node only.
   - `front` (`internal: true`), shared only by the app and Caddy or `cloudflared`, so nothing else
     can reach the app's port (otherwise `X-Forwarded-For`/`CF-Connecting-IP` could be spoofed by
     connecting directly; `TRUST_PROXY_PEERS` is the second line of defence, 08 §4.1). Its subnet is
-    **pinned with IPAM** in both compose files (e.g. `172.30.99.0/28`), and the compose files set
-    `TRUST_PROXY_PEERS` to exactly that subnet plus loopback (loopback keeps the container's own
-    health check working). The private-ranges default of `TRUST_PROXY_PEERS` is only a fallback for
+    **pinned with IPAM** in both compose files (e.g. `172.30.99.0/28`), and so is the proxy's
+    address on it. The Docker host has an address on `front` too (the bridge gateway), so the
+    compose files set `TRUST_PROXY_PEERS` to exactly **the proxy's pinned address**
+    (the container's own health check needs no client address, so loopback is not trusted), never the whole subnet. The tunnel
+    reaches the app through a front-only alias (`app-front`): Docker resolves the service name to
+    every network the app is on, including `egress`, a peer outside `TRUST_PROXY_PEERS`, so a route to the service name would be
+    refused. The private-ranges default of `TRUST_PROXY_PEERS` is only a fallback for
     deployments that don't set it, and startup logs a warning when the default is in use;
   - `egress`, a normal bridge network the app needs for outbound calls (Gmail API, Web Push) and
     `cloudflared` for its tunnel connection. The app publishes nothing on it. In the Caddy compose,

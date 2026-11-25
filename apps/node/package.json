@@ -26,6 +26,7 @@
     "esbuild": "catalog:",
     "fast-check": "catalog:",
     "tsx": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "yaml": "catalog:"
   }
 }

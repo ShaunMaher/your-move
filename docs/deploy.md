@@ -1,6 +1,6 @@
 # Deploying
 
-This page grows with the milestones; today it covers what M0 delivers. The specification is
+This page grows with the milestones; today it covers the Docker image, the `gmail` email provider and the Cloudflare Tunnel deployment (the proof of concept). The specification is
 [`docs/spec/09-operations.md`](spec/09-operations.md).
 
 ## Configuration
@@ -74,7 +74,196 @@ docker run --rm --read-only -p 127.0.0.1:8080:8080 \
 curl http://127.0.0.1:8080/api/health
 ```
 
-The compose files for the Cloudflare Tunnel and Caddy deployments arrive in M4 (09 §4).
+The Cloudflare Tunnel compose file is below; the Caddy one arrives in M4 (09 §4).
+
+## Email through Gmail
+
+The proof of concept sends sign-in codes with the `gmail` provider (09 §2, Q2): a dedicated user
+in your Google Workspace domain, an OAuth client that is **Internal** to the domain, and a refresh
+token that can do one thing, send mail as that user. There is no domain-wide delegation and no app
+password. You do the steps below once. `<your Workspace domain>` stands for your domain; use your
+own wherever you see `example.org`.
+
+1. **The sender user.** In the Google Admin console create a user such as
+   `no-reply@example.org`, used for nothing else and never signed in to after step 3. Turn on
+   2-Step Verification for it, turn off IMAP and POP for it, and set up a regular purge of its
+   _Sent_ folder (Gmail keeps a copy of every message it sends; purged messages stay in Trash for
+   30 days, and a Vault hold keeps them longer, so the privacy page's retention statement must
+   allow for both, 08 §5).
+2. **DNS.** The sending domain must have SPF, DKIM and DMARC. For a Workspace domain they usually
+   exist; check them before go-live (an Admin console "Authenticate email" page, or
+   `dig TXT example.org`, `dig TXT google._domainkey.example.org`, `dig TXT _dmarc.example.org`).
+   Without them sign-in codes land in spam.
+3. **The OAuth client.** In a Google Cloud project owned by the Workspace organisation, enable the
+   **Gmail API**. Under _Google Auth platform_ set the audience to **Internal**, and add the single
+   scope `https://www.googleapis.com/auth/gmail.send` (plus the default `openid` and `email`). Create an
+   OAuth client of type **Desktop app**: a Web client wants every redirect address registered in
+   advance, and the helper in the next step listens on a random loopback port. Download its client
+   id and client secret.
+4. **Keep the secrets in files.** Choose a directory only you can enter, outside the repository
+   (the same one the tunnel deployment uses, `SECRETS_DIR` below), and put the client id and
+   secret in their own files. Create the directory as yourself, mode 0700 (with `sudo`, make it
+   yours, never root's):
+
+   ```sh
+   umask 077
+   sudo install -d -o "$USER" -m 0700 /srv/secrets   # or: install -d -m 0700 "$HOME/secrets"
+   printf '%s' '<client id>' > /srv/secrets/gmail_client_id
+   printf '%s' '<client secret>' > /srv/secrets/gmail_client_secret
+   ```
+
+5. **Get the refresh token** with the helper, on a machine that has this repository checked out
+   (`mise install`, `pnpm install`) and a browser:
+
+   ```sh
+   GMAIL_SENDER=no-reply@example.org \
+   GMAIL_CLIENT_ID_FILE=/srv/secrets/gmail_client_id \
+   GMAIL_CLIENT_SECRET_FILE=/srv/secrets/gmail_client_secret \
+   pnpm gmail:authorize --out /srv/secrets/gmail_refresh_token
+   ```
+
+   It prints an address. Open it in a browser and **sign in as the sender user** (not as an
+   administrator: the helper refuses a token for any other account, and revokes it). Accept the
+   request to send email. The browser is redirected to `http://127.0.0.1:<port>/callback`, which the
+   helper is listening on, so run it on the machine where you open the browser. It then checks
+   that the granted scopes are exactly `openid`, `email` and `gmail.send` and that the sign-in
+   was the sender's own, and writes the refresh token to the `--out` file (mode 0600, which must not
+   exist yet and must be outside the repository and any Git working tree). It never prints the token. If it fails,
+   nothing is written and the token is revoked; if the revocation itself fails it says so, and you must
+   remove the app's access in the sender account's security settings.
+
+6. **Give the server the values** as the secrets `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`
+   and `GMAIL_REFRESH_TOKEN` (files, below), and set `GMAIL_SENDER` (the sender's address) and
+   `EMAIL_FROM` (`"Example Games" <no-reply@example.org>`; the address must be the same one as
+   `GMAIL_SENDER`, or the server refuses to start). On Cloudflare Workers they are Worker
+   secrets (`wrangler secret put GMAIL_REFRESH_TOKEN`).
+
+To **revoke** (a leaked file, a retired instance), remove the app's access in the sender user's
+Google account (Security, _Third-party apps with account access_) or delete the OAuth client, then
+repeat steps 5 and 6. A stolen refresh token can only send mail as the sender user: it can't read
+any mailbox and it can't act as anyone else. A stolen client secret additionally lets someone start
+consent flows for users in your domain, so keep it as secret as the token.
+
+At startup the Node server refreshes the token once and refuses to start if its scope is anything
+but `gmail.send` or it belongs to another account. It still starts when Google is unreachable or
+has revoked the token (sign-in can't succeed then, but the rest of the app works), and says so in
+the log. The logs name these alerts (each an `error`-level line with an `alert` field; none ever
+holds an address, a code or a token):
+
+| `alert`                      | Meaning and what to do                                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `email_credentials_rejected` | Google refused the refresh token (revoked, or the OAuth client was deleted): redo steps 5 and 6                                |
+| `email_token_failed`         | Google couldn't be reached or answered unexpectedly: check outbound access and Google's status                                 |
+| `email_token_scope`          | The token's scopes aren't exactly `openid`, `email` and `gmail.send`: revoke it and redo step 5                                |
+| `email_token_account`        | The token isn't `GMAIL_SENDER`'s verified account for this client (or has no `id_token`): revoke it, redo step 5 as the sender |
+| `email_send_failed`          | One message wasn't sent (`status` is Gmail's HTTP status where there is one)                                                   |
+| `email_provider_unavailable` | `EMAIL_PROVIDER` names a provider that isn't built: nothing is sent                                                            |
+
+Gmail allows a Workspace user about 2,000 messages a day, well above the instance's own limits.
+Move to a transactional provider before the instance grows beyond friends and family.
+
+## Behind a Cloudflare Tunnel
+
+[`apps/node/docker-compose.tunnel.yml`](../apps/node/docker-compose.tunnel.yml) is the
+proof-of-concept deployment (09 §4, Q6): the app and `cloudflared`, with nothing published on the
+host and no inbound firewall rule. TLS ends at Cloudflare, which forwards `CF-Connecting-IP`, and
+the app trusts it only from the tunnel's own address.
+
+- `front` is an **internal** network (no route out) holding only the app and `cloudflared`; its
+  subnet is pinned to `172.30.99.0/28`, `cloudflared` has the pinned address `172.30.99.2` and the
+  app `172.30.99.3`. The Docker host has an address on `front` too (the bridge gateway,
+  `172.30.99.1`), so the app's `TRUST_PROXY_PEERS` is exactly `172.30.99.2/32` (the
+  container's own health check needs no client address, so loopback is not trusted), not the subnet. A request from any other address, or without a
+  valid `CF-Connecting-IP`, is answered `400` on every route that needs the client's address, and
+  `X-Forwarded-For` is never read. If you change an address, change `TRUST_PROXY_PEERS` and the
+  tunnel's route to match.
+- The app is reachable on `front` as **`app-front`**, an alias that exists only there. The
+  tunnel's route must use it (`http://app-front:8080`): Docker also resolves the service name
+  `app` to the app's `egress` address, so `cloudflared` would reach the app from an address
+  outside `TRUST_PROXY_PEERS`, and every request would be answered `400` (the health check still
+  passes, since it needs no client address).
+- Each container's log is capped (`json-file`, 3 files of 10 MB) and each has a process and memory
+  limit, so a fault can't fill the host's disk or take the host down.
+- `egress` is an ordinary bridge for outbound calls: Gmail, and the tunnel to Cloudflare.
+- Every secret is a Docker secret read through `<NAME>_FILE`; the tunnel token is read with
+  `--token-file`. None appears in `docker inspect`.
+
+**Prepare**
+
+1. **The tunnel.** In the Cloudflare dashboard (_Zero Trust_, _Networks_, _Tunnels_) create a
+   tunnel of type Cloudflared and copy its token (the long string after `--token` in the command
+   the page shows; keep only the token). Add one **public hostname**, `<hostname>` on a domain in
+   your account, with service type HTTP and URL `app-front:8080` (not `app:8080`, see above). Add nothing else: no other hostname
+   and no catch-all rule, so the tunnel can reach only the app.
+2. **Pseudo IPv4.** In the zone's _Network_ settings turn **Pseudo IPv4 off**, or set it to "Add
+   header" (never "Overwrite", which puts made-up addresses in `CF-Connecting-IP` and ruins the
+   per-address limits, 08 §4.1). Optionally put a Cloudflare Access policy in front of the whole
+   hostname while you test.
+3. **The secrets files** (`SECRETS_DIR`, outside the repository). Create the directory as
+   yourself with mode 0700 (the directory's mode is what keeps other users out). Docker mounts each
+   file with its host permissions, and the app runs as UID 1000 and `cloudflared` as 65532,
+   neither of whom is you, so the files must be world-readable (0444): the `chmod` is the **last**
+   step, after every file exists, including `gmail_refresh_token` from the Gmail section.
+
+   ```sh
+   umask 077
+   sudo install -d -o "$USER" -m 0700 /srv/secrets   # or: install -d -m 0700 "$HOME/secrets"
+   openssl rand -base64 32 > /srv/secrets/app_secret      # never rotate it (below)
+   printf '%s' '<tunnel token>' > /srv/secrets/tunnel_token
+   # gmail_client_id, gmail_client_secret and gmail_refresh_token: "Email through Gmail" above
+   chmod 0444 /srv/secrets/*    # last step before `up`; run it again after adding or replacing a file
+   ```
+
+4. **The settings.** Copy [`apps/node/tunnel.env.example`](../apps/node/tunnel.env.example) to a
+   file outside the repository and fill it in: `PUBLIC_URL=https://<hostname>`, `SECRETS_DIR`,
+   `OPERATOR_CONTACT`, `EMAIL_FROM`, `GMAIL_SENDER` and optionally `APP_NAME` and `ADMIN_EMAILS`.
+5. **The image**, by digest: the `publish:image` job of the pipeline that built the commit you
+   want prints it. Put it in the settings file as `APP_IMAGE=<registry>/<project>/server@sha256:<digest>`,
+   and `docker login` to the registry first if it is private.
+
+**Run**
+
+```sh
+docker compose -f apps/node/docker-compose.tunnel.yml --env-file /path/to/tunnel.env up -d
+docker compose -f apps/node/docker-compose.tunnel.yml --env-file /path/to/tunnel.env ps    # both healthy
+docker compose -f apps/node/docker-compose.tunnel.yml --env-file /path/to/tunnel.env logs app
+```
+
+The log shows `listening` and, with the gmail provider, no `email_*` alert. Then open
+`https://<hostname>/api/health` from another machine, and sign in. To update, change `APP_IMAGE`
+to the new digest and run `up -d` again; the app applies new migrations at start (and refuses to
+start on a database a newer image has migrated, so keep a backup before an update).
+
+**Check it** (the acceptance checks for this deployment; the settings they rely on are also tests in CI,
+`apps/node/src/tunnel-compose.test.ts`):
+
+- `docker compose ... config` shows no `ports:` on either service, and `docker inspect <app>`
+  shows no port bindings;
+- the routing, scripted: with the stack up, run
+  `COMPOSE="docker compose -f apps/node/docker-compose.tunnel.yml --env-file /path/to/tunnel.env" PUBLIC_URL=https://<hostname> apps/node/scripts/check-tunnel-routing.sh`.
+  It sends a sign-in request from `cloudflared`'s own network namespace to `http://app-front:8080`
+  (must not be `400`), the same request to `http://app:8080` (must be `400`) and one from the
+  Docker host (must be `400`). It makes one email attempt, to an address that doesn't exist;
+- a request to the app from any other address (for example from a container attached only to
+  `egress`) gets `400` on `POST /api/v1/auth/otp/request`, and `200` on `GET /api/health`;
+- a request on `front` without `CF-Connecting-IP`, or with only `X-Forwarded-For`, gets `400`;
+- the container health check passes without `CF-Connecting-IP`;
+- `docker inspect <app>` shows no secret value, and `docker exec <app> ls -l /run/secrets` lists
+  the four files;
+- the sign-in code arrives by email on a phone, with the code in the subject.
+
+If every sign-in request is answered `400` while `/api/health` is fine, check that the tunnel's
+route points at `app-front:8080`. If a container fails to start with a permission error on
+`/run/secrets/...`, the final `chmod 0444` of step 3 was skipped, or a file was added after it.
+
+**Things to know.** The app's port is reachable from the Docker host itself (a bridge network's
+gateway is the host), but the host's address on `front` is not in `TRUST_PROXY_PEERS`, so a request
+from it gets `400`. Anyone with Docker access on the host controls the whole stack anyway, so treat
+the host as trusted and don't give other users Docker access: access to Docker on the host is
+enough to impersonate the tunnel. Don't add private-network (CIDR) or WARP routes to this
+tunnel: they would let other machines send requests from the tunnel's address, which the app
+trusts to name the client. Data lives in the named volumes `data` and
+`blobs`; backup documentation arrives with M4. Rotating `APP_SECRET` is unsupported (above).
 
 ## Cloudflare Workers
 

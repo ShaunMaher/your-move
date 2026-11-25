@@ -90,6 +90,9 @@ Attempt counting, consumption and rate limiting must be race-free under parallel
   in 10 minutes, "We will never ask you for this code — don't share it with anyone", "If you didn't
   request this, ignore this email", and the approximate request time. A link to the app is fine;
   it must not carry the code.
+- Addresses are normalised (04 conventions) before any limit, counter or lookup, identically for
+  every address, including the domain rule there: the address stored and counted is the address
+  the email is delivered to (09 §2), never a form a URL parser or mail server would rewrite.
 - Input field: `inputmode="numeric"`, `autocomplete="one-time-code"`, `pattern="[0-9]*"`,
   paste-friendly (strip spaces/dashes).
 - Optional, operator-configurable: Cloudflare Turnstile on `/otp/request` (works on both targets).

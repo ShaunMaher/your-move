@@ -3,6 +3,7 @@
  * as its SHA-256; sliding expiry 180 days since last use, refreshed at most hourly; an absolute
  * cap of 400 days. Local-dev mode uses the plain `sid` cookie without `Secure` (06 §4, 08 T19).
  */
+import { toBase64Url } from "../base64.js";
 import type { SessionRecord, UserRecord, Repositories } from "../db/repositories.js";
 
 const DAY = 86_400_000;
@@ -16,16 +17,9 @@ function cookieName(localDev: boolean): string {
   return localDev ? "sid" : "__Host-sid";
 }
 
-function base64url(bytes: Uint8Array): string {
-  return btoa(String.fromCharCode(...bytes))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/u, "");
-}
-
 /** A fresh 256-bit session token. */
 function newSessionToken(): string {
-  return base64url(crypto.getRandomValues(new Uint8Array(32)));
+  return toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
 /** SHA-256 of the token, hex: the only form stored (06 §4). */

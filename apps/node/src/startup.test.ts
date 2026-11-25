@@ -3,12 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ConfigError, type Installed } from "@your-move/server";
+import { ConfigError, GmailTokenRefused, type Installed } from "@your-move/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { lockPath } from "./db/instance-lock.js";
 import { SecretFileError } from "./env.js";
-import { isRefusal, startup } from "./startup.js";
+import { isRefusal, startup, verifyEmail } from "./startup.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
 const INSTALLED: Installed = {};
@@ -84,5 +84,33 @@ describe("startup (02 §7.3, M2a review S-6)", () => {
 
   it("treats other errors as crashes, not refusals", () => {
     expect(isRefusal(new Error("boom"))).toBe(false);
+  });
+});
+
+describe("verifyEmail (09 §2)", () => {
+  const sender = { send: () => Promise.resolve() };
+
+  it("passes providers without a check and a token that checks out", async () => {
+    await expect(verifyEmail(sender)).resolves.toBeUndefined();
+    await expect(
+      verifyEmail({ ...sender, verifyCredentials: () => Promise.resolve() }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses to start for a token that isn't send-only or isn't the sender's", async () => {
+    const refusal = verifyEmail({
+      ...sender,
+      verifyCredentials: () => Promise.reject(new GmailTokenRefused("wrong scope")),
+    });
+    await expect(refusal).rejects.toThrow("wrong scope (09 §2)");
+    await refusal.catch((error: unknown) => {
+      expect(isRefusal(error)).toBe(true);
+    });
+  });
+
+  it("passes other failures through", async () => {
+    await expect(
+      verifyEmail({ ...sender, verifyCredentials: () => Promise.reject(new Error("boom")) }),
+    ).rejects.toThrow("boom");
   });
 });

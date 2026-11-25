@@ -1,0 +1,59 @@
+# Alpha slice A5 review — resolutions
+
+This record covers round 1 of the review of alpha slice A5, Gmail sending and the Cloudflare Tunnel
+deployment (`alpha-a5-deploy`): the security review (S) and the picky review (P). Each line gives
+the finding's ID, its outcome and where the fix lives. The spec changes are in v0.9.17 (the README
+history line); the owner renumbers at merge.
+
+| ID | Outcome | Where |
+|---|---|---|
+| A5-S-1 / A5-P-1 | Fixed. The app has a front-only alias `app-front` and a pinned address on `front`; the tunnel's public hostname routes to `http://app-front:8080`, never `app:8080` (which Docker resolves to the app's `egress` address, outside the trusted peers). Comments that overstated what the network guarantees are corrected. Tests: the alias exists only on `front` and is the origin the file and the docs name; a scripted stack check (`apps/node/scripts/check-tunnel-routing.sh`) sends the sign-in request from `cloudflared`'s network namespace to `app-front:8080` (2xx), to `app:8080` (`400`) and from the Docker host (`400`), and `tunnel-stack.test.ts` runs it against a real compose stack when `TUNNEL_STACK_IMAGE` names a locally built image. | `apps/node/docker-compose.tunnel.yml`, `apps/node/scripts/check-tunnel-routing.sh`, `apps/node/src/tunnel-compose.test.ts`, `apps/node/src/tunnel-stack.test.ts`, `docs/deploy.md`, 09 §4 |
+| A5-S-2 | Fixed. `cloudflared` has the pinned address `172.30.99.2` and `TRUST_PROXY_PEERS` is `172.30.99.2/32` plus loopback; the host's gateway on `front` is refused. 09 §4, 08 §4.1 and the 09 §1 table now say "the proxy's pinned address". Tests: the declared setting, and a peer table that includes the gateway, the app and other front addresses. | compose file, `tunnel-compose.test.ts`, 09 §1, §4, 08 §4.1 |
+| A5-S-3 / A5-P-3 | Fixed. `normaliseAddress` refuses a domain with any ASCII character outside letters, digits, `.` and `-`, or that NFKC would rewrite, and stores an internationalised domain as punycode with the label count unchanged and the whole address re-checked; the MIME builder refuses (never converts) anything that isn't already an ASCII dot-atom domain. Tests: `x@gmail.com#é`, `/é`, `?é`, fullwidth `ｇｍａｉｌ`, `gma%69l.cömx`, an ideographic full stop, `_`, leading and trailing hyphens, and `x@bücher.de` stored as `x@xn--bcher-kva.de`; the M2b parity and limit suites pass unchanged (normalisation precedes every limit and lookup, for every address). | `packages/server/src/accounts/email.ts`, `email/mime.ts`, tests beside them, 04 conventions, 06 §3.3, 09 §2 |
+| A5-S-4 | Fixed. Requests use `redirect: "manual"`; a `3xx` or an opaque redirect is a failure, never followed (tested for each of 301, 302, 303, 307, 308 on both endpoints). Under workerd: `tests/contract/src/redirect.test.ts` proves `"error"` throws and `"manual"` is accepted. Gap: Wrangler's test harness proxies a Worker's outbound requests through something that follows redirects itself, so the redirect answer can't be observed under the harness; the provider's handling is tested with a fetch double. | `packages/server/src/email/gmail.ts`, `gmail.test.ts`, `tests/contract/src/redirect.test.ts`, 09 §2 |
+| A5-S-5 / A5-P-2 | Fixed. The token check fails closed: exactly `openid`, `email` and `gmail.send`, and a parseable `id_token` with `aud` equal to the client id, `email_verified` true and `email` equal to `GMAIL_SENDER`; otherwise `GmailTokenRefused` (`email_token_scope` / `email_token_account`) and Node refuses to start. Tests: missing, unparseable, wrong-audience, unverified and wrong-account tokens; missing or extra scopes. 09 §2's wording is amended. | `gmail.ts`, `gmail.test.ts`, 09 §2 |
+| A5-S-6 / A5-P-9 | Fixed. The helper's output path is checked by `checkOutFile`: the parent directory is resolved with `realpath`, "outside" is `rel` neither `..` nor starting `../` (a directory named `..x` inside the repository is refused), and any ancestor directory containing `.git` is refused. | `scripts/src/gmail/out-file.ts`, `out-file.test.ts`, `scripts/src/bin/gmail-authorize.ts` |
+| A5-S-7 | Fixed. The helper checks the revoke response; on failure it says "revocation failed: remove the app's access in the account's security settings". | `scripts/src/gmail/authorize.ts`, `authorize.test.ts` |
+| A5-S-8 | Fixed. The scope alert logs only the known scope names and a count of the others, never Google's string. | `gmail.ts`, `gmail.test.ts` |
+| A5-S-9 | Fixed. A send failure whose provider has already alerted is marked (`markAlerted`), and the sign-in routes' background task skips the "background task failed" log for a marked error (09 §2 "logs nothing more"). An unmarked failure is still logged. Tests: the provider marks every failure path; the route logs one entry for a marked failure and one for an unmarked one. | `email/sender.ts`, `email/gmail.ts`, `auth/routes.ts`, `apps/node/src/email-failure.test.ts` |
+| A5-S-10 | Fixed. Both services have a capped `json-file` log, `pids_limit` and `mem_limit` (tested); `docs/deploy.md` creates the secrets directory as the operator with `install -d -m 0700`. | compose file, `tunnel-compose.test.ts`, `docs/deploy.md` |
+| A5-P-4 | Fixed. The `chmod` is the explicit last step before `up`, and "Check it" names the failure when it is skipped. | `docs/deploy.md` |
+| A5-P-5 | Fixed. Unconsumed response bodies are cancelled on non-OK answers, before the 401 retry and after a success; a redirect answer's body too. Test: the cancel hook of each body runs. | `gmail.ts`, `gmail.test.ts` |
+| A5-P-6 | Resolved at merge: the alpha branch owns the roadmap, so the owner makes the bookkeeping edit when merging. | owner, at merge |
+| A5-P-7 | Fixed by removal. `MimeInput.headers` and `EXTRA_HEADERS` had no caller; M4's unsubscribe headers will add them with their first use and tests. 09 §2 still says unsubscribe links come with M4. | `email/mime.ts`, `mime.test.ts` |
+| A5-P-8 | Fixed. One `base64.ts` (`toBase64`, `toBase64Url`, `fromBase64Url`) is used by the MIME builder, the gmail provider, session tokens and the authorize helper. | `packages/server/src/base64.ts` |
+
+## How the routing fix was proved
+
+With the app image built locally, the compose stack was run with dummy secrets, `cloudflared`
+replaced by a stand-in container with the same networks and pinned address, and Google's hosts
+resolved to loopback so nothing left the machine. `check-tunnel-routing.sh` printed: from
+`cloudflared`'s namespace to `app-front:8080` `202`; to `app:8080` `400`; from the Docker host
+`400`. The app logged one `email_send_failed` alert for the unreachable provider and nothing
+else for that send.
+
+## Round 2
+
+Both round-2 verdicts were MERGE; these are the follow-ups taken before merging.
+
+| ID | Outcome | Where |
+|---|---|---|
+| A5-S2-1 / A5-P2-5 | Fixed. One rule, `isSendableAddress`, is shared by `normaliseAddress` and the MIME builder: an ASCII dot-atom local part of at most 64 characters, labels of at most 63, a domain of at most 253, an ASCII domain, and a top-level label that isn't all digits. Every refused address gets the same `400 BAD_REQUEST`. Tests: non-ASCII local parts, leading, trailing and consecutive dots, a 64-character label, an over-long domain, `x@127.0.0.1`, a numeric top-level label (including after punycode), and the accepted edges (a 63-character label, a numeric inner label). The M2b parity and limit suites pass unchanged. 04 conventions state the rule. | `packages/server/src/accounts/email.ts`, `email/mime.ts`, `accounts/accounts.test.ts`, 04 |
+| A5-S2-2 | Fixed. `TRUST_PROXY_PEERS` is `172.30.99.2/32` alone; the health check needs no client address and still passes (checked on the running stack). Compose file, `tunnel.env.example`, `docs/deploy.md`, 08 §4.1, 09 §1 and §4 and the compose test are updated. | compose file, `tunnel-compose.test.ts`, docs |
+| A5-S2-3 | Fixed. "Things to know" says Docker access on the host is enough to impersonate the tunnel and that no private-network (CIDR) or WARP routes may be added to this tunnel. | `docs/deploy.md` |
+| A5-S2-4 | Fixed. The catch-all send alert carries `errorClass` (the class name only). Test: the alert for an unreachable provider has it and no secret. | `email/gmail.ts`, `gmail.test.ts` |
+| A5-S2-5 | Fixed. `EMAIL_FROM` is refused at config parse unless its address satisfies the same rule (the `console` provider, local development only, is exempt). Tests: non-ASCII, consecutive dots, numeric top-level label. | `config/parse.ts`, `parse.test.ts` |
+| A5-S2-6 | Fixed. The helper's revoke request uses `redirect: "error"`. Test: it failed before the change. | `scripts/src/gmail/authorize.ts`, `authorize.test.ts` |
+| A5-S2-7 | Recorded: no instance held addresses under the old rule when it changed (the proof-of-concept deployment isn't live yet). | `docs/security/findings.md` |
+| A5-P2-1 | Fixed. The skip-by-default tunnel stack test is documented: how to run it and when (any change to the compose file, `TRUST_PROXY_PEERS` or the `app-front` alias). | 11 §4, `CLAUDE.md` Commands |
+| A5-P2-2 | Fixed. The script requires a 2xx for the tunnel's route and prints the status it wanted on every line. | `apps/node/scripts/check-tunnel-routing.sh` |
+| A5-P2-3 | Fixed. Round trips for 0 to 5 bytes, `+` and `/` mapped to `-` and `_`, unpadded input accepted, invalid input throws. | `packages/server/src/base64.test.ts` |
+| A5-P2-4 | Fixed. The script's usage comment states its assumptions: no spaces in paths, a Linux host with a native engine, and that `000` means no connection, never a pass. | `check-tunnel-routing.sh` |
+| A5-P2-6 | Recorded: roadmap bookkeeping is the owner's edit at merge. | owner, at merge |
+
+## Round 3
+
+| ID | Resolution | Where |
+|---|---|---|
+| A5-R3-1 | Left: one commit subject is 73 characters; commitlint's limit is 100 and the branch history stays as is. | — |
+| A5-R3-2 | Fixed. 09 §1 states the `EMAIL_FROM` startup rule, and the message says the address must be one mail can be sent to and from. | `docs/spec/09-operations.md`, `packages/server/src/config/parse.ts` |

@@ -1,7 +1,7 @@
 import { isGameType } from "@your-move/sdk";
 import { z } from "zod";
 
-import { normaliseAddress, type NormalisedEmail } from "../accounts/email.js";
+import { isSendableAddress, normaliseAddress, type NormalisedEmail } from "../accounts/email.js";
 import { RATE_LIMIT_NAMES } from "../auth/limits.js";
 import { DEFAULT_APP_NAME } from "./defaults.js";
 import { isEmailAddress, normaliseEmail, parseMailbox } from "./email.js";
@@ -215,6 +215,8 @@ function crossFieldIssues(raw: RawEnv, options: ParseConfigOptions): string[] {
   const from = parseMailbox(raw.EMAIL_FROM);
   if (!from) {
     issues.push('EMAIL_FROM: must be an address or "Name" <address>, on one line');
+  } else if (raw.EMAIL_PROVIDER !== "console" && !isSendableAddress(from.address)) {
+    issues.push("EMAIL_FROM: the address must be one mail can be sent to and from (04)");
   }
 
   switch (raw.EMAIL_PROVIDER) {

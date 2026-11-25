@@ -227,6 +227,21 @@ describe("parseConfig: invalid configurations", () => {
       "EMAIL_FROM: must be an address",
     ],
     [
+      "non-ASCII EMAIL_FROM",
+      { ...PROD_ENV, EMAIL_FROM: "ü@example.org" },
+      "EMAIL_FROM: the address must be one mail can be sent to and from",
+    ],
+    [
+      "EMAIL_FROM with consecutive dots",
+      { ...PROD_ENV, EMAIL_FROM: "Example <a..b@example.org>" },
+      "EMAIL_FROM: the address must be one mail can be sent to and from",
+    ],
+    [
+      "EMAIL_FROM with a numeric top-level label",
+      { ...PROD_ENV, EMAIL_FROM: "a@127.0.0.1" },
+      "EMAIL_FROM: the address must be one mail can be sent to and from",
+    ],
+    [
       "EMAIL_FROM with a line break",
       { ...PROD_ENV, EMAIL_FROM: "a@example.org\r\nBcc: x@example.org" },
       "EMAIL_FROM: must be an address",

@@ -21,13 +21,65 @@ const LOCAL = String.raw`[^\s\p{Cc}\p{Cf}@<>()[\]\\,;:"]{1,64}`;
 const LABEL = String.raw`[^\s\p{Cc}\p{Cf}@<>()[\]\\,;:".]+`;
 const ADDRESS = new RegExp(String.raw`^${LOCAL}@${LABEL}(?:\.${LABEL})+$`, "u");
 
+/** A delivery-safe domain: ASCII labels of letters, digits and inner hyphens, at least two. */
+const ASCII_DOMAIN =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/u;
+
+/** An ASCII dot-atom local part (RFC 5322): no leading, trailing or consecutive dots. */
+const ASCII_LOCAL_PART = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/u;
+
+/**
+ * Whether `address` is one the mail builder can send as it stands: an ASCII dot-atom local part of
+ * at most 64 characters, an ASCII domain of letters, digits and inner hyphens with labels of at
+ * most 63 characters, at most 253 in all, and a top-level label that isn't all digits (which would
+ * read as an IP address). The one rule shared by {@link normaliseAddress}, the MIME builder and the
+ * `EMAIL_FROM` check, so what is accepted can never be wider than what can be sent.
+ */
+export function isSendableAddress(address: string): boolean {
+  const at = address.lastIndexOf("@");
+  if (at < 1 || address.length > MAX_EMAIL_LENGTH) return false;
+  const local = address.slice(0, at);
+  const domain = address.slice(at + 1);
+  if (local.length > 64 || !ASCII_LOCAL_PART.test(local)) return false;
+  if (domain.length > 253 || !ASCII_DOMAIN.test(domain)) return false;
+  const labels = domain.split(".");
+  return labels.every((label) => label.length <= 63) && !/^\d+$/u.test(labels.at(-1) ?? "");
+}
+
+/**
+ * The ASCII form of `domain`, or `null` when it can't be one that means the same thing. Any ASCII
+ * character outside letters, digits, `.` and `-` is refused, and so is a domain that NFKC would
+ * rewrite: a URL parser maps such characters to ASCII ones (`#`, `/`, `%`), which would send mail
+ * somewhere other than the stored address says. Only a plain internationalised domain is
+ * converted (punycode), with the same number of labels.
+ */
+function asciiDomain(domain: string): string | null {
+  if (/\p{ASCII}/u.test(domain.replaceAll(/[A-Za-z0-9.-]/gu, ""))) return null;
+  if (domain.normalize("NFKC") !== domain) return null;
+  if (!/[^\p{ASCII}]/u.test(domain)) return ASCII_DOMAIN.test(domain) ? domain : null;
+  let converted: string;
+  try {
+    converted = new URL(`http://${domain}`).hostname;
+  } catch {
+    return null;
+  }
+  const labels = (value: string): number => value.split(".").length;
+  return ASCII_DOMAIN.test(converted) && labels(converted) === labels(domain) ? converted : null;
+}
+
 /**
  * Normalises and validates an address typed by a person: trim, Unicode NFC, lower case, then the
  * shape and length checks. No provider-specific canonicalisation: dots and `+tags` stay as typed
- * (04). Returns `null` for anything that isn't a plausible address.
+ * (04). The domain is stored in ASCII (an internationalised one as punycode), so the stored
+ * address is exactly the one mail is delivered to (09 §2, 08 T14). Returns `null` for anything
+ * that isn't a plausible address.
  */
 export function normaliseAddress(input: string): NormalisedEmail | null {
   const value = input.trim().normalize("NFC").toLowerCase();
   if (value.length > MAX_EMAIL_LENGTH || !ADDRESS.test(value)) return null;
-  return value as NormalisedEmail;
+  const at = value.lastIndexOf("@");
+  const domain = asciiDomain(value.slice(at + 1));
+  if (domain === null) return null;
+  const address = `${value.slice(0, at)}@${domain}`;
+  return isSendableAddress(address) ? (address as NormalisedEmail) : null;
 }

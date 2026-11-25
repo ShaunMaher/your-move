@@ -8,7 +8,10 @@ describe("normaliseAddress (04 conventions)", () => {
     ["Sam@Example.ORG", "sam@example.org"],
     ["  sam+games@example.org\t", "sam+games@example.org"],
     ["first.last@sub.example.co.uk", "first.last@sub.example.co.uk"],
-    ["Ånne@example.org".normalize("NFD"), "ånne@example.org"],
+    // The stored domain is ASCII: an internationalised one is stored as punycode (09 §2).
+    ["x@bücher.de", "x@xn--bcher-kva.de"],
+    ["x@BÜCHER.de", "x@xn--bcher-kva.de"],
+    ["x@bu\u0308cher.de", "x@xn--bcher-kva.de"],
   ])("%j → %s", (input, expected) => {
     expect(normaliseAddress(input)).toBe(expected);
   });
@@ -30,8 +33,36 @@ describe("normaliseAddress (04 conventions)", () => {
     "sam@example..org",
     "sam\u0000@example.org",
     `${"a".repeat(65)}@example.org`,
+    // A domain a URL parser would rewrite into something else is never stored (A5-S-3).
+    "x@gmail.com#é",
+    "x@gmail.com/é",
+    "x@gmail.com?é",
+    "x@ｇｍａｉｌ.com",
+    "x@gma%69l.cömx",
+    "x@gmail.com%2F.é.de",
+    "x@a_b.example",
+    "x@-a.example",
+    "x@a-.example",
+    "x@exämple。org",
+    "x@xn--bcher-kva.de\u00e9\u0000",
+    // Nothing is accepted that the mail builder can't send (A5-S2-1).
+    "ü@example.org",
+    "Ånne@example.org".normalize("NFD"),
+    "a..b@example.org",
+    ".a@example.org",
+    "a.@example.org",
+    `x@${"a".repeat(64)}.org`,
+    `x@${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(63)}.org`,
+    "x@127.0.0.1",
+    "x@example.123",
+    "x@bücher.123",
   ])("refuses %j", (input) => {
     expect(normaliseAddress(input)).toBeNull();
+  });
+
+  it("accepts labels of 63 characters and a numeric label that isn't the last", () => {
+    expect(normaliseAddress(`x@${"a".repeat(63)}.org`)).toBe(`x@${"a".repeat(63)}.org`);
+    expect(normaliseAddress("x@123.example.org")).toBe("x@123.example.org");
   });
 
   it(`refuses addresses longer than ${String(MAX_EMAIL_LENGTH)} characters`, () => {
