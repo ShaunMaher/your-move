@@ -15,11 +15,14 @@
  * 3. **coverage**: every `/api/v1/games*` and `/api/v1/catalog` route the app registers must have
  *    been exercised, so a new route can't escape the test.
  */
+import type { AnyGameDefinition } from "@your-move/sdk";
+import type { InstalledGame } from "@your-move/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { installedGames } from "../../../generated/server-registry.js";
 import { nodeDictionaries } from "./dictionaries.js";
 import { createGame, type ExampleView, gameHarness, type Player, signUp } from "./games-support.js";
-import { type Harness, HOUR } from "./test-harness.js";
+import { type Harness, HOUR, MINUTE } from "./test-harness.js";
 
 /** The served dictionaries the harness reads (built by the dictionary package). */
 const DICTIONARIES = new URL("../../../packages/dictionary/generated/served", import.meta.url)
@@ -173,8 +176,56 @@ function check(text: string, gameIds: readonly string[], viewer: Player, label: 
       expect(text.includes(secret), `${label}: contains a secret`).toBe(false);
     }
   }
-  // Nobody's typed address, ever, except the creator's own `invitedAs` (checked by the keys).
-  expect(text.includes("@example.org") && !text.includes('"invitedAs"'), label).toBe(false);
+  typedAddressesOnlyTheirOwn(body, text, viewer, label);
+}
+
+/** The address a game row holds as `invite_email`, per game, as stored now. */
+function typedAddresses(gameId: string): string[] {
+  return h
+    .query("SELECT invite_email FROM game_players WHERE game_id = ?", gameId)
+    .flatMap((row) => (typeof row["invite_email"] === "string" ? [row["invite_email"]] : []));
+}
+
+/**
+ * Nobody's typed address appears anywhere but as `invitedAs` in an envelope of a game whose own
+ * rows still hold that address, and only to that game's creator. Every address in the body must
+ * be accounted for that way (A2 review S2-4).
+ */
+function typedAddressesOnlyTheirOwn(
+  body: unknown,
+  text: string,
+  viewer: Player,
+  label: string,
+): void {
+  let accounted = 0;
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) return value.forEach(walk);
+    if (typeof value !== "object" || value === null) return;
+    const record = value as Record<string, unknown>;
+    const players = record["players"];
+    if (typeof record["id"] === "string" && Array.isArray(players)) {
+      for (const row of players as Record<string, unknown>[]) {
+        const address = row["invitedAs"];
+        if (typeof address !== "string") continue;
+        expect(typedAddresses(record["id"]), `${label}: invitedAs is not stored`).toContain(
+          address,
+        );
+        const [mine] = h.query(
+          "SELECT joined_via FROM game_players WHERE game_id = ? AND user_id = ?",
+          record["id"],
+          viewer.id,
+        );
+        expect(mine?.["joined_via"], `${label}: invitedAs shown to a non-creator`).toBe("creator");
+        accounted += 1;
+      }
+    }
+    Object.values(record).forEach(walk);
+  };
+  walk(body);
+  expect(
+    text.match(/[^"\s@]+@example\.org/gu)?.length ?? 0,
+    `${label}: an unaccounted address`,
+  ).toBe(accounted);
 }
 
 /** Every game of the scenario, so a list response is checked against all of them. */
@@ -230,6 +281,40 @@ async function reads(gameId: string, viewer: Player): Promise<string[]> {
     const text = await response.text();
     check(text, gamesInPlay, viewer, `GET /api/v1/games${query}`);
     bodies.push(text);
+  }
+  bodies.push(...(await repeatedWrites(gameId, viewer)));
+  return bodies;
+}
+
+/**
+ * The same preview and the same illegal action, as the viewer, each time `reads` runs, so a
+ * perturbation that changes a refusal's body or a preview shows up too (A2 review S2-4). Both
+ * name pieces no one holds, so they're refused or previewed from the viewer's own hand alone.
+ */
+async function repeatedWrites(gameId: string, viewer: Player): Promise<string[]> {
+  const game = stored(gameId);
+  if (game.status !== "active") return [];
+  const action =
+    game.gameType === "words"
+      ? {
+          type: "play",
+          placements: [
+            { row: 7, col: 7, tile: "Q" },
+            { row: 7, col: 8, tile: "Z" },
+          ],
+        }
+      : { card: 9999 };
+  // The per-minute write limits would otherwise answer the later calls differently.
+  h.advance(MINUTE);
+  const [row] = h.query("SELECT version FROM games WHERE id = ?", gameId);
+  const bodies: string[] = [];
+  for (const [name, body] of [
+    ["preview", { action }],
+    ["actions", { expectedVersion: Number(row?.["version"]), action }],
+  ] as const) {
+    bodies.push(
+      (await hit(viewer, "POST", `/api/v1/games/:id/${name}`, { id: gameId }, body)).text,
+    );
   }
   return bodies;
 }
@@ -556,6 +641,34 @@ async function playAWord(gameId: string, player: Player): Promise<boolean> {
 describe("route-wide secrecy (04 invariant 4)", () => {
   beforeEach(() => {
     gamesInPlay = [];
+  });
+
+  it("negative control: a view that leaks an opponent's cards fails the perturbation check", async () => {
+    const example = installedGames.find((game) => game.manifest.type === "example");
+    const engine = example?.engines[1];
+    if (example === undefined || engine === undefined) throw new Error("no example game");
+    const leaky: InstalledGame = {
+      ...example,
+      engines: {
+        1: {
+          ...engine,
+          // The cards of another seat's hand, summed, in a field the schema allows.
+          view: (state: { hands: number[][] }, viewer: number | null) => ({
+            ...(engine.view as (state: unknown, viewer: number | null) => object)(state, viewer),
+            deckCount: state.hands
+              .filter((_hand, seat) => seat !== viewer)
+              .flat()
+              .reduce((sum, card) => sum + card, 0),
+          }),
+        } as unknown as AnyGameDefinition,
+      },
+    };
+    h.close();
+    h = gameHarness({ ENABLED_GAMES: "example" }, { games: [leaky] });
+    const [a, b] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
+    const game = await created(a, { gameType: "example", invitees: [{ email: b.email }] });
+    expect((await transition(game, b, "accept")).json.game?.status).toBe("active");
+    await expect(unchangedByHiddenState(game, [a, b])).rejects.toThrow(/sees hidden state change/u);
   });
 
   it("the example game: lobbies, a full game with previews and refusals, the frozen declined ending", async () => {
