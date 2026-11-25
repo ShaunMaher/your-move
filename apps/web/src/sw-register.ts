@@ -47,7 +47,7 @@ export function watchForUpdates(
 export function registerServiceWorker(onUpdate: (watch: UpdateWatch) => void): void {
   if (!import.meta.env.PROD || !("serviceWorker" in navigator)) return;
   const container = navigator.serviceWorker;
-  window.addEventListener("load", () => {
+  const register = () => {
     void container.register("/sw.js").then(
       (registration) => {
         watchForUpdates(container, registration, onUpdate, () => {
@@ -55,11 +55,15 @@ export function registerServiceWorker(onUpdate: (watch: UpdateWatch) => void): v
         });
         // A long-lived home-screen app is resumed, not reloaded: look for a new version then.
         document.addEventListener("visibilitychange", () => {
-          if (document.visibilityState === "visible")
+          if (document.visibilityState === "visible") {
             void registration.update().catch(() => undefined);
+          }
         });
       },
       () => undefined,
     );
-  });
+  };
+  // After the page has loaded, so installing the worker never competes with showing the app.
+  if (document.readyState === "complete") register();
+  else window.addEventListener("load", register, { once: true });
 }
