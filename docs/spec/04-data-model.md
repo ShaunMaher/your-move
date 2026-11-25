@@ -210,9 +210,9 @@ to sign in).
 | id | TEXT PK | |
 | user_id | TEXT FK ON DELETE CASCADE | |
 | session_id | TEXT FK → sessions ON DELETE CASCADE | subscription dies with the session (06 §4) |
-| endpoint | TEXT UNIQUE | validated per 08 T12; on conflict the row is reassigned to the current user/session (upsert) |
+| endpoint | TEXT UNIQUE | validated per 08 T12 and stored as the parsed URL (what every push is posted to); on conflict the row is reassigned to the current user/session and keys (upsert, keeping its id; `created_at` and `last_success_at` are kept for the same user and start afresh when the endpoint changes hands) |
 | p256dh, auth | TEXT | base64url; validated as a 65-byte uncompressed P-256 point and 16 bytes respectively |
-| created_at, last_success_at | INTEGER | delete on 404/410 from push service. Max 10 per user (oldest evicted) |
+| created_at, last_success_at | INTEGER | delete on 404/410 from push service. Max 10 per user (oldest by `created_at` evicted, in the same batch as the upsert; the subscription just saved is never the one evicted) |
 
 ### `dictionaries` (uploaded and operator dictionaries — built-ins live in the code registry)
 | Column | Type | Notes |

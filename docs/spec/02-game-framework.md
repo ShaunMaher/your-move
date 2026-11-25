@@ -841,7 +841,8 @@ The framework UI handles 2–8 players from day one:
 - Pushes go to seats whose clock started ("your turn"); to every seated player when a game that
   reached `active` ends; to a user auto-joined by a past opponent ("<creator> added you to a
   game"); and to a user with a new invitation, generically ("You have a new game invitation",
-  06 §6.2). Nothing else in the lobby pushes, and lobby endings send no push or email (§4).
+  06 §6.2). The user whose request made a transition gets none of its pushes (03 §7). Nothing
+  else in the lobby pushes, and lobby endings send no push or email (§4).
 
 ## 9. AI players and AI assistance
 

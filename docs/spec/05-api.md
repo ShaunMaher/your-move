@@ -324,8 +324,12 @@ No endpoint returns a `serverOnly` dictionary's contents, `blob_key`, `sha256`, 
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/v1/push/subscriptions` | `{ endpoint, keys: { p256dh, auth } }` — idempotent upsert bound to the current session; endpoint and keys validated per 08 T12. `204` |
-| DELETE | `/api/v1/push/subscriptions` | `{ endpoint }` — removes it if it belongs to the viewer. `204` |
+| POST | `/api/v1/push/subscriptions` | `{ endpoint, keys: { p256dh, auth } }` (strict: `PushSubscription.toJSON()`'s `expirationTime` is not sent) — idempotent upsert bound to the current session; endpoint and keys validated per 08 T12, `400 BAD_REQUEST` if refused. `204` |
+| DELETE | `/api/v1/push/subscriptions` | `{ endpoint }` — removes it if it belongs to the viewer; otherwise does nothing. `204` |
+
+Both count toward "any authenticated write per user" (`LIMIT_WRITES_USER_MINUTE`, 08 §4). The
+client takes the VAPID public key (`applicationServerKey`) from `GET /api/v1/config`'s
+`vapidPublicKey`, which is absent when the instance sends no pushes (alpha A8).
 
 ## Email links (unsubscribe)
 
