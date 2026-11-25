@@ -10,9 +10,12 @@ import { wordsV1 } from "./definition.js";
 
 export const engines = { 1: wordsV1 } satisfies GameEngines;
 
+export { analyseViewPlay } from "./analysis.js";
+export { premiumAt, tilePoints, type PlayAnalysis } from "./board.js";
 export { isCompatible, type DictionaryTraits } from "./compatibility.js";
 export { findRuleset, latestRuleset, RULESETS, type RulesetRegistry } from "./rulesets/index.js";
 export {
+  BLANK,
   premiumCounts,
   type Premium,
   type Ruleset,
