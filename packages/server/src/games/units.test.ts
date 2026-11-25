@@ -6,8 +6,8 @@ import { z } from "zod";
 
 import type { GamePlayerRecord, GameRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
-import { accept, LOBBY_LIFETIME_MS, rerank, start } from "./lifecycle.js";
 import { EngineFault, guardEngine } from "./engine-fault.js";
+import { accept, LOBBY_LIFETIME_MS, rerank, start } from "./lifecycle.js";
 import { cryptoRandom, recorded } from "./random.js";
 import { createGameRegistry, GameConfigError } from "./registry.js";
 import {

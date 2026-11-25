@@ -15,7 +15,6 @@
  * 3. **coverage**: every `/api/v1/games*` and `/api/v1/catalog` route the app registers must have
  *    been exercised, so a new route can't escape the test.
  */
-import type { AnyGameDefinition } from "@your-move/sdk";
 import type { InstalledGame } from "@your-move/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -199,7 +198,10 @@ function typedAddressesOnlyTheirOwn(
 ): void {
   let accounted = 0;
   const walk = (value: unknown): void => {
-    if (Array.isArray(value)) return value.forEach(walk);
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+      return;
+    }
     if (typeof value !== "object" || value === null) return;
     const record = value as Record<string, unknown>;
     const players = record["players"];
@@ -660,7 +662,7 @@ describe("route-wide secrecy (04 invariant 4)", () => {
               .flat()
               .reduce((sum, card) => sum + card, 0),
           }),
-        } as unknown as AnyGameDefinition,
+        },
       },
     };
     h.close();
@@ -824,8 +826,9 @@ describe("route-wide secrecy (04 invariant 4)", () => {
     };
 
     await step();
-    // The opening: a rack of seven always spells some word across the centre.
-    expect(await playAWord(game, await toAct())).toBe(true);
+    // The opening: almost every rack spells a word across the centre; one that doesn't passes,
+    // and the later turns make up the plays.
+    let played = (await playAWord(game, await toAct())) ? 1 : 0;
     await step();
     // A swap: its record says how many tiles, never which.
     const swapper = await toAct();
@@ -845,8 +848,7 @@ describe("route-wide secrecy (04 invariant 4)", () => {
     expect(swapped.status, swapped.text).toBe(200);
     await step();
     // Then words through the tiles on the board, until a second one is played.
-    let played = 1;
-    for (let turn = 0; turn < 4 && played < 2; turn++) {
+    for (let turn = 0; turn < 8 && played < 2; turn++) {
       if (await playAWord(game, await toAct())) played += 1;
       await step();
     }
