@@ -1,6 +1,6 @@
 # Alpha A8 review — resolutions
 
-This record covers round 1 of the review of alpha slice A8, the Web Push "your turn" and "game
+This record covers rounds 1 and 2 of the review of alpha slice A8, the Web Push "your turn" and "game
 over" notifications (`alpha-a8-push`): the picky review (A8-P) and the security review (A8-S).
 Each line gives the finding's ID, its outcome and where the fix lives. Owner decisions are marked
 as such. The spec changes are folded into v0.9.23 (the README history line).
@@ -28,3 +28,14 @@ as such. The spec changes are folded into v0.9.23 (the README history line).
 | A8-P-8 | Fixed. The body is cut by code point. Test with astral characters. | `packages/server/src/push/notify.ts`, `notify.test.ts`, 03 §7 |
 | A8-P-9 | Fixed. `MAX_SUBSCRIPTIONS_PER_USER` lives with the endpoint rules. | `packages/server/src/push/endpoint.ts`, `push/routes.ts` |
 | A8-P-10 | Fixed. The tunnel section says how to upgrade an existing deployment. | `docs/deploy.md` |
+
+## Round 2 (A8-R2)
+
+| ID | Outcome | Where |
+|---|---|---|
+| A8-R2-1 | Fixed. The decline test waits for the start's push before declining, so the two pushes can't arrive in either order; the file passed 20 runs in a row. | `apps/node/src/push.test.ts` |
+| A8-R2-2 | Fixed (owner decision). A save from another user or session takes over an endpoint whose stored session is no longer live, whatever the keys; the eviction ranks rows of sessions that aren't live below every live one, so they go first. Both use `liveSessionCutoffs`. Tests on both drivers. | `packages/server/src/db/push-repos.ts`, `db/repositories.ts`, `push/routes.ts`, `db/push-contract.ts`, 04, 05 |
+| A8-R2-3 | Fixed. `sendTransitionPushes` with five recipients of ten devices each, listed one recipient after another: 40 sent, eight to each. | `packages/server/src/push/notify.test.ts` |
+| A8-R2-4 | Fixed. When the offer after an accept closes, focus moves to the screen's heading. Test. | `apps/web/src/screens/Game.tsx`, `Game.test.tsx`, 07 §4 |
+| A8-R2-5 | Fixed (spec). 03 §7 says the body is cut to 240 code points; grapheme cutting was left out to keep it simple. | 03 §7 |
+| A8-R2-6 | Fixed. The named lines are wrapped (comments, SQL, messages, test titles, the 03 and 07 paragraphs); the OpenAPI description of the upsert now matches the takeover and eviction rules. | `packages/server/src/db/push-contract.ts`, `db/push-repos.ts`, `scripts/src/vapid/generate.ts`, `packages/shared/src/push.ts`, 03 §7, 07 §4 |

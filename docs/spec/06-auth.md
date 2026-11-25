@@ -137,11 +137,11 @@ mostly painless.
   them as well. The shell's **public word-list cache**
   (`dictionaries-v1`, 07 §4) deliberately survives sign-out: it holds only public, content-addressed
   lists (each stored under the digest of its own contents) and nothing of any user. So does the shell's
-  `ym.install-dismissed` flag (07 §4): per device, no user data, and kept across sign-out on purpose,
-  and the `ym.push-offered` flag (07 §4, alpha A8), for the same reasons. The device's push
-  subscription does not survive: `clearClientState()` unsubscribes it in the browser (the server
-  already deleted its row with the session), and so does a launch that finds no session, beside
-  clearing the game keys (the return path is kept, as above).
+  `ym.install-dismissed` flag (07 §4): per device, no user data, and kept across sign-out on
+  purpose, and the `ym.push-offered` flag (07 §4, alpha A8), for the same reasons. The device's
+  push subscription does not survive: `clearClientState()` unsubscribes it in the browser (the
+  server already deleted its row with the session), and so does a launch that finds no session,
+  beside clearing the game keys (the return path is kept, as above).
 - **Suspension** (05 §Admin API): suspending a user deletes their sessions and revokes their tokens
   (with the same socket closing as above), cancels the lobbies they created and declines their
   pending invitations (realtime only); their active games continue and time out normally. The

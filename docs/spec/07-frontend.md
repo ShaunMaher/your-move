@@ -159,29 +159,29 @@ dictionaries is the shell's job and needs no change to the module contract.
     text screens (accessibility).
   - Web Push only works once installed to home screen (iOS 16.4+); the notifications toggle explains
     this when running in Safari.
-  - **Notifications (alpha A8).** Settings has a "Notifications" section for this device: a
-    "Notify me on this device" toggle where push can work, and otherwise one line saying what
-    stands in the way — the instance sends none (no `vapidPublicKey` in `/api/v1/config`), iOS or
-    iPadOS Safari outside the Home Screen (the A7 Safari test and not standalone; it links to
-    `/install`), a browser without service workers, the Push API or notifications, or
-    notifications blocked for the site (allow them in the browser or device settings). Turning
-    it on calls `Notification.requestPermission()` straight from the tap, before anything is
-    awaited (iOS honours a permission request only inside a user gesture), then
-    `pushManager.subscribe({ userVisibleOnly: true, applicationServerKey })` and the POST; if the
-    POST fails the browser subscription is undone, so the toggle never shows "on" for a device the
-    server doesn't know. A dismissed prompt leaves it off; a refused one shows the blocked line and
-    moves focus to the section's heading, since the toggle that had it is gone.
-    Turning it off sends the DELETE, then unsubscribes the browser. **After the first game is
-    created** (never at sign-in, 03 §7) the new-game flow offers it once per device, before
-    going to the game: "Know when it's your turn?" with "Turn on notifications" (the same tap
-    rule) and "Not now", either of which goes on to the game. The same offer follows a
-    successful **Accept** of an invitation, on the game's screen (Q28); the offer is made only when the
-    instance has a key, the device could subscribe, permission is still `default` and the
-    per-device `localStorage` key `ym.push-offered` isn't set (it is set when the offer shows;
-    guarded like `ym.install-dismissed`, and outside the `ym.game.` prefix, 06 §4). At each
-    launch with a session the client saves an existing subscription again (below); one made with
-    a VAPID key the server no longer has is unsubscribed and replaced with one for the current
-    key. Sign-out, and a launch that finds no session, unsubscribe the browser (06 §4).
+  - **Notifications (alpha A8).** Settings has a "Notifications" section for this device: a "Notify
+    me on this device" toggle where push can work, and otherwise one line saying what stands in the
+    way — the instance sends none (no `vapidPublicKey` in `/api/v1/config`), iOS or iPadOS Safari
+    outside the Home Screen (the A7 Safari test and not standalone; it links to `/install`), a
+    browser without service workers, the Push API or notifications, or notifications blocked for the
+    site (allow them in the browser or device settings). Turning it on calls
+    `Notification.requestPermission()` straight from the tap, before anything is awaited (iOS
+    honours a permission request only inside a user gesture), then `pushManager.subscribe({
+    userVisibleOnly: true, applicationServerKey })` and the POST; if the POST fails the browser
+    subscription is undone, so the toggle never shows "on" for a device the server doesn't know. A
+    dismissed prompt leaves it off; a refused one shows the blocked line and moves focus to the
+    section's heading, since the toggle that had it is gone. Turning it off sends the DELETE, then
+    unsubscribes the browser. **After the first game is created** (never at sign-in, 03 §7) the
+    new-game flow offers it once per device, before going to the game: "Know when it's your turn?"
+    with "Turn on notifications" (the same tap rule) and "Not now", either of which goes on to the
+    game. The same offer follows a successful **Accept** of an invitation, on the game's screen
+    (Q28), and focus then moves to the screen's heading; the offer is made only when the instance
+    has a key, the device could subscribe, permission is still `default` and the per-device
+    `localStorage` key `ym.push-offered` isn't set (it is set when the offer shows; guarded like
+    `ym.install-dismissed`, and outside the `ym.game.` prefix, 06 §4). At each launch with a session
+    the client saves an existing subscription again (below); one made with a VAPID key the server no
+    longer has is unsubscribed and replaced with one for the current key. Sign-out, and a launch
+    that finds no session, unsubscribe the browser (06 §4).
   - **Install guide** (alpha A7). `/install` is a signed-in screen (a signed-out visit is remembered
     and restored like any other, §6): numbered steps for iOS Safari (Share, which is at the bottom
     on iPhone and the top right on iPad, behind the three-dot button when it isn't shown; "Add to

@@ -274,30 +274,30 @@ filesystems are unsupported for the database anyway).
 - Implemented once in `packages/server` using WebCrypto (RFC 8291 aes128gcm + RFC 8292 VAPID) or a
   vetted Workers-compatible library; must work on both runtimes.
 - **Turn and game-end pushes (alpha A8).** Implemented with WebCrypto alone, no library. A
-  transition that won its race schedules its pushes in the background (§4) after the response,
-  so a push never delays or fails the action; nothing is sent without VAPID configured (09 §1).
-  "Your turn" goes to each seat whose clock the transition started (`to_act_since` set: it entered
+  transition that won its race schedules its pushes in the background (§4) after the response, so a
+  push never delays or fails the action; nothing is sent without VAPID configured (09 §1). "Your
+  turn" goes to each seat whose clock the transition started (`to_act_since` set: it entered
   `toAct`, the start included, 02 §2.3), and "game over" to every seated player when a game that
   reached `active` ends (`finished`, or `declined` after the start); **never to the user whose
-  request made the transition**, who is looking at it (so a seat whose own action restarts its
-  clock gets nothing, and the creator who presses Start isn't told it's their turn). The message
-  is `{ title, body, url, tag }`: `title` is `APP_NAME`; `body` is the transition's `describe` text
-  with names filled in ("You" for the recipient, "New player" and "Deleted player" as for the
-  email nudge) as a sentence followed by "Your turn." or "The game is over."; a start, which has
-  no `describe` text, says "Your game with <the other players> has started. Your turn.", and a
-  framework-only `declined` ending "<name> declined the game, so it's over."; the body is cut to
-  240 code points (never splitting a character); `url` is the game's path `/g/<id>` and `tag` is `game-<id>`, so a newer
-  notification for a game replaces an older one. Each request carries `TTL: 86400` (the email
-  nudge covers a longer wait) and `Urgency: normal`. A push service's `2xx` sets
-  `last_success_at`, `404`/`410` deletes the subscription, and anything else (a redirect, another
-  status, a network error or the 5 s timeout, 08 T12) is logged by status or error class only,
-  never the endpoint (a capability URL) or the text. Only subscriptions whose session is live
+  request made the transition**, who is looking at it (so a seat whose own action restarts its clock
+  gets nothing, and the creator who presses Start isn't told it's their turn). The message is `{
+  title, body, url, tag }`: `title` is `APP_NAME`; `body` is the transition's `describe` text with
+  names filled in ("You" for the recipient, "New player" and "Deleted player" as for the email
+  nudge) as a sentence followed by "Your turn." or "The game is over."; a start, which has no
+  `describe` text, says "Your game with <the other players> has started. Your turn.", and a
+  framework-only `declined` ending "<name> declined the game, so it's over."; the body is cut to 240
+  code points (so a cut never splits a surrogate pair); `url` is the game's path `/g/<id>` and `tag`
+  is `game-<id>`, so a newer notification for a game replaces an older one. Each request carries
+  `TTL: 86400` (the email nudge covers a longer wait) and `Urgency: normal`. A push service's `2xx`
+  sets `last_success_at`, `404`/`410` deletes the subscription, and anything else (a redirect,
+  another status, a network error or the 5 s timeout, 08 T12) is logged by status or error class
+  only, never the endpoint (a capability URL) or the text. Only subscriptions whose session is live
   are sent to (the session check's own expiry rules, 06 §4: a session past its expiry is deleted
   only at its next use, and until then gets nothing). At most 40 subscriptions are sent to per
   transition (a Worker invocation's subrequest budget, 09 §3), taken in turn by recipient (each
-  one's first device, then each one's second, a recipient's devices most recently useful first),
-  so no recipient's devices crowd out another's; the delivery marks and deletions are one
-  statement each.
+  one's first device, then each one's second, a recipient's devices most recently useful first), so
+  no recipient's devices crowd out another's; the delivery marks and deletions are one statement
+  each.
 - Optional email nudge (default off, per-user setting): "It's your turn" after 24 h idle, max one
   per game per day; and at most one email per normal invitation, sent when it's created or claimed
   (06 §6.2), not by the sweep. Precisely (alpha A6): the sweep nudges a `playing` seat of an

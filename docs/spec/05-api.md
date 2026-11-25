@@ -324,7 +324,7 @@ No endpoint returns a `serverOnly` dictionary's contents, `blob_key`, `sha256`, 
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/v1/push/subscriptions` | `{ endpoint, keys: { p256dh, auth } }` (strict: `PushSubscription.toJSON()`'s `expirationTime` is not sent) — idempotent upsert bound to the current session; endpoint and keys validated per 08 T12, `400 BAD_REQUEST` if refused. An endpoint stored for another user or session moves only when the keys equal the stored ones; otherwise nothing changes, with the same `204` (04). `204` |
+| POST | `/api/v1/push/subscriptions` | `{ endpoint, keys: { p256dh, auth } }` (strict: `PushSubscription.toJSON()`'s `expirationTime` is not sent) — idempotent upsert bound to the current session; endpoint and keys validated per 08 T12, `400 BAD_REQUEST` if refused. An endpoint stored for another user or session moves only when the keys equal the stored ones or that session is no longer live; otherwise nothing changes, with the same `204` (04). `204` |
 | DELETE | `/api/v1/push/subscriptions` | `{ endpoint }` — removes it if it belongs to the viewer; otherwise does nothing. `204` |
 
 Both count toward "any authenticated write per user" (`LIMIT_WRITES_USER_MINUTE`, 08 §4). The

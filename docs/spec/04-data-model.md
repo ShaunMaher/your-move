@@ -210,9 +210,9 @@ to sign in).
 | id | TEXT PK | |
 | user_id | TEXT FK ON DELETE CASCADE | |
 | session_id | TEXT FK → sessions ON DELETE CASCADE | subscription dies with the session (06 §4) |
-| endpoint | TEXT UNIQUE | validated per 08 T12 and stored as the parsed URL (what every push is posted to); on conflict (upsert, keeping its id): the same user and session update its keys; another user or session takes it over only when the keys sent equal the stored ones (the same browser subscription), and otherwise nothing changes and the answer is the same `204` (no ownership oracle, alpha A8 review); `created_at` and `last_success_at` are kept for the same user and start afresh when the endpoint changes hands |
+| endpoint | TEXT UNIQUE | validated per 08 T12 and stored as the parsed URL (what every push is posted to); on conflict (upsert, keeping its id): the same user and session update its keys; another user or session takes it over only when the keys sent equal the stored ones (the same browser subscription) or the stored row's session is no longer live (06 §4; such a row gets no pushes, owner decision in the alpha A8 review round 2), and otherwise nothing changes and the answer is the same `204` (no ownership oracle, alpha A8 review); `created_at` and `last_success_at` are kept for the same user and start afresh when the endpoint changes hands |
 | p256dh, auth | TEXT | base64url; validated as a 65-byte uncompressed P-256 point and 16 bytes respectively |
-| created_at, last_success_at | INTEGER | delete on 404/410 from push service. Max 10 per user, the least recently useful evicted (by `COALESCE(last_success_at, created_at)`), in the same batch as the upsert; the subscription just saved is never the one evicted. Only rows whose session is live receive pushes (03 §7) |
+| created_at, last_success_at | INTEGER | delete on 404/410 from push service. Max 10 per user: rows whose session isn't live are evicted first, then the least recently useful (by `COALESCE(last_success_at, created_at)`), in the same batch as the upsert; the subscription just saved is never the one evicted. Only rows whose session is live receive pushes (03 §7) |
 
 ### `dictionaries` (uploaded and operator dictionaries — built-ins live in the code registry)
 | Column | Type | Notes |
