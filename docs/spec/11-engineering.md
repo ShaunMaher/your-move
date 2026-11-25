@@ -98,6 +98,12 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
   in a CI job of their own, never alongside another suite, are run locally before any change to
   the paths they time is handed off, and are re-measured rather than retried when they fail
   (ADR 0006).
+- The tunnel stack test (`apps/node/src/tunnel-stack.test.ts`, which runs
+  `apps/node/scripts/check-tunnel-routing.sh` against a real compose stack) needs a Docker engine
+  and the app image, so it is skipped unless `TUNNEL_STACK_IMAGE` names one. Run it after any
+  change to `apps/node/docker-compose.tunnel.yml`, to `TRUST_PROXY_PEERS` or to the `app-front`
+  alias: `docker build -f apps/node/Dockerfile .`, then
+  `TUNNEL_STACK_IMAGE=<image> pnpm exec vitest run --project apps/node src/tunnel-stack.test.ts`.
 - Every bug fix lands with a test that failed before the fix.
 
 ## 5. Architecture rules

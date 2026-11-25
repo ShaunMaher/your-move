@@ -64,7 +64,10 @@ Toolchain: `mise install` (Node, pnpm and the scanners pinned in `mise.toml` and
 - Quality: `pnpm format` · `pnpm format:check` · `pnpm lint` · `pnpm lint:arch` ·
   `pnpm lint:unused` · `pnpm lint:licences` · `pnpm lint:vulns` · `pnpm lint:pins` ·
   `pnpm typecheck` · `pnpm test` ·
-  `pnpm test:e2e` (after `pnpm build`) · `pnpm gates:prove`
+  `pnpm test:e2e` (after `pnpm build`) · `pnpm gates:prove` · the tunnel stack test (skipped by default; run it after
+  changing `docker-compose.tunnel.yml`, `TRUST_PROXY_PEERS` or the `app-front` alias, 11 §4):
+  `docker build -f apps/node/Dockerfile .` then
+  `TUNNEL_STACK_IMAGE=<image> pnpm exec vitest run --project apps/node src/tunnel-stack.test.ts`
 - Games: `pnpm games:generate` (also runs on `prepare`) · `pnpm games:verify` (`--fast` in builds; never in deploy jobs) ·
   `pnpm games:check-inputs` (after the builds; `--only web,node` in the Docker build) ·
   `pnpm games:check-db` (deploy; reads only `generated/installed.json`)
