@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { Installed } from "@your-move/server";
+import type { Installed, Orphan } from "@your-move/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { InstanceLockedError } from "./db/instance-lock.js";
@@ -30,13 +30,17 @@ afterEach(() => {
 
 const at = Date.UTC(2026, 0, 1);
 
-/** Seeds one game of `type` v1 in `status`, through a first start. */
-async function seed(type: string, status: "lobby" | "active" | "finished"): Promise<void> {
+/** Seeds one game of `type` v1 in `status`, through a start accepting `allowOrphanGames`. */
+async function seed(
+  type: string,
+  status: "lobby" | "active" | "finished",
+  allowOrphanGames: string | null = null,
+): Promise<void> {
   const storage = await openStorage({
     databasePath,
     migrationsFolder: MIGRATIONS,
     installed: INSTALLED,
-    allowOrphanGames: null,
+    allowOrphanGames,
   });
   await storage.repos.games.create(
     {
@@ -113,6 +117,32 @@ describe("openStorage", () => {
     const storage = await openStorage({ ...options, allowOrphanGames: digest });
     expect(storage.acceptedOrphans).toEqual([
       { id: "gone-lobby", gameType: "gone", gameVersion: 1, reason: "type not installed" },
+    ]);
+    storage.close();
+  });
+
+  it("refuses a subset's digest when more games are orphaned (P2-8)", async () => {
+    const lobby: Orphan = {
+      id: "gone-lobby",
+      gameType: "gone",
+      gameVersion: 1,
+      reason: "type not installed",
+    };
+    const active = { ...lobby, id: "gone-active" };
+    await seed("gone", "lobby");
+    await seed("gone", "active", orphanDigest([lobby]));
+    const options = { databasePath, migrationsFolder: MIGRATIONS, installed: INSTALLED };
+    // {A}'s digest, accepted while A was the only orphan, doesn't wave through {A, B}.
+    const start = openStorage({ ...options, allowOrphanGames: orphanDigest([lobby]) });
+    await expect(start).rejects.toThrow(StartupRefusal);
+    await expect(start).rejects.toThrow(`ALLOW_ORPHAN_GAMES=${orphanDigest([lobby, active])}`);
+    const storage = await openStorage({
+      ...options,
+      allowOrphanGames: orphanDigest([active, lobby]),
+    });
+    expect(storage.acceptedOrphans.map((orphan) => orphan.id).sort()).toEqual([
+      "gone-active",
+      "gone-lobby",
     ]);
     storage.close();
   });

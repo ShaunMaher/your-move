@@ -12,6 +12,7 @@
     "@axe-core/playwright": "catalog:",
     "@playwright/test": "catalog:",
     "@types/node": "catalog:",
-    "@your-move/server": "workspace:*"
+    "@your-move/server": "workspace:*",
+    "vitest": "catalog:"
   }
 }

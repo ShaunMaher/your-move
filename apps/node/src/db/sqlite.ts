@@ -10,7 +10,7 @@
  * belongs to {@link inTransaction} alone: a statement that would begin or end a transaction
  * through the driver is refused, so nothing can leave the shared connection mid-transaction.
  */
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 
 import { createRepositories, type Database, type Repositories } from "@your-move/server";
 import { drizzle } from "drizzle-orm/sqlite-proxy";
@@ -22,8 +22,11 @@ type Method = "run" | "all" | "values" | "get";
 /** How long a writer waits for another connection's lock before failing (03 §5.3). */
 const BUSY_TIMEOUT_MS = 5000;
 
-/** Statements that begin, end or nest a transaction. */
-const TRANSACTION_CONTROL = /^\s*(?:BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b/iu;
+/** Statements that begin, end or nest a transaction (after their leading comments). */
+const TRANSACTION_CONTROL = /^(?:BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b/iu;
+
+/** What may precede a statement: whitespace, empty statements (`;`) and comments. */
+const LEADING_COMMENTS = /^(?:[\s;]|--[^\n]*(?:\n|$)|\/\*[\s\S]*?(?:\*\/|$))*/u;
 
 export class TransactionControlError extends Error {
   override readonly name = "TransactionControlError";
@@ -31,6 +34,11 @@ export class TransactionControlError extends Error {
   constructor() {
     super("Transactions are opened only by the adapter's batch (inTransaction).");
   }
+}
+
+/** Whether `sql` begins, ends or nests a transaction, however many comments precede it. */
+function isTransactionControl(sql: string): boolean {
+  return TRANSACTION_CONTROL.test(sql.replace(LEADING_COMMENTS, ""));
 }
 
 /** Opens (creating if needed, privately) the database file and applies the connection settings. */
@@ -48,6 +56,10 @@ export function openSqlite(path: string): DatabaseSync {
 /**
  * Runs one statement the way Drizzle's proxy driver expects: rows as arrays of values, and for
  * `get` the one row itself (`undefined` when there is none).
+ *
+ * Transaction control is refused by its text, and, as a backstop for whatever the text check
+ * misses, a statement run in autocommit that leaves a transaction open is rolled back and refused
+ * (M2a review S2-2).
  */
 function execute(
   sqlite: DatabaseSync,
@@ -55,9 +67,39 @@ function execute(
   params: readonly unknown[],
   method: Method,
 ): { rows: unknown[] } {
-  if (TRANSACTION_CONTROL.test(sql)) throw new TransactionControlError();
-  const statement = sqlite.prepare(sql);
-  const args = params as SQLInputValue[];
+  if (isTransactionControl(sql)) throw new TransactionControlError();
+  return runLeavingNoTransaction(sqlite, sql, params, method);
+}
+
+/** Whether a transaction is open (a call, so TypeScript doesn't narrow it between reads). */
+const isOpen = (sqlite: DatabaseSync): boolean => sqlite.isTransaction;
+
+/** Runs one statement; if it opened a transaction from autocommit, rolls that back and throws. */
+function runLeavingNoTransaction(
+  sqlite: DatabaseSync,
+  sql: string,
+  params: readonly unknown[],
+  method: Method,
+): { rows: unknown[] } {
+  const autocommit = !isOpen(sqlite);
+  const refuseOpenTransaction = (): void => {
+    if (autocommit && isOpen(sqlite)) {
+      sqlite.exec("ROLLBACK");
+      throw new TransactionControlError();
+    }
+  };
+  let result: { rows: unknown[] };
+  try {
+    result = run(sqlite.prepare(sql), params as SQLInputValue[], method);
+  } catch (error) {
+    refuseOpenTransaction();
+    throw error;
+  }
+  refuseOpenTransaction();
+  return result;
+}
+
+function run(statement: StatementSync, args: SQLInputValue[], method: Method): { rows: unknown[] } {
   if (method === "run") {
     statement.run(...args);
     return { rows: [] };
@@ -109,5 +151,5 @@ export function nodeRepositories(sqlite: DatabaseSync): Repositories {
   return createRepositories(nodeDatabase(sqlite));
 }
 
-/** The adapter's Drizzle database, for the adapter's own tests. */
-export const testing = { nodeDatabase };
+/** The adapter's Drizzle database and its autocommit backstop, for the adapter's own tests. */
+export const testing = { nodeDatabase, runLeavingNoTransaction };
