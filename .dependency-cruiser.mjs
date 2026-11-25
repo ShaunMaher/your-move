@@ -154,8 +154,17 @@ export default {
       severity: "error",
       // The build (vite.config.ts, vite-plugin/) runs in Node and takes the server-path list from
       // @your-move/shared/server-paths; nothing of it reaches the browser bundle.
-      from: { path: "^apps/web/", pathNot: "^apps/web/(vite-plugin/|vite[.]config[.]ts$)" },
+      from: { path: "^apps/web/", pathNot: "^apps/web/(vite-plugin/|vite(st)?[.]config[.]ts$)" },
       to: { path: "^packages/(server|shared)/" },
+    },
+    {
+      name: "web-src-not-to-build-code",
+      comment:
+        "The app's source and worker never import the build's code (vite-plugin/, the Vite configuration): " +
+        "it runs in Node and may use server packages; the build hands the app constants instead (07 §4).",
+      severity: "error",
+      from: { path: "^apps/web/(src|sw)/", pathNot: "[.]test[.]tsx?$" },
+      to: { path: "^apps/web/(vite-plugin/|vite(st)?[.]config)" },
     },
   ],
   options: {
