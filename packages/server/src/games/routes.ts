@@ -248,9 +248,8 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
   };
 
   /**
-   * The checks `/actions` and `/preview` share (05): a member with a seat (`404`), `active`
-   * (`GAME_NOT_ACTIVE`) and not orphaned (`GAME_UNAVAILABLE`), then — for actions only — the
-   * expected version.
+   * The first checks `/actions` and `/preview` share (05): a member with a seat (`404`), `active`
+   * (`GAME_NOT_ACTIVE`) and not orphaned (`GAME_UNAVAILABLE`).
    */
   const seatedContext = async (gameId: string, user: UserRecord) => {
     const { loaded, viewer } = await loadMember(gameId, user);
