@@ -1,4 +1,9 @@
-import { createJsonLogger, detachedRepositories, parseConfig } from "@your-move/server";
+import {
+  createJsonLogger,
+  detachedRepositories,
+  NO_DICTIONARIES,
+  parseConfig,
+} from "@your-move/server";
 import { describe, expect, it } from "vitest";
 
 import { createNodePlatform, PROXY_CHECK_WINDOW } from "./platform.js";
@@ -27,6 +32,7 @@ function platform(trustProxy: "false" | "xff") {
       sink: (line) => lines.push(JSON.parse(line) as Record<string, unknown>),
     }),
     now,
+    dictionaries: NO_DICTIONARIES,
   });
   const from = (address: string) =>
     result.clientIp(new Request("http://x/"), { incoming: { socket: { remoteAddress: address } } });

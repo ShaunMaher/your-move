@@ -9,6 +9,7 @@ import {
   createJsonLogger,
   DEFAULT_APP_NAME,
   detachedRepositories,
+  NO_DICTIONARIES,
   parseConfig,
 } from "@your-move/server";
 import openapiTS, { astToString } from "openapi-typescript";
@@ -36,6 +37,7 @@ export async function buildOpenApiDocument(): Promise<unknown> {
       log,
       email: createConsoleEmailSender(log, now),
       clientIp: () => ({ ok: false, reason: "missing" }),
+      dictionaries: NO_DICTIONARIES,
     },
     games: [],
   });

@@ -6,16 +6,19 @@
  * - `<id>/words.txt.gz` and `<id>/words.txt.br`: the same, compressed, for clients;
  * - `<id>/manifest.json`: its metadata, alphabet, hash and size;
  * - `index.json`: every manifest and the global removals, which the runtime parses with
- *   `parseIndex`.
+ *   `parseIndex`;
+ * - `served/`: what the runtimes publish (words §9.4): each word list (and its compressed copies)
+ *   under its versioned, hashed `servedFileName`, and `index.json`. The server reads the lists from
+ *   there and clients download them by `servedPath`.
  *
  * `generated/` is rebuilt from scratch each time and never committed.
  */
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 
-import type { DictionaryIndex } from "../manifest.js";
+import { type DictionaryIndex, servedFileName } from "../manifest.js";
 import { BuildError, buildDictionary, parseEdits, type BuiltDictionary } from "./build.js";
 
 /** One built dictionary's output files, with their sizes in bytes. */
@@ -122,5 +125,21 @@ export async function buildAll(packageDir: string, outDir: string): Promise<Buil
     globalRemovals: parseEdits("removals-global.txt", globalRemovals),
   };
   writeFileSync(join(outDir, "index.json"), `${JSON.stringify(index, null, 2)}\n`);
+  writeServed(outDir, index, join(outDir, "served"));
   return reports;
+}
+
+/** The served layout (see above) of the dictionaries built into `outDir`, written to `servedDir`. */
+function writeServed(outDir: string, index: DictionaryIndex, servedDir: string): void {
+  mkdirSync(servedDir, { recursive: true });
+  for (const manifest of index.dictionaries) {
+    const name = servedFileName(manifest);
+    for (const suffix of ["", ".gz", ".br"]) {
+      copyFileSync(
+        join(outDir, manifest.id, `words.txt${suffix}`),
+        join(servedDir, `${name}${suffix}`),
+      );
+    }
+  }
+  writeFileSync(join(servedDir, "index.json"), `${JSON.stringify(index)}\n`);
 }

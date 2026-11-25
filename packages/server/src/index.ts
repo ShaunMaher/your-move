@@ -106,4 +106,11 @@ export {
   type LiveGame,
   type Orphan,
 } from "./games/installed.js";
+export { GameConfigError } from "./games/registry.js";
+export {
+  type BuiltinDictionaries,
+  NO_DICTIONARIES,
+  ResourceConfigError,
+} from "./games/resources.js";
+export { parseIndex, servedFileName, type DictionaryManifest } from "@your-move/dictionary";
 export { createJsonLogger, type LogFields, type Logger } from "./log.js";

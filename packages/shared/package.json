@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@hono/zod-openapi": "catalog:",
+    "@your-move/sdk": "workspace:*",
     "hono": "catalog:",
     "zod": "catalog:"
   },

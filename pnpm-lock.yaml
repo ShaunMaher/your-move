@@ -438,6 +438,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
+      '@your-move/dictionary':
+        specifier: workspace:*
+        version: link:../../packages/dictionary
       '@your-move/web':
         specifier: workspace:*
         version: link:../web
@@ -506,6 +509,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
+      '@your-move/dictionary':
+        specifier: workspace:*
+        version: link:../../packages/dictionary
       '@your-move/web':
         specifier: workspace:*
         version: link:../web
@@ -643,6 +649,9 @@ importers:
       '@hono/zod-openapi':
         specifier: 'catalog:'
         version: 1.6.3(hono@4.13.19)(zod@4.6.7)
+      '@your-move/dictionary':
+        specifier: workspace:*
+        version: link:../dictionary
       '@your-move/sdk':
         specifier: workspace:*
         version: link:../sdk
@@ -674,6 +683,9 @@ importers:
       '@hono/zod-openapi':
         specifier: 'catalog:'
         version: 1.6.3(hono@4.13.19)(zod@4.6.7)
+      '@your-move/sdk':
+        specifier: workspace:*
+        version: link:../sdk
       hono:
         specifier: 'catalog:'
         version: 4.13.19

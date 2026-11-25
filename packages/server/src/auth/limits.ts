@@ -12,7 +12,8 @@ interface LimitConfig {
   readonly limits: Readonly<Record<string, number>>;
 }
 
-const HOUR = 3_600_000;
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
 interface LimitRule {
@@ -21,8 +22,8 @@ interface LimitRule {
   readonly windowMs: number;
 }
 
-/** The sign-in limits of 08 §4, by their `LIMIT_*` name. */
-const AUTH_LIMITS = {
+/** The limits of 08 §4 built so far, by their `LIMIT_*` name. */
+const LIMITS = {
   OTP_REQUEST_EMAIL_HOUR: { limit: 5, windowMs: HOUR },
   OTP_REQUEST_EMAIL_DAY: { limit: 10, windowMs: DAY },
   OTP_REQUEST_IP_HOUR: { limit: 20, windowMs: HOUR },
@@ -35,19 +36,30 @@ const AUTH_LIMITS = {
   DISPLAY_NAME_CHANGES_30D: { limit: 3, windowMs: 30 * DAY },
   STEP_UP_USER_HOUR: { limit: 5, windowMs: HOUR },
   STEP_UP_USER_DAY: { limit: 10, windowMs: DAY },
+  // Games (A2): writes, moves, previews, game creation and email invitees per user.
+  WRITES_USER_MINUTE: { limit: 300, windowMs: MINUTE },
+  MOVES_USER_MINUTE: { limit: 120, windowMs: MINUTE },
+  PREVIEWS_USER_MINUTE: { limit: 300, windowMs: MINUTE },
+  GAMES_CREATED_USER_DAY: { limit: 30, windowMs: DAY },
+  GAMES_CREATED_PAIR_DAY: { limit: 5, windowMs: DAY },
+  EMAIL_INVITEES_USER_HOUR: { limit: 5, windowMs: HOUR },
+  EMAIL_INVITEES_USER_DAY: { limit: 10, windowMs: DAY },
 } as const satisfies Record<string, LimitRule>;
 
-type LimitName = keyof typeof AUTH_LIMITS;
+export type LimitName = keyof typeof LIMITS;
 
 /** Every `LIMIT_*` name the rate limiter reads (the config parser refuses unknown ones). */
-export const RATE_LIMIT_NAMES: readonly string[] = Object.keys(AUTH_LIMITS);
+export const RATE_LIMIT_NAMES: readonly string[] = Object.keys(LIMITS);
 
 /** One counter to update: a limit, the key it counts under, and how much to add. */
 export interface LimitCheck {
   readonly name: LimitName;
   readonly key: string;
-  /** 1 counts this request; 0 reads the counter through the same statements (06 §3.2). */
-  readonly amount: 0 | 1;
+  /**
+   * How much this request counts (1, or e.g. its number of email invitees); 0 reads the counter
+   * through the same statements (06 §3.2).
+   */
+  readonly amount: number;
   /** Scales the limit, e.g. 4× for an IPv6 /56 bucket (08 §4.1). Default 1. */
   readonly multiplier?: number;
 }
@@ -63,7 +75,7 @@ export interface LimitResult {
 
 /** The effective allowance for a limit (`LIMIT_<NAME>` or the default). */
 function limitOf(config: LimitConfig, name: LimitName): number {
-  return config.limits[name] ?? AUTH_LIMITS[name].limit;
+  return config.limits[name] ?? LIMITS[name].limit;
 }
 
 /**
@@ -76,7 +88,7 @@ export async function checkLimits(
   checks: readonly LimitCheck[],
 ): Promise<LimitResult[]> {
   const hits: RateLimitHit[] = checks.map((check) => {
-    const { windowMs } = AUTH_LIMITS[check.name];
+    const { windowMs } = LIMITS[check.name];
     const windowStart = Math.floor(now / windowMs) * windowMs;
     return {
       key: `${check.name}:${check.key}`,
@@ -87,7 +99,7 @@ export async function checkLimits(
   });
   const counts: RateLimitCount[] = await repos.rateLimits.hit(hits);
   return checks.map((check, i) => {
-    const { windowMs } = AUTH_LIMITS[check.name];
+    const { windowMs } = LIMITS[check.name];
     const hit = hits[i];
     const count = counts[i] ?? { current: 0, previous: 0 };
     const elapsed = hit === undefined ? 0 : (now - hit.windowStart) / windowMs;
