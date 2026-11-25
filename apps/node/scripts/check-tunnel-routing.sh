@@ -2,11 +2,16 @@
 # Proves the tunnel compose file's routing on a running stack (docs/deploy.md, "Check it"; 09 §4):
 #
 #   1. a request that arrives the way the tunnel's does -- from cloudflared's own network
-#      namespace, to the origin hostname `app-front:8080`, with CF-Connecting-IP -- gets past the
-#      trusted-peer check (anything but 400);
+#      namespace, to the origin hostname `app-front:8080`, with CF-Connecting-IP -- succeeds (any
+#      2xx status);
 #   2. the same request to `app:8080`, the name Docker resolves to the app's `egress` address,
 #      is refused with 400 (the mistake the alias exists to prevent);
 #   3. a request from the Docker host (its gateway address on `front`) is refused with 400.
+#
+# Assumptions: paths without spaces (the commands are word-split); a Linux host with a native
+# Docker engine (the host check reaches the `front` gateway address directly, which Docker
+# Desktop's VM does not allow); a status of `000` means the request could not connect at all, and
+# is never a pass.
 #
 # Usage: COMPOSE="docker compose -f apps/node/docker-compose.tunnel.yml --env-file <file>" \
 #        PUBLIC_URL=https://<hostname> apps/node/scripts/check-tunnel-routing.sh
@@ -44,22 +49,21 @@ from_tunnel() {
 }
 
 failed=0
-# check <description> <400|not-400> <status>
+# check <description> <400|2xx> <status>
 check() {
   local good=0
   case "$2:$3" in
-    400:400) good=1 ;;
-    not-400:[0-9][0-9][0-9]) if [ "$3" != "400" ]; then good=1; fi ;;
+    400:400 | 2xx:2[0-9][0-9]) good=1 ;;
   esac
   if [ "$good" = 1 ]; then
-    echo "ok   $1 -> $3"
+    echo "ok   $1 -> $3 (wanted $2)"
   else
     echo "FAIL $1 -> $3 (wanted $2)"
     failed=1
   fi
 }
 
-check "cloudflared -> http://app-front:8080 (the tunnel's route)" not-400 "$(from_tunnel http://app-front:8080)"
+check "cloudflared -> http://app-front:8080 (the tunnel's route)" 2xx "$(from_tunnel http://app-front:8080)"
 check "cloudflared -> http://app:8080 (its egress address: must be refused)" 400 "$(from_tunnel http://app:8080)"
 host_status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 \
   --request POST --header 'content-type: application/json' --header "origin: $PUBLIC_URL" \
