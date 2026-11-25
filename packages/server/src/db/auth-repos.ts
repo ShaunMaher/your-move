@@ -53,11 +53,44 @@ export function userRepo(db: Database): UserRepo {
     async findById(id) {
       return asUser(await db.select().from(users).where(eq(users.id, id)).get());
     },
+    async findByIds(ids) {
+      if (ids.length === 0) return [];
+      const rows = await db
+        .select()
+        .from(users)
+        .where(inArray(users.id, [...ids]));
+      return rows as UserRecord[];
+    },
     async findByEmail(email) {
       return asUser(await db.select().from(users).where(eq(users.email, email)).get());
     },
     async update(id, set) {
       await db.update(users).set(set).where(eq(users.id, id));
+    },
+    async pastOpponentsOf(userId, candidates) {
+      if (candidates.length === 0) return [];
+      const rows = await db
+        .select({ otherId: pastOpponents.otherId })
+        .from(pastOpponents)
+        .where(
+          and(eq(pastOpponents.userId, userId), inArray(pastOpponents.otherId, [...candidates])),
+        );
+      return rows.map((row) => row.otherId);
+    },
+    async rememberGameOptions(id, remember) {
+      // Only the two keys change, in SQL, so a concurrent change to any other setting survives
+      // (A2 review S-3). Settings that aren't a JSON object count as empty.
+      const base = sql`(CASE WHEN json_valid(${users.settings}) AND json_type(${users.settings}) = 'object' THEN ${users.settings} ELSE '{}' END)`;
+      const lastOptions = sql`(CASE WHEN json_type(${base}, '$.lastOptions') = 'object' THEN json_extract(${base}, '$.lastOptions') ELSE '{}' END)`;
+      const type = remember.gameType;
+      const settings =
+        remember.input === null
+          ? sql`json_set(${base}, '$.lastGameType', ${type})`
+          : sql`json_set(${base}, '$.lastOptions', json_set(${lastOptions}, ${`$."${type}"`}, json(${remember.input})), '$.lastGameType', ${type})`;
+      await db
+        .update(users)
+        .set({ settings, updatedAt: remember.updatedAt })
+        .where(eq(users.id, id));
     },
     async deleteAccount(user, event) {
       // Agents go with their owner (owner_user_id cascades), and their sessions and tokens with

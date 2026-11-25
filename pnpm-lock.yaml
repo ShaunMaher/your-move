@@ -438,6 +438,12 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
+      '@your-move/dictionary':
+        specifier: workspace:*
+        version: link:../../packages/dictionary
+      '@your-move/testkit':
+        specifier: workspace:*
+        version: link:../../packages/testkit
       '@your-move/web':
         specifier: workspace:*
         version: link:../web
@@ -512,6 +518,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
+      '@your-move/dictionary':
+        specifier: workspace:*
+        version: link:../../packages/dictionary
       '@your-move/web':
         specifier: workspace:*
         version: link:../web
@@ -615,6 +624,9 @@ importers:
         specifier: 'catalog:'
         version: 0.17.0
     devDependencies:
+      '@your-move/sdk':
+        specifier: workspace:*
+        version: link:../sdk
       vitest:
         specifier: 'catalog:'
         version: 5.1.1(@types/node@26.6.6)(@vitest/coverage-v8@5.1.1)(jsdom@31.0.1)(vite@8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
@@ -670,6 +682,9 @@ importers:
       '@hono/zod-openapi':
         specifier: 'catalog:'
         version: 1.6.3(hono@4.13.19)(zod@4.6.7)
+      '@your-move/dictionary':
+        specifier: workspace:*
+        version: link:../dictionary
       '@your-move/sdk':
         specifier: workspace:*
         version: link:../sdk
@@ -701,6 +716,9 @@ importers:
       '@hono/zod-openapi':
         specifier: 'catalog:'
         version: 1.6.3(hono@4.13.19)(zod@4.6.7)
+      '@your-move/sdk':
+        specifier: workspace:*
+        version: link:../sdk
       hono:
         specifier: 'catalog:'
         version: 4.13.19
@@ -796,6 +814,12 @@ importers:
       '@your-move/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@your-move/game-example':
+        specifier: workspace:*
+        version: link:../../games/example
+      '@your-move/node':
+        specifier: workspace:*
+        version: link:../../apps/node
       '@your-move/server':
         specifier: workspace:*
         version: link:../../packages/server

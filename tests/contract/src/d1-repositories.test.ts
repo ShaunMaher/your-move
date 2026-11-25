@@ -12,7 +12,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { repositoryContract } from "@your-move/server/testing";
+import { engines } from "@your-move/game-example/engine";
+import { manifest } from "@your-move/game-example/manifest";
+import { gameRaceContract, repositoryContract } from "@your-move/server/testing";
 import { d1Repositories } from "@your-move/worker/d1";
 import { describe, expect, it } from "vitest";
 import { getPlatformProxy } from "wrangler";
@@ -20,7 +22,8 @@ import { getPlatformProxy } from "wrangler";
 const CONFIG = fileURLToPath(new URL("../wrangler.d1.toml", import.meta.url));
 const WRANGLER = fileURLToPath(new URL("../node_modules/.bin/wrangler", import.meta.url));
 
-repositoryContract("D1", async () => {
+/** A fresh local D1 database, migrated as a deployment would be. */
+async function connectD1() {
   const state = mkdtempSync(join(tmpdir(), "d1-contract-"));
   execFileSync(
     WRANGLER,
@@ -50,6 +53,18 @@ repositoryContract("D1", async () => {
       rmSync(state, { recursive: true, force: true });
     },
   };
+}
+
+repositoryContract("D1", connectD1);
+
+// The lifecycle races on D1 (03 §5.2): here the requests are really concurrent.
+gameRaceContract("D1", connectD1, {
+  installed: [{ manifest, engines, enabledByDefault: true }],
+  type: "example",
+  // The reference game (02 §7.6): any card in the seat's own hand.
+  legalMove: (view, seat) => ({
+    card: (view as { seats: { hand: number[] | null }[] }).seats[seat]?.hand?.[0],
+  }),
 });
 
 /**

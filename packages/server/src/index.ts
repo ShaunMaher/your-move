@@ -12,6 +12,7 @@ export {
   type OpenApiDocument,
   type Platform,
 } from "./app.js";
+export type { RandomFactory } from "./games/random.js";
 export { normaliseAddress, type NormalisedEmail } from "./accounts/email.js";
 export {
   resolveClientIp,
@@ -89,6 +90,10 @@ export type {
 } from "./db/repositories.js";
 export type {
   GameActionRecord,
+  GameListQuery,
+  GameListRow,
+  GameStatus,
+  NewInvite,
   GamePlayerRecord,
   GamePlayerUpdate,
   GameRecord,
@@ -116,4 +121,11 @@ export {
   type LiveGame,
   type Orphan,
 } from "./games/installed.js";
+export { GameConfigError } from "./games/registry.js";
+export {
+  type BuiltinDictionaries,
+  NO_DICTIONARIES,
+  ResourceConfigError,
+} from "./games/resources.js";
+export { parseIndex, servedFileName, type DictionaryManifest } from "@your-move/dictionary";
 export { createJsonLogger, type LogFields, type Logger } from "./log.js";

@@ -34,6 +34,14 @@ cpSync(
   new URL("../dist/migrations/", import.meta.url),
   { recursive: true },
 );
+// The built-in dictionaries' served layout (words §9.4), read at startup and served to clients.
+const dictionaries = new URL("../../../packages/dictionary/generated/served/", import.meta.url);
+if (!existsSync(dictionaries)) {
+  throw new Error(
+    "packages/dictionary/generated is missing: build the dictionaries first (pnpm build does)",
+  );
+}
+cpSync(dictionaries, new URL("../dist/dictionaries/", import.meta.url), { recursive: true });
 console.log(
-  `build: ${String(files.length)} files in apps/node/dist, plus the web app in dist/public and the migrations in dist/migrations`,
+  `build: ${String(files.length)} files in apps/node/dist, plus the web app in dist/public, the migrations in dist/migrations and the dictionaries in dist/dictionaries`,
 );

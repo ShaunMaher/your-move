@@ -15,17 +15,25 @@ import {
   createJsonLogger,
   type EmailSender,
   type Env,
+  type InstalledGame,
+  NO_DICTIONARIES,
   parseConfig,
   type Platform,
+  type RandomFactory,
   type Repositories,
 } from "@your-move/server";
 
 import { migrate } from "./db/migrate.js";
 import { nodeRepositories, openSqlite } from "./db/sqlite.js";
 import type { NodeConfig } from "./node-config.js";
+import { nodeDictionaries } from "./dictionaries.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
+/** The dictionary package's served layout (built by `pnpm build`, or the tests' global setup). */
+const DICTIONARIES = fileURLToPath(
+  new URL("../../../packages/dictionary/generated/served", import.meta.url),
+);
 
 export const T0 = Date.UTC(2026, 0, 1, 9, 0, 0);
 export const MINUTE = 60_000;
@@ -83,8 +91,12 @@ export interface Harness {
   /** Signs in and returns the cookie pair (`name=value`). */
   signIn(email: string, options?: SendOptions): Promise<string>;
   readonly logs: Record<string, unknown>[];
+  /** Every route and middleware registration of the app, as Hono lists them (`:param` paths). */
+  routes(): readonly { readonly method: string; readonly path: string }[];
   /** Runs one SQL statement directly, for state no endpoint sets yet (e.g. suspension, M3). */
   exec(sql: string, ...params: (string | number | null)[]): void;
+  /** Runs one SQL query directly and returns its rows, for checking what was stored. */
+  query(sql: string, ...params: (string | number | null)[]): Record<string, unknown>[];
   close(): void;
 }
 
@@ -110,6 +122,10 @@ export interface HarnessOptions {
   readonly wrapRepos?: (repos: Repositories) => Repositories;
   /** Replaces the capturing email sender (e.g. one that fails). */
   readonly sender?: EmailSender;
+  /** The installed games (the generated registry); none by default. */
+  readonly games?: readonly InstalledGame[];
+  /** The games' randomness; WebCrypto by default, a seeded source in the game tests. */
+  readonly random?: RandomFactory;
 }
 
 export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {}): Harness {
@@ -124,7 +140,14 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     now,
     sink: (line) => logs.push(JSON.parse(line) as Record<string, unknown>),
   });
-  const config = parseConfig(env, { runtime: "node", installedGames: [] });
+  const games = options.games ?? [];
+  const config = parseConfig(env, {
+    runtime: "node",
+    installedGames: games.map((game) => ({
+      type: game.manifest.type,
+      enabledByDefault: game.enabledByDefault,
+    })),
+  });
   const capture = createConsoleEmailSender(log, now);
   const platform = createNodePlatform({
     repos: (options.wrapRepos ?? ((repos) => repos))(nodeRepositories(sqlite)),
@@ -136,9 +159,15 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     },
     log,
     now,
+    // Without games nothing reads a word list, so the tests of sign-in need no dictionary build.
+    dictionaries: games.length === 0 ? NO_DICTIONARIES : nodeDictionaries(DICTIONARIES),
     smtp: options.sender ?? capture,
   });
-  const app = createApp({ platform, games: [] });
+  const app = createApp({
+    platform,
+    games,
+    ...(options.random === undefined ? {} : { random: options.random }),
+  });
   const background = createBackgroundTracker();
   let scheduled = 0;
   const countedContext = (): ReturnType<typeof background.context> => {
@@ -209,8 +238,12 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
       return cookieOf(response);
     },
     logs,
+    routes: () => app.routes.map((route) => ({ method: route.method, path: route.path })),
     exec(sql, ...params) {
       sqlite.prepare(sql).run(...params);
+    },
+    query(sql, ...params) {
+      return sqlite.prepare(sql).all(...params);
     },
     close() {
       sqlite.close();

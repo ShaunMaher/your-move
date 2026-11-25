@@ -108,7 +108,7 @@ GameEnvelope = {
               outReason?: "eliminated" | "resigned" | "timed_out" | "declined" | "cancelled", rank?: number, score?: number,
               deadline?: number /* when this seat times out, if in toAct */, isYou: boolean, isCreator: boolean }],
   yourSeat: number | null, toAct: number[], yourTurn: boolean,
-  yourInvitation: "normal" | "hidden" | null, // you hold an `invited` seat (accept/decline); hidden ones never badge
+  yourInvitation: "normal" | "hidden" | null, // you hold an `invited` seat in a `lobby` (accept/decline); null once the lobby ended; hidden ones never badge
   joinLink?: { active: boolean, expiresAt: number | null },  // creator only, lobby only; the URL is shown only on create/rotate
   canAddPlayers?: { userId, displayName }[], // creator only, finished games: link joiners who acted and aren't yet past opponents — blocked ones are still listed so the prompt reveals nothing; add-player is a no-op for them (02 §4)
   createdAt, lastActionAt
@@ -139,7 +139,7 @@ The viewer's games (membership as in 04), newest activity first: all `lobby`/`ac
 from the last 90 days; `declined`/`cancelled`/`expired` from the last 7 days. Cursor-paginated
 (`?cursor=`, 50 per page; `nextCursor`). **Hidden invitations are excluded by default.** Filters:
 `?status=`, `?gameType=`, `?invitations=true` (normal invitations), `?invitations=hidden` (the
-collapsed *Hidden invitations*, 06 §6.7).
+collapsed *Hidden invitations*, 06 §6.7); both list only invitations whose lobby is still open.
 `403 ONBOARDING_REQUIRED` until onboarding is complete.
 
 ### `POST /api/v1/games`
@@ -195,6 +195,13 @@ rejects the merged input, the server retries once with the request input alone (
 the rest); only if that fails too is `INVALID_OPTIONS` returned, so a since-deleted upload or
 disabled ruleset in the remembered choices never breaks game creation.
 
+**Until email invites (alpha, M4).** Only an address that belongs to an onboarded account can be
+played with: its invitation works as above. An email-invite seat (no account, or an account that
+hasn't finished onboarding) is created and answered exactly the same (Q3), but nothing claims it
+until onboarding claims exist (06 §6.4, M4), so it stays unfilled until the lobby is started
+without it, cancelled or expires. Clients tell the creator that the other person must have signed
+in first.
+
 ### `GET /api/v1/games/:id`
 `200 { game: GameEnvelope, view: <module View> | null }`. `view` is `view(state, yourSeat)` while
 active, null in the lobby (and for invitations), and `final_views.seats[yourSeat].view` for any
@@ -205,8 +212,9 @@ viewer isn't a member (04 §Membership; never `403`).
 
 ### `GET /api/v1/games/:id/history`
 Members only (`404` otherwise). Cursor-paginated, oldest first (`?cursor=`, 100 per page):
-`{ items: [{ seq, seat, kind, record, describe: Text, via: "app" | "token", createdAt }], nextCursor }`
-from `game_actions`. `via` lets every client mark AI moves (02 §9.1). Never returns `action` or
+`{ items: [{ seq, seat, kind, record, describe: Text, via: "app" | "token" | "system", createdAt }], nextCursor }`
+from `game_actions`. `via` lets every client mark AI moves (02 §9.1); `system` is a transition the
+server made itself (a timeout). Never returns `action` or
 `rng`. Empty for games that never started.
 
 ### `POST /api/v1/games/:id/actions`
@@ -230,14 +238,18 @@ from `game_actions`. `via` lets every client mark AI moves (02 §9.1). Never ret
 
 ### `POST /api/v1/games/:id/preview`
 `{ action }` → `200 { preview }` or `400` module error, without committing. Only for modules that
-implement `preview`, and only for a full module `Action` (never free-form words). Runs checks 1, 2,
+implement `preview` (for any other game type the route answers `404 NOT_FOUND`), and only for a
+full module `Action` (never free-form words). Runs checks 1, 2,
 4, 6 and 7 of `/actions` — including the `serverOnly` lookup-budget reservation — then module
 `preview`. It **never** runs check 5: previews are allowed to a `read` token whatever the game's
 `aiAssistance` (02 §9.3). Rate-limited (it can be a dictionary oracle — 08 T22, §4); a test
 asserts that preview draws on the lookup budget.
 
 ### Lifecycle transitions
-All take `{ expectedVersion }` and are framework transitions (03 §5.2).
+All take `{ expectedVersion }` and are framework transitions (03 §5.2). Each answers
+`200 { game, view }` as `GET /api/v1/games/:id` would after it, except a decline that ends the
+caller's membership (a lobby decline, 04 §Membership), which answers `204`: there is nothing left
+the caller may see.
 
 | Method | Path | Who / when | Errors (besides `404`, `409 STALE_GAME`) |
 |---|---|---|---|
@@ -287,7 +299,7 @@ creator's game caps. Joining always requires an explicit tap on Join (07 §1).
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/v1/config` **public** | `{ appName, appShortName, operatorContact, minAge, vapidPublicKey?, turnstileSiteKey?, uploadsEnabled }` — non-sensitive values only (`uploadsEnabled` = framework `DICTIONARY_UPLOADS`) |
-| GET | `/api/v1/catalog` | `{ games: [{ type, version, name, players, defaultTurnTimeoutDays, defaults, catalog }] }` for enabled game types. `defaults` follows the create path's rule: the viewer's `lastOptions[type]` if `resolveOptions` accepts it against the current `ctx.resources`, otherwise `{}` (module defaults), so a deleted upload or disabled ruleset is never offered. `catalog` = module `catalog(ctx)` with `ctx.resources` = built-in and operator resources that are enabled (`DICTIONARIES_ENABLED`, `DICTIONARIES_EXTRA`) plus the **viewer's own** non-deleted uploads; it never contains `blob_key`, `sha256` or `size_bytes`. Public dictionaries carry their versioned, hashed download URL |
+| GET | `/api/v1/catalog` | `{ games: [{ type, version, name, description, icon, players, defaultTurnTimeoutDays, defaults, catalog }] }` for enabled game types (`name`, `description`, the sanitised `icon` and the overall `players` bounds come from the manifest, 02 §7.2, so the game picker needs no client chunk). `defaults` follows the create path's rule: the viewer's `lastOptions[type]` if `resolveOptions` accepts it against the current `ctx.resources`, otherwise `{}` (module defaults), so a deleted upload or disabled ruleset is never offered. `catalog` = module `catalog(ctx)` with `ctx.resources` = built-in and operator resources that are enabled (`DICTIONARIES_ENABLED`, `DICTIONARIES_EXTRA`) plus the **viewer's own** non-deleted uploads; it never contains `blob_key`, `sha256` or `size_bytes`, and no download URL (a game's word list is downloaded from its envelope's `resources[].downloadUrl`; nothing is previewed before a game exists, words §9.4). `icon` is SVG markup the server has sanitised; clients render it only as an image from a `data:` URL (`<img src="data:image/svg+xml,…">`), never inline in the page |
 | GET | `/api/health` and `/api/v1/health` **public** | `200 { ok: true }` — no version or config details |
 | GET | `/manifest.webmanifest` **public** | Generated from config (07 §4) |
 

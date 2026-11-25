@@ -1,5 +1,4 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
-import type { GameManifest } from "@your-move/sdk";
 import {
   configRoute,
   healthRoute,
@@ -15,27 +14,29 @@ import { registerAuthRoutes } from "./auth/routes.js";
 import { readSessionCookie } from "./auth/session.js";
 import { isLocalDev } from "./config/local-dev.js";
 import { deriveSubkeys, type Subkeys } from "./crypto/subkeys.js";
+import { EngineFault } from "./games/engine-fault.js";
+import { cryptoRandom, type RandomFactory } from "./games/random.js";
+import { createGameRegistry, type InstalledGame } from "./games/registry.js";
+import { createResourceProvider } from "./games/resources.js";
+import { registerGameRoutes } from "./games/routes.js";
+import { ApiError } from "./http/api-error.js";
 import { webManifest } from "./http/manifest.js";
 import { apiBodyLimit, requestRules } from "./http/request-rules.js";
 import { API_CACHE_CONTROL, securityHeadersMiddleware } from "./http/security-headers.js";
 import type { AppEnv, Platform } from "./platform.js";
 
 export type { AppEnv, Platform } from "./platform.js";
-
-/**
- * One installed game package, as the generated server registry lists it (02 §7.3). `engines` maps
- * each supported rules version to its `GameDefinition` (typed by the SDK from M1).
- */
-export interface InstalledGame {
-  readonly manifest: GameManifest;
-  readonly engines: Readonly<Record<string, unknown>>;
-  readonly enabledByDefault: boolean;
-}
+export type { InstalledGame } from "./games/registry.js";
 
 export interface AppOptions {
   readonly platform: Platform;
   /** The generated registry, injected by the runtime; the core never imports it (02 §7.3). */
   readonly games: readonly InstalledGame[];
+  /**
+   * Each game transition's source of randomness. Omitted in production, which always uses
+   * WebCrypto (03 §4); only tests pass a seeded source, so a failing game can be replayed.
+   */
+  readonly random?: RandomFactory;
 }
 
 /** The HTTP application `createApp` returns. */
@@ -82,14 +83,31 @@ function stackFrames(error: Error): string {
     .join("\n");
 }
 
+/** A class name as code spells it, or nothing. */
+function safeName(name: string): string | undefined {
+  return /^[A-Za-z_$][\w$]{0,63}$/u.test(name) ? name : undefined;
+}
+
 /**
  * What a server fault's log entry may say (09 §5). Errors that wrap another — a database driver's
  * query error carries the SQL and its parameters (addresses, token hashes) in its message — and
  * parse errors, whose message quotes the parsed text, are logged by class, stack frames and the
- * cause's class or code only. Other errors keep their message.
+ * cause's class or code only; a game module's exception ({@link EngineFault}) by the game type, the
+ * member called, and the original's class and stack frames. Other errors keep their message.
  */
 function faultFields(error: Error): Record<string, string | undefined> {
   const cause: unknown = error.cause;
+  if (error instanceof EngineFault) {
+    // A module's exception may quote hidden state: its class and frames only (A2 review S-5).
+    return {
+      errorClass: error.name,
+      gameType: error.gameType,
+      member: error.member,
+      ...(cause instanceof Error
+        ? { causeClass: safeName(cause.constructor.name), stack: stackFrames(cause) }
+        : { causeClass: typeof cause }),
+    };
+  }
   if (cause !== undefined || error instanceof SyntaxError) {
     const causeCode =
       typeof cause === "object" && cause !== null && "code" in cause ? cause.code : undefined;
@@ -119,10 +137,23 @@ function respondedRoute(c: Context): string {
  * Builds the HTTP application: security headers on every response, the versioned public API under
  * `/api/v1`, and JSON errors for every server-handled path. Runtimes add static file serving (Node)
  * or rely on Workers Static Assets (Cloudflare).
+ *
+ * Throws at startup for a configuration the games or their resources refuse (`GameConfigError`,
+ * `ResourceConfigError`), naming the variable and never its value (02 §2.1 rule 8).
  */
 export function createApp(options: AppOptions): App {
   const { platform } = options;
   const { config, log } = platform;
+  const resources = createResourceProvider({
+    dictionaries: platform.dictionaries,
+    enabled: config.dictionariesEnabled,
+    now: () => platform.now().getTime(),
+  });
+  const registry = createGameRegistry(options.games, {
+    gameConfig: config.gameConfig,
+    enabledGames: config.enabledGames,
+    resources: resources.enabled(),
+  });
 
   const app = new OpenAPIHono<AppEnv>({
     // Request validation failures never echo input values (09 §5).
@@ -202,9 +233,14 @@ export function createApp(options: AppOptions): App {
   );
 
   let subkeys: Promise<Subkeys> | null = null;
-  registerAuthRoutes(app, {
+  const keys = (): Promise<Subkeys> => (subkeys ??= deriveSubkeys(config.appSecret));
+  registerAuthRoutes(app, { platform, keys });
+  registerGameRoutes(app, {
     platform,
-    keys: () => (subkeys ??= deriveSubkeys(config.appSecret)),
+    registry,
+    resources,
+    keys,
+    random: options.random ?? cryptoRandom,
   });
 
   // Dev only (06 §4, 09 §2, 08 T19): registered only in local-dev mode, so a production config
@@ -231,6 +267,14 @@ export function createApp(options: AppOptions): App {
 
   app.onError((error, c) => {
     const context = { requestId: c.get("requestId"), route: respondedRoute(c as Context) };
+    if (error instanceof ApiError) {
+      // A refusal the handler chose (05 §Errors): the client's to act on, not a server fault.
+      log.info("request refused", { ...context, status: error.status, code: error.code });
+      return new Response(JSON.stringify(error.body()), {
+        status: error.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     const code = error instanceof HTTPException ? REJECTION_CODES[error.status] : undefined;
     if (error instanceof HTTPException && code !== undefined) {
       // A request the client got wrong: its own status and code, not an error-level log, and never

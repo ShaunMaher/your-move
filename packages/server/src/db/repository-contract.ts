@@ -164,6 +164,60 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
           });
         }
       });
+
+      it("remembers game options by changing only those keys (A2 review S-3)", async () => {
+        const id = crypto.randomUUID();
+        const settings = async () =>
+          JSON.parse((await repos.users.findById(id))?.settings ?? "null") as unknown;
+        await repos.users.create({
+          id,
+          email: address(id),
+          settings: JSON.stringify({ whoCanAddMe: "nobody", lastOptions: { example: { x: 2 } } }),
+          createdAt: T0,
+          updatedAt: T0,
+        });
+        await repos.users.rememberGameOptions(id, {
+          gameType: "words",
+          input: JSON.stringify({ ruleset: "casual", n: [1, "two"] }),
+          updatedAt: T0 + 1,
+        });
+        expect(await settings()).toEqual({
+          whoCanAddMe: "nobody",
+          lastOptions: { example: { x: 2 }, words: { ruleset: "casual", n: [1, "two"] } },
+          lastGameType: "words",
+        });
+        expect((await repos.users.findById(id))?.updatedAt).toBe(T0 + 1);
+        await repos.users.rememberGameOptions(id, {
+          gameType: "example",
+          input: null,
+          updatedAt: T0 + 2,
+        });
+        expect(await settings()).toMatchObject({
+          lastOptions: { example: { x: 2 } },
+          lastGameType: "example",
+        });
+        // Settings that aren't an object, or a lastOptions that isn't one, count as empty.
+        for (const stored of ["{", "[1]", JSON.stringify({ lastOptions: 5, keep: true })]) {
+          const other = crypto.randomUUID();
+          await repos.users.create({
+            id: other,
+            email: address(other),
+            settings: stored,
+            createdAt: T0,
+            updatedAt: T0,
+          });
+          await repos.users.rememberGameOptions(other, {
+            gameType: "words",
+            input: "{}",
+            updatedAt: T0,
+          });
+          expect(JSON.parse((await repos.users.findById(other))?.settings ?? "")).toEqual({
+            ...(stored.includes("keep") ? { keep: true } : {}),
+            lastOptions: { words: {} },
+            lastGameType: "words",
+          });
+        }
+      });
     });
 
     describe("games", () => {
@@ -243,6 +297,294 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
           { id: created[0]?.id, gameType: type, gameVersion: 1 },
           { id: created[1]?.id, gameType: type, gameVersion: 2 },
         ]);
+      });
+    });
+
+    describe("games: reads for the framework (A2)", () => {
+      const human = async () => {
+        const id = crypto.randomUUID();
+        await repos.users.create({ id, email: address(id), createdAt: T0, updatedAt: T0 });
+        return id;
+      };
+
+      it("tells which candidates are a user's past opponents", async () => {
+        const user = await human();
+        const [past, other, onlyTheirs] = [await human(), await human(), await human()];
+        await target.sql(
+          "INSERT INTO past_opponents (user_id, other_id, last_finished_at) VALUES (?, ?, ?), (?, ?, ?)",
+          user,
+          past,
+          T0,
+          onlyTheirs,
+          user,
+          T0,
+        );
+        expect(await repos.users.pastOpponentsOf(user, [past, other, onlyTheirs, ""])).toEqual([
+          past,
+        ]);
+        expect(await repos.users.pastOpponentsOf(user, [])).toEqual([]);
+      });
+
+      it("finds a user's overdue lobbies, oldest first (lazy expiry)", async () => {
+        const user = await human();
+        const other = await human();
+        const make = async (
+          createdAt: number,
+          status: NewGame["status"],
+          rows: NewGamePlayer[],
+        ) => {
+          const game = newGame({ createdAt, status, createdBy: other });
+          await repos.games.create(game, rows);
+          return game.id;
+        };
+        const older = await make(T0 - 2, "lobby", [
+          player({ userId: user, state: "invited", joinedAt: null }),
+        ]);
+        // Any row of the user's counts, one giving no access included.
+        const old = await make(T0 - 1, "lobby", [player({ userId: user, state: "declined" })]);
+        await make(T0 + 1, "lobby", [player({ userId: user })]); // not overdue yet
+        await make(T0 - 3, "cancelled", [player({ userId: user })]); // not a lobby
+        await make(T0 - 4, "lobby", [player({ userId: other })]); // not the user's
+        expect(await repos.games.overdueLobbies(user, T0, 10)).toEqual([older, old]);
+        expect(await repos.games.overdueLobbies(user, T0, 1)).toEqual([older]);
+      });
+
+      it("creates resources and invites with the game, and reads the game with its players at once", async () => {
+        const creator = await human();
+        const game = newGame({ createdBy: creator });
+        const rows = [
+          player({ userId: creator, joinedVia: "creator" }),
+          player({ state: "invited", inviteEmail: "z@example.org", joinedAt: null }),
+          player({ state: "invited", inviteEmail: "a@example.org", joinedAt: null }),
+        ];
+        await repos.games.create(game, rows, {
+          resources: [{ kind: "dictionary", resourceId: "enable", version: 2 }],
+          invites: [
+            { id: crypto.randomUUID(), inviterId: creator, emailHash: "h1", expiresAt: T0 + 1 },
+          ],
+        });
+        const loaded = await repos.games.load(game.id);
+        expect(loaded?.game.id).toBe(game.id);
+        // In the order the rows were added: the creator, then the invitees as typed.
+        expect(loaded?.players.map((row) => row.id)).toEqual(rows.map((row) => row.id));
+        expect(await repos.games.resources(game.id)).toEqual([
+          { kind: "dictionary", resourceId: "enable", version: 2 },
+        ]);
+        expect(await repos.games.load(crypto.randomUUID())).toBeNull();
+        expect(await repos.users.findByIds([creator, crypto.randomUUID()])).toEqual([
+          expect.objectContaining({ id: creator }),
+        ]);
+        expect(await repos.users.findByIds([])).toEqual([]);
+      });
+
+      it("creates nothing when an invite of the game is refused", async () => {
+        const game = newGame();
+        await expect(
+          repos.games.create(game, [player()], {
+            invites: [
+              {
+                id: crypto.randomUUID(),
+                inviterId: crypto.randomUUID(),
+                emailHash: "h",
+                expiresAt: T0,
+              },
+            ],
+          }),
+        ).rejects.toThrow();
+        expect(await repos.games.get(game.id)).toBeNull();
+      });
+
+      it("reads history without the secret columns, and each game's newest action", async () => {
+        const ids = await activeGame(repos);
+        for (let seq = 1; seq <= 3; seq++) {
+          await repos.games.applyTransition(
+            ids.gameId,
+            seq - 1,
+            move(ids, seq, (seq - 1) % 2, `m${String(seq)}`),
+          );
+        }
+        const history = await repos.games.history(ids.gameId, 1, 10);
+        expect(history.map((row) => row.seq)).toEqual([2, 3]);
+        for (const row of history) {
+          expect(Object.keys(row).sort()).toEqual(
+            ["createdAt", "describe", "gameId", "kind", "record", "seat", "seq", "via"].sort(),
+          );
+        }
+        expect((await repos.games.history(ids.gameId, 0, 1)).map((row) => row.seq)).toEqual([1]);
+        const other = await activeGame(repos);
+        const last = await repos.games.lastActions([ids.gameId, other.gameId]);
+        expect(last.map((row) => [row.gameId, row.seq])).toEqual([[ids.gameId, 3]]);
+        expect(await repos.games.lastActions([])).toEqual([]);
+      });
+
+      it("lists a user's games newest first, by membership, retention and filters, with a cursor", async () => {
+        const user = await human();
+        const make = async (overrides: Partial<NewGame>, row: Partial<NewGamePlayer>) => {
+          const game = newGame({ gameType: "listed", ...overrides });
+          await repos.games.create(game, [player({ userId: user, ...row })]);
+          return game.id;
+        };
+        const lobby = await make({ lastActionAt: T0 + 5 }, {});
+        const invited = await make({ lastActionAt: T0 + 4 }, { state: "invited", joinedAt: null });
+        const hidden = await make(
+          { lastActionAt: T0 + 3 },
+          { state: "invited", delivery: "hidden", joinedAt: null },
+        );
+        await make(
+          { lastActionAt: T0 + 2 },
+          { state: "invited", delivery: "inert", joinedAt: null },
+        );
+        await make({ lastActionAt: T0 + 1 }, { state: "declined" });
+        const finishedOld = await make(
+          { status: "finished", lastActionAt: T0, endedAt: T0 },
+          { state: "out" },
+        );
+        const query = { userId: user, finishedSince: T0 + 1, endedSince: T0 + 1, limit: 10 };
+        const listed = async (q: Partial<Parameters<typeof repos.games.listForUser>[0]> = {}) =>
+          (await repos.games.listForUser({ ...query, ...q })).map((row) => row.game.id);
+        expect(await listed()).toEqual([lobby, invited]);
+        expect(await listed({ invitations: "normal" })).toEqual([invited]);
+        expect(await listed({ invitations: "hidden" })).toEqual([hidden]);
+        expect(await listed({ finishedSince: T0 })).toEqual([lobby, invited, finishedOld]);
+        expect(await listed({ status: "finished", finishedSince: T0 })).toEqual([finishedOld]);
+        expect(await listed({ gameType: "other" })).toEqual([]);
+        expect(await listed({ limit: 1 })).toEqual([lobby]);
+        expect(await listed({ after: { lastActionAt: T0 + 5, id: lobby } })).toEqual([invited]);
+        const [row] = await repos.games.listForUser({ ...query, limit: 1 });
+        expect(row?.member.userId).toBe(user);
+        expect((await repos.games.playersOf([lobby, invited])).map((p) => p.gameId)).toEqual(
+          [lobby, invited].sort(),
+        );
+        expect(await repos.games.playersOf([])).toEqual([]);
+      });
+
+      it("lists only the columns the list shows: the state while active, the own final summary", async () => {
+        const user = await human();
+        const at = T0 + 100;
+        const active = newGame({
+          status: "active",
+          state: '{"secret":1}',
+          setupRng: "[[2,1]]",
+          lastActionAt: at + 1,
+        });
+        await repos.games.create(active, [player({ userId: user, seat: 1, state: "playing" })]);
+        const finalViews = {
+          seats: [
+            { view: { hand: [7] }, summary: { headline: ["Seat 0's line"] } },
+            { view: { hand: [9] }, summary: { headline: ["Your line"], scores: [1, 2] } },
+          ],
+          public: { view: null, summary: { headline: ["Public"] } },
+        };
+        const finished = newGame({
+          status: "finished",
+          state: '{"secret":2}',
+          finalViews: JSON.stringify(finalViews),
+          endedAt: at,
+          lastActionAt: at,
+        });
+        await repos.games.create(finished, [player({ userId: user, seat: 1, state: "out" })]);
+        const rows = await repos.games.listForUser({
+          userId: user,
+          finishedSince: T0,
+          endedSince: T0,
+          limit: 10,
+        });
+        expect(rows.map((row) => row.game)).toEqual([
+          expect.objectContaining({ id: active.id, state: '{"secret":1}', finalSummary: null }),
+          expect.objectContaining({ id: finished.id, state: null }),
+        ]);
+        expect(JSON.parse(rows[1]?.game.finalSummary ?? "null")).toEqual(
+          finalViews.seats[1]?.summary,
+        );
+        for (const row of rows) {
+          expect(Object.keys(row.game)).not.toContain("setupRng");
+          expect(Object.keys(row.game)).not.toContain("finalViews");
+          expect(Object.keys(row.game)).not.toContain("writeToken");
+        }
+      });
+
+      it("raises a user's unread marker, never past the game's version and never down", async () => {
+        const user = await human();
+        const game = newGame();
+        await repos.games.create(game, [player({ userId: user })]);
+        await repos.games.applyTransition(game.id, 0, { game: { updatedAt: T0 + 1 } });
+        await repos.games.markSeen(game.id, user, 5);
+        const seen = async () => (await repos.games.players(game.id))[0]?.lastSeenVersion;
+        expect(await seen()).toBe(1);
+        await repos.games.markSeen(game.id, user, 0);
+        expect(await seen()).toBe(1);
+      });
+
+      it("counts the live games a user created, in total and per typed address", async () => {
+        const user = await human();
+        const create = async (status: NewGame["status"], hash: string) => {
+          const game = newGame({ status, createdBy: user });
+          await repos.games.create(game, [player({ userId: user })], {
+            invites: [{ id: crypto.randomUUID(), inviterId: user, emailHash: hash, expiresAt: T0 }],
+          });
+        };
+        await create("lobby", "pair");
+        await create("active", "pair");
+        await create("finished", "pair");
+        await create("lobby", "other");
+        expect(await repos.games.countLiveCreated(user)).toBe(3);
+        expect(await repos.games.countLiveCreatedWithInvite(user, "pair")).toBe(2);
+        expect(await repos.games.countLiveCreatedWithInvite(user, "none")).toBe(0);
+      });
+
+      it("writes past opponents only with the winning transition, and never for a blocked pair", async () => {
+        const [a, b, c] = [await human(), await human(), await human()];
+        await target.sql(
+          "INSERT INTO blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)",
+          c,
+          a,
+          T0,
+        );
+        const game = newGame();
+        await repos.games.create(game, []);
+        const pairs = [
+          { userId: a, otherId: b, lastFinishedAt: T0 },
+          { userId: b, otherId: a, lastFinishedAt: T0 },
+          { userId: a, otherId: c, lastFinishedAt: T0 },
+          { userId: c, otherId: a, lastFinishedAt: T0 },
+        ];
+        expect(
+          await repos.games.applyTransition(game.id, 0, {
+            game: { updatedAt: T0 },
+            pastOpponents: pairs,
+          }),
+        ).toBe("ok");
+        expect(
+          await repos.games.applyTransition(game.id, 0, {
+            game: { updatedAt: T0 },
+            pastOpponents: pairs.map((p) => ({ ...p, lastFinishedAt: T0 + 9 })),
+          }),
+        ).toBe("stale");
+        const rows = await target.sql(
+          "SELECT user_id, other_id, last_finished_at FROM past_opponents WHERE user_id IN (?, ?, ?) ORDER BY user_id, other_id",
+          a,
+          b,
+          c,
+        );
+        expect(rows).toEqual(
+          [
+            { user_id: a, other_id: b, last_finished_at: T0 },
+            { user_id: b, other_id: a, last_finished_at: T0 },
+          ].sort((x, y) => (x.user_id < y.user_id ? -1 : 1)),
+        );
+        // A later finish refreshes the pair.
+        expect(
+          await repos.games.applyTransition(game.id, 1, {
+            game: { updatedAt: T0 },
+            pastOpponents: pairs.slice(0, 1).map((p) => ({ ...p, lastFinishedAt: T0 + 5 })),
+          }),
+        ).toBe("ok");
+        const [refreshed] = await target.sql(
+          "SELECT last_finished_at FROM past_opponents WHERE user_id = ? AND other_id = ?",
+          a,
+          b,
+        );
+        expect(refreshed?.["last_finished_at"]).toBe(T0 + 5);
       });
     });
 

@@ -341,14 +341,15 @@ dictionaries as a list from day one, so adding one is a data change plus a build
   deployed, and it applies to every game using that dictionary, including games in progress. The recorded version is informational only. Changes to
   additions/removals bump the version.
 - The server is authoritative. The client downloads the game's dictionary by versioned, hashed URL
-  (from the game envelope's `resources[].downloadUrl`, 05, so it works even after the dictionary is
-  disabled for new games; the new-game screen uses `GET /api/v1/catalog`), caches it in the service
-  worker, and uses it only for instant validity/score previews.
+  from the game envelope's `resources[].downloadUrl` (05), so it works even after the dictionary is
+  disabled for new games, caches it in the service worker, and uses it only for instant
+  validity/score previews. The catalog (§10.1), which the new-game screen uses to choose a
+  dictionary, carries no download URL: nothing is previewed before a game exists.
 - Server lookup is a binary search directly over the sorted text. No index is built, so loading
   costs only I/O and no request pays a parse cost (Workers Free: 10 ms CPU/request). Dictionaries are
-  loaded lazily per id and cached per isolate/process. On Cloudflare they're bundled as text
-  modules while the total fits the bundle budget; past that they're fetched once per isolate from
-  the static-assets binding. See 03 §10.
+  loaded lazily per id and cached per isolate/process. On Cloudflare they're fetched once per
+  isolate from the static-assets binding, from the same versioned, hashed files clients download
+  (since alpha A2; bundling them as text modules was the first plan). See 03 §10.
 
 ### 9.5 Bring-your-own dictionaries
 

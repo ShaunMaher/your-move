@@ -19,6 +19,8 @@ export { createWordList, hasWord, WordListFormatError, type WordList } from "./l
 export {
   manifestSchema,
   parseIndex,
+  servedFileName,
+  servedPath,
   toResourceMeta,
   type DictionaryIndex,
   type DictionaryManifest,

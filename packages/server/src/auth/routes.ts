@@ -17,14 +17,14 @@ import {
   patchMeRoute,
   UserSettingsSchema,
 } from "@your-move/shared";
-import type { Context, MiddlewareHandler } from "hono";
+import type { Context } from "hono";
 
 import { validateDisplayName } from "../accounts/display-name.js";
 import { normaliseAddress } from "../accounts/email.js";
 import { isLocalDev } from "../config/local-dev.js";
 import { hmacHex, type Subkeys } from "../crypto/subkeys.js";
 import type { UserRecord } from "../db/repositories.js";
-import { type EmailMessage, wasAlerted } from "../email/sender.js";
+import type { EmailMessage } from "../email/sender.js";
 import {
   accountDeletedEmail,
   approximateTime,
@@ -33,6 +33,7 @@ import {
   suspendedNoticeEmail,
   type TemplateContext,
 } from "../email/templates.js";
+import { background } from "../http/background.js";
 import type { AppEnv, Platform } from "../platform.js";
 import { ipBuckets } from "./client-ip.js";
 import { checkLimits } from "./limits.js";
@@ -45,6 +46,7 @@ import {
   newAccountAllowed,
   verifyCode,
 } from "./otp.js";
+import { requireSession } from "./require-session.js";
 import {
   clearedSessionCookie,
   createSession,
@@ -102,30 +104,6 @@ export interface AuthRouteOptions {
   readonly keys: () => Promise<Subkeys>;
 }
 
-/**
- * Runs `task` after the response (06 §3.2): through the request's `waitUntil` (per request on
- * Workers, tracked on Node), started on a later macrotask so it never delays the response. Errors
- * are logged by class only.
- */
-function background(c: Context, platform: Platform, task: () => Promise<unknown>): void {
-  const run = new Promise((resolve) => setTimeout(resolve, 0))
-    .then(task)
-    .catch((error: unknown) => {
-      // A provider that already logged its own alert for this failure is not logged again (09 §2).
-      if (wasAlerted(error)) return;
-      platform.log.error("background task failed", {
-        errorClass: error instanceof Error ? error.name : typeof error,
-      });
-    });
-  let context: { waitUntil(promise: Promise<unknown>): void } | null = null;
-  try {
-    context = c.executionCtx;
-  } catch {
-    // No execution context (a bare `app.request` in a test): the task simply runs detached.
-  }
-  context?.waitUntil(run);
-}
-
 export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteOptions): void {
   const { platform } = options;
   const { config, repos } = platform;
@@ -164,27 +142,7 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     c.header("Set-Cookie", clearedSessionCookie(localDev), { append: true });
   };
 
-  /** Session only (05 §Token scopes). Bearer tokens arrive in M3. */
-  const requireSession: MiddlewareHandler<AppEnv> = async (c, next) => {
-    const token = readSessionCookie(c.req.header("Cookie"), localDev);
-    if (c.req.header("Authorization") !== undefined) {
-      // A cookie and a bearer token together are refused (05 §Conventions); tokens alone can't
-      // authenticate until M3.
-      return token === null ? fail(c, 401, "UNAUTHENTICATED") : fail(c, 400, "BAD_REQUEST");
-    }
-    if (token === null) return fail(c, 401, "UNAUTHENTICATED");
-    const active = await loadSession(repos, token, now(), (task) => {
-      background(c, platform, task);
-    });
-    if (active === null) {
-      clearCookie(c);
-      return fail(c, 401, "UNAUTHENTICATED");
-    }
-    if (active.user.suspendedAt !== null) return fail(c, 403, "SUSPENDED");
-    c.set("session", active);
-    await next();
-    return undefined;
-  };
+  const session = requireSession(platform);
   // Registered before the handlers, so it runs first.
   for (const path of [
     logoutRoute.path,
@@ -192,7 +150,7 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     getMeRoute.path,
     deleteOtpRoute.path,
   ]) {
-    app.use(path, requireSession);
+    app.use(path, session);
   }
 
   app.openapi(otpRequestRoute, async (c) => {

@@ -9,6 +9,9 @@
  * whole or not at all — the same guarantee D1's `batch()` gives (03 §5.2). Transaction control
  * belongs to {@link inTransaction} alone: a statement that would begin or end a transaction
  * through the driver is refused, so nothing can leave the shared connection mid-transaction.
+ *
+ * Test use only: this module is the package's `./db` export so the contract suite and the
+ * repository tests can open a real database; the server itself imports it by path (03 §4).
  */
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 

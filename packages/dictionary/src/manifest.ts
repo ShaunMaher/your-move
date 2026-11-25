@@ -88,3 +88,18 @@ export function toResourceMeta(manifest: DictionaryManifest): ResourceMeta {
     source: "builtin",
   };
 }
+
+/**
+ * Where a built-in word list is served to clients, below the static `/assets/` path (words §9.4):
+ * versioned and hashed, so it can be cached as immutable and a new build never reuses a name. The
+ * runtimes' builds publish each list under this name, and the framework sets the catalog's and
+ * envelope's `downloadUrl` from it.
+ */
+export function servedPath(manifest: DictionaryManifest): string {
+  return `/assets/dictionaries/${servedFileName(manifest)}`;
+}
+
+/** The file name of {@link servedPath}. */
+export function servedFileName(manifest: DictionaryManifest): string {
+  return `${manifest.id}-v${String(manifest.version)}.${manifest.wordsSha256.slice(0, 16)}.txt`;
+}

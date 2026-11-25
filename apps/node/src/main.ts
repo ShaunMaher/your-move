@@ -18,13 +18,16 @@ import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
 import {
   createJsonLogger,
+  GameConfigError,
   installedSchema,
   isLocalDev,
   registryMismatches,
+  ResourceConfigError,
 } from "@your-move/server";
 
 import installedJson from "../../../generated/installed.json" with { type: "json" };
 import { codeGenerationFromStringsAllowed } from "./code-generation.js";
+import { DictionariesError, nodeDictionaries } from "./dictionaries.js";
 import { scrubSecrets } from "./env.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
 import { createNodeApp } from "./server.js";
@@ -41,6 +44,10 @@ const { values: args } = parseArgs({
     migrations: {
       type: "string",
       default: fileURLToPath(new URL("migrations", import.meta.url)),
+    },
+    dictionaries: {
+      type: "string",
+      default: fileURLToPath(new URL("dictionaries", import.meta.url)),
     },
   },
 });
@@ -111,19 +118,41 @@ if (mismatches.length > 0) {
 }
 
 // 5. Serve. The gmail provider first checks its token's scope and account (09 §2): a token that
-// could do more than send, or belongs to another user, refuses the start.
-const platform = createNodePlatform({ repos: storage.repos, config, nodeConfig, log, now });
+// could do more than send, or belongs to another user, refuses the start. The games' and
+// dictionaries' configuration is checked as the app is built (02 §2.1 rule 8); a refusal names
+// the variable, never its value.
+const platform = createNodePlatform({
+  repos: storage.repos,
+  config,
+  nodeConfig,
+  log,
+  now,
+  dictionaries: nodeDictionaries(args.dictionaries),
+});
 try {
   await verifyEmail(platform.email);
 } catch (error) {
   if (isRefusal(error)) exitWith(`Refusing to start: ${error.message}`);
   throw error;
 }
-const app = createNodeApp({
-  platform,
-  games,
-  staticRoot: args.static,
-});
+let app: ReturnType<typeof createNodeApp>;
+try {
+  app = createNodeApp({
+    platform,
+    games,
+    staticRoot: args.static,
+    dictionariesRoot: args.dictionaries,
+  });
+} catch (error) {
+  if (
+    error instanceof GameConfigError ||
+    error instanceof ResourceConfigError ||
+    error instanceof DictionariesError
+  ) {
+    exitWith(error.message);
+  }
+  throw error;
+}
 // Background work (emails) is per request and tracked, so shutdown waits for it (03 §4).
 const background = createBackgroundTracker();
 const server = serve(

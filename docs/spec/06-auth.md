@@ -272,7 +272,9 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    to play — Accept / Decline"), with the same checks as a new invitation:
    - the full §6.1 block rule against the creator **and every other row** in the game (a block in
      either direction → `inert`);
-   - the inbound cap (§6.7; over it → `hidden`), counted atomically with the claim.
+   - the inbound cap (§6.7; over it → `hidden`). The cap is counted once, when the game is created
+     and for every typed address (§6.7); the claim reads the `delivery` stored on the seat then,
+     and counts nothing again.
 
    An `inert` seat is never claimed and never becomes deliverable.
 
@@ -301,7 +303,11 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    any one creator** who isn't a past opponent, and **3 per day in total** from such creators. Over
    the cap the invitation is created with `delivery = hidden`: it goes to a collapsed *Hidden
    invitations* list (no badge, no push, no email), where the user can still accept or decline it,
-   and it expires with the lobby. The creator sees "Invited" either way. Active game caps (05) count
+   and it expires with the lobby. The cap is counted in `rate_limits` keyed by the target's
+   `emailId` (with the creator's id for the per-creator count), for **every** typed address
+   whatever it resolves to, with the same lookups and writes (Q3): a past opponent's invitation
+   reads the counters without adding to them, and one already over the per-creator cap adds
+   nothing to the total. The creator sees "Invited" either way. Active game caps (05) count
    only games a user *created*, so other people's games can never lock a user out of creating their
    own.
 8. **Join links** (for groups, and for players who'd rather share a link in a group chat than type

@@ -135,12 +135,15 @@ never touches a Drizzle database object. Instead:
 - A shared repository contract test suite (`@your-move/server/testing`) runs against **both**
   adapters: Node in-process on a real file; D1 in workerd, migrated with
   `wrangler d1 migrations apply --local` and reached through Wrangler's `getPlatformProxy` (in
-  CI's arm64 `test:worker` job, 11 §9).
+  CI's arm64 `test:worker` job, 11 §9). `@your-move/server/testing` (the suite and test helpers
+  such as `createSession`) and `@your-move/node/db` (the Node adapter, for the contract tests) are
+  exports for tests only: production code reaches the adapter by path and never imports either.
 
 **Randomness.** Production randomness always comes from WebCrypto (`crypto.getRandomValues`,
 `crypto.randomUUID`). The engine receives it as an explicit `RandomSource` argument (02 §2); the
 server constructs the WebCrypto-backed source in exactly one place. Only tests construct seeded
-sources.
+sources: `createApp` takes an optional `random` source factory that runtimes never pass, and the
+framework's tests pass a seeded one and print its seed on failure.
 
 ## 5. Storage
 
@@ -274,7 +277,16 @@ filesystems are unsupported for the database anyway).
 
 ## 8. Scheduled work
 
-(Turn timeouts are applied here and nowhere else; GET handlers never write game state.)
+(Turn timeouts are applied here and nowhere else. GET handlers never write game state, with one
+exception: **lazy lobby expiry**. A read or write of a game by a member first applies the expiry
+transition if it is a lobby past its 14 days (a stranger's `404` never writes), and listing or
+creating games first expires the caller's overdue lobbies (at most 20 per request, oldest first,
+the rest on the next request), so no overdue lobby is shown, accepted, started or counted as live,
+and its typed addresses are cleared (06 §6.5) as soon as anyone involved comes back. It's a
+transition like any other (§5.2), so it bumps the game's version: a member sees the game unread,
+and a request in flight with the earlier `expectedVersion` gets `STALE_GAME`. `start` and `accept`
+also refuse a lobby at or past its expiry whatever its status says. The alpha has no sweep at all;
+once the sweep exists it expires the lobbies no one comes back to.)
 
 One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * * *`) or a Node
 `setInterval`. Every step is idempotent and uses the same transition mechanism as actions:
@@ -289,7 +301,7 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
   seat order, reloading and re-checking `toAct` and the deadline before each (02 §4).
 - Send timeout reminders (50 % and 24 h before, 02 §4; tracked in `timeout_reminders_sent`, which
   every clock restart resets to 0).
-- Expire lobbies 14 days after creation.
+- Expire lobbies 14 days after creation (reads and writes also expire them lazily, above).
 - Send due email nudges.
 - Purge blobs of deleted dictionaries no `lobby`/`active` game references (`game_resources`), and
   delete row-less upload blobs older than 1 h (words §9.5).
@@ -325,9 +337,10 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
 ## 10. Dictionary at runtime
 
 - Server: a `DictionaryProvider` loads dictionaries lazily by id and caches them per
-  isolate/process. Each compact sorted word list is either bundled into the Worker / Node build as a
-  text module or, on Cloudflare once the total exceeds the bundle budget, fetched once per isolate
-  from the static-assets binding (Node reads it from disk). Lookup is a binary search directly over
+  isolate/process. Each compact sorted word list is read from disk on Node and fetched once per
+  isolate from the static-assets binding on Cloudflare, so the Worker and the clients share one
+  copy of each list (the served layout below; bundling the lists into the Worker as text modules
+  was the plan until alpha A2). Lookup is a binary search directly over
   the text (no parse), or any index is built outside request handling, never inside a request.
   Memory < 25 MB per loaded dictionary. Measure Worker startup time and per-lookup CPU in M1 and
   record the numbers (M1, in `packages/dictionary/README.md`: under 1 µs CPU per ENABLE lookup,
@@ -336,6 +349,20 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
   list as a text module; the real startup time is recorded at the first Workers deployment).
   Each built-in list is checked against its manifest's size and SHA-256 once per load, before
   first use.
+- **Served layout (alpha A2).** The dictionary build also writes `generated/served/`: the index
+  (`index.json`) and each word list, with its `.gz` and `.br` copies, under its versioned, hashed
+  name `<id>-v<version>.<first 16 hex digits of wordsSha256>.txt`. Clients download it at
+  `/assets/dictionaries/<that name>` (the `downloadUrl` the framework sets for public lists, words
+  §9.4), cached as immutable like every hashed asset. The index is unversioned, so it is never
+  published under `/assets/`: on Cloudflare the build copies the word lists (without the `.gz` and
+  `.br` copies, as Cloudflare compresses static assets itself) into the static assets and the index
+  to `/dictionaries/index.json`, which Cloudflare's default revalidates, and the Worker reads the
+  index (once per isolate, when the app is built) and each list (on first use) through the
+  `ASSETS` binding; on Node the build copies the layout to `dist/dictionaries`, which the server
+  reads from disk, serving only the word lists (with their precompressed copies). Around the
+  runtime's `loadText` the core adds a 10 s timeout, and it remembers any failure of the whole
+  load (a list whose size or hash doesn't match its manifest included) for 30 s before fetching
+  or hashing that list again (10 M3).
 - `serverOnly` dictionaries (operator and uploaded, words §9.5) are loaded from `BlobStore` on first
   use into an in-memory LRU cache **sized by bytes** (default 60 MB per isolate or process, below the
   Worker's 128 MB limit). Lookup is a binary search over the raw sorted text with no index build,

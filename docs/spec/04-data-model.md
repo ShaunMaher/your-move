@@ -79,7 +79,7 @@ At most 3 *live* challenges per (email, purpose); issuing a 4th burns the oldest
 | seat_order | TEXT NOT NULL | `join` · `random` (02 §4) |
 | ai_assistance | TEXT NOT NULL | `off` · `allowed` (02 §9.3) — public |
 | state 🔒 | TEXT NULL | module `State` JSON; NULL in `lobby` (setup runs at start) |
-| setup_rng 🔒 | TEXT NULL | random draws consumed at start: seat-order draw, then `setup` (replay, 02 §5) |
+| setup_rng 🔒 | TEXT NULL | random draws consumed at start: seat-order draw, then `setup` (replay, 02 §5); JSON `[maxExclusive, value]` pairs, so a replay detects a changed draw range |
 | final_views | TEXT NULL | JSON `{ seats: { view, summary }[], public: { view, summary } }`, written on any terminal status after start (`finished`; `declined` before a first action; `cancelled` by an operator), except for an orphaned game whose engine is gone (02 §5, §7.3). A player only ever receives `seats[theirSeat]` |
 | version | INTEGER NOT NULL DEFAULT 0 | optimistic concurrency, 03 §5.2 |
 | write_token | TEXT NULL | per-transition guard token, 03 §5.2 |
@@ -106,7 +106,7 @@ At most 3 *live* challenges per (email, purpose); issuing a 4th burns the oldest
 | to_act_since | INTEGER NULL | per-seat timeout clock (02 §2.3) |
 | acted_once | INTEGER NOT NULL DEFAULT 0 | for "decline before first action" (02 §4) |
 | rank, score | INTEGER NULL | from module `result()`, re-ranked without `declined` seats (02 §4); NULL for everyone when the game ends `declined` |
-| last_seen_version | INTEGER NOT NULL DEFAULT 0 | unread badges |
+| last_seen_version | INTEGER NOT NULL DEFAULT 0 | unread badges: the game is unread while `games.version` is above it. A member's own transition sets it to the version it creates; an invitation starts at `-1`, so it is unread until seen |
 | last_nudged_at | INTEGER NULL | email nudge throttle |
 | timeout_reminders_sent | INTEGER NOT NULL DEFAULT 0 | 0–2 (02 §4) |
 
@@ -131,7 +131,7 @@ in state `joined`, `playing` or `out`, or an `invited` row with their `user_id` 
 | action 🔒 | TEXT NULL | the module action as submitted (secret: e.g. which tiles were swapped); NULL for other kinds |
 | record | TEXT NOT NULL | module `PublicRecord` JSON — public |
 | describe | TEXT NOT NULL | JSON `Text` from module `describe(record)` (02 §5) — public |
-| rng 🔒 | TEXT NULL | random draws consumed (replay) |
+| rng 🔒 | TEXT NULL | random draws consumed (replay), as `[maxExclusive, value]` pairs like `games.setup_rng` |
 | via | TEXT NOT NULL DEFAULT 'app' | `app` (cookie session) · `token` (an API token: an AI move, 02 §9.1) · `system` (timeouts). Public; history shows token moves as AI or AI-assisted |
 | created_at | INTEGER | |
 

@@ -26,13 +26,15 @@ const config: KnipConfig = {
     },
     "apps/node": {
       project: ["src/**/*.ts", "scripts/**/*.ts"],
-      // Build-order dependency: the build copies the web app's output (pnpm builds it first).
-      ignoreDependencies: ["@your-move/web"],
+      // Build-order dependencies: the build copies the web app's and the dictionaries' output
+      // (pnpm builds them first).
+      ignoreDependencies: ["@your-move/web", "@your-move/dictionary"],
     },
     "apps/worker": {
       project: ["src/**/*.ts", "scripts/**/*.ts"],
-      // Build-order dependency: the build copies the web app's output (pnpm builds it first).
-      ignoreDependencies: ["@your-move/web"],
+      // Build-order dependencies: the build copies the web app's and the dictionaries' output
+      // (pnpm builds them first).
+      ignoreDependencies: ["@your-move/web", "@your-move/dictionary"],
     },
     "apps/web": {
       // The build's own code (vite.config.ts and vite-plugin/, which import @your-move/shared for

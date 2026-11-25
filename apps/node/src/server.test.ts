@@ -1,19 +1,26 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   createJsonLogger,
   detachedRepositories,
   parseConfig,
   securityHeaders,
+  servedFileName,
 } from "@your-move/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { nodeDictionaries } from "./dictionaries.js";
 import { createNodePlatform } from "./platform.js";
 import { createNodeApp } from "./server.js";
 
 let staticRoot: string;
+/** The dictionary package's served layout, built by `pnpm build`. */
+const DICTIONARIES = fileURLToPath(
+  new URL("../../../packages/dictionary/generated/served", import.meta.url),
+);
 
 beforeAll(() => {
   staticRoot = mkdtempSync(join(tmpdir(), "web-dist-"));
@@ -47,9 +54,11 @@ function app() {
       nodeConfig: { trustProxy: "false", trustProxyHops: 1, trustProxyPeers: [] },
       now,
       log: createJsonLogger({ level: "error", now, sink: () => undefined }),
+      dictionaries: nodeDictionaries(DICTIONARIES),
     }),
     games: [],
     staticRoot,
+    dictionariesRoot: DICTIONARIES,
   });
 }
 
@@ -94,6 +103,28 @@ describe("Node static serving", () => {
     const res = await app().request("/assets/missing-000000.js");
     expect(res.status).toBe(404);
     expect(res.headers.get("Cache-Control")).toBeNull();
+  });
+
+  it("serves the built-in word lists by their hashed names, immutable, compressed on request", async () => {
+    const manifest = nodeDictionaries(DICTIONARIES).index.dictionaries[0];
+    if (manifest === undefined) throw new Error("no built-in dictionary");
+    const path = `/assets/dictionaries/${servedFileName(manifest)}`;
+    const plain = await app().request(path);
+    expect(plain.status).toBe(200);
+    expect((await plain.text()).length).toBe(manifest.bytes);
+    expect(plain.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
+    for (const [name, value] of Object.entries(HEADERS))
+      expect(plain.headers.get(name)).toBe(value);
+    const brotli = await app().request(path, { headers: { "Accept-Encoding": "br" } });
+    expect(brotli.headers.get("Content-Encoding")).toBe("br");
+    const missing = await app().request("/assets/dictionaries/enable-v1.0000000000000000.txt");
+    expect(missing.status).toBe(404);
+  });
+
+  it("doesn't publish the dictionaries' unversioned index (A2 review S-8)", async () => {
+    const index = await app().request("/assets/dictionaries/index.json");
+    expect(index.status).toBe(404);
+    expect(index.headers.get("Cache-Control")).toBeNull();
   });
 
   it("does not escape the static root", async () => {

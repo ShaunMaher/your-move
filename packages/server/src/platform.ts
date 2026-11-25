@@ -7,11 +7,12 @@ import type { ActiveSession } from "./auth/session.js";
 import type { AppConfig } from "./config/parse.js";
 import type { Repositories } from "./db/repositories.js";
 import type { CoreEmailSender } from "./email/providers.js";
+import type { BuiltinDictionaries } from "./games/resources.js";
 import type { Logger } from "./log.js";
 
 /**
  * What the runtime provides to the core. Storage arrived in M2a, email and the client address in
- * M2b; realtime and push join in M3/M4, blobs in M6.
+ * M2b, the built-in dictionaries in A2; realtime and push join in M3/M4, blobs in M6.
  *
  * Background work (`waitUntil`) is per request, not per isolate: on Workers it is the request's
  * `ctx.waitUntil`, which the runtime hands to `app.fetch(request, env, ctx)`; Node passes an
@@ -30,6 +31,11 @@ export interface Platform {
    * `TRUST_PROXY`. `env` is what the runtime passed to `app.fetch`.
    */
   clientIp(request: Request, env: unknown): ClientIp;
+  /**
+   * The built-in dictionaries: the build's index and a loader for one word list (03 §10), from the
+   * static assets on Workers and from disk on Node.
+   */
+  readonly dictionaries: BuiltinDictionaries;
   /** Injectable clock: tests control time through it. */
   now(): Date;
 }

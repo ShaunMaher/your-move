@@ -5,16 +5,20 @@
  *
  * M2a provided users and games, enough for the `write_token` transition (03 §5.2) and the orphan
  * check (02 §7.3); M2b adds what sign-in needs: OTP challenges, sessions, rate limits, auth events
- * and API-token revocation.
+ * and API-token revocation; the alpha's framework core (A2) what one game needs: its resources and
+ * invites, the game list, history, unread markers and past opponents.
  */
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
 import type { NormalisedEmail } from "../accounts/email.js";
 import type {
   AUTH_EVENT_TYPES,
+  GAME_STATUSES,
   gameActions,
   gamePlayers,
+  gameResources,
   games,
+  invites,
   otpChallenges,
   sessions,
   users,
@@ -42,8 +46,24 @@ export interface UserRepo {
    */
   createOrGetByEmail(user: NewUser & { email: NormalisedEmail }): Promise<UserRecord>;
   findById(id: string): Promise<UserRecord | null>;
+  /** The users with these ids that exist, in no particular order. */
+  findByIds(ids: readonly string[]): Promise<UserRecord[]>;
   findByEmail(email: NormalisedEmail): Promise<UserRecord | null>;
+  /**
+   * Which of `candidates` are past opponents of the user (04 `past_opponents`). Ids that match no
+   * user simply aren't returned, so callers can pass a placeholder to keep the query the same.
+   */
+  pastOpponentsOf(userId: string, candidates: readonly string[]): Promise<string[]>;
   update(id: string, set: UserUpdate): Promise<void>;
+  /**
+   * Sets `settings.lastGameType` and, unless `input` is null, `settings.lastOptions[gameType]` to
+   * the JSON `input`, leaving every other key as it is now in the database (05 §Remembered
+   * options). `gameType` matches the manifest's type pattern.
+   */
+  rememberGameOptions(
+    id: string,
+    remember: { gameType: string; input: string | null; updatedAt: number },
+  ): Promise<void>;
   /**
    * Deletes an account that holds no game rows (04 §Account deletion steps 1, 3, 4 and 5): its
    * sessions and API tokens, its OTP challenges, blocks and past-opponent rows, the
@@ -150,9 +170,13 @@ export interface ApiTokenRepo {
   revokeAll(userId: string, now: number): Promise<void>;
 }
 
+export type GameStatus = (typeof GAME_STATUSES)[number];
 export type GameRecord = InferSelectModel<typeof games>;
 export type GamePlayerRecord = InferSelectModel<typeof gamePlayers>;
 export type GameActionRecord = InferSelectModel<typeof gameActions>;
+export type GameResourceRecord = Omit<InferSelectModel<typeof gameResources>, "gameId">;
+/** A logged transition without its secret columns (`action`, `rng`): what history may show. */
+export type PublicActionRecord = Omit<GameActionRecord, "action" | "rng">;
 
 /** A new game row; `version`, `write_token` and `action_count` start at their defaults. */
 export type NewGame = Omit<
@@ -163,6 +187,14 @@ export type NewGame = Omit<
 export type NewGamePlayer = Omit<InferInsertModel<typeof gamePlayers>, "gameId">;
 /** A new `game_actions` row of a known game. */
 export type NewGameAction = Omit<InferInsertModel<typeof gameActions>, "gameId">;
+/** A new `invites` row of a known game: the `emailId` of an address the creator typed. */
+export type NewInvite = Omit<InferInsertModel<typeof invites>, "gameId">;
+
+/** What a new game is created with besides its players (04 `game_resources`, `invites`). */
+export interface NewGameExtras {
+  readonly resources?: readonly GameResourceRecord[];
+  readonly invites?: readonly NewInvite[];
+}
 
 /**
  * The `games` columns a transition may set. `version` and `write_token` are the repository's own
@@ -188,6 +220,13 @@ export type GameUpdate = Partial<
 /** The `game_players` columns a transition may set on an existing row. */
 export type GamePlayerUpdate = Partial<Omit<GamePlayerRecord, "id" | "gameId">>;
 
+/** One direction of a past-opponent pair (04 `past_opponents`). */
+export interface PastOpponentPair {
+  readonly userId: string;
+  readonly otherId: string;
+  readonly lastFinishedAt: number;
+}
+
 /**
  * Everything one transition writes (03 §5.2): the game row, plus dependent writes that take effect
  * only if this transition won the race.
@@ -197,6 +236,12 @@ export interface GameWriteSet {
   readonly insertPlayers?: readonly NewGamePlayer[];
   readonly updatePlayers?: readonly { readonly id: string; readonly set: GamePlayerUpdate }[];
   readonly insertActions?: readonly NewGameAction[];
+  /**
+   * Past-opponent rows written by a transition that finishes a game, each direction given. A pair
+   * with a block in either direction is never written (04 invariant 6), checked in the same
+   * statement.
+   */
+  readonly pastOpponents?: readonly PastOpponentPair[];
 }
 
 /** `stale`: another transition changed the game since `expectedVersion`; nothing was written. */
@@ -209,15 +254,99 @@ export interface LiveGameRow {
   readonly gameVersion: number;
 }
 
+/** A game with all of its `game_players` rows, read together. */
+export interface LoadedGame {
+  readonly game: GameRecord;
+  readonly players: readonly GamePlayerRecord[];
+}
+
+/** Which of a user's games to list (05 `GET /api/v1/games`). */
+export interface GameListQuery {
+  readonly userId: string;
+  readonly status?: GameStatus;
+  readonly gameType?: string;
+  /**
+   * `normal` or `hidden`: only the user's open invitations (in a `lobby`) with that delivery.
+   * Otherwise every game the user is a member of, except hidden invitations.
+   */
+  readonly invitations?: "normal" | "hidden";
+  /** `finished` games ended at or after this time are listed. */
+  readonly finishedSince: number;
+  /** `declined`, `cancelled` and `expired` games ended at or after this time are listed. */
+  readonly endedSince: number;
+  /** Continue after this game (newest activity first: `last_action_at`, then id, descending). */
+  readonly after?: { readonly lastActionAt: number; readonly id: string };
+  readonly limit: number;
+}
+
+/**
+ * The `games` columns the game list shows (05 `GameSummary`): never the secret ones, and of the
+ * state and the final views only what the viewer's summary line needs (A2 review P-16).
+ */
+export type ListedGame = Pick<
+  GameRecord,
+  | "id"
+  | "gameType"
+  | "gameVersion"
+  | "status"
+  | "endReason"
+  | "aiAssistance"
+  | "seats"
+  | "turnTimeoutDays"
+  | "startedAt"
+  | "lastActionAt"
+  | "version"
+> & {
+  /** The module state while `active`, for the module's `summary`; otherwise null. */
+  readonly state: string | null;
+  /** The viewer's own `final_views` summary (JSON) once a started game ended; otherwise null. */
+  readonly finalSummary: string | null;
+};
+
+/** One listed game: its listed columns and the viewer's own `game_players` row. */
+export interface GameListRow {
+  readonly game: ListedGame;
+  readonly member: GamePlayerRecord;
+}
+
 export interface GameRepo {
-  /** Inserts a new game and its first `game_players` rows atomically. */
-  create(game: NewGame, players: readonly NewGamePlayer[]): Promise<void>;
+  /** Inserts a new game, its first `game_players` rows, resources and invites atomically. */
+  create(game: NewGame, players: readonly NewGamePlayer[], extras?: NewGameExtras): Promise<void>;
   /** The game row, secret columns included (the core decides what leaves the server). */
   get(id: string): Promise<GameRecord | null>;
-  /** The game's `game_players` rows, ordered by seat and then id. */
+  /** The game row and its players, read in one batch. */
+  load(id: string): Promise<LoadedGame | null>;
+  /** The game's `game_players` rows, ordered by seat and then as they were added. */
   players(gameId: string): Promise<GamePlayerRecord[]>;
+  /** The `game_players` rows of several games, ordered by game, seat and then as added. */
+  playersOf(gameIds: readonly string[]): Promise<GamePlayerRecord[]>;
+  /** The game's resources (04 `game_resources`). */
+  resources(gameId: string): Promise<GameResourceRecord[]>;
   /** The game's action log in `seq` order, secret columns included (replay, 02 §5). */
   actions(gameId: string): Promise<GameActionRecord[]>;
+  /** Up to `limit` logged transitions after `afterSeq`, oldest first, without secret columns. */
+  history(gameId: string, afterSeq: number, limit: number): Promise<PublicActionRecord[]>;
+  /** The newest logged transition of each game that has one, without secret columns. */
+  lastActions(gameIds: readonly string[]): Promise<PublicActionRecord[]>;
+  /** A user's games (05 `GET /api/v1/games`), newest activity first. */
+  listForUser(query: GameListQuery): Promise<GameListRow[]>;
+  /**
+   * Raises the user's unread marker in a game to `version` (never lowers it, never past the game's
+   * own version). Not a transition: it touches only the user's own row.
+   */
+  markSeen(gameId: string, userId: string, version: number): Promise<void>;
+  /**
+   * Up to `limit` ids of `lobby` games created at or before `createdBefore` in which the user
+   * holds a row, oldest first: the lobbies lazy expiry looks at (02 §4).
+   */
+  overdueLobbies(userId: string, createdBefore: number, limit: number): Promise<string[]>;
+  /** How many `lobby`/`active` games the user created (05 `TOO_MANY_GAMES`). */
+  countLiveCreated(userId: string): Promise<number>;
+  /**
+   * How many `lobby`/`active` games the user created with an address of this `emailId` among the
+   * typed invitees (05 `TOO_MANY_GAMES`, per pair).
+   */
+  countLiveCreatedWithInvite(userId: string, emailHash: string): Promise<number>;
   /**
    * Applies one transition atomically (03 §5.2): bumps `version` and sets a fresh `write_token`
    * only if the game is still at `expectedVersion`, and applies every dependent write only if
