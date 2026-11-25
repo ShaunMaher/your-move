@@ -3,6 +3,8 @@
  * the real app on a real SQLite database with the installed games, like `games.test.ts`.
  */
 import type { AnyGameDefinition } from "@your-move/sdk";
+import type { InstalledGame } from "@your-move/server";
+import { seededRandom } from "@your-move/testkit";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { installedGames } from "../../../generated/server-registry.js";
@@ -15,7 +17,7 @@ import {
   signUp,
   transition,
 } from "./games-support.js";
-import type { Harness } from "./test-harness.js";
+import { createHarness, type Harness, PROD_ENV } from "./test-harness.js";
 
 const open: Harness[] = [];
 afterEach(() => {
@@ -29,15 +31,21 @@ function harness(...args: Parameters<typeof gameHarness>): Harness {
   return h;
 }
 
-const example = installedGames.find((game) => game.manifest.type === "example");
-const words = installedGames.find((game) => game.manifest.type === "words");
-if (example === undefined || words === undefined) throw new Error("the games aren't installed");
+function installed(type: string): InstalledGame {
+  const game = installedGames.find((candidate) => candidate.manifest.type === type);
+  if (game === undefined) throw new Error(`${type} isn't installed`);
+  return game;
+}
 
-/** The example game with some of its version 1 members replaced. */
-function exampleWith(overrides: Partial<AnyGameDefinition>) {
-  const engine = example?.engines[1];
+/** The installed games with some of the example game's version 1 members replaced. */
+function exampleWith(overrides: Partial<AnyGameDefinition>): InstalledGame[] {
+  const example = installed("example");
+  const engine = example.engines[1];
   if (engine === undefined) throw new Error("no example engine");
-  return { ...example, engines: { 1: { ...engine, ...overrides } as AnyGameDefinition } };
+  return [
+    installed("words"),
+    { ...example, engines: { 1: { ...engine, ...overrides } } },
+  ];
 }
 
 /** A two-player example game between `a` and `b`, started by b's accept. */
@@ -55,7 +63,7 @@ describe("S-5: a module's exception never reaches the log with its message", () 
         throw new Error("the hidden hand is 7,8,9 secret-xyz");
       },
     });
-    const h = harness({}, { games: [words, throwing].filter((game) => game !== undefined) });
+    const h = harness({}, { games: throwing });
     const a = await signUp(h, "Ada");
     const b = await signUp(h, "Bo");
     const game = await startedExample(h, a, b);
@@ -75,5 +83,25 @@ describe("S-5: a module's exception never reaches the log with its message", () 
     expect(String(fault?.["stack"])).toMatch(/^\s+at /u);
     expect(JSON.stringify(h.logs)).not.toContain("secret-xyz");
     expect(JSON.stringify(moved.body)).not.toContain("secret-xyz");
+  });
+});
+
+describe("P-5: the games' randomness is injected", () => {
+  it("plays the same deal from the same seed, and another from another", async () => {
+    const deal = async (seed: number) => {
+      const h = createHarness(
+        { ...PROD_ENV, ENABLED_GAMES: "words,example" },
+        { games: installedGames, random: () => source },
+      );
+      const source = seededRandom(seed);
+      open.push(h);
+      const a = await signUp(h, "Ada");
+      const b = await signUp(h, "Bo");
+      const game = await startedExample(h, a, b);
+      return h.query("SELECT state, setup_rng FROM games WHERE id = ?", game.id)[0];
+    };
+    const first = await deal(7);
+    expect(await deal(7)).toEqual(first);
+    expect(await deal(8)).not.toEqual(first);
   });
 });

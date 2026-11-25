@@ -4,16 +4,35 @@
  * build.
  */
 import type { GameEnvelope } from "@your-move/sdk";
-import { expect } from "vitest";
+import { seededRandom } from "@your-move/testkit";
+import { expect, onTestFailed } from "vitest";
 
 import { installedGames } from "../../../generated/server-registry.js";
-import { createHarness, type Harness, PROD_ENV } from "./test-harness.js";
+import { createHarness, type Harness, type HarnessOptions, PROD_ENV } from "./test-harness.js";
 
-/** A harness with the installed games, both enabled. */
-export function gameHarness(env: Record<string, string> = {}): Harness {
+/** The seed of a test's games: `GAME_SEED` to replay a failure, otherwise a fresh one. */
+function gameSeed(): number {
+  const given = process.env["GAME_SEED"];
+  return given === undefined ? (crypto.getRandomValues(new Uint32Array(1))[0] ?? 0) : Number(given);
+}
+
+/**
+ * A harness with the installed games, both enabled, playing from one seeded source (03 §4: only
+ * tests seed). Call it in a test or `beforeEach`: a failure prints the seed, and `GAME_SEED=<seed>`
+ * replays the same deals, seat orders and draws.
+ */
+export function gameHarness(
+  env: Record<string, string> = {},
+  options: Omit<HarnessOptions, "random"> = {},
+): Harness {
+  const seed = gameSeed();
+  onTestFailed(() => {
+    process.stderr.write(`game randomness seed: GAME_SEED=${String(seed)}\n`);
+  });
+  const source = seededRandom(seed);
   return createHarness(
     { ...PROD_ENV, ENABLED_GAMES: "words,example", ...env },
-    { games: installedGames },
+    { games: installedGames, ...options, random: () => source },
   );
 }
 

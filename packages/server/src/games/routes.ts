@@ -56,6 +56,7 @@ import {
   summaryOf,
   viewOf,
 } from "./present.js";
+import type { RandomFactory } from "./random.js";
 import type { GameRegistry } from "./registry.js";
 import type { ResourceProvider } from "./resources.js";
 import { lastOptionsOf } from "./settings.js";
@@ -72,6 +73,8 @@ export interface GameRouteOptions {
   readonly registry: GameRegistry;
   readonly resources: ResourceProvider;
   readonly keys: () => Promise<Subkeys>;
+  /** Each transition's source of randomness (WebCrypto in production, seeded in tests). */
+  readonly random: RandomFactory;
 }
 
 /** OpenAPI's `{id}` path parameters as Hono's `:id`, for middleware registration. */
@@ -207,6 +210,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       definition,
       options: parsed.data,
       state: loaded.game.state === null ? null : (JSON.parse(loaded.game.state) as unknown),
+      random: options.random(),
     };
   };
 

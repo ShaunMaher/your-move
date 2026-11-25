@@ -17,6 +17,7 @@ import {
   type InstalledGame,
   parseConfig,
   type Platform,
+  type RandomFactory,
   type Repositories,
 } from "@your-move/server";
 
@@ -112,6 +113,8 @@ export interface HarnessOptions {
   readonly wrapRepos?: (repos: Repositories) => Repositories;
   /** The installed games (the generated registry); none by default. */
   readonly games?: readonly InstalledGame[];
+  /** The games' randomness; WebCrypto by default, a seeded source in the game tests. */
+  readonly random?: RandomFactory;
 }
 
 export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {}): Harness {
@@ -144,7 +147,11 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     dictionaries: nodeDictionaries(DICTIONARIES),
     smtp: capture,
   });
-  const app = createApp({ platform, games });
+  const app = createApp({
+    platform,
+    games,
+    ...(options.random === undefined ? {} : { random: options.random }),
+  });
   const background = createBackgroundTracker();
   const origin = config.publicUrl;
   const captured = (): readonly CapturedEmail[] => (platform.email.captured ?? capture.captured)();

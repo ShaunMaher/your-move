@@ -9,6 +9,7 @@ import { readSessionCookie } from "./auth/session.js";
 import { isLocalDev } from "./config/local-dev.js";
 import { deriveSubkeys, type Subkeys } from "./crypto/subkeys.js";
 import { EngineFault } from "./games/engine-fault.js";
+import { cryptoRandom, type RandomFactory } from "./games/random.js";
 import { createGameRegistry, type InstalledGame } from "./games/registry.js";
 import { createResourceProvider } from "./games/resources.js";
 import { registerGameRoutes } from "./games/routes.js";
@@ -24,6 +25,11 @@ export interface AppOptions {
   readonly platform: Platform;
   /** The generated registry, injected by the runtime; the core never imports it (02 §7.3). */
   readonly games: readonly InstalledGame[];
+  /**
+   * Each game transition's source of randomness. Omitted in production, which always uses
+   * WebCrypto (03 §4); only tests pass a seeded source, so a failing game can be replayed.
+   */
+  readonly random?: RandomFactory;
 }
 
 /** The HTTP application `createApp` returns. */
@@ -216,7 +222,13 @@ export function createApp(options: AppOptions): App {
   let subkeys: Promise<Subkeys> | null = null;
   const keys = (): Promise<Subkeys> => (subkeys ??= deriveSubkeys(config.appSecret));
   registerAuthRoutes(app, { platform, keys });
-  registerGameRoutes(app, { platform, registry, resources, keys });
+  registerGameRoutes(app, {
+    platform,
+    registry,
+    resources,
+    keys,
+    random: options.random ?? cryptoRandom,
+  });
 
   // Dev only (06 §4, 09 §2, 08 T19): registered only in local-dev mode, so a production config
   // answers 404 from the catch-all below.

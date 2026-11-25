@@ -1,13 +1,19 @@
 /**
- * The one production randomness source (docs/spec/03-architecture.md §4, 08 T10): WebCrypto,
- * unbiased, and recorded for replay (02 §2.1 rule 2, §5). Each draw is stored as a
- * `[maxExclusive, value]` pair, so a replay notices when an engine asks for a different range
- * (10 M3, M1 review P-20).
+ * Game randomness (docs/spec/03-architecture.md §4, 08 T10): the one production source, WebCrypto,
+ * unbiased, built here and nowhere else; and the recording every transition wraps around its
+ * source for replay (02 §2.1 rule 2, §5). Each draw is stored as a `[maxExclusive, value]` pair, so
+ * a replay notices when an engine asks for a different range (10 M3, M1 review P-20).
+ *
+ * The source is injected (`createApp({ random })`): production passes nothing and gets
+ * {@link cryptoRandom}; only tests pass a seeded one, so a failing game can be replayed.
  */
 import { assertRange, type RandomSource } from "@your-move/sdk";
 
 /** One recorded draw: the range asked for and the value returned. */
 export type Draw = readonly [maxExclusive: number, value: number];
+
+/** The source of one transition's randomness. */
+export type RandomFactory = () => RandomSource;
 
 export interface RecordedRandom {
   readonly rng: RandomSource;
@@ -28,15 +34,26 @@ function cryptoInt(maxExclusive: number): number {
   }
 }
 
-/** A recording WebCrypto source for one transition. */
-export function recordedCryptoRandom(): RecordedRandom {
+/** The production source: WebCrypto (03 §4). */
+export const cryptoRandom: RandomFactory = () => ({
+  nextInt(maxExclusive) {
+    assertRange(maxExclusive);
+    return cryptoInt(maxExclusive);
+  },
+});
+
+/** Records every draw from `source` as `[maxExclusive, value]`. */
+export function recorded(source: RandomSource): RecordedRandom {
   const draws: Draw[] = [];
   return {
     draws,
     rng: {
       nextInt(maxExclusive) {
         assertRange(maxExclusive);
-        const value = cryptoInt(maxExclusive);
+        const value = source.nextInt(maxExclusive);
+        if (!Number.isInteger(value) || value < 0 || value >= maxExclusive) {
+          throw new RangeError("nextInt: the source returned a value out of range");
+        }
         draws.push([maxExclusive, value]);
         return value;
       },

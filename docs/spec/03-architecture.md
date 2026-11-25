@@ -140,7 +140,8 @@ never touches a Drizzle database object. Instead:
 **Randomness.** Production randomness always comes from WebCrypto (`crypto.getRandomValues`,
 `crypto.randomUUID`). The engine receives it as an explicit `RandomSource` argument (02 §2); the
 server constructs the WebCrypto-backed source in exactly one place. Only tests construct seeded
-sources.
+sources: `createApp` takes an optional `random` source factory that runtimes never pass, and the
+framework's tests pass a seeded one and print its seed on failure.
 
 ## 5. Storage
 

@@ -23,6 +23,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@your-move/dictionary": "workspace:*",
+    "@your-move/testkit": "workspace:*",
     "@your-move/web": "workspace:*",
     "esbuild": "catalog:",
     "fast-check": "catalog:",

@@ -7,7 +7,7 @@ import { z } from "zod";
 import type { GamePlayerRecord, GameRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
 import { accept, rerank } from "./lifecycle.js";
-import { recordedCryptoRandom } from "./random.js";
+import { cryptoRandom, recorded } from "./random.js";
 import { createGameRegistry, GameConfigError } from "./registry.js";
 import {
   createResourceProvider,
@@ -65,9 +65,9 @@ describe("remembered options (05 §Remembered options)", () => {
   });
 });
 
-describe("recordedCryptoRandom", () => {
+describe("the recorded WebCrypto source", () => {
   it("records every draw as [max, value] and stays in range", () => {
-    const { rng, draws } = recordedCryptoRandom();
+    const { rng, draws } = recorded(cryptoRandom());
     for (const max of [1, 2, 7, 2 ** 32]) {
       const value = rng.nextInt(max);
       expect(value).toBeGreaterThanOrEqual(0);
@@ -78,7 +78,7 @@ describe("recordedCryptoRandom", () => {
   });
 
   it("is roughly uniform", () => {
-    const { rng } = recordedCryptoRandom();
+    const { rng } = recorded(cryptoRandom());
     const counts = [0, 0, 0];
     for (let i = 0; i < 3000; i++) {
       const value = rng.nextInt(3);
@@ -315,6 +315,7 @@ describe("an automatic start validateStart refuses (02 §4 Start, step 2)", () =
       } as unknown as AnyGameDefinition,
       options: {},
       state: null,
+      random: cryptoRandom(),
     };
     expect(accept(ctx, invited, 5)).toEqual({
       game: { updatedAt: 5 },

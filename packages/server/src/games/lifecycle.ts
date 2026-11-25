@@ -21,7 +21,7 @@ import type {
   GameWriteSet,
   PastOpponentPair,
 } from "../db/repositories.js";
-import { recordedCryptoRandom, type Draw } from "./random.js";
+import { type Draw, recorded } from "./random.js";
 
 /** A loaded game with its parsed options and, once started, its parsed state. */
 export interface GameContext {
@@ -31,6 +31,8 @@ export interface GameContext {
   readonly options: unknown;
   /** The module state; null in the lobby. */
   readonly state: unknown;
+  /** This transition's source of randomness, recorded for replay (02 §5). */
+  readonly random: RandomSource;
 }
 
 /** The final views written when a started game ends (04 `games.final_views`). */
@@ -121,7 +123,7 @@ export function moduleTransition(
 ): ModuleOutcome {
   const { definition, game } = ctx;
   const { seat, kind, now } = input;
-  const random = recordedCryptoRandom();
+  const random = recorded(ctx.random);
   const { state, record } = input.run(random.rng);
   const describe = definition.describe(record);
   const result = definition.result(state);
@@ -269,7 +271,7 @@ function startWrites(ctx: GameContext, now: number): GameWriteSet | GameError {
   const checked = definition.validateStart(ctx.options, joined.length);
   if (isGameError(checked)) return checked;
 
-  const random = recordedCryptoRandom();
+  const random = recorded(ctx.random);
   const order = game.seatOrder === "random" ? shuffle(joined, random.rng) : joined;
   const state = definition.setup({ options: ctx.options, seats: order.length, rng: random.rng });
   const toAct = new Set(definition.toAct(state));

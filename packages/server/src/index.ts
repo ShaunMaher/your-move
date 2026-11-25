@@ -13,6 +13,7 @@ export {
   type OpenApiDocument,
   type Platform,
 } from "./app.js";
+export type { RandomFactory } from "./games/random.js";
 export { normaliseAddress, type NormalisedEmail } from "./accounts/email.js";
 export {
   resolveClientIp,
