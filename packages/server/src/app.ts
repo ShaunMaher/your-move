@@ -16,9 +16,9 @@ import { isLocalDev } from "./config/local-dev.js";
 import { deriveSubkeys, type Subkeys } from "./crypto/subkeys.js";
 import { registerUnsubscribeRoutes } from "./email/unsubscribe-routes.js";
 import { EngineFault } from "./games/engine-fault.js";
+import { instanceGames } from "./games/instance.js";
 import { cryptoRandom, type RandomFactory } from "./games/random.js";
-import { createGameRegistry, type InstalledGame } from "./games/registry.js";
-import { createResourceProvider } from "./games/resources.js";
+import type { InstalledGame } from "./games/registry.js";
 import { registerGameRoutes } from "./games/routes.js";
 import { ApiError } from "./http/api-error.js";
 import { webManifest } from "./http/manifest.js";
@@ -145,16 +145,7 @@ function respondedRoute(c: Context): string {
 export function createApp(options: AppOptions): App {
   const { platform } = options;
   const { config, log } = platform;
-  const resources = createResourceProvider({
-    dictionaries: platform.dictionaries,
-    enabled: config.dictionariesEnabled,
-    now: () => platform.now().getTime(),
-  });
-  const registry = createGameRegistry(options.games, {
-    gameConfig: config.gameConfig,
-    enabledGames: config.enabledGames,
-    resources: resources.enabled(),
-  });
+  const { registry, resources } = instanceGames(platform, options.games);
 
   const app = new OpenAPIHono<AppEnv>({
     // Request validation failures never echo input values (09 §5).

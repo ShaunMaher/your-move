@@ -12,7 +12,7 @@ import type { AppConfig } from "../config/parse.js";
 import { emailId, hmacHex, type Subkeys, verifyHmacHex } from "../crypto/subkeys.js";
 import type { OtpPurpose, Repositories } from "../db/repositories.js";
 import type { Logger } from "../log.js";
-import { checkLimits, type LimitCheck, type LimitResult } from "./limits.js";
+import { alertOnCrossing, checkLimits, type LimitCheck } from "./limits.js";
 
 const CODE_TTL_MS = 10 * 60_000;
 const MAX_ATTEMPTS = 5;
@@ -72,18 +72,6 @@ export interface IssueOutcome {
  * the same counter row (06 §3.2). Never read.
  */
 const SILENT_COUNTER = "silent";
-
-/**
- * Logs an instance-wide limit as an alert (08 §4) once, on the request that first crosses it, so
- * a sustained flood doesn't also flood the logs.
- */
-function alertOnCrossing(log: Logger, results: readonly LimitResult[]): void {
-  for (const result of results) {
-    if (result.exceeded && result.estimate - 1 <= result.limit) {
-      log.error("instance-wide limit exceeded", { alert: result.name });
-    }
-  }
-}
 
 /** The per-bucket checks of one limit. */
 function bucketChecks(

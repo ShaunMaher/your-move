@@ -18,6 +18,7 @@ import {
   UserSettingsSchema,
 } from "@your-move/shared";
 import type { Context } from "hono";
+import { z } from "zod";
 
 import { validateDisplayName } from "../accounts/display-name.js";
 import { normaliseAddress } from "../accounts/email.js";
@@ -73,8 +74,16 @@ function fail<S extends ErrorStatus, C extends Code>(c: Context, status: S, code
   return c.json({ error: { code, message: MESSAGES[code] } }, status);
 }
 
-/** Stored settings: known keys only, anything unreadable treated as unset. */
-const storedSettings = UserSettingsSchema.partial().catch({});
+/**
+ * Stored settings: known keys only, each read on its own, so one unreadable value counts as unset
+ * without taking the others with it (A6-P-12).
+ */
+const storedSettings = z
+  .object({
+    whoCanAddMe: UserSettingsSchema.shape.whoCanAddMe.optional().catch(undefined),
+    emailNudges: UserSettingsSchema.shape.emailNudges.optional().catch(undefined),
+  })
+  .catch({});
 
 /** The `Me` view of a user (05 §Auth & account). */
 function toMe(user: UserRecord, adminEmails: readonly string[], minAge: number): Me {
@@ -303,11 +312,16 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     }
     const nudges = body.settings?.emailNudges;
     if (nudges !== undefined) {
-      // Turning nudges on records the address's emailId, which a nudges unsubscribe link finds
-      // the account by (04 `users.email_id`, 05 §Email links).
-      const id =
-        nudges && user.email !== null ? await emailId(await options.keys(), user.email) : null;
-      await repos.users.setEmailNudges(user.id, { enabled: nudges, emailId: id, updatedAt: now() });
+      if (nudges) {
+        // Nudges go to the account's address: an account without one can't have them.
+        if (user.email === null) return fail(c, 400, "BAD_REQUEST");
+        // Records the address's emailId, which a nudges unsubscribe link finds the account by
+        // (04 `users.email_id`, 05 §Email links).
+        const id = await emailId(await options.keys(), user.email);
+        await repos.users.setEmailNudges(user.id, { enabled: true, emailId: id, updatedAt: now() });
+      } else {
+        await repos.users.setEmailNudges(user.id, { enabled: false, updatedAt: now() });
+      }
       // The settings were changed in SQL, key by key: read back what is stored now.
       user = (await repos.users.findById(user.id)) ?? user;
     }

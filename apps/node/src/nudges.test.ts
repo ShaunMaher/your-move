@@ -3,7 +3,13 @@
  * §8; 05 §Email links; 08 T6, T14, T17, T18; alpha A6), end to end on the real app and a real
  * SQLite database: the setting, the sweep's rules, the email, and the one-click unsubscribe.
  */
-import { type CapturedEmail, deriveSubkeys, type EmailSender } from "@your-move/server";
+import {
+  type CapturedEmail,
+  deriveSubkeys,
+  emailId as emailIdOf,
+  type EmailSender,
+  normaliseAddress,
+} from "@your-move/server";
 import { unsubscribeToken } from "@your-move/server/testing";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -18,7 +24,11 @@ import {
   signUp,
   transition,
 } from "./games-support.js";
-import { DAY, type Harness, HOUR, MINUTE, T0 } from "./test-harness.js";
+import { codeOf, DAY, type Harness, HOUR, MINUTE, T0 } from "./test-harness.js";
+
+function fail(): never {
+  throw new Error("unreachable");
+}
 
 let h: Harness;
 afterEach(() => {
@@ -101,6 +111,63 @@ describe("the emailNudges setting (PATCH /api/v1/me)", () => {
     const renamed = await call<Me>(h, ada, "PATCH", "/api/v1/me", { displayName: "Ada L" });
     expect(renamed.body.settings.emailNudges).toBe(true);
     expect((await setNudges(ada, false)).settings.emailNudges).toBe(false);
+    // Off clears the stored emailId (A6-S-4).
+    expect(h.query("SELECT email_id FROM users WHERE id = ?", ada.id)).toEqual([
+      { email_id: null },
+    ]);
+  });
+
+  it("reads each stored setting on its own: one unreadable value doesn't reset the others (A6-P-12)", async () => {
+    h = gameHarness();
+    const ada = await signUp(h, "Ada");
+    h.exec(
+      "UPDATE users SET settings = ? WHERE id = ?",
+      JSON.stringify({ whoCanAddMe: "nobody", emailNudges: "yes" }),
+      ada.id,
+    );
+    expect((await call<Me>(h, ada, "GET", "/api/v1/me")).body.settings).toEqual({
+      whoCanAddMe: "nobody",
+      emailNudges: false,
+    });
+    h.exec("UPDATE users SET settings = '[1,2]' WHERE id = ?", ada.id);
+    expect((await call<Me>(h, ada, "GET", "/api/v1/me")).body.settings).toEqual({
+      whoCanAddMe: "pastOpponents",
+      emailNudges: false,
+    });
+  });
+
+  it("refuses to turn nudges on for an account without an address (A6-P-8)", async () => {
+    h = gameHarness();
+    const ada = await signUp(h, "Ada");
+    h.exec("UPDATE users SET email = NULL WHERE id = ?", ada.id);
+    expect(
+      (await call(h, ada, "PATCH", "/api/v1/me", { settings: { emailNudges: true } })).status,
+    ).toBe(400);
+    expect(h.query("SELECT settings, email_id FROM users WHERE id = ?", ada.id)).toEqual([
+      { settings: "{}", email_id: null },
+    ]);
+  });
+
+  it("turning nudges on lifts an earlier unsubscribe-link suppression, never a bounce (A6-P-3)", async () => {
+    h = gameHarness();
+    const { ada, bo } = await started({});
+    const keys = await deriveSubkeys(h.platform.config.appSecret);
+    const idOf = async (player: Player) =>
+      emailIdOf(keys, normaliseAddress(player.email) ?? fail());
+    h.exec(
+      "INSERT INTO email_suppressions (email_hash, reason, created_at) VALUES (?, 'unsubscribed', ?), (?, 'bounced', ?)",
+      await idOf(ada),
+      T0,
+      await idOf(bo),
+      T0,
+    );
+    await setNudges(ada, true);
+    await setNudges(bo, true);
+    expect(h.query("SELECT reason FROM email_suppressions")).toEqual([{ reason: "bounced" }]);
+    h.setTime(T0 + DAY);
+    expect((await h.sweep()).nudges).toMatchObject({ due: 1, sent: 1 });
+    expect(await nudgesTo(ada)).toHaveLength(1);
+    expect(await nudgesTo(bo)).toHaveLength(0);
   });
 
   it("keeps the other stored settings and records the address's emailId", async () => {
@@ -141,7 +208,13 @@ describe("the sweep's email nudges (03 §7)", () => {
     h = gameHarness();
     await started();
     h.advance(3 * DAY);
-    expect((await h.sweep()).nudges).toEqual({ due: 0, sent: 0, failed: 0, skipped: 0 });
+    expect((await h.sweep()).nudges).toEqual({
+      due: 0,
+      sent: 0,
+      failed: 0,
+      skipped: 0,
+      capped: false,
+    });
     expect((await h.emails()).filter((email) => email.subject === SUBJECT)).toEqual([]);
   });
 
@@ -206,15 +279,81 @@ describe("the sweep's email nudges (03 §7)", () => {
     expect((await h.sweep()).nudges?.due).toBe(0);
   });
 
-  it("skips a game whose rules version isn't installed (an orphan) without claiming it", async () => {
+  it("never lets orphaned games fill the queue: 100 orphaned seats and one normal one (A6-P-1)", async () => {
     h = gameHarness();
-    const { gameId } = await started({ bo: true });
-    h.exec("UPDATE games SET game_version = 99 WHERE id = ?", gameId);
+    const { bo, gameId } = await started({ bo: true });
+    const repos = h.platform.repos;
+    for (let i = 0; i < 100; i++) {
+      const id = crypto.randomUUID();
+      await repos.games.create(
+        {
+          id,
+          gameType: "example",
+          gameVersion: 99,
+          options: "{}",
+          status: "active",
+          seats: 2,
+          turnTimeoutDays: 3,
+          seatOrder: "join",
+          aiAssistance: "off",
+          state: "{}",
+          lastActionAt: T0 - DAY,
+          createdAt: T0 - DAY,
+          updatedAt: T0 - DAY,
+          startedAt: T0 - DAY,
+        },
+        [
+          {
+            id: crypto.randomUUID(),
+            userId: bo.id,
+            seat: 0,
+            state: "playing",
+            joinedAt: T0 - DAY,
+            toAct: 1,
+            // Waiting longer than the real game: first in the queue if orphans were in it.
+            toActSince: T0 - DAY,
+          },
+        ],
+      );
+    }
     h.setTime(T0 + DAY);
-    expect((await h.sweep()).nudges).toEqual({ due: 1, sent: 0, failed: 0, skipped: 1 });
+    expect((await h.sweep()).nudges).toMatchObject({ due: 1, sent: 1, skipped: 0 });
+    const [email] = await nudgesTo(bo);
+    expect(email?.text).toContain(`/g/${gameId}`);
     expect(
-      h.query("SELECT last_nudged_at FROM game_players WHERE last_nudged_at IS NOT NULL"),
-    ).toEqual([]);
+      h.query("SELECT count(*) AS n FROM game_players WHERE last_nudged_at IS NOT NULL"),
+    ).toEqual([{ n: 1 }]);
+  });
+
+  it("stops at the instance-wide daily cap without claiming, and alerts once (A6-S-1)", async () => {
+    h = gameHarness({ LIMIT_NUDGE_EMAILS_PER_DAY: "1" });
+    const { ada, bo } = await started({ ada: true, bo: true });
+    h.setTime(T0 + DAY);
+    expect((await h.sweep()).nudges).toMatchObject({ due: 2, sent: 1, capped: true });
+    const alerts = () =>
+      h.logs.filter(
+        (line) => line["alert"] === "NUDGE_EMAILS_PER_DAY" && line["level"] === "error",
+      );
+    expect(alerts()).toHaveLength(1);
+    expect(
+      h.query("SELECT count(*) AS n FROM game_players WHERE last_nudged_at IS NOT NULL"),
+    ).toEqual([{ n: 1 }]);
+    // The next run reads the cap and does nothing more, with no second alert.
+    h.advance(15 * MINUTE);
+    expect((await h.sweep()).nudges).toEqual({
+      due: 0,
+      sent: 0,
+      failed: 0,
+      skipped: 0,
+      capped: true,
+    });
+    expect(alerts()).toHaveLength(1);
+    const sentTo = [...(await nudgesTo(ada)), ...(await nudgesTo(bo))];
+    expect(sentTo).toHaveLength(1);
+    // Two days on, the window has passed and the other seat gets its nudge.
+    h.advance(2 * DAY);
+    await h.sweep();
+    expect([...(await nudgesTo(ada)), ...(await nudgesTo(bo))].length).toBeGreaterThan(1);
   });
 
   it("sends nothing to a suspended user or a suppressed address", async () => {
@@ -243,7 +382,7 @@ describe("the sweep's email nudges (03 §7)", () => {
     expect(email?.listUnsubscribe).toBe(unsubscribe);
     expect(email?.text).toBe(
       [
-        "It's your turn in your Example game with Ada. It has been waiting for you for a day.",
+        "It's your turn in your Example game with Ada. It has been waiting for you for over a day.",
         "Last move: Ada played a card in round 1",
         `Play now: https://play.example.org/g/${gameId}`,
         "You're getting this because you turned on email nudges in Family Games: at most one a day for each game that's waiting for you.",
@@ -251,11 +390,40 @@ describe("the sweep's email nudges (03 §7)", () => {
         `Or unsubscribe with one click: ${unsubscribe}`,
       ].join("\n\n") + "\n",
     );
-    // No address, hand or other state anywhere in it.
+    // No address of anyone but the recipient anywhere in it.
     const everything = JSON.stringify(email);
     expect(everything).not.toContain(ada.email);
     expect(everything.split(bo.email)).toHaveLength(2); // only the To
-    expect(everything).not.toContain('"hand"');
+  });
+
+  it("never shows a rack: neither player's tiles are in a words nudge (T18, A6-P-6)", async () => {
+    h = gameHarness();
+    const ada = await signUp(h, "Ada");
+    const bo = await signUp(h, "Bo");
+    await setNudges(ada, true);
+    const created = await createGame(h, ada, {
+      gameType: "words",
+      invitees: [{ email: bo.email }],
+    });
+    expect((await transition(h, bo, created.id, "accept")).body.game.status).toBe("active");
+    const racks: string[] = [];
+    for (const player of [ada, bo]) {
+      const { view } = await getGame(h, player, created.id);
+      const rack = (view as { yourRack: string[] | null }).yourRack ?? [];
+      expect(rack.length).toBeGreaterThan(0);
+      racks.push(rack.join(""), rack.join(" "), rack.join(", "), JSON.stringify(rack));
+    }
+    h.setTime(T0 + DAY);
+    await h.sweep();
+    const [email] = (await h.emails()).filter(
+      (sent) => sent.to === ada.email && sent.subject === "It's your turn in Words on Family Games",
+    );
+    expect(email).toBeDefined();
+    for (const part of [email?.subject, email?.text, email?.html]) {
+      const lower = (part ?? "").toLowerCase();
+      for (const rack of racks) expect(lower).not.toContain(rack.toLowerCase());
+    }
+    expect(email?.text).toContain("It's your turn in your Words game with Bo.");
   });
 
   it("escapes hostile display names in the HTML and keeps them out of the subject (T7, T14)", async () => {
@@ -287,7 +455,7 @@ describe("the sweep's email nudges (03 §7)", () => {
     const { ada, bo } = await started({ ada: true, bo: true });
     h.setTime(T0 + DAY);
     const report = await h.sweep();
-    expect(report.nudges).toEqual({ due: 2, sent: 0, failed: 2, skipped: 0 });
+    expect(report.nudges).toEqual({ due: 2, sent: 0, failed: 2, skipped: 0, capped: false });
     const errors = h.logs.filter((line) => line["level"] === "error");
     expect(errors).toEqual([
       expect.objectContaining({ msg: "email nudge not sent", errorClass: "TypeError" }),
@@ -337,6 +505,7 @@ describe("the unsubscribe route (05 §Email links, T17)", () => {
     const page = await first.text();
     expect(page).toContain("Email nudges are off");
     expect(await nudgesOf(bo)).toBe(false);
+    expect(h.query("SELECT email_id FROM users WHERE id = ?", bo.id)).toEqual([{ email_id: null }]);
     const again = await form(token, null);
     expect(again.status).toBe(200);
     expect(await again.text()).toBe(page);
@@ -415,12 +584,23 @@ describe("the unsubscribe route (05 §Email links, T17)", () => {
     expect(h.query("SELECT reason FROM email_suppressions")).toEqual([{ reason: "bounced" }]);
   });
 
-  it("a valid nudges token for an account that no longer exists changes nothing", async () => {
+  it("a valid nudges token for an account that was deleted shows the same page and changes nothing", async () => {
     h = gameHarness();
     const ada = await signUp(h, "Ada");
+    const gone = await signUp(h, "Gone");
     await setNudges(ada, true);
+    await setNudges(gone, true);
+    const [row] = h.query("SELECT email_id FROM users WHERE id = ?", gone.id);
     const keys = await deriveSubkeys(h.platform.config.appSecret);
-    const token = await unsubscribeToken(keys, { purpose: "nudges", emailId: "b".repeat(64) });
+    const token = await unsubscribeToken(keys, {
+      purpose: "nudges",
+      emailId: String(row?.["email_id"]),
+    });
+    // The account is deleted for real, through the step-up flow (06 §7).
+    expect((await call(h, gone, "POST", "/api/v1/me/delete/otp", {})).status).toBe(202);
+    const code = codeOf(await h.lastEmail(gone.email));
+    expect((await call(h, gone, "DELETE", "/api/v1/me", { code })).status).toBe(204);
+    expect(h.query("SELECT id FROM users WHERE id = ?", gone.id)).toEqual([]);
     const response = await form(token);
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("Email nudges are off");

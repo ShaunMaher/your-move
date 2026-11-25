@@ -137,7 +137,7 @@ export interface NudgeContext {
 export function nudgeEmail(to: NormalisedEmail, context: NudgeContext): EmailMessage {
   const withWhom = context.opponents.length === 0 ? "" : ` with ${namesList(context.opponents)}`;
   const paragraphs: Paragraph[] = [
-    `It's your turn in your ${context.gameName} game${withWhom}. It has been waiting for you for a day.`,
+    `It's your turn in your ${context.gameName} game${withWhom}. It has been waiting for you for over a day.`,
     ...(context.lastMove === null ? [] : [`Last move: ${context.lastMove}`]),
     { text: "Play now:", href: context.gameUrl },
     `You're getting this because you turned on email nudges in ${context.appName}: at most one a day for each game that's waiting for you.`,

@@ -89,8 +89,18 @@ async function build(env: Readonly<Record<string, unknown>>): Promise<Built> {
         trustedPeers: [],
       }),
   };
-  return { app: createApp({ platform, games }), sweep: createSweep({ platform, games }) };
+  return {
+    app: createApp({ platform, games }),
+    sweep: createSweep({ platform, games, nudgesPerRun: WORKER_NUDGES_PER_RUN }),
+  };
 }
+
+/**
+ * Email nudges one Cron Trigger invocation sends at most (03 §7). Each costs several D1 queries
+ * and a provider subrequest, and an invocation's subrequest budget is small (09 §3); re-measure
+ * at the first Workers deployment (10).
+ */
+const WORKER_NUDGES_PER_RUN = 10;
 
 let built: Promise<Built> | null = null;
 
@@ -130,9 +140,14 @@ export default {
     return worker.app.fetch(request, env, ctx);
   },
   // The Cron Trigger (`*/15 * * * *`, wrangler.example.toml): one sweep run (03 §8). The sweep
-  // logs its own failures and never rejects.
-  async scheduled(_controller, env, ctx) {
+  // logs its own failures and never rejects; a run with any is reported as a failed invocation,
+  // so it shows in the Cron Trigger's history, and isn't retried (the next run is 15 minutes away).
+  async scheduled(controller, env) {
     const worker = await ready(env);
-    if (worker !== null) ctx.waitUntil(worker.sweep());
+    const nudges = worker === null ? null : (await worker.sweep()).nudges;
+    if (nudges === null || nudges.failed > 0) {
+      controller.noRetry();
+      throw new Error("the sweep did not complete cleanly; its log says why");
+    }
   },
 } satisfies ExportedHandler<Record<string, unknown>>;

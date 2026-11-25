@@ -30,6 +30,8 @@ export interface GameType {
   readonly config: ModuleConfig;
   /** Offered for new games (`ENABLED_GAMES`); a disabled type keeps serving its games. */
   readonly enabled: boolean;
+  /** Every rules version this build exports, ascending. */
+  readonly versions: readonly number[];
   /** The definition of one rules version, if this build still exports it. */
   engine(version: number): AnyGameDefinition | undefined;
 }
@@ -39,6 +41,8 @@ export interface GameRegistry {
   get(type: string): GameType | undefined;
   /** The enabled game types, in installation order. */
   enabled(): readonly GameType[];
+  /** Every installed game type, enabled or not, in installation order. */
+  all(): readonly GameType[];
 }
 
 /** A startup refusal from a game's config (02 §2.1 rule 8): names keys, never values. */
@@ -134,13 +138,16 @@ export function createGameRegistry(
       latest: byVersion.get(latest.version) ?? latest,
       config,
       enabled: options.enabledGames.includes(type),
+      versions: [...byVersion.keys()],
       engine: (version) => byVersion.get(version),
     });
   }
   if (issues.length > 0) throw new GameConfigError([...new Set(issues)]);
-  const enabled = [...types.values()].filter((type) => type.enabled);
+  const all = [...types.values()];
+  const enabled = all.filter((type) => type.enabled);
   return {
     get: (type) => types.get(type),
     enabled: () => enabled,
+    all: () => all,
   };
 }

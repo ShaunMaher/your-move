@@ -47,6 +47,8 @@ const LIMITS = {
   // The inbound invitation cap (06 §6.7): per target and creator, and per target in total.
   INVITATIONS_RECEIVED_PAIR_DAY: { limit: 1, windowMs: DAY },
   INVITATIONS_RECEIVED_DAY: { limit: 3, windowMs: DAY },
+  // "It's your turn" email nudges sent, instance-wide (alpha A6, 03 §7).
+  NUDGE_EMAILS_PER_DAY: { limit: 200, windowMs: DAY },
 } as const satisfies Record<string, LimitRule>;
 
 export type LimitName = keyof typeof LIMITS;
@@ -115,4 +117,21 @@ export async function checkLimits(
       exceeded: check.amount === 0 ? estimate >= limit : estimate > limit,
     };
   });
+}
+
+/**
+ * Logs an instance-wide limit as an alert (08 §4) once, on the request that first crosses it, so
+ * a sustained flood doesn't also flood the logs.
+ */
+export function alertOnCrossing(
+  // The logger's one method used here, so this module needn't import the logger (which reads the
+  // config, which reads the limit names from here).
+  log: { error(msg: string, fields: { readonly alert: string }): void },
+  results: readonly LimitResult[],
+): void {
+  for (const result of results) {
+    if (result.exceeded && result.estimate - 1 <= result.limit) {
+      log.error("instance-wide limit exceeded", { alert: result.name });
+    }
+  }
 }

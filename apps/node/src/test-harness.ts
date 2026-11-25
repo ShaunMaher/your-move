@@ -30,6 +30,7 @@ import { nodeRepositories, openSqlite } from "./db/sqlite.js";
 import { nodeDictionaries } from "./dictionaries.js";
 import type { NodeConfig } from "./node-config.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
+import { NODE_NUDGES_PER_RUN } from "./sweeper.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
 /** The dictionary package's served layout (built by `pnpm build`, or the tests' global setup). */
@@ -176,7 +177,7 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     games,
     ...(options.random === undefined ? {} : { random: options.random }),
   });
-  const sweep = createSweep({ platform, games });
+  const sweep = createSweep({ platform, games, nudgesPerRun: NODE_NUDGES_PER_RUN });
   const background = createBackgroundTracker();
   let scheduled = 0;
   const countedContext = (): ReturnType<typeof background.context> => {

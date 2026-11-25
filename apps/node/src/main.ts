@@ -34,7 +34,7 @@ import { scrubSecrets } from "./env.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
 import { createNodeApp } from "./server.js";
 import { isRefusal, startup, type Started, verifyEmail } from "./startup.js";
-import { startSweeper } from "./sweeper.js";
+import { NODE_NUDGES_PER_RUN, startSweeper } from "./sweeper.js";
 
 function exitWith(message: string): never {
   console.error(message);
@@ -171,7 +171,7 @@ const server = serve(
 );
 
 // Scheduled work (03 §8): the alpha's sweep sends due email nudges.
-const sweeper = startSweeper(createSweep({ platform, games }));
+const sweeper = startSweeper(createSweep({ platform, games, nudgesPerRun: NODE_NUDGES_PER_RUN }));
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {

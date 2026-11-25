@@ -186,6 +186,7 @@ describe("Worker Cron Trigger (03 §8, alpha A6)", () => {
       DB: Parameters<typeof d1Repositories>[0];
     };
     const repos = d1Repositories(env.DB);
+    const db = env.DB as unknown as { prepare(sql: string): { first<T>(): Promise<T | null> } };
     const userId = crypto.randomUUID();
     const email = normaliseAddress(`cron-${userId}@example.org`);
     if (email === null) throw new Error("bad address");
@@ -235,10 +236,16 @@ describe("Worker Cron Trigger (03 §8, alpha A6)", () => {
         { id: crypto.randomUUID(), seat: 1, state: "playing", joinedAt: long },
       ],
     );
+    // An invocation is "ok" only when every sweep step ran and no nudge failed (apps/worker).
     const result = await harness
       .getWorker()
       .scheduled({ scheduledTime: new Date(), cron: "*/15 * * * *" });
     expect(result.outcome).toBe("ok");
+    // The nudge was counted against the daily cap, then claimed: the whole send path ran.
+    const counted = await db
+      .prepare("SELECT sum(count) AS n FROM rate_limits WHERE key = 'NUDGE_EMAILS_PER_DAY:all'")
+      .first<{ n: number }>();
+    expect(counted?.n).toBe(1);
     const players = await repos.games.players(gameId);
     expect(players.find((row) => row.id === playerId)?.lastNudgedAt).toEqual(expect.any(Number));
   });

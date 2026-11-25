@@ -4,6 +4,7 @@
  * others arrive with their milestones. A failing step is logged by class and the rest still run.
  */
 import { deriveSubkeys, type Subkeys } from "../crypto/subkeys.js";
+import { instanceGames } from "../games/instance.js";
 import type { InstalledGame } from "../games/registry.js";
 import type { Platform } from "../platform.js";
 import { type NudgeReport, sendDueNudges } from "./nudges.js";
@@ -12,6 +13,12 @@ export interface SweepOptions {
   readonly platform: Platform;
   /** The generated registry, as `createApp` gets it. */
   readonly games: readonly InstalledGame[];
+  /**
+   * Email nudges one run sends at most (03 §7). The runtime's budget for one invocation bounds
+   * it: 100 on Node, 10 on Workers, whose subrequest and D1-query limits per Cron Trigger
+   * invocation each nudge spends several of (09 §3).
+   */
+  readonly nudgesPerRun: number;
 }
 
 /** What one run did; a step that failed reports null. */
@@ -21,9 +28,13 @@ export interface SweepReport {
 
 export type Sweep = () => Promise<SweepReport>;
 
-/** Builds the sweep for a runtime to schedule. Each call is one run; it never rejects. */
+/**
+ * Builds the sweep for a runtime to schedule. Each call is one run; it never rejects. Throws at
+ * creation, as `createApp` does, for a configuration the games or their resources refuse.
+ */
 export function createSweep(options: SweepOptions): Sweep {
   const { platform } = options;
+  const { registry } = instanceGames(platform, options.games);
   let subkeys: Promise<Subkeys> | null = null;
   const keys = (): Promise<Subkeys> => (subkeys ??= deriveSubkeys(platform.config.appSecret));
 
@@ -43,7 +54,7 @@ export function createSweep(options: SweepOptions): Sweep {
   return async () => {
     const started = platform.now().getTime();
     const nudges = await step("nudges", () =>
-      sendDueNudges({ platform, games: options.games, keys }),
+      sendDueNudges({ platform, registry, keys, perRun: options.nudgesPerRun }),
     );
     platform.log.info("sweep finished", {
       durationMs: platform.now().getTime() - started,
@@ -54,6 +65,7 @@ export function createSweep(options: SweepOptions): Sweep {
             nudgesSent: nudges.sent,
             nudgesFailed: nudges.failed,
             nudgesSkipped: nudges.skipped,
+            nudgesCapped: nudges.capped,
           }),
     });
     return { nudges };
