@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
 import { authorize } from "../gmail/authorize.js";
-import { checkOutFile } from "../gmail/out-file.js";
+import { checkOutFile } from "../secrets/out-file.js";
 import { ROOT_DIR, run } from "./cli.js";
 
 /** A value from `NAME_FILE` (one trailing newline trimmed) or else `NAME`. */

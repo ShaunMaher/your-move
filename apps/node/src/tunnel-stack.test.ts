@@ -28,21 +28,35 @@ describe.skipIf(image === undefined)("the tunnel stack, running", () => {
   let dir = "";
   let compose: string[] = [];
 
-  beforeAll(() => {
+  beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "tunnel-stack-"));
     const secrets = join(dir, "secrets");
     mkdirSync(secrets, { mode: 0o700 });
+    // A VAPID pair for this run only: the server checks the pair at startup.
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+      "sign",
+    ]);
+    const vapid: Record<string, string> = {
+      vapid_public_key: Buffer.from(await crypto.subtle.exportKey("raw", pair.publicKey)).toString(
+        "base64url",
+      ),
+      vapid_private_key: (await crypto.subtle.exportKey("jwk", pair.privateKey)).d ?? "",
+    };
     for (const name of [
       "app_secret",
       "gmail_client_id",
       "gmail_client_secret",
       "gmail_refresh_token",
       "tunnel_token",
+      "vapid_public_key",
+      "vapid_private_key",
     ]) {
       const file = join(secrets, name);
       writeFileSync(
         file,
-        name === "app_secret" ? btoa("tunnel-stack-test-0123456789abcdef") : "dummy",
+        name === "app_secret"
+          ? btoa("tunnel-stack-test-0123456789abcdef")
+          : (vapid[name] ?? "dummy"),
       );
       chmodSync(file, 0o444);
     }
@@ -55,6 +69,7 @@ describe.skipIf(image === undefined)("the tunnel stack, running", () => {
         "OPERATOR_CONTACT=ops@example.org",
         `EMAIL_FROM='"Example Games" <no-reply@example.org>'`,
         "GMAIL_SENDER=no-reply@example.org",
+        "VAPID_SUBJECT=mailto:ops@example.org",
         "",
       ].join("\n"),
     );

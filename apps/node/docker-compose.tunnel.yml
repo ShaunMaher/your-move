@@ -16,7 +16,7 @@
 #   address, so loopback is not trusted), so a request from any other peer, the host's gateway
 #   included, is refused (08 §4.1). The subnet and both
 #   addresses are pinned; if you change one, change TRUST_PROXY_PEERS and the tunnel's route.
-# - `egress` is an ordinary bridge for outbound calls: the app's (Gmail) and the tunnel's.
+# - `egress` is an ordinary bridge for outbound calls: the app's (Gmail, Web Push) and the tunnel's.
 # - Every secret is a Docker secret read through `<NAME>_FILE`, so none shows in `docker inspect`
 #   or the process environment.
 # - Pull the image by digest (docs/deploy.md), never by tag.
@@ -46,11 +46,17 @@ services:
       GMAIL_CLIENT_ID_FILE: /run/secrets/gmail_client_id
       GMAIL_CLIENT_SECRET_FILE: /run/secrets/gmail_client_secret
       GMAIL_REFRESH_TOKEN_FILE: /run/secrets/gmail_refresh_token
+      # Web Push "your turn" notifications (docs/deploy.md): keys from `pnpm gen:vapid`.
+      VAPID_SUBJECT: ${VAPID_SUBJECT:?set VAPID_SUBJECT to mailto:<an address that reaches you>}
+      VAPID_PUBLIC_KEY_FILE: /run/secrets/vapid_public_key
+      VAPID_PRIVATE_KEY_FILE: /run/secrets/vapid_private_key
     secrets:
       - app_secret
       - gmail_client_id
       - gmail_client_secret
       - gmail_refresh_token
+      - vapid_public_key
+      - vapid_private_key
     volumes:
       - data:/data
       - blobs:/data/blobs
@@ -117,5 +123,9 @@ secrets:
     file: ${SECRETS_DIR}/gmail_client_secret
   gmail_refresh_token:
     file: ${SECRETS_DIR}/gmail_refresh_token
+  vapid_public_key:
+    file: ${SECRETS_DIR}/vapid_public_key
+  vapid_private_key:
+    file: ${SECRETS_DIR}/vapid_private_key
   tunnel_token:
     file: ${SECRETS_DIR}/tunnel_token

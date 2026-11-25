@@ -33,6 +33,7 @@
     "games:check-db": "tsx scripts/src/bin/games-check-db.ts",
     "db:check": "tsx scripts/src/bin/db-check.ts",
     "gmail:authorize": "tsx scripts/src/bin/gmail-authorize.ts",
+    "gen:vapid": "tsx scripts/src/bin/gen-vapid.ts",
     "api:generate": "tsx scripts/src/bin/api-generate.ts",
     "web:icons": "tsx scripts/src/bin/web-icons.ts",
     "renovate:sync": "tsx scripts/src/bin/renovate-sync.ts",

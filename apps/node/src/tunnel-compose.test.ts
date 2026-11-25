@@ -144,6 +144,7 @@ describe("docker-compose.tunnel.yml (09 §4)", () => {
       OPERATOR_CONTACT: "ops@example.org",
       EMAIL_FROM: '"Example Games" <no-reply@example.org>',
       GMAIL_SENDER: "no-reply@example.org",
+      VAPID_SUBJECT: "mailto:ops@example.org",
     };
     const env: Record<string, string | undefined> = {};
     for (const [name, value] of Object.entries(app.environment ?? {})) {
@@ -156,6 +157,10 @@ describe("docker-compose.tunnel.yml (09 §4)", () => {
       "/run/secrets/gmail_client_id": "fake-client-id",
       "/run/secrets/gmail_client_secret": "fake-client-secret",
       "/run/secrets/gmail_refresh_token": "fake-refresh-token\n",
+      // RFC 8291 Appendix A's published example key pair: the shapes `pnpm gen:vapid` writes.
+      "/run/secrets/vapid_public_key":
+        "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8\n",
+      "/run/secrets/vapid_private_key": "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw\n",
     };
     const resolved = resolveSecretFiles(env, (path) => {
       const content = files[path];
@@ -164,6 +169,7 @@ describe("docker-compose.tunnel.yml (09 §4)", () => {
     });
     const config = parseConfig(resolved, { runtime: "node", installedGames: [] });
     expect(config.email.provider).toBe("gmail");
+    expect(config.vapid?.subject).toBe("mailto:ops@example.org");
     const node = parseNodeConfig(resolved);
     expect(node).toMatchObject({ trustProxy: "cloudflare", trustProxyPeersDefaulted: false });
   });

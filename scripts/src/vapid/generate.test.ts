@@ -1,0 +1,86 @@
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { OutFileError } from "../secrets/out-file.js";
+import { newVapidKeys, PRIVATE_KEY_FILE, PUBLIC_KEY_FILE, writeVapidKeys } from "./generate.js";
+
+let base: string;
+let root: string;
+
+beforeEach(() => {
+  base = realpathSync(mkdtempSync(join(tmpdir(), "gen-vapid-")));
+  root = join(base, "repo");
+  mkdirSync(join(root, ".git"), { recursive: true });
+});
+
+afterEach(() => {
+  rmSync(base, { recursive: true, force: true });
+});
+
+describe("gen:vapid (09 §1)", () => {
+  it("makes a P-256 pair in the shapes the config takes, and the halves belong together", async () => {
+    const { publicKey, privateKey } = await newVapidKeys();
+    expect(publicKey).toMatch(/^[\w-]{87}$/u);
+    expect(privateKey).toMatch(/^[\w-]{43}$/u);
+    const point = Buffer.from(publicKey, "base64url");
+    expect(point).toHaveLength(65);
+    expect(point[0]).toBe(4);
+    const jwk = {
+      kty: "EC",
+      crv: "P-256",
+      x: point.subarray(1, 33).toString("base64url"),
+      y: point.subarray(33).toString("base64url"),
+    };
+    const algorithm = { name: "ECDSA", namedCurve: "P-256" };
+    const signer = await crypto.subtle.importKey(
+      "jwk",
+      { ...jwk, d: privateKey },
+      algorithm,
+      false,
+      ["sign"],
+    );
+    const verifier = await crypto.subtle.importKey("jwk", jwk, algorithm, false, ["verify"]);
+    const data = new TextEncoder().encode("check");
+    const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, signer, data);
+    expect(
+      await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, verifier, signature, data),
+    ).toBe(true);
+  });
+
+  it("writes both keys to new 0600 files and returns only the public key", async () => {
+    const dir = join(base, "secrets");
+    mkdirSync(dir);
+    const written = await writeVapidKeys(dir, root);
+    const publicText = readFileSync(join(dir, PUBLIC_KEY_FILE), "utf8");
+    const privateText = readFileSync(join(dir, PRIVATE_KEY_FILE), "utf8");
+    expect(publicText).toBe(`${written.publicKey}\n`);
+    expect(privateText).toMatch(/^[\w-]{43}\n$/u);
+    expect(JSON.stringify(written)).not.toContain(privateText.trim());
+    for (const file of [PUBLIC_KEY_FILE, PRIVATE_KEY_FILE]) {
+      expect(statSync(join(dir, file)).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it("never overwrites an existing key", async () => {
+    const dir = join(base, "secrets");
+    mkdirSync(dir);
+    writeFileSync(join(dir, PRIVATE_KEY_FILE), "in use\n");
+    await expect(writeVapidKeys(dir, root)).rejects.toThrow(/EEXIST/u);
+    expect(readFileSync(join(dir, PRIVATE_KEY_FILE), "utf8")).toBe("in use\n");
+  });
+
+  it("refuses a directory inside the repository", async () => {
+    await expect(writeVapidKeys(root, root)).rejects.toThrow(OutFileError);
+  });
+});

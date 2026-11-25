@@ -170,6 +170,29 @@ holds an address, a code or a token):
 Gmail allows a Workspace user about 2,000 messages a day, well above the instance's own limits.
 Move to a transactional provider before the instance grows beyond friends and family.
 
+## Web Push
+
+"It's your turn" notifications on phones and browsers (Web Push, [03 §7](spec/03-architecture.md))
+need a VAPID key pair, made once with
+
+```sh
+pnpm gen:vapid --out /srv/secrets
+```
+
+It writes `vapid_public_key` and `vapid_private_key` as new 0600 files in that directory, which
+must be outside the repository and any Git working tree; it never overwrites a file and never
+prints the private key. Give them to the server as `VAPID_PUBLIC_KEY_FILE` and
+`VAPID_PRIVATE_KEY_FILE`, with `VAPID_SUBJECT` set to a `mailto:` address (or `https://` URL) push
+services can use to reach you. Without all three the server sends no pushes and the app says
+so in Settings. The Node server refuses to start if the private key isn't the public key's.
+
+**Keep the pair.** A new one makes every device's subscription unusable until the app replaces it
+on its next launch. Outbound pushes go only to the browsers' push services (Apple, Google,
+Microsoft, Mozilla), over the `egress` network.
+
+On iPhone and iPad, notifications work only for the app added to the Home Screen (iOS 16.4 or
+later); the app's Settings explain this and link to the install guide.
+
 ## Behind a Cloudflare Tunnel
 
 [`apps/node/docker-compose.tunnel.yml`](../apps/node/docker-compose.tunnel.yml) is the
@@ -215,7 +238,8 @@ the app trusts it only from the tunnel's own address.
    yourself with mode 0700 (the directory's mode is what keeps other users out). Docker mounts each
    file with its host permissions, and the app runs as UID 1000 and `cloudflared` as 65532,
    neither of whom is you, so the files must be world-readable (0444): the `chmod` is the **last**
-   step, after every file exists, including `gmail_refresh_token` from the Gmail section.
+   step, after every file exists, including `gmail_refresh_token` from the Gmail section and the
+   two VAPID key files from `pnpm gen:vapid`.
 
    ```sh
    umask 077
@@ -223,12 +247,14 @@ the app trusts it only from the tunnel's own address.
    openssl rand -base64 32 > /srv/secrets/app_secret      # never rotate it (below)
    printf '%s' '<tunnel token>' > /srv/secrets/tunnel_token
    # gmail_client_id, gmail_client_secret and gmail_refresh_token: "Email through Gmail" above
+   pnpm gen:vapid --out /srv/secrets    # vapid_public_key, vapid_private_key ("Web Push" below)
    chmod 0444 /srv/secrets/*    # last step before `up`; run it again after adding or replacing a file
    ```
 
 4. **The settings.** Copy [`apps/node/tunnel.env.example`](../apps/node/tunnel.env.example) to a
    file outside the repository and fill it in: `PUBLIC_URL=https://<hostname>`, `SECRETS_DIR`,
-   `OPERATOR_CONTACT`, `EMAIL_FROM`, `GMAIL_SENDER` and optionally `APP_NAME` and `ADMIN_EMAILS`.
+   `OPERATOR_CONTACT`, `EMAIL_FROM`, `GMAIL_SENDER`, `VAPID_SUBJECT` and optionally `APP_NAME`
+   and `ADMIN_EMAILS`.
 5. **The image**, by digest: the `publish:image` job of the pipeline that built the commit you
    want prints it. Put it in the settings file as `APP_IMAGE=<registry>/<project>/server@sha256:<digest>`,
    and `docker login` to the registry first if it is private.
