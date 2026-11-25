@@ -47,7 +47,8 @@ repositoryContract("node:sqlite", () => {
 });
 
 // The lifecycle races on a real file (03 §5.2): on Node the requests interleave at await points
-// on one connection, so the version check and the token guard still decide them.
+// on one connection; the suite's barrier makes every request load the game before any writes, so
+// the token guard decides them.
 gameRaceContract(
   "node:sqlite",
   () => {
@@ -63,7 +64,14 @@ gameRaceContract(
       },
     });
   },
-  installedGames,
+  {
+    installed: installedGames,
+    type: "example",
+    // The reference game (02 §7.6): any card in the seat's own hand.
+    legalMove: (view, seat) => ({
+      card: (view as { seats: { hand: number[] | null }[] }).seats[seat]?.hand?.[0],
+    }),
+  },
 );
 
 describe("openSqlite", () => {

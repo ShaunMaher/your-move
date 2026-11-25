@@ -58,7 +58,14 @@ async function connectD1() {
 repositoryContract("D1", connectD1);
 
 // The lifecycle races on D1 (03 §5.2): here the requests are really concurrent.
-gameRaceContract("D1", connectD1, [{ manifest, engines, enabledByDefault: true }]);
+gameRaceContract("D1", connectD1, {
+  installed: [{ manifest, engines, enabledByDefault: true }],
+  type: "example",
+  // The reference game (02 §7.6): any card in the seat's own hand.
+  legalMove: (view, seat) => ({
+    card: (view as { seats: { hand: number[] | null }[] }).seats[seat]?.hand?.[0],
+  }),
+});
 
 /**
  * Why `pnpm db:check` refuses unreviewed table rebuilds (04 §Migrations, M2a review P-1): on D1
