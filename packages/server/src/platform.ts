@@ -8,6 +8,7 @@ import type { AppConfig } from "./config/parse.js";
 import type { Repositories } from "./db/repositories.js";
 import type { CoreEmailSender } from "./email/providers.js";
 import type { BuiltinDictionaries } from "./games/resources.js";
+import type { ErrorLog } from "./http/error-log.js";
 import type { Logger } from "./log.js";
 import type { PushSender } from "./push/sender.js";
 
@@ -52,5 +53,7 @@ export interface AppEnv {
     requestId: string;
     /** Set by the session middleware on session-only routes. */
     session: ActiveSession;
+    /** Set where an error response is built, read by the request log (09 §5). */
+    errorLog?: ErrorLog;
   };
 }

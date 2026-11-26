@@ -35,6 +35,7 @@ import {
   type TemplateContext,
 } from "../email/templates.js";
 import { background } from "../http/background.js";
+import { noteError } from "../http/error-log.js";
 import type { AppEnv, Platform } from "../platform.js";
 import { ipBuckets } from "./client-ip.js";
 import { checkLimits } from "./limits.js";
@@ -70,7 +71,13 @@ const MESSAGES: Readonly<Record<Code, string>> = {
   RATE_LIMITED: "Too many requests. Please wait and try again.",
 };
 
-function fail<S extends ErrorStatus, C extends Code>(c: Context, status: S, code: C) {
+function fail<S extends ErrorStatus, C extends Code>(
+  c: Context,
+  status: S,
+  code: C,
+  reason?: "invalid_email" | "no_client_ip",
+) {
+  noteError(c, { code, ...(reason === undefined ? {} : { reason }) });
   return c.json({ error: { code, message: MESSAGES[code] } }, status);
 }
 
@@ -170,10 +177,10 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
 
   app.openapi(otpRequestRoute, async (c) => {
     const email = normaliseAddress(c.req.valid("json").email);
-    if (email === null) return fail(c, 400, "BAD_REQUEST");
+    if (email === null) return fail(c, 400, "BAD_REQUEST", "invalid_email");
     const context = await deps();
     const buckets = await clientBuckets(c, context.keys);
-    if (buckets === null) return fail(c, 400, "BAD_REQUEST");
+    if (buckets === null) return fail(c, 400, "BAD_REQUEST", "no_client_ip");
     const outcome = await issueSignInCode(context, email, buckets);
     if (outcome.kind === "ip-limited") return fail(c, 429, "RATE_LIMITED");
     // Both messages are built on every path, sent or not, so the work before the response doesn't
@@ -194,10 +201,10 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
   app.openapi(otpVerifyRoute, async (c) => {
     const body = c.req.valid("json");
     const email = normaliseAddress(body.email);
-    if (email === null) return fail(c, 400, "BAD_REQUEST");
+    if (email === null) return fail(c, 400, "BAD_REQUEST", "invalid_email");
     const context = await deps();
     const buckets = await clientBuckets(c, context.keys);
-    if (buckets === null) return fail(c, 400, "BAD_REQUEST");
+    if (buckets === null) return fail(c, 400, "BAD_REQUEST", "no_client_ip");
     const existing = await repos.users.findByEmail(email);
     const outcome = await verifyCode(context, email, "signin", body.code, buckets);
     if (outcome === "limited") return fail(c, 429, "RATE_LIMITED");
@@ -338,7 +345,7 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
   app.openapi(deleteOtpRoute, async (c) => {
     const active = c.get("session");
     const email = active.user.email;
-    if (email === null) return fail(c, 400, "BAD_REQUEST");
+    if (email === null) return fail(c, 400, "BAD_REQUEST", "invalid_email");
     const issued = await issueStepUpCode(
       await deps(),
       { id: active.user.id, email },
@@ -353,10 +360,10 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
   app.openapi(deleteMeRoute, async (c) => {
     const active = c.get("session");
     const email = active.user.email;
-    if (email === null) return fail(c, 400, "BAD_REQUEST");
+    if (email === null) return fail(c, 400, "BAD_REQUEST", "invalid_email");
     const context = await deps();
     const buckets = await clientBuckets(c, context.keys);
-    if (buckets === null) return fail(c, 400, "BAD_REQUEST");
+    if (buckets === null) return fail(c, 400, "BAD_REQUEST", "no_client_ip");
     const outcome = await verifyCode(
       context,
       email,
