@@ -15,6 +15,7 @@ export type GameWithView = Schema<"GameWithView">;
 export type Player = GameEnvelope["players"][number];
 export type HistoryItem = Schema<"HistoryItem">;
 export type CreateGameRequest = Schema<"CreateGameRequest">;
+export type RecentPlayer = Schema<"RecentPlayers">["players"][number];
 
 /**
  * A game and the viewer's view, with the envelope as the SDK types it (what a board is given). The
@@ -97,6 +98,9 @@ export const getHistory = (api: ApiClient, id: string, cursor?: string) =>
 
 export const createGame = (api: ApiClient, body: CreateGameRequest) =>
   settle(api.POST("/api/v1/games", { body }));
+
+/** Your past opponents, to pick for a new game (05 `GET /api/v1/players/recent`). */
+export const listRecentPlayers = (api: ApiClient) => settle(api.GET("/api/v1/players/recent"));
 
 export const markSeen = (api: ApiClient, id: string, version: number) =>
   settle(api.POST("/api/v1/games/{id}/seen", { params: { path: { id } }, body: { version } }));

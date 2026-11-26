@@ -1,15 +1,16 @@
 /**
  * The new-game flow (07 §1.1): pick a game, set its options (the module's own form), choose the
- * players by email, check the addresses, create. The alpha's slice of the flow: no past-opponent
- * picker, join link, AI seats, seat order or turn timeout (10, Alpha), so the creator's choices are
- * the game, the options, the seat count and the addresses.
+ * players — people you've played, picked from the list, or anyone by email — check them, create.
+ * The alpha's slice of the flow: no join link, AI seats, seat order or turn timeout (10, Alpha), so
+ * the creator's choices are the game, the options, the seat count and the players. A game whose
+ * seats are all people you've played starts at once and opens on the board; otherwise the lobby.
  */
 import type { ApiClient } from "@your-move/api-client";
 import type { GameClientModule } from "@your-move/sdk/client";
 import { type SyntheticEvent, useEffect, useRef, useState } from "react";
 
 import { loadCatalog } from "../catalog.js";
-import { type CatalogGame, createGame } from "../game-api.js";
+import { type CatalogGame, createGame, listRecentPlayers, type RecentPlayer } from "../game-api.js";
 import { GameIcon } from "../GameIcon.js";
 import { loadGameClient } from "../games.js";
 import { rememberPushOffered, shouldOfferPush } from "../push.js";
@@ -40,7 +41,8 @@ const CREATE_PROBLEMS: Readonly<Record<string, string>> = {
   INVALID_OPTIONS: "Those options can't be used. Go back and check them.",
   INVALID_SEATS: "Those options don't work with this many players. Go back and check them.",
   INVALID_SEAT_COUNT: "That number of players isn't allowed for this game.",
-  INVALID_INVITEES: "Check the email addresses: each must be different and valid.",
+  INVALID_INVITEES:
+    "Check the players: each address must be valid and different, and each person you picked must still be in your list.",
   CANNOT_PLAY_SELF: "You can't invite yourself. Enter the other person's address.",
   TOO_MANY_GAMES: "You have too many games waiting or in progress. Finish or cancel one first.",
   RATE_LIMITED: "Too many attempts. Wait a little and try again.",
@@ -62,6 +64,10 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
   const [options, setOptions] = useState<unknown>({});
   const [seats, setSeats] = useState(2);
   const [emails, setEmails] = useState<readonly string[]>([""]);
+  /** People you've played (05 `/players/recent`); null until loaded, or if they couldn't be. */
+  const [recent, setRecent] = useState<readonly RecentPlayer[] | null>(null);
+  /** The past opponents picked, by user id, in the order picked: each fills a seat. */
+  const [picked, setPicked] = useState<readonly string[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   /** The created game's path, while the notifications offer is open. */
@@ -97,6 +103,19 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
     };
   }, [api, attempt, onSessionLost]);
 
+  // The people you've played, for the players step. Without them, typing addresses still works.
+  useEffect(() => {
+    let cancelled = false;
+    void listRecentPlayers(api).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setRecent(result.data.players);
+      else if (result.status === 401) onSessionLost();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, onSessionLost]);
+
   // A step is a new screen for a screen reader: start reading at its heading.
   useEffect(() => {
     heading.current?.focus({ preventScroll: true });
@@ -107,6 +126,7 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
     setOptions(game.defaults ?? {});
     const seatCount = game.players.min;
     setSeats(seatCount);
+    setPicked([]);
     setEmails(Array.from({ length: seatCount - 1 }, () => ""));
     setProblem(null);
     setClient("loading");
@@ -117,10 +137,30 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
     setStep("options");
   }
 
+  /** Keeps one address field for each seat that no picked past opponent fills. */
+  function fitEmails(open: number) {
+    setEmails((now) => Array.from({ length: Math.max(0, open) }, (_, index) => now[index] ?? ""));
+  }
+
   function setSeatCount(next: number) {
     setSeats(next);
-    setEmails((now) => Array.from({ length: next - 1 }, (_, index) => now[index] ?? ""));
+    const kept = picked.slice(0, next - 1);
+    setPicked(kept);
+    fitEmails(next - 1 - kept.length);
   }
+
+  /** Picking someone fills a seat; unpicking frees it for an address. */
+  function togglePicked(userId: string) {
+    const next = picked.includes(userId)
+      ? picked.filter((id) => id !== userId)
+      : [...picked, userId].slice(0, seats - 1);
+    setPicked(next);
+    fitEmails(seats - 1 - next.length);
+    setProblem(null);
+  }
+
+  const nameOf = (userId: string): string =>
+    recent?.find((player) => player.userId === userId)?.displayName ?? "";
 
   function checkPlayers(event: SyntheticEvent) {
     event.preventDefault();
@@ -150,7 +190,7 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
       gameType: chosen.type,
       options,
       seats,
-      invitees: emails.map((email) => ({ email })),
+      invitees: [...picked.map((userId) => ({ userId })), ...emails.map((email) => ({ email }))],
     });
     if (result.ok) {
       const path = `/g/${encodeURIComponent(result.data.game.id)}`;
@@ -281,12 +321,39 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
               </select>
             </div>
           ) : null}
+          {recent !== null && recent.length > 0 ? (
+            <fieldset className="card stack">
+              <legend>
+                <h3>People you&apos;ve played</h3>
+              </legend>
+              {recent.map((player) => {
+                const chosen = picked.includes(player.userId);
+                return (
+                  <label key={player.userId} className="check">
+                    <input
+                      type="checkbox"
+                      checked={chosen}
+                      disabled={!chosen && picked.length >= seats - 1}
+                      aria-describedby="picked-note"
+                      onChange={() => {
+                        togglePicked(player.userId);
+                      }}
+                    />
+                    {player.displayName}
+                  </label>
+                );
+              })}
+              <p id="picked-note" className="hint">
+                Someone you pick joins the game at once, with no invitation to accept.
+              </p>
+            </fieldset>
+          ) : null}
           {emails.map((email, index) => (
             <div className="field" key={index}>
               <label htmlFor={`player-${String(index)}`}>
-                {emails.length === 1
+                {seats === 2
                   ? "Their email address"
-                  : `Player ${String(index + 2)}'s email address`}
+                  : `Player ${String(picked.length + index + 2)}'s email address`}
               </label>
               <input
                 id={`player-${String(index)}`}
@@ -305,10 +372,13 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
               />
             </div>
           ))}
-          <p id="players-note" className="hint">
-            They must have signed in to {appName} at least once first, with this address. We
-            can&apos;t invite someone who has never signed in.
-          </p>
+          {emails.length > 0 ? (
+            <p id="players-note" className="hint">
+              {recent !== null && recent.length > 0 ? "Or type an address. " : ""}
+              They must have signed in to {appName} at least once first, with this address. We
+              can&apos;t invite someone who has never signed in.
+            </p>
+          ) : null}
           <Problem id="players-problem" message={problem} />
           <div className="row">
             <button type="button" className="button secondary" onClick={back("options")}>
@@ -325,11 +395,17 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
         <section className="stack" aria-labelledby="review-heading">
           <h2 id="review-heading">Ready to create?</h2>
           <p>
-            A {chosen.name} game for {String(seats)} players. Check the{" "}
-            {emails.length === 1 ? "address" : "addresses"}: we never say whether an address has an
-            account, so a typo just means an invitation nobody receives.
+            A {chosen.name} game for {String(seats)} players.
+            {emails.length === 0
+              ? " It starts as soon as you create it."
+              : ` Check the ${emails.length === 1 ? "address" : "addresses"}: we never say whether an address has an account, so a typo just means an invitation nobody receives.`}
           </p>
           <ul className="plain">
+            {picked.map((userId) => (
+              <li key={userId} className="card">
+                Playing with <strong>{nameOf(userId)}</strong>
+              </li>
+            ))}
             {emails.map((email) => (
               <li key={email} className="card">
                 Check the address: <strong>{email}</strong>

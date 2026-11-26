@@ -135,7 +135,7 @@ describe("the new-game flow", () => {
   });
 
   it.each([
-    ["INVALID_INVITEES", 400, /Check the email addresses/u],
+    ["INVALID_INVITEES", 400, /Check the players/u],
     ["CANNOT_PLAY_SELF", 400, /invite yourself/u],
     ["TOO_MANY_GAMES", 409, /too many games/u],
     ["INVALID_OPTIONS", 400, /options can't be used/u],
@@ -191,6 +191,126 @@ describe("the new-game flow", () => {
     expect(await screen.findByText(/Couldn't load the games/u)).toBeDefined();
     click("Try again");
     expect(await screen.findByText(/Couldn't load the games/u)).toBeDefined();
+  });
+});
+
+describe("people you've played (alpha A12, 07 §1.1)", () => {
+  const RECENT = {
+    players: [
+      { userId: "u-bob", displayName: "Bob", lastPlayedAt: 2 },
+      { userId: "u-cy", displayName: "Cy", lastPlayedAt: 1 },
+    ],
+  };
+
+  function withRecent(recent: Response, catalog: Response = json(CATALOG)) {
+    const fake = fakeApi({
+      "GET /api/v1/catalog": catalog,
+      "GET /api/v1/players/recent": recent,
+      "POST /api/v1/games": json(created, 201),
+    });
+    const lost = vi.fn();
+    render(
+      <NewGame
+        api={fake.api}
+        appName="Family Games"
+        pushKey={undefined}
+        ownEmail="sam@example.org"
+        onSessionLost={lost}
+      />,
+    );
+    return { ...fake, lost };
+  }
+
+  it("offers them by name as a group with a legend; picking one fills the seat and creates by userId", async () => {
+    const { calls } = withRecent(json(RECENT));
+    await toPlayers();
+    const group = screen.getByRole("group", { name: "People you've played" });
+    const boxes = screen.getAllByRole("checkbox");
+    expect(boxes.map((box) => box.closest("label")?.textContent)).toEqual(["Bob", "Cy"]);
+    expect(group.contains(boxes[0] ?? null)).toBe(true);
+    expect(screen.getByLabelText("Their email address")).toBeDefined();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Bob" }));
+    // The one seat is filled: no address to type, and nobody else can be picked.
+    expect(screen.queryByLabelText("Their email address")).toBeNull();
+    expect(screen.getByRole("checkbox", { name: "Cy" })).toHaveProperty("disabled", true);
+    click("Review");
+    expect(screen.getByText(/starts as soon as you create it/u)).toBeDefined();
+    expect((await screen.findByRole("listitem")).textContent).toBe("Playing with Bob");
+    click("Create game");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/g/g9");
+    });
+    expect(calls.find((call) => call.method === "POST")?.body).toEqual({
+      gameType: "words",
+      options: CATALOG_GAME.defaults,
+      seats: 2,
+      invitees: [{ userId: "u-bob" }],
+    });
+  });
+
+  it("gives the seat back to an address when unpicked", async () => {
+    withRecent(json(RECENT));
+    await toPlayers();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Cy" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Cy" }));
+    expect(screen.getByRole("checkbox", { name: "Bob" })).toHaveProperty("disabled", false);
+    typeEmail("alex@example.org");
+    click("Review");
+    expect((await screen.findByRole("listitem")).textContent).toBe(
+      "Check the address: alex@example.org",
+    );
+  });
+
+  it("mixes picked people and typed addresses in a bigger game", async () => {
+    const bigger = { ...CATALOG_GAME, players: { min: 2, max: 3 } };
+    const { calls } = withRecent(json(RECENT), json({ games: [bigger] }));
+    await toPlayers();
+    fireEvent.change(screen.getByLabelText("Number of players"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Cy" }));
+    fireEvent.change(screen.getByLabelText("Player 3's email address"), {
+      target: { value: "dee@example.org" },
+    });
+    click("Review");
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "Playing with Cy",
+      "Check the address: dee@example.org",
+    ]);
+    click("Back");
+    // Two fewer seats than picks can't happen: fewer seats drop the latest picks.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Bob" }));
+    expect(screen.queryByLabelText(/email address/u)).toBeNull();
+    fireEvent.change(screen.getByLabelText("Number of players"), { target: { value: "2" } });
+    expect(screen.getByRole("checkbox", { name: "Cy" })).toHaveProperty("checked", true);
+    expect(screen.getByRole("checkbox", { name: "Bob" })).toHaveProperty("checked", false);
+    click("Review");
+    click("Create game");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/g/g9");
+    });
+    expect(calls.find((call) => call.method === "POST")?.body).toMatchObject({
+      seats: 2,
+      invitees: [{ userId: "u-cy" }],
+    });
+  });
+
+  it("shows no list without past opponents, or when it couldn't be loaded", async () => {
+    withRecent(json({ players: [] }));
+    await toPlayers();
+    expect(screen.queryByRole("group")).toBeNull();
+    expect(screen.getByLabelText("Their email address")).toBeDefined();
+    cleanup();
+    forgetCatalog();
+    withRecent(problem(500, "INTERNAL"));
+    await toPlayers();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.getByLabelText("Their email address")).toBeDefined();
+  });
+
+  it("ends the session when the list answers 401", async () => {
+    const { lost } = withRecent(problem(401, "UNAUTHENTICATED"));
+    await waitFor(() => {
+      expect(lost).toHaveBeenCalled();
+    });
   });
 });
 
