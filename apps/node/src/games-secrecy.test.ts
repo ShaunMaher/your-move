@@ -27,6 +27,9 @@ import { type Harness, HOUR, MINUTE } from "./test-harness.js";
 const DICTIONARIES = new URL("../../../packages/dictionary/generated/served", import.meta.url)
   .pathname;
 
+/** The budget for the one test that plays a full game (11 §4: sized deliberately, not retried). */
+const FULL_GAME_TIMEOUT_MS = 30_000;
+
 let h: Harness;
 /** Every route exercised, as `METHOD /path/:param`, for the coverage check. */
 const exercised = new Set<string>();
@@ -673,141 +676,147 @@ describe("route-wide secrecy (04 invariant 4)", () => {
     await expect(unchangedByHiddenState(game, [a, b])).rejects.toThrow(/sees hidden state change/u);
   });
 
-  it("the example game: lobbies, a full game with previews and refusals, the frozen declined ending", async () => {
-    const players = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
-    const [a, b, c] = players as [Player, Player, Player];
-    const stranger = await signUp(h, "Stranger");
+  // A whole game over a real SQLite file in tmpdir (CI puts that on tmpfs): three sign-ups and
+  // every route, so it needs more than Vitest's 5 s default when the machine is busy.
+  it(
+    "the example game: lobbies, a full game with previews and refusals, the frozen declined ending",
+    { timeout: FULL_GAME_TIMEOUT_MS },
+    async () => {
+      const players = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
+      const [a, b, c] = players as [Player, Player, Player];
+      const stranger = await signUp(h, "Stranger");
 
-    // A lobby declined by one invitee (204) and cancelled by the creator.
-    const cancelled = await created(a, {
-      gameType: "example",
-      seats: 3,
-      invitees: [{ email: b.email }, { email: c.email }],
-    });
-    expect((await transition(cancelled, b, "decline")).status).toBe(204);
-    expect((await transition(cancelled, a, "cancel")).status).toBe(200);
-    await readEverything(cancelled, players, stranger);
+      // A lobby declined by one invitee (204) and cancelled by the creator.
+      const cancelled = await created(a, {
+        gameType: "example",
+        seats: 3,
+        invitees: [{ email: b.email }, { email: c.email }],
+      });
+      expect((await transition(cancelled, b, "decline")).status).toBe(204);
+      expect((await transition(cancelled, a, "cancel")).status).toBe(200);
+      await readEverything(cancelled, players, stranger);
 
-    // A lobby started by the creator below the maximum: c's invitation is dropped.
-    const startedByCreator = await created(a, {
-      gameType: "example",
-      seats: 3,
-      invitees: [{ email: b.email }, { email: c.email }],
-    });
-    expect((await transition(startedByCreator, b, "accept")).status).toBe(200);
-    expect((await transition(startedByCreator, a, "start")).status).toBe(200);
-    await readEverything(startedByCreator, players, stranger);
-    expect(await unchangedByHiddenState(startedByCreator, players)).toBe(2);
+      // A lobby started by the creator below the maximum: c's invitation is dropped.
+      const startedByCreator = await created(a, {
+        gameType: "example",
+        seats: 3,
+        invitees: [{ email: b.email }, { email: c.email }],
+      });
+      expect((await transition(startedByCreator, b, "accept")).status).toBe(200);
+      expect((await transition(startedByCreator, a, "start")).status).toBe(200);
+      await readEverything(startedByCreator, players, stranger);
+      expect(await unchangedByHiddenState(startedByCreator, players)).toBe(2);
 
-    // The frozen declined ending: one seat acts, the other declines before acting.
-    const frozen = await created(a, { gameType: "example", invitees: [{ email: b.email }] });
-    const accepted = await transition(frozen, b, "accept");
-    expect(accepted.json.game?.status).toBe("active");
-    const bCard = (accepted.json.view as ExampleView).seats[seatOf(frozen, b) ?? 0]?.hand?.[0];
-    const played = await hit(
-      b,
-      "POST",
-      "/api/v1/games/:id/actions",
-      { id: frozen },
-      {
-        expectedVersion: await version(frozen, b),
-        action: { card: bCard },
-      },
-    );
-    expect(played.status, played.text).toBe(200);
-    await unchangedByHiddenState(frozen, players);
-    const declined = await transition(frozen, a, "decline");
-    expect(declined.json.game?.status).toBe("declined");
-    await readEverything(frozen, players, stranger);
-    // Both members still see the game, each only their own final view.
-    for (const viewer of [a, b]) {
-      const own = await hit(viewer, "GET", "/api/v1/games/:id", { id: frozen });
-      expect(own.json.view).not.toBeNull();
-    }
-
-    // A full three-player game with random seats: every step read, perturbed and refused.
-    const game = await created(a, {
-      gameType: "example",
-      seats: 3,
-      seatOrder: "random",
-      options: { lives: 2 },
-      invitees: [{ email: b.email }, { email: c.email }],
-    });
-    await readEverything(game, players, stranger);
-    for (const who of [b, c]) await transition(game, who, "accept");
-    let steps = 0;
-    for (; steps < 300; steps++) {
-      const now = (await hit(a, "GET", "/api/v1/games/:id", { id: game })).json;
-      if (now.game?.status !== "active") break;
-      // Not vacuous: there is something hidden to leak at every step.
-      expect(hiddenPieces(stored(game), 0).length).toBeGreaterThan(0);
-      if (steps % 3 === 0) {
-        await readEverything(game, players, stranger);
-        expect(await unchangedByHiddenState(game, players)).toBeGreaterThan(0);
+      // The frozen declined ending: one seat acts, the other declines before acting.
+      const frozen = await created(a, { gameType: "example", invitees: [{ email: b.email }] });
+      const accepted = await transition(frozen, b, "accept");
+      expect(accepted.json.game?.status).toBe("active");
+      const bCard = (accepted.json.view as ExampleView).seats[seatOf(frozen, b) ?? 0]?.hand?.[0];
+      const played = await hit(
+        b,
+        "POST",
+        "/api/v1/games/:id/actions",
+        { id: frozen },
+        {
+          expectedVersion: await version(frozen, b),
+          action: { card: bCard },
+        },
+      );
+      expect(played.status, played.text).toBe(200);
+      await unchangedByHiddenState(frozen, players);
+      const declined = await transition(frozen, a, "decline");
+      expect(declined.json.game?.status).toBe("declined");
+      await readEverything(frozen, players, stranger);
+      // Both members still see the game, each only their own final view.
+      for (const viewer of [a, b]) {
+        const own = await hit(viewer, "GET", "/api/v1/games/:id", { id: frozen });
+        expect(own.json.view).not.toBeNull();
       }
-      const seat = now.game.toAct[0];
-      const player = playerAt(now, seat, players);
-      const { view } = (await hit(player, "GET", "/api/v1/games/:id", { id: game })).json;
-      const hand = (view as ExampleView).seats[seat ?? 0]?.hand ?? [];
-      const expectedVersion = now.game.version;
-      // Refusals: a card not in hand, a stale version, and a seat that isn't to act.
-      const notInHand = await hit(
-        player,
-        "POST",
-        "/api/v1/games/:id/actions",
-        { id: game },
-        {
-          expectedVersion,
-          action: { card: 999 },
-        },
-      );
-      expect(notInHand.status).toBe(400);
-      const stale = await hit(
-        player,
-        "POST",
-        "/api/v1/games/:id/actions",
-        { id: game },
-        {
-          expectedVersion: expectedVersion - 1,
-          action: { card: hand[0] },
-        },
-      );
-      expect(stale.json.error?.code).toBe("STALE_GAME");
-      await hit(
-        player,
-        "POST",
-        "/api/v1/games/:id/preview",
-        { id: game },
-        {
-          action: { card: hand[0] },
-        },
-      );
-      const moved = await hit(
-        player,
-        "POST",
-        "/api/v1/games/:id/actions",
-        { id: game },
-        {
-          expectedVersion,
-          action: { card: hand[0] },
-        },
-      );
-      expect(moved.status, moved.text).toBe(200);
-      await hit(
-        player,
-        "POST",
-        "/api/v1/games/:id/seen",
-        { id: game },
-        {
-          version: expectedVersion + 1,
-        },
-      );
-    }
-    expect(steps).toBeGreaterThan(3);
-    expect(stored(game).status).toBe("finished");
-    await readEverything(game, players, stranger);
-    await hit(a, "GET", "/api/v1/games/types/:type/rules", { type: "example" });
-  });
+
+      // A full three-player game with random seats: every step read, perturbed and refused.
+      const game = await created(a, {
+        gameType: "example",
+        seats: 3,
+        seatOrder: "random",
+        options: { lives: 2 },
+        invitees: [{ email: b.email }, { email: c.email }],
+      });
+      await readEverything(game, players, stranger);
+      for (const who of [b, c]) await transition(game, who, "accept");
+      let steps = 0;
+      for (; steps < 300; steps++) {
+        const now = (await hit(a, "GET", "/api/v1/games/:id", { id: game })).json;
+        if (now.game?.status !== "active") break;
+        // Not vacuous: there is something hidden to leak at every step.
+        expect(hiddenPieces(stored(game), 0).length).toBeGreaterThan(0);
+        if (steps % 3 === 0) {
+          await readEverything(game, players, stranger);
+          expect(await unchangedByHiddenState(game, players)).toBeGreaterThan(0);
+        }
+        const seat = now.game.toAct[0];
+        const player = playerAt(now, seat, players);
+        const { view } = (await hit(player, "GET", "/api/v1/games/:id", { id: game })).json;
+        const hand = (view as ExampleView).seats[seat ?? 0]?.hand ?? [];
+        const expectedVersion = now.game.version;
+        // Refusals: a card not in hand, a stale version, and a seat that isn't to act.
+        const notInHand = await hit(
+          player,
+          "POST",
+          "/api/v1/games/:id/actions",
+          { id: game },
+          {
+            expectedVersion,
+            action: { card: 999 },
+          },
+        );
+        expect(notInHand.status).toBe(400);
+        const stale = await hit(
+          player,
+          "POST",
+          "/api/v1/games/:id/actions",
+          { id: game },
+          {
+            expectedVersion: expectedVersion - 1,
+            action: { card: hand[0] },
+          },
+        );
+        expect(stale.json.error?.code).toBe("STALE_GAME");
+        await hit(
+          player,
+          "POST",
+          "/api/v1/games/:id/preview",
+          { id: game },
+          {
+            action: { card: hand[0] },
+          },
+        );
+        const moved = await hit(
+          player,
+          "POST",
+          "/api/v1/games/:id/actions",
+          { id: game },
+          {
+            expectedVersion,
+            action: { card: hand[0] },
+          },
+        );
+        expect(moved.status, moved.text).toBe(200);
+        await hit(
+          player,
+          "POST",
+          "/api/v1/games/:id/seen",
+          { id: game },
+          {
+            version: expectedVersion + 1,
+          },
+        );
+      }
+      expect(steps).toBeGreaterThan(3);
+      expect(stored(game).status).toBe("finished");
+      await readEverything(game, players, stranger);
+      await hit(a, "GET", "/api/v1/games/types/:type/rules", { type: "example" });
+    },
+  );
 
   it("words: real plays, a swap, previews and a resignation", async () => {
     const players = [await signUp(h, "Ada"), await signUp(h, "Bo")];
