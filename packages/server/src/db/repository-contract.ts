@@ -658,6 +658,29 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         expect(await repos.games.countLiveCreatedWithInvite(user, "none")).toBe(0);
       });
 
+      it("keeps a typed address on an open invitation through every non-transition write (A12-S-3)", async () => {
+        // Telling a picked invitation (`invite_email` NULL) from a typed one depends on no writer
+        // clearing `invite_email` on an `invited` row in an open lobby; the transitions are
+        // checked in the lifecycle's unit tests. The explicit marker is M4's.
+        const creator = await human();
+        const invitee = await human();
+        const game = newGame({ createdBy: creator });
+        const row = player({
+          userId: invitee,
+          state: "invited",
+          joinedAt: null,
+          inviteEmail: "typed@example.org",
+        });
+        await repos.games.create(game, [player({ userId: creator }), row]);
+        await repos.games.markSeen(game.id, invitee, 0);
+        await repos.nudges.claim(row.id, T0 + 1, { idleSince: T0 + 1, nudgedBefore: T0 + 1 });
+        const [stored] = await target.sql(
+          "SELECT state, invite_email FROM game_players WHERE id = ?",
+          row.id,
+        );
+        expect(stored).toEqual({ state: "invited", invite_email: "typed@example.org" });
+      });
+
       it("counts the live games a user created with a picked past opponent (A12)", async () => {
         const user = await human();
         const other = await human();
@@ -665,11 +688,12 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
           const game = newGame({ status, createdBy: user });
           await repos.games.create(game, [player({ userId: user }), player(row)]);
         };
-        // Counted: joined (picked or accepted), and an invitation picked by id.
+        // Counted: every row without a typed address in a live game, whatever its state (A12-P-6).
         await create("lobby", { userId: other, state: "joined", joinedVia: "added" });
         await create("active", { userId: other, state: "playing", seat: 1 });
         await create("lobby", { userId: other, state: "invited", joinedAt: null });
-        // Not counted: an ended game, a typed address's invitation, a decline, another creator's.
+        await create("lobby", { userId: other, state: "declined", joinedAt: null });
+        // Not counted: an ended game, an open invitation to a typed address, another creator's.
         await create("finished", { userId: other, state: "out", seat: 1 });
         await create("lobby", {
           userId: other,
@@ -677,10 +701,9 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
           joinedAt: null,
           inviteEmail: "typed@example.org",
         });
-        await create("lobby", { userId: other, state: "declined", joinedAt: null });
         const theirs = newGame({ createdBy: other });
         await repos.games.create(theirs, [player({ userId: other }), player({ userId: user })]);
-        expect(await repos.games.countLiveCreatedWithUser(user, other)).toBe(3);
+        expect(await repos.games.countLiveCreatedWithUser(user, other)).toBe(4);
         expect(await repos.games.countLiveCreatedWithUser(other, user)).toBe(1);
         expect(await repos.games.countLiveCreatedWithUser(user, "nobody")).toBe(0);
       });

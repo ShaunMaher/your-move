@@ -3,22 +3,7 @@
  * adapter's {@link Database} (docs/spec/03-architecture.md §4). Multi-statement writes go through
  * one atomic batch; nothing here opens an interactive transaction.
  */
-import {
-  and,
-  asc,
-  count,
-  desc,
-  eq,
-  gte,
-  inArray,
-  isNotNull,
-  isNull,
-  lt,
-  lte,
-  ne,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 
 import {
   apiTokenRepo,
@@ -274,10 +259,11 @@ function gameRepo(db: Database): GameRepo {
         .where(
           and(
             eq(gamePlayers.userId, otherId),
-            or(
-              isNotNull(gamePlayers.joinedAt),
-              and(eq(gamePlayers.state, "invited"), isNull(gamePlayers.inviteEmail)),
-            ),
+            // Every row without a typed address, whatever its state, as the emailId pair counts
+            // every game with that typed address (A12-P-6). An invitation to a typed address
+            // keeps its `invite_email` while it is `invited` in an open lobby (the invariant the
+            // repository contract pins, A12-S-3), so it is never counted here (Q3).
+            isNull(gamePlayers.inviteEmail),
             eq(games.createdBy, userId),
             LIVE,
           ),

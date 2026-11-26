@@ -7,7 +7,18 @@ import { z } from "zod";
 import type { GamePlayerRecord, GameRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
 import { EngineFault, guardEngine } from "./engine-fault.js";
-import { accept, LOBBY_LIFETIME_MS, rerank, start } from "./lifecycle.js";
+import {
+  accept,
+  cancel,
+  decline,
+  expire,
+  isModuleOutcome,
+  isRefusal,
+  LOBBY_LIFETIME_MS,
+  rerank,
+  start,
+  startAtCreation,
+} from "./lifecycle.js";
 import { cryptoRandom, recorded } from "./random.js";
 import { createGameRegistry, GameConfigError } from "./registry.js";
 import {
@@ -15,7 +26,7 @@ import {
   DictionaryUnavailableError,
   ResourceConfigError,
 } from "./resources.js";
-import { lastOptionsOf, mergeOptions, rememberedInput } from "./settings.js";
+import { lastOptionsOf, mergeOptions, rememberedInput, whoCanAddMeOf } from "./settings.js";
 
 describe("rerank (02 §4 Ranking)", () => {
   it("drops declined seats and re-ranks the rest with standard competition ranking", () => {
@@ -49,6 +60,13 @@ describe("remembered options (05 §Remembered options)", () => {
     expect(lastOptionsOf(stored, "words")).toEqual({ a: 1 });
     expect(lastOptionsOf("not json", "words")).toBeUndefined();
     expect(lastOptionsOf("[1]", "words")).toBeUndefined();
+  });
+
+  it("reads whoCanAddMe: only a stored 'nobody' is nobody (A12-P-3)", () => {
+    expect(whoCanAddMeOf(JSON.stringify({ whoCanAddMe: "nobody" }))).toBe("nobody");
+    for (const stored of ['{"whoCanAddMe":"pastOpponents"}', "{}", '{"whoCanAddMe":1}', "nope"]) {
+      expect(whoCanAddMeOf(stored)).toBe("pastOpponents");
+    }
   });
 
   it("doesn't remember an input too large to be worth keeping", () => {
@@ -436,5 +454,81 @@ describe("the engine-fault boundary (A2 review S2-6)", () => {
 
   it("keeps guarding a function member", () => {
     expect(() => (definition.view as () => unknown)()).toThrow(EngineFault);
+  });
+});
+
+describe("typed addresses on open invitations (A12-S-3)", () => {
+  // Telling a picked invitation from a typed one (present.ts, `countLiveCreatedWithUser`) relies
+  // on this: no transition clears `invite_email` on a row that stays `invited` in a lobby that
+  // stays open. A row's address goes only with the row leaving `invited` or the lobby ending.
+  const row = (
+    id: string,
+    state: GamePlayerRecord["state"],
+    joinedVia: GamePlayerRecord["joinedVia"],
+    inviteEmail: string | null,
+  ) =>
+    ({
+      id,
+      userId: `u-${id}`,
+      state,
+      joinedVia,
+      inviteEmail,
+      joinedAt: state === "joined" ? 1 : null,
+      seat: null,
+    }) as GamePlayerRecord;
+  const creator = row("a", "joined", "creator", null);
+  const typedX = row("x", "invited", null, "x@example.org");
+  const typedY = row("y", "invited", null, "y@example.org");
+  const added = row("z", "joined", "added", null);
+  const pickedInvitation = row("p", "invited", null, null);
+  const ctx = {
+    game: {
+      status: "lobby",
+      createdAt: 1000,
+      seats: 5,
+      aiAssistance: "off",
+      seatOrder: "join",
+    } as GameRecord,
+    players: [creator, added, typedX, typedY, pickedInvitation],
+    definition: {
+      players: () => ({ min: 2, max: 5 }),
+      validateStart: () => OK,
+      setup: () => ({}),
+      toAct: () => [0],
+    } as unknown as AnyGameDefinition,
+    options: {},
+    state: null,
+    random: cryptoRandom(),
+  };
+
+  it("holds for every lobby transition", () => {
+    const at = 2000;
+    const outcomes = [
+      accept(ctx, typedX, at),
+      accept(ctx, pickedInvitation, at),
+      decline(ctx, typedX, at),
+      decline(ctx, added, at),
+      decline(ctx, pickedInvitation, at),
+      start(ctx, creator, at),
+      cancel(ctx, creator, at),
+      expire(ctx.game, ctx.players, 1000 + LOBBY_LIFETIME_MS),
+      startAtCreation({ ...ctx, game: { ...ctx.game, seats: 2 }, players: [creator, added] }, at),
+    ];
+    let checked = 0;
+    for (const outcome of outcomes) {
+      if (outcome === null || isRefusal(outcome)) continue;
+      const writes = isModuleOutcome(outcome) ? outcome.writes : outcome;
+      const lobbyOpen = (writes.game.status ?? "lobby") === "lobby";
+      for (const update of writes.updatePlayers ?? []) {
+        const before = ctx.players.find((candidate) => candidate.id === update.id);
+        const stillInvited = (update.set.state ?? before?.state) === "invited";
+        if (update.set.inviteEmail === null && before?.inviteEmail !== null) {
+          expect(lobbyOpen && stillInvited, update.id).toBe(false);
+          checked += 1;
+        }
+      }
+    }
+    // Not vacuous: accepts, declines and endings did clear addresses.
+    expect(checked).toBeGreaterThan(4);
   });
 });

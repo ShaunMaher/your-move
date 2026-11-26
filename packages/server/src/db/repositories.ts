@@ -410,10 +410,10 @@ export interface GameRepo {
    */
   countLiveCreatedWithInvite(userId: string, emailHash: string): Promise<number>;
   /**
-   * How many `lobby`/`active` games the user created in which `otherId` has joined or holds an
-   * invitation picked by id (`invite_email` NULL) (05 `TOO_MANY_GAMES`, per pair for a picked past
-   * opponent). An invitation to a typed address isn't counted here, even when it resolves to
-   * `otherId`: it counts by its `emailId` alone (06 §6.7, Q3).
+   * How many `lobby`/`active` games the user created in which `otherId` holds a row without a
+   * typed address (`invite_email` NULL), in any state (05 `TOO_MANY_GAMES`, per pair for a picked
+   * past opponent). An invitation to a typed address isn't counted while it is open, even when it
+   * resolves to `otherId`: it counts by its `emailId` (06 §6.7, Q3).
    */
   countLiveCreatedWithUser(userId: string, otherId: string): Promise<number>;
   /**

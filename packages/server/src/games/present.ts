@@ -51,6 +51,10 @@ export function memberRow(
  * look alike and neither shows anything but its state. The creator already knows who they picked,
  * so they see the name (05 §Who sees what); nothing about a typed address decides whether a row is
  * one.
+ *
+ * This inference depends on an invariant: no writer clears `invite_email` on an `invited` row of an
+ * open lobby (A12-S-3; pinned by the lifecycle unit tests and the repository contract). A writer
+ * that broke it would show a typed invitation's user by name. An explicit marker on the row is M4's.
  */
 function isPickedInvitation(row: GamePlayerRecord, lobbyOpen: boolean): boolean {
   return lobbyOpen && row.state === "invited" && row.userId !== null && row.inviteEmail === null;
