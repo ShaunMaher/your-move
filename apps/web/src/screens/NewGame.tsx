@@ -341,6 +341,7 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
                     />
                     <span className="check-text">
                       {player.displayName}
+                      <span className="visually-hidden">,</span>{" "}
                       <span className="hint">{lastPlayed(player.lastPlayedAt)}</span>
                     </span>
                   </label>

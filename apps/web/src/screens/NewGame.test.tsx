@@ -228,9 +228,11 @@ describe("people you've played (alpha A12, 07 §1.1)", () => {
     const group = screen.getByRole("group", { name: "People you've played" });
     const boxes = screen.getAllByRole("checkbox");
     expect(boxes.map((box) => box.closest("label")?.textContent)).toEqual([
-      `Bob${lastPlayed(2)}`,
-      `Cy${lastPlayed(1)}`,
+      `Bob, ${lastPlayed(2)}`,
+      `Cy, ${lastPlayed(1)}`,
     ]);
+    // The name and the date read as two parts, not "Boblast played …" (A12-R2-2).
+    expect(screen.getByRole("checkbox", { name: /^Bob, last played/u })).toBeDefined();
     expect(lastPlayed(Date.UTC(2026, 10, 26, 12))).toMatch(/^last played .*2026/u);
     expect(screen.getByText(/joins the game at once/u)).toBeDefined();
     expect(group.contains(boxes[0] ?? null)).toBe(true);
