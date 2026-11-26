@@ -54,24 +54,25 @@ let sent: Sent[];
 /** What the fake push service answers for an endpoint (default 201). */
 let answers: Map<string, number | Error>;
 
+/** The fake push service: records every request and answers from `answers`. */
+const pushFetch: typeof fetch = (input, init) => {
+  // The sender always passes the endpoint's href.
+  const endpoint = typeof input === "string" ? input : "(not a string)";
+  sent.push({
+    endpoint,
+    body: init?.body as Uint8Array,
+    headers: new Headers(init?.headers),
+  });
+  const answer = answers.get(endpoint) ?? 201;
+  return answer instanceof Error
+    ? Promise.reject(answer)
+    : Promise.resolve(new Response(null, { status: answer }));
+};
+
 beforeEach(() => {
   sent = [];
   answers = new Map();
-  h = gameHarness(vapid, {
-    pushFetch: (input, init) => {
-      // The sender always passes the endpoint's href.
-      const endpoint = typeof input === "string" ? input : "(not a string)";
-      sent.push({
-        endpoint,
-        body: init?.body as Uint8Array,
-        headers: new Headers(init?.headers),
-      });
-      const answer = answers.get(endpoint) ?? 201;
-      return answer instanceof Error
-        ? Promise.reject(answer)
-        : Promise.resolve(new Response(null, { status: answer }));
-    },
-  });
+  h = gameHarness(vapid, { pushFetch });
 });
 
 afterEach(() => {
@@ -436,6 +437,98 @@ describe("the push to a past opponent added to a new game (alpha A12, 06 §6.2)"
     });
     expect(invited.status).toBe("lobby");
     expect(await received(boPhone)).toHaveLength(1);
+  });
+});
+
+describe("the auto-join push when the start at creation goes wrong (A12-P-1, P-11, S-4)", () => {
+  /** A harness whose repositories run `before` ahead of the start at creation's transition. */
+  function harnessAroundStart(before: () => Promise<void>) {
+    h.close();
+    h = gameHarness(vapid, {
+      pushFetch,
+      wrapRepos: (repos) => ({
+        ...repos,
+        games: {
+          ...repos.games,
+          async applyTransition(gameId, version, writes) {
+            if (writes.game.status === "active" && version === 0) await before();
+            return repos.games.applyTransition(gameId, version, writes);
+          },
+        },
+      }),
+    });
+  }
+
+  const pastOpponents = (a: Player, b: Player) => {
+    const at = h.platform.now().getTime();
+    h.exec(
+      "INSERT INTO past_opponents (user_id, other_id, last_finished_at) VALUES (?, ?, ?), (?, ?, ?)",
+      a.id,
+      b.id,
+      at,
+      b.id,
+      a.id,
+      at,
+    );
+  };
+
+  it("still answers 201 with the game as stored, logs the error by class, and pushes", async () => {
+    let fail = true;
+    harnessAroundStart(() => {
+      if (!fail) return Promise.resolve();
+      fail = false;
+      return Promise.reject(new TypeError("the database went away"));
+    });
+    const [ada, bo] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
+    const boPhone = await device();
+    await subscribe(bo, boPhone);
+    pastOpponents(ada, bo);
+    const answer = await call<{ game: { id: string; status: string } }>(
+      h,
+      ada,
+      "POST",
+      "/api/v1/games",
+      { gameType: "words", invitees: [{ userId: bo.id }] },
+    );
+    expect(answer.status).toBe(201);
+    // The start didn't happen: a full lobby the creator can start.
+    expect(answer.body.game.status).toBe("lobby");
+    expect(h.logs).toContainEqual(
+      expect.objectContaining({ msg: "start at creation failed", errorClass: "TypeError" }),
+    );
+    expect(JSON.stringify(h.logs)).not.toContain("the database went away");
+    expect(await received(boPhone)).toEqual([
+      {
+        title: "Family Games",
+        body: "Ada added you to a game.",
+        url: `/g/${answer.body.game.id}`,
+        tag: `game-${answer.body.game.id}`,
+      },
+    ]);
+    expect((await transition(h, ada, answer.body.game.id, "start")).body.game.status).toBe(
+      "active",
+    );
+  });
+
+  it("pushes nothing when the added player's decline won the race and ended the lobby", async () => {
+    let declineFirst = (): Promise<void> => Promise.resolve();
+    harnessAroundStart(() => declineFirst());
+    const [ada, bo] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
+    const boPhone = await device();
+    await subscribe(bo, boPhone);
+    pastOpponents(ada, bo);
+    declineFirst = async () => {
+      declineFirst = () => Promise.resolve();
+      const [row] = h.query(
+        "SELECT game_id FROM game_players WHERE user_id = ? AND joined_via = 'added'",
+        bo.id,
+      );
+      const gameId = String(row?.["game_id"]);
+      expect((await transition(h, bo, gameId, "decline", 0)).status).toBe(204);
+    };
+    const game = await createGame(h, ada, { gameType: "words", invitees: [{ userId: bo.id }] });
+    expect(game.status).toBe("declined");
+    expect(await received(boPhone)).toEqual([]);
   });
 });
 

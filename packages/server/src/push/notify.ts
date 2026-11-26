@@ -229,17 +229,32 @@ export function addedMessage(
 
 /**
  * Sends the "added you" push to each past opponent added to a new game, never to the creator.
- * Whose turn it is comes from the game as it is now, so a start at creation is reflected.
+ * It reads the game as it is now: nothing once the game has ended (a decline that won the race
+ * with the start at creation ends a two-seat lobby), and only to added players still in it
+ * (`joined` in the lobby, `playing` once started), so whoever declined in between hears nothing
+ * (A12-P-11, A12-S-4). Whose turn it is comes from the same read, so a start is reflected.
  */
 export async function sendAddedPushes(platform: Platform, event: AddedToGame): Promise<void> {
   const { repos, push } = platform;
   if (!push.enabled) return;
-  const recipients = event.added.filter((userId) => userId !== event.creator.id);
+  const loaded = await repos.games.load(event.gameId);
+  if (loaded === null) return;
+  const { game, players } = loaded;
+  if (game.status !== "lobby" && game.status !== "active") return;
+  const stillIn = new Set(
+    players.flatMap((row) =>
+      row.userId !== null && (row.state === "joined" || row.state === "playing")
+        ? [row.userId]
+        : [],
+    ),
+  );
+  const recipients = event.added.filter(
+    (userId) => userId !== event.creator.id && stillIn.has(userId),
+  );
   if (recipients.length === 0) return;
-  await deliver(platform, recipients, async () => {
-    const rows = await repos.games.players(event.gameId);
+  await deliver(platform, recipients, () => {
     const toAct = new Set(
-      rows.flatMap((row) =>
+      players.flatMap((row) =>
         row.toAct === 1 && row.state === "playing" && row.userId !== null ? [row.userId] : [],
       ),
     );
@@ -261,7 +276,7 @@ export async function sendAddedPushes(platform: Platform, event: AddedToGame): P
 async function deliver(
   platform: Platform,
   recipientIds: readonly string[],
-  messagesFor: () => Promise<ReadonlyMap<string, PushMessage>>,
+  messagesFor: () => ReadonlyMap<string, PushMessage> | Promise<ReadonlyMap<string, PushMessage>>,
 ): Promise<void> {
   const { repos, log, push } = platform;
   const subscriptions = interleaveByRecipient(
