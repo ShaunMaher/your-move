@@ -48,3 +48,14 @@ The security review found nothing in the slice. A10-S-1 was existing behaviour i
 | LOG-P-9 | Fixed. The client check cites the address rules in 04. | `apps/web/src/text.ts` |
 | LOG-S-2 | Open, existed before: a module's error codes aren't bounded at run time (the test kit checks them before install). To be filed as an issue. | — |
 | LOG-S-3 | Fixed. A missing email on the session's own account logs `no_email`, not `invalid_email`. | `packages/server/src/auth/routes.ts`, `app.test.ts` |
+
+## Test budgets under load (CH2)
+
+`alpha-chores-2`: one web test setup gives every web test the same wait and test budgets, and the
+full-game secrecy test gets its own; no retries (11 §4). The security review found nothing.
+
+| ID | Outcome | Where |
+|---|---|---|
+| CH2-P-1 | Fixed. The setup file says the cause is inferred (the failures could not be reproduced) and the budget is headroom. | `apps/web/vitest.setup.ts` |
+| CH2-P-2 | Fixed. Waits that assert something goes away keep a 1 s budget, so a regression fails fast; they assert presence first, so none is vacuous. | `apps/web/src/screens/Game.test.tsx` |
+| CH2-P-3 | Fixed. The secrecy test's comment gives its measured unloaded time. | `apps/node/src/games-secrecy.test.ts` |
