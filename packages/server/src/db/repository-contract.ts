@@ -688,12 +688,12 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
           const game = newGame({ status, createdBy: user });
           await repos.games.create(game, [player({ userId: user }), player(row)]);
         };
-        // Counted: every row without a typed address in a live game, whatever its state (A12-P-6).
+        // Counted: joined rows (picked or accepted), and an invitation picked by id.
         await create("lobby", { userId: other, state: "joined", joinedVia: "added" });
         await create("active", { userId: other, state: "playing", seat: 1 });
         await create("lobby", { userId: other, state: "invited", joinedAt: null });
-        await create("lobby", { userId: other, state: "declined", joinedAt: null });
-        // Not counted: an ended game, an open invitation to a typed address, another creator's.
+        // Not counted: an ended game, an open typed invitation, another creator's game, and a
+        // picked invitation declined in a lobby that stays open (the accepted undercount).
         await create("finished", { userId: other, state: "out", seat: 1 });
         await create("lobby", {
           userId: other,
@@ -701,11 +701,61 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
           joinedAt: null,
           inviteEmail: "typed@example.org",
         });
+        await create("lobby", { userId: other, state: "declined", joinedAt: null });
         const theirs = newGame({ createdBy: other });
         await repos.games.create(theirs, [player({ userId: other }), player({ userId: user })]);
-        expect(await repos.games.countLiveCreatedWithUser(user, other)).toBe(4);
+        expect(await repos.games.countLiveCreatedWithUser(user, other)).toBe(3);
         expect(await repos.games.countLiveCreatedWithUser(other, user)).toBe(1);
         expect(await repos.games.countLiveCreatedWithUser(user, "nobody")).toBe(0);
+      });
+
+      it("never counts a typed row that lost its address while the game is live (A12-S2-1)", async () => {
+        // A typed address that resolves to `x`, then (a) dropped at a start and (b) declined in a
+        // three-seat lobby that stays open: both clear `invite_email` and keep `user_id`. Neither
+        // may count toward the (creator, x) pair, or the cap would tie the address to x (Q3).
+        const creator = await human();
+        const x = await human();
+        const typed = () =>
+          player({
+            userId: x,
+            state: "invited",
+            joinedAt: null,
+            inviteEmail: "typed@example.org",
+          });
+
+        const started = newGame({ createdBy: creator, seats: 3 });
+        const droppedRow = typed();
+        const added = player({ userId: await human(), joinedVia: "added" });
+        await repos.games.create(started, [player({ userId: creator }), added, droppedRow]);
+        expect(
+          await repos.games.applyTransition(started.id, 0, {
+            game: { status: "active", state: "{}", startedAt: T0, updatedAt: T0 },
+            updatePlayers: [
+              { id: droppedRow.id, set: { state: "dropped", seat: null, inviteEmail: null } },
+            ],
+          }),
+        ).toBe("ok");
+
+        const open = newGame({ createdBy: creator, seats: 3 });
+        const declinedRow = typed();
+        const waiting = player({ userId: await human(), state: "invited", joinedAt: null });
+        await repos.games.create(open, [player({ userId: creator }), declinedRow, waiting]);
+        expect(
+          await repos.games.applyTransition(open.id, 0, {
+            game: { updatedAt: T0 },
+            updatePlayers: [{ id: declinedRow.id, set: { state: "declined", inviteEmail: null } }],
+          }),
+        ).toBe("ok");
+
+        const rows = await target.sql(
+          "SELECT g.status, p.state, p.invite_email FROM game_players p JOIN games g ON g.id = p.game_id WHERE p.user_id = ? ORDER BY g.status",
+          x,
+        );
+        expect(rows).toEqual([
+          { status: "active", state: "dropped", invite_email: null },
+          { status: "lobby", state: "declined", invite_email: null },
+        ]);
+        expect(await repos.games.countLiveCreatedWithUser(creator, x)).toBe(0);
       });
 
       it("writes past opponents only with the winning transition, and never for a blocked pair", async () => {

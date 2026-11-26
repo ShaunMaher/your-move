@@ -3,7 +3,22 @@
  * adapter's {@link Database} (docs/spec/03-architecture.md §4). Multi-statement writes go through
  * one atomic batch; nothing here opens an interactive transaction.
  */
-import { and, asc, count, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 
 import {
   apiTokenRepo,
@@ -259,11 +274,18 @@ function gameRepo(db: Database): GameRepo {
         .where(
           and(
             eq(gamePlayers.userId, otherId),
-            // Every row without a typed address, whatever its state, as the emailId pair counts
-            // every game with that typed address (A12-P-6). An invitation to a typed address
-            // keeps its `invite_email` while it is `invited` in an open lobby (the invariant the
-            // repository contract pins, A12-S-3), so it is never counted here (Q3).
-            isNull(gamePlayers.inviteEmail),
+            // Rows that have joined, and invitations picked by id (`invited` without a typed
+            // address: an open typed invitation keeps its `invite_email`, the invariant pinned
+            // as A12-S-3). Not "every row without `invite_email`" (A12-S2-1): a typed row also
+            // loses its address while the game is still live, when a start drops it or it is
+            // declined in a lobby that stays open, and keeps its `user_id`, so counting it would
+            // tie a typed address to an account (Q3). Accepted undercount: a picked invitation
+            // declined in a lobby that stays open stops counting; the daily pair limit still
+            // bounds it. An explicit pick marker (M4) would allow counting every picked row.
+            or(
+              isNotNull(gamePlayers.joinedAt),
+              and(eq(gamePlayers.state, "invited"), isNull(gamePlayers.inviteEmail)),
+            ),
             eq(games.createdBy, userId),
             LIVE,
           ),
