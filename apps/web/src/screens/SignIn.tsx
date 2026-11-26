@@ -27,9 +27,10 @@ function requestMessage(failure: Failure): string {
     case "rate-limited":
       return "Too many attempts from your connection. Please wait a while and try again.";
     case "rejected":
-      // The address passed the app's own check, so what the server refused isn't something the
-      // person can fix by retyping it; say the same thing whatever the address (06 §6.1).
-      return "Something went wrong sending your code. Try again later.";
+      // The server's own check of the address shape failed (or, rarely, its network address was
+      // missing). The answer depends on the address's shape only, never on whether it has an
+      // account, so it can say so without leaking anything (06 §6.1).
+      return "Check your email address. If it looks right, please try again later.";
     default:
       return "Something went wrong. Please try again.";
   }

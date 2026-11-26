@@ -35,6 +35,7 @@ import {
   type TemplateContext,
 } from "../email/templates.js";
 import { background } from "../http/background.js";
+import { errorBody, type ErrorReason } from "../http/error-log.js";
 import type { AppEnv, Platform } from "../platform.js";
 import { ipBuckets } from "./client-ip.js";
 import { checkLimits } from "./limits.js";
@@ -70,8 +71,13 @@ const MESSAGES: Readonly<Record<Code, string>> = {
   RATE_LIMITED: "Too many requests. Please wait and try again.",
 };
 
-function fail<S extends ErrorStatus, C extends Code>(c: Context, status: S, code: C) {
-  return c.json({ error: { code, message: MESSAGES[code] } }, status);
+function fail<S extends ErrorStatus, C extends Code>(
+  c: Context<AppEnv>,
+  status: S,
+  code: C,
+  reason?: ErrorReason,
+) {
+  return c.json(errorBody(c, code, MESSAGES[code], reason === undefined ? {} : { reason }), status);
 }
 
 /**
@@ -170,10 +176,10 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
 
   app.openapi(otpRequestRoute, async (c) => {
     const email = normaliseAddress(c.req.valid("json").email);
-    if (email === null) return fail(c, 400, "BAD_REQUEST");
+    if (email === null) return fail(c, 400, "BAD_REQUEST", "invalid_email");
     const context = await deps();
     const buckets = await clientBuckets(c, context.keys);
-    if (buckets === null) return fail(c, 400, "BAD_REQUEST");
+    if (buckets === null) return fail(c, 400, "BAD_REQUEST", "no_client_ip");
     const outcome = await issueSignInCode(context, email, buckets);
     if (outcome.kind === "ip-limited") return fail(c, 429, "RATE_LIMITED");
     // Both messages are built on every path, sent or not, so the work before the response doesn't
@@ -194,10 +200,10 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
   app.openapi(otpVerifyRoute, async (c) => {
     const body = c.req.valid("json");
     const email = normaliseAddress(body.email);
-    if (email === null) return fail(c, 400, "BAD_REQUEST");
+    if (email === null) return fail(c, 400, "BAD_REQUEST", "invalid_email");
     const context = await deps();
     const buckets = await clientBuckets(c, context.keys);
-    if (buckets === null) return fail(c, 400, "BAD_REQUEST");
+    if (buckets === null) return fail(c, 400, "BAD_REQUEST", "no_client_ip");
     const existing = await repos.users.findByEmail(email);
     const outcome = await verifyCode(context, email, "signin", body.code, buckets);
     if (outcome === "limited") return fail(c, 429, "RATE_LIMITED");
@@ -316,7 +322,7 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     if (nudges !== undefined) {
       if (nudges) {
         // Nudges go to the account's address: an account without one can't have them.
-        if (user.email === null) return fail(c, 400, "BAD_REQUEST");
+        if (user.email === null) return fail(c, 400, "BAD_REQUEST", "no_email");
         // Records the address's emailId, which a nudges unsubscribe link finds the account by
         // (04 `users.email_id`, 05 §Email links).
         const id = await emailId(await options.keys(), user.email);
@@ -338,7 +344,8 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
   app.openapi(deleteOtpRoute, async (c) => {
     const active = c.get("session");
     const email = active.user.email;
-    if (email === null) return fail(c, 400, "BAD_REQUEST");
+    // The session user's own address is missing (an account without one), not a typed one.
+    if (email === null) return fail(c, 400, "BAD_REQUEST", "no_email");
     const issued = await issueStepUpCode(
       await deps(),
       { id: active.user.id, email },
@@ -353,10 +360,11 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
   app.openapi(deleteMeRoute, async (c) => {
     const active = c.get("session");
     const email = active.user.email;
-    if (email === null) return fail(c, 400, "BAD_REQUEST");
+    // The session user's own address is missing (an account without one), not a typed one.
+    if (email === null) return fail(c, 400, "BAD_REQUEST", "no_email");
     const context = await deps();
     const buckets = await clientBuckets(c, context.keys);
-    if (buckets === null) return fail(c, 400, "BAD_REQUEST");
+    if (buckets === null) return fail(c, 400, "BAD_REQUEST", "no_client_ip");
     const outcome = await verifyCode(
       context,
       email,

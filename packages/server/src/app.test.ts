@@ -4,6 +4,8 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
+import { ApiError } from "./http/api-error.js";
+import { loggedIssues } from "./http/error-log.js";
 import { securityHeaders } from "./http/security-headers.js";
 import { createJsonLogger } from "./log.js";
 import { PROD_ENV, TEST_VAPID, testPlatform } from "./test-support.js";
@@ -346,6 +348,260 @@ describe("errors and logging", () => {
     const app = createApp({ platform: { ...platform, now }, games: [] });
     await app.request("/api/v1/health");
     expect(platform.lines.at(-1)).toMatchObject({ durationMs: 25 });
+  });
+
+  describe("the error code in the request log line (09 §5)", () => {
+    const OTP = "/api/v1/auth/otp/request";
+    const PLANTED = "planted-7f3a91c2";
+    const post = (body: string, headers: Record<string, string> = {}) => ({
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body,
+    });
+    const requestLine = (lines: Record<string, unknown>[]) =>
+      lines.filter((line) => line["msg"] === "request");
+
+    it("carries the code of an ApiError", async () => {
+      const { app, platform } = throwing(ApiError.of("NOT_FOUND"));
+      expect((await app.request("/api/v1/config")).status).toBe(404);
+      const lines = requestLine(platform.lines);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({ status: 404, code: "NOT_FOUND" });
+    });
+
+    it("carries a game module's own code", async () => {
+      const { app, platform } = throwing(ApiError.module("WORD_NOT_FOUND", { word: PLANTED }));
+      expect((await app.request("/api/v1/config")).status).toBe(400);
+      expect(requestLine(platform.lines)[0]).toMatchObject({ code: "WORD_NOT_FOUND" });
+    });
+
+    it("carries INTERNAL for an unhandled exception, without the message", async () => {
+      const { app, platform } = throwing(new TypeError(PLANTED));
+      await app.request("/api/v1/config");
+      expect(requestLine(platform.lines)[0]).toMatchObject({ status: 500, code: "INTERNAL" });
+    });
+
+    it("logs a validation failure's issue paths and codes, never values", async () => {
+      const { app, platform } = setup();
+      const res = await app.request(OTP, post(JSON.stringify({ email: PLANTED.repeat(30) })));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
+      const lines = requestLine(platform.lines);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({
+        status: 400,
+        code: "BAD_REQUEST",
+        route: OTP,
+        issues: "json.email:too_big",
+      });
+      expect(JSON.stringify(platform.lines)).not.toContain(PLANTED);
+    });
+
+    it("tells an address the handler refuses from a validation failure by its reason", async () => {
+      const { app, platform } = setup();
+      const res = await app.request(OTP, post(JSON.stringify({ email: `${PLANTED}@nodot` })));
+      expect(res.status).toBe(400);
+      const line = requestLine(platform.lines)[0];
+      expect(line).toMatchObject({ code: "BAD_REQUEST", reason: "invalid_email" });
+      expect(line).not.toHaveProperty("issues");
+      expect(JSON.stringify(platform.lines)).not.toContain(PLANTED);
+    });
+
+    it("logs an unknown key as an issue without naming the key", async () => {
+      const { app, platform } = setup();
+      await app.request(OTP, post(JSON.stringify({ email: "a@example.org", [PLANTED]: 1 })));
+      expect(requestLine(platform.lines)[0]).toMatchObject({ issues: "json:unrecognized_keys" });
+      expect(JSON.stringify(platform.lines)).not.toContain(PLANTED);
+    });
+
+    it("logs a body of the wrong shape by path and code", async () => {
+      const { app, platform } = setup();
+      await app.request(OTP, post(JSON.stringify({ email: 42 })));
+      expect(requestLine(platform.lines)[0]).toMatchObject({ issues: "json.email:invalid_type" });
+    });
+
+    it("carries the code of a JSON-rule refusal", async () => {
+      const { app, platform } = setup();
+      const res = await app.request(OTP, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: PLANTED,
+      });
+      expect(res.status).toBe(415);
+      expect(requestLine(platform.lines)[0]).toMatchObject({
+        status: 415,
+        code: "UNSUPPORTED_MEDIA_TYPE",
+      });
+      expect(JSON.stringify(platform.lines)).not.toContain(PLANTED);
+    });
+
+    it("carries the code of an Origin refusal", async () => {
+      const { app, platform } = setup();
+      const res = await app.request(OTP, post("{}", { Origin: "https://evil.example" }));
+      expect(res.status).toBe(403);
+      expect(requestLine(platform.lines)[0]).toMatchObject({ status: 403, code: "BAD_ORIGIN" });
+    });
+
+    it("carries the code of a body-limit refusal", async () => {
+      const { app, platform } = setup();
+      const res = await app.request(OTP, post(JSON.stringify({ email: "a".repeat(20_000) })));
+      expect(res.status).toBe(413);
+      expect(requestLine(platform.lines)[0]).toMatchObject({ status: 413, code: "TOO_LARGE" });
+    });
+
+    it("carries the code of unparseable JSON", async () => {
+      const { app, platform } = setup();
+      const res = await app.request(OTP, post(`{"email": "${PLANTED}"`));
+      expect(res.status).toBe(400);
+      expect(requestLine(platform.lines)[0]).toMatchObject({ status: 400, code: "BAD_REQUEST" });
+      expect(JSON.stringify(platform.lines)).not.toContain(PLANTED);
+    });
+
+    it("carries the code of a missing client address, with a fixed reason", async () => {
+      const platform = testPlatform(PROD_ENV);
+      const app = createApp({
+        platform: { ...platform, clientIp: () => ({ ok: false, reason: "missing" }) },
+        games: [],
+      });
+      const res = await app.request(OTP, post(JSON.stringify({ email: "a@example.org" })));
+      expect(res.status).toBe(400);
+      expect(requestLine(platform.lines)[0]).toMatchObject({
+        code: "BAD_REQUEST",
+        reason: "no_client_ip",
+      });
+      expect(JSON.stringify(platform.lines)).not.toContain("a@example.org");
+    });
+
+    describe("session-gate refusals", () => {
+      const ME = "/api/v1/me";
+      const NOW = Date.UTC(2026, 0, 1);
+      const TOKEN = "stale-token".padEnd(43, "x");
+      const COOKIE = { Cookie: `__Host-sid=${TOKEN}` };
+
+      it.each([
+        ["no cookie", {}, 401, "UNAUTHENTICATED"],
+        ["a bearer token alone", { Authorization: "Bearer x" }, 401, "UNAUTHENTICATED"],
+        [
+          "a cookie and a bearer token",
+          { ...COOKIE, Authorization: "Bearer x" },
+          400,
+          "BAD_REQUEST",
+        ],
+      ])("carries the code for %s", async (_, headers, status, code) => {
+        const { app, platform } = setup();
+        const res = await app.request(ME, { headers });
+        expect(res.status).toBe(status);
+        expect(requestLine(platform.lines)[0]).toMatchObject({ status, code });
+        expect(JSON.stringify(platform.lines)).not.toContain(TOKEN);
+      });
+
+      it("carries the code for a stale cookie", async () => {
+        const { app, platform } = signedInAs(null);
+        const res = await app.request(ME, { headers: COOKIE });
+        expect(res.status).toBe(401);
+        expect(requestLine(platform.lines)[0]).toMatchObject({ code: "UNAUTHENTICATED" });
+      });
+
+      /** An app whose session cookie resolves to a stored user with these fields. */
+      function signedInAs(user: Record<string, unknown> | null) {
+        const platform = testPlatform(PROD_ENV);
+        const repos = {
+          ...platform.repos,
+          sessions: {
+            ...platform.repos.sessions,
+            findByTokenHash: () =>
+              Promise.resolve(
+                user === null
+                  ? null
+                  : {
+                      session: {
+                        id: "s",
+                        createdAt: NOW,
+                        lastSeenAt: NOW,
+                        expiresAt: Number.MAX_SAFE_INTEGER,
+                      },
+                      user: { id: "u", suspendedAt: null, ...user },
+                    },
+              ),
+          },
+        };
+        return {
+          platform,
+          app: createApp({ platform: { ...platform, repos } as never, games: [] }),
+        };
+      }
+
+      it("carries SUSPENDED for a suspended account", async () => {
+        const { app, platform } = signedInAs({ suspendedAt: 1 });
+        const res = await app.request(ME, { headers: COOKIE });
+        expect(res.status).toBe(403);
+        expect(requestLine(platform.lines)[0]).toMatchObject({ status: 403, code: "SUSPENDED" });
+      });
+
+      it("gives requesting a deletion code for an account without an address the reason no_email", async () => {
+        const { app, platform } = signedInAs({ email: null, onboardedAt: 1 });
+        const res = await app.request("/api/v1/me/delete/otp", {
+          method: "POST",
+          headers: { ...COOKIE, Origin: "https://play.example.org" },
+        });
+        expect(res.status).toBe(400);
+        expect(requestLine(platform.lines)[0]).toMatchObject({
+          code: "BAD_REQUEST",
+          reason: "no_email",
+        });
+      });
+
+      it("gives turning nudges on for an account without an address the reason no_email", async () => {
+        const { app, platform } = signedInAs({ email: null, onboardedAt: 1 });
+        const res = await app.request(ME, {
+          method: "PATCH",
+          headers: {
+            ...COOKIE,
+            "Content-Type": "application/json",
+            Origin: "https://play.example.org",
+          },
+          body: JSON.stringify({ settings: { emailNudges: true } }),
+        });
+        expect(res.status).toBe(400);
+        expect(requestLine(platform.lines)[0]).toMatchObject({
+          code: "BAD_REQUEST",
+          reason: "no_email",
+        });
+      });
+    });
+
+    it("never logs an identifier-shaped unknown key of a strict object", async () => {
+      const { app, platform } = setup();
+      const key = "planted_key_9c1e";
+      await app.request(OTP, post(JSON.stringify({ email: "a@example.org", [key]: 1 })));
+      expect(requestLine(platform.lines)[0]).toMatchObject({ issues: "json:unrecognized_keys" });
+      expect(JSON.stringify(platform.lines)).not.toContain(key);
+    });
+
+    it("leaves a successful request without a code", async () => {
+      const { app, platform } = setup();
+      await app.request("/api/v1/health");
+      expect(requestLine(platform.lines)[0]).not.toHaveProperty("code");
+    });
+  });
+
+  describe("loggedIssues", () => {
+    it("caps the count and masks keys that could carry input", () => {
+      const issues = Array.from({ length: 9 }, () => ({
+        path: ["items", 3, "someone@example.org"],
+        code: "invalid_type",
+      }));
+      const logged = loggedIssues("json", issues);
+      expect(logged.split(",")).toHaveLength(5);
+      expect(logged).toContain("json.items.3.*:invalid_type");
+      expect(logged).not.toContain("someone");
+    });
+
+    it("drops an issue code that is not a plain Zod code", () => {
+      expect(loggedIssues("query", [{ path: [], code: "custom code with spaces" }])).toBe(
+        "query:unknown",
+      );
+    });
   });
 });
 

@@ -135,6 +135,9 @@ export default {
   async fetch(request, env, ctx) {
     const worker = await ready(env);
     if (worker === null) {
+      // Startup failed before the app existed: deliberately outside the request log and the
+      // per-request error contract (05 §Errors), which only the app's handlers uphold. The
+      // failure was logged by `ready`.
       return Response.json(
         { error: { code: "INTERNAL", message: "Something went wrong." } },
         { status: 500, headers: { "Cache-Control": "no-store" } },
