@@ -520,7 +520,7 @@ export function gameRaceContract(
         const { game: stored, players } = await consistent(gameId, 1);
         if (startWins) {
           expect(declining?.status).toBe(409);
-          expect(declining.body?.error?.code).toBe("STALE_GAME");
+          expect(declining?.body?.error?.code).toBe("STALE_GAME");
           expect(stored?.status).toBe("active");
           expect(rowOf(players, b)).toMatchObject({ state: "playing", seat: 1 });
           expect(creating?.body?.game?.status).toBe("active");
