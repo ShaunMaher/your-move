@@ -281,7 +281,12 @@ test("a game can be resigned straight after it starts", async ({ page: ann, frie
     (await ann.locator('.ym-w-turn[data-yours="true"]').count()) === 0 ? [ann, bob] : [bob, ann];
   await expect(acting.locator('.ym-w-turn[data-yours="true"]')).toHaveText("Your turn");
   await expect(waiting.locator('.ym-w-turn[data-yours="false"]')).toContainText(/'s turn$/u);
-  await waiting.getByRole("group", { name: "Your rack" }).getByRole("button").first().click();
+  // Not a blank: placing one would open the letter picker.
+  await waiting
+    .getByRole("group", { name: "Your rack" })
+    .getByRole("button", { name: /^(?!Blank)/u })
+    .first()
+    .click();
   await waiting.locator("[data-square]").nth(112).click();
   await expect(waiting.locator('.ym-w-tile[data-state="planned"]')).toHaveCount(1);
   await expect(waiting.getByRole("button", { name: /Planned tile/u })).toHaveCount(1);

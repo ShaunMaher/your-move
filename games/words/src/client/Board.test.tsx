@@ -909,6 +909,44 @@ describe("when it isn't your turn", () => {
     expect(p.preview).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["a new version of the game", true],
+    ["the turn passing", false],
+  ])("closes an open dialog on %s, and nothing is sent", (_what, sameVersion) => {
+    const game = envelope(NAMES, 0);
+    const p = props();
+    const { rerender } = render(<Board game={game} view={view(fresh(), 0)} {...p} />);
+    fireEvent.click(button("Pass"));
+    expect(screen.getByRole("dialog", { name: "Pass your turn?" })).toBeTruthy();
+    rerender(
+      <Board
+        game={{
+          ...game,
+          version: sameVersion ? 4 : game.version,
+          ...(sameVersion ? {} : { yourTurn: false, toAct: [1] }),
+        }}
+        view={view(fresh({ turn: sameVersion ? 0 : 1 }), 0)}
+        {...p}
+      />,
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(p.submit).not.toHaveBeenCalled();
+    if (!sameVersion) {
+      // The turn comes back: the dialog does not.
+      rerender(<Board game={game} view={view(fresh(), 0)} {...p} />);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    }
+  });
+
+  it("drags a planned tile's ghost in the planned style", () => {
+    setup(fresh({ turn: 1 }), { yourTurn: false });
+    fireEvent.pointerDown(rackTile("S, 1 point"), { pointerId: 1, clientX: 5, clientY: 5 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 40, clientY: 40 });
+    expect(document.querySelector(".ym-w-ghost .ym-w-tile")?.getAttribute("data-state")).toBe(
+      "planned",
+    );
+  });
+
   it("says it is a plan even when nobody is to act", () => {
     render(
       <Board

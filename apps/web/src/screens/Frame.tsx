@@ -51,6 +51,7 @@ function turnText(game: GameEnvelope): string {
   const waiting = game.players
     .filter((player) => player.seat !== null && game.toAct.includes(player.seat))
     .map(seatLabel);
+  if (waiting.length === 1) return `${waiting[0] ?? ""}'s turn`;
   return waiting.length === 0 ? "Waiting" : `Waiting for ${waiting.join(" and ")}`;
 }
 

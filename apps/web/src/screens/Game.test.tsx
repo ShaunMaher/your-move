@@ -238,6 +238,22 @@ describe("the game frame", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it.each([
+    [[1], "Sam's turn"],
+    [[0, 1], "Waiting for You and Sam"],
+  ])("words the stand-in's turn line as the board does (to act: %j)", async (toAct, text) => {
+    const game = envelope({
+      yourTurn: false,
+      toAct,
+      players: [
+        player({ isYou: true }),
+        player({ seat: 1, userId: "u2", displayName: "Sam", isYou: false }),
+      ],
+    });
+    open({ "GET /api/v1/games/g1": withView(game) }, { client: null });
+    expect(await screen.findByText(text)).toBeDefined();
+  });
+
   it("names a seat without a display name by why it has none: New player, or Deleted player", async () => {
     const game = envelope({
       players: [

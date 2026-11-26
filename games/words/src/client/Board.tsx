@@ -147,10 +147,13 @@ function Table(
       }),
     );
     setSelected(null);
+    setDialog(null);
     setSent(false);
     setMessage(null);
     setAnswers(new Map());
   }
+  // A dialog is for acting: when the turn passes (or the game ends) with one open, it closes.
+  if (!canAct && dialog !== null) setDialog(null);
 
   const frame = useRef<HTMLDivElement>(null);
   const rackBox = useRef<HTMLDivElement>(null);
@@ -358,6 +361,8 @@ function Table(
   }
 
   async function send(action: Action): Promise<void> {
+    // Nothing is sent off turn, whatever a stale dialog or button says (07 §2).
+    if (!canAct) return;
     setBusy(true);
     setMessage(null);
     try {
@@ -569,7 +574,11 @@ function Table(
             }
           }}
         >
-          <span className="ym-w-tile" data-state="placed" data-blank={ghost.tile === "?"}>
+          <span
+            className="ym-w-tile"
+            data-state={canArrange && !canAct ? "planned" : "placed"}
+            data-blank={ghost.tile === "?"}
+          >
             {shown(ghost.tile)}
           </span>
         </div>

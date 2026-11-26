@@ -122,9 +122,12 @@ by the shell for every game.)
   "Waiting for Sam and Alex"); it is absent when the game isn't under way or nobody is to act. The
   seat or seats to act are a filled chip in the score list (the underline stays as a second cue;
   `aria-current` names them to assistive technology). The chip is the board's one announcement of a
-  change of turn (`role="status"`, filled in place so a change is read once); the status line
-  doesn't repeat it. The shell's frame bar keeps its own "Your turn" / "Waiting for …" text, which
-  says the same thing.
+  change of turn (`role="status"`, filled in place so the change is read when it happens, not on
+  every render); the status line doesn't repeat the turn, though it may follow with its own short
+  hint (two brief announcements at a change of turn are accepted). The shell's frame bar, drawn
+  only where there is no board, words it the same way: "Your turn", "Sam's turn" for one waiting
+  seat, "Waiting for Sam and Alex" for several. A dialog open on the board closes when a new
+  version of the game arrives or the turn passes, and nothing is sent off turn.
 - **Planning off turn** (alpha A10). With a rack in an active game a player may place tiles while
   it is not their turn. Such tiles are a plan, not a move: they are drawn as **planned tiles** (a
   paler tile with a dashed outline; the letter keeps its own contrast pair, never reduced
