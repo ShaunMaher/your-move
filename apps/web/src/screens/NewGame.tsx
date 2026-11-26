@@ -16,7 +16,7 @@ import { loadGameClient } from "../games.js";
 import { rememberPushOffered, shouldOfferPush } from "../push.js";
 import { PushOffer } from "../PushOffer.js";
 import { navigate, Link } from "../router.js";
-import { looksLikeEmail } from "../text.js";
+import { fitAddresses, lastPlayed, looksLikeEmail } from "../text.js";
 import { Page } from "./Page.js";
 import { Problem } from "./Problem.js";
 
@@ -139,7 +139,7 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
 
   /** Keeps one address field for each seat that no picked past opponent fills. */
   function fitEmails(open: number) {
-    setEmails((now) => Array.from({ length: Math.max(0, open) }, (_, index) => now[index] ?? ""));
+    setEmails((now) => fitAddresses(now, open));
   }
 
   function setSeatCount(next: number) {
@@ -327,24 +327,29 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
                 <h3>People you&apos;ve played</h3>
               </legend>
               {recent.map((player) => {
-                const chosen = picked.includes(player.userId);
+                const isPicked = picked.includes(player.userId);
                 return (
                   <label key={player.userId} className="check">
                     <input
                       type="checkbox"
-                      checked={chosen}
-                      disabled={!chosen && picked.length >= seats - 1}
+                      checked={isPicked}
+                      disabled={!isPicked && picked.length >= seats - 1}
                       aria-describedby="picked-note"
                       onChange={() => {
                         togglePicked(player.userId);
                       }}
                     />
-                    {player.displayName}
+                    <span className="check-text">
+                      {player.displayName}
+                      <span className="hint">{lastPlayed(player.lastPlayedAt)}</span>
+                    </span>
                   </label>
                 );
               })}
               <p id="picked-note" className="hint">
-                Someone you pick joins the game at once, with no invitation to accept.
+                {picked.length >= seats - 1
+                  ? "Every seat is filled; unpick someone to choose another."
+                  : "Someone you pick joins the game at once, unless they've asked to be invited instead."}
               </p>
             </fieldset>
           ) : null}
@@ -397,7 +402,7 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
           <p>
             A {chosen.name} game for {String(seats)} players.
             {emails.length === 0
-              ? " It starts as soon as you create it."
+              ? " It starts as soon as you create it, unless someone you picked has asked to be invited instead."
               : ` Check the ${emails.length === 1 ? "address" : "addresses"}: we never say whether an address has an account, so a typo just means an invitation nobody receives.`}
           </p>
           <ul className="plain">

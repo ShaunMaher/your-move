@@ -1,4 +1,4 @@
-/** Small text helpers for the sign-in screens. */
+/** Small text helpers for the sign-in and new-game screens. */
 
 /** The code field accepts pasted or autofilled text such as `1234 5678` (06 §3.3). */
 export function cleanCode(input: string): string {
@@ -25,4 +25,30 @@ export const DISPLAY_NAME_MAX = 24;
  */
 export function looksLikeEmail(input: string): boolean {
   return /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)*\.[^\s@.]+$/u.test(input.trim());
+}
+
+const playedDate = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
+
+/** "last played <date>" for a past opponent (07 §1.1), in the device's locale. */
+export function lastPlayed(at: number): string {
+  return `last played ${playedDate.format(new Date(at))}`;
+}
+
+/**
+ * `now` resized to `open` address fields (07 §1.1): new fields are empty; when there are too many,
+ * empty ones go first (the latest first), then the latest typed ones.
+ */
+export function fitAddresses(now: readonly string[], open: number): string[] {
+  const size = Math.max(0, open);
+  const kept = [...now];
+  while (kept.length > size) {
+    const empty = kept.findLastIndex((address) => address.trim() === "");
+    kept.splice(empty === -1 ? kept.length - 1 : empty, 1);
+  }
+  while (kept.length < size) kept.push("");
+  return kept;
 }

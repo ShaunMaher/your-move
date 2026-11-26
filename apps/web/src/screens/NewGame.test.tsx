@@ -15,6 +15,7 @@ import {
   PUSH_KEY,
   removeFakePush,
 } from "../test-support.js";
+import { lastPlayed } from "../text.js";
 import { NewGame } from "./NewGame.js";
 
 vi.mock("../games.js", () => ({ loadGameClient: vi.fn(() => Promise.resolve(fakeClient)) }));
@@ -226,13 +227,21 @@ describe("people you've played (alpha A12, 07 §1.1)", () => {
     await toPlayers();
     const group = screen.getByRole("group", { name: "People you've played" });
     const boxes = screen.getAllByRole("checkbox");
-    expect(boxes.map((box) => box.closest("label")?.textContent)).toEqual(["Bob", "Cy"]);
+    expect(boxes.map((box) => box.closest("label")?.textContent)).toEqual([
+      `Bob${lastPlayed(2)}`,
+      `Cy${lastPlayed(1)}`,
+    ]);
+    expect(lastPlayed(Date.UTC(2026, 10, 26, 12))).toMatch(/^last played .*2026/u);
+    expect(screen.getByText(/joins the game at once/u)).toBeDefined();
     expect(group.contains(boxes[0] ?? null)).toBe(true);
     expect(screen.getByLabelText("Their email address")).toBeDefined();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Bob" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Bob/u }));
     // The one seat is filled: no address to type, and nobody else can be picked.
     expect(screen.queryByLabelText("Their email address")).toBeNull();
-    expect(screen.getByRole("checkbox", { name: "Cy" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("checkbox", { name: /^Cy/u })).toHaveProperty("disabled", true);
+    expect(
+      screen.getByText("Every seat is filled; unpick someone to choose another."),
+    ).toBeDefined();
     click("Review");
     expect(screen.getByText(/starts as soon as you create it/u)).toBeDefined();
     expect((await screen.findByRole("listitem")).textContent).toBe("Playing with Bob");
@@ -251,9 +260,9 @@ describe("people you've played (alpha A12, 07 §1.1)", () => {
   it("gives the seat back to an address when unpicked", async () => {
     withRecent(json(RECENT));
     await toPlayers();
-    fireEvent.click(screen.getByRole("checkbox", { name: "Cy" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Cy" }));
-    expect(screen.getByRole("checkbox", { name: "Bob" })).toHaveProperty("disabled", false);
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Cy/u }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Cy/u }));
+    expect(screen.getByRole("checkbox", { name: /^Bob/u })).toHaveProperty("disabled", false);
     typeEmail("alex@example.org");
     click("Review");
     expect((await screen.findByRole("listitem")).textContent).toBe(
@@ -266,7 +275,7 @@ describe("people you've played (alpha A12, 07 §1.1)", () => {
     const { calls } = withRecent(json(RECENT), json({ games: [bigger] }));
     await toPlayers();
     fireEvent.change(screen.getByLabelText("Number of players"), { target: { value: "3" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Cy" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Cy/u }));
     fireEvent.change(screen.getByLabelText("Player 3's email address"), {
       target: { value: "dee@example.org" },
     });
@@ -277,11 +286,11 @@ describe("people you've played (alpha A12, 07 §1.1)", () => {
     ]);
     click("Back");
     // Two fewer seats than picks can't happen: fewer seats drop the latest picks.
-    fireEvent.click(screen.getByRole("checkbox", { name: "Bob" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Bob/u }));
     expect(screen.queryByLabelText(/email address/u)).toBeNull();
     fireEvent.change(screen.getByLabelText("Number of players"), { target: { value: "2" } });
-    expect(screen.getByRole("checkbox", { name: "Cy" })).toHaveProperty("checked", true);
-    expect(screen.getByRole("checkbox", { name: "Bob" })).toHaveProperty("checked", false);
+    expect(screen.getByRole("checkbox", { name: /^Cy/u })).toHaveProperty("checked", true);
+    expect(screen.getByRole("checkbox", { name: /^Bob/u })).toHaveProperty("checked", false);
     click("Review");
     click("Create game");
     await waitFor(() => {
@@ -291,6 +300,22 @@ describe("people you've played (alpha A12, 07 §1.1)", () => {
       seats: 2,
       invitees: [{ userId: "u-cy" }],
     });
+  });
+
+  it("drops an empty address field first when a pick takes a seat (A12-P-10)", async () => {
+    const bigger = { ...CATALOG_GAME, players: { min: 2, max: 3 } };
+    withRecent(json(RECENT), json({ games: [bigger] }));
+    await toPlayers();
+    fireEvent.change(screen.getByLabelText("Number of players"), { target: { value: "3" } });
+    // The first field empty, the second typed: picking someone keeps the typed one.
+    fireEvent.change(screen.getByLabelText("Player 3's email address"), {
+      target: { value: "dee@example.org" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Bob/u }));
+    expect(screen.getByLabelText("Player 3's email address")).toHaveProperty(
+      "value",
+      "dee@example.org",
+    );
   });
 
   it("shows no list without past opponents, or when it couldn't be loaded", async () => {

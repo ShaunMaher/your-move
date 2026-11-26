@@ -264,6 +264,12 @@ input[aria-invalid="true"] {
   height: 1.5rem;
 }
 
+/* A choice's name with a line of secondary text under it ("last played …"). */
+.check-text {
+  display: flex;
+  flex-direction: column;
+}
+
 .details {
   display: grid;
   grid-template-columns: max-content 1fr;
