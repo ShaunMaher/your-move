@@ -256,6 +256,27 @@ describe("adding a past opponent by userId (06 §6.1, §6.2)", () => {
     expect((await transition(h, a, game.id, "start")).body.game.status).toBe("active");
   });
 
+  it("makes it an invitation when their stored whoCanAddMe is nobody (A12-P-3, 06 §6.2)", async () => {
+    const a = await signUp(h, "Ada");
+    const [b, c] = [await signUp(h, "Bo"), await signUp(h, "Cy")];
+    pastOpponents(a, b);
+    pastOpponents(a, c);
+    h.exec("UPDATE users SET settings = ? WHERE id = ?", '{"whoCanAddMe":"nobody"}', b.id);
+    const game = await createGame(h, a, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ userId: b.id }, { userId: c.id }],
+    });
+    expect(game.status).toBe("lobby");
+    expect(rowsOf(game.id).slice(1)).toEqual([
+      expect.objectContaining({ user_id: b.id, state: "invited", delivery: "normal" }),
+      expect.objectContaining({ user_id: c.id, state: "joined", joined_via: "added" }),
+    ]);
+    expect((await getGame(h, b, game.id)).game.yourInvitation).toBe("normal");
+    // b's accept fills the last seat: the game starts.
+    expect((await transition(h, b, game.id, "accept")).body.game.status).toBe("active");
+  });
+
   it("shows nothing but the state once a picked invitation's lobby has ended", async () => {
     const a = await signUp(h, "Ada");
     const b = await signUp(h, "Bo");
@@ -415,6 +436,57 @@ describe("blocks among the people added (06 §6.1)", () => {
     expect(seen.status).toBe(404);
   });
 
+  // The creator's block makes d's seat inert; one between d and e makes the later one's.
+  it.each<[string, (a: Player, d: Player, e: Player) => void, string[]]>([
+    [
+      "between the creator and the typed address's user",
+      (a, d) => {
+        block(d, a);
+      },
+      ["inert", "normal"],
+    ],
+    [
+      "between the creator and the typed address's user, the creator blocking",
+      (a, d) => {
+        block(a, d);
+      },
+      ["inert", "normal"],
+    ],
+    [
+      "between two typed addresses' users",
+      (_a, d, e) => {
+        block(e, d);
+      },
+      ["normal", "inert"],
+    ],
+  ])(
+    "gives a typed address an inert seat for a block %s, the response unchanged (A12-P-2)",
+    async (_name, arrange, deliveries) => {
+      const a = await signUp(h, "Ada");
+      const [d, e] = [await signUp(h, "Di"), await signUp(h, "Ed")];
+      arrange(a, d, e);
+      const game = await createGame(h, a, {
+        gameType: "example",
+        seats: 3,
+        invitees: [{ email: d.email }, { email: e.email }],
+      });
+      const control = await createGame(h, a, {
+        gameType: "example",
+        seats: 3,
+        invitees: [{ email: freshEmail() }, { email: freshEmail() }],
+      });
+      const shape = (players: typeof game.players) =>
+        players.map((player) => ({ ...player, playerId: undefined, invitedAs: undefined }));
+      expect(shape(game.players)).toEqual(shape(control.players));
+      expect(game.players.map((player) => player.invitedAs)).toEqual([undefined, d.email, e.email]);
+      expect(rowsOf(game.id).map((row) => row["delivery"])).toEqual(["normal", ...deliveries]);
+      h.advance(DAY);
+    },
+  );
+
+  // Today's behaviour, which tells the creator about a block between two people they picked
+  // (06 §6.1, open-questions Q29). It MUST change in M4 before anything can write `blocks`:
+  // the default there makes every pick an invitation when a request picks two or more.
   it("gives the later of two picked past opponents with a block between them an inert invitation", async () => {
     const a = await signUp(h, "Ada");
     const [b, c] = [await signUp(h, "Bo"), await signUp(h, "Cy")];
