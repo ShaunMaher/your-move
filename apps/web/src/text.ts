@@ -18,7 +18,10 @@ export const DISPLAY_NAME_MAX = 24;
 
 /**
  * A cheap look at an email field before sending; the server is the real check. The domain needs a
- * dot with something after it, since the server refuses `name@host` (06 §3).
+ * dot with something after it, since the server refuses `name@host` (04 conventions on stored
+ * addresses; `normaliseAddress` in `packages/server/src/accounts/email.ts`). Only the ASCII full
+ * stop counts: a domain written with U+3002, U+FF0E or U+FF61 is refused here, which is rare and
+ * fixed by typing an ASCII dot.
  */
 export function looksLikeEmail(input: string): boolean {
   return /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)*\.[^\s@.]+$/u.test(input.trim());

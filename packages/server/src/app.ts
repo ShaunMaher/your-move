@@ -154,13 +154,8 @@ export function createApp(options: AppOptions): App {
     // Request validation failures never echo input values (09 §5).
     defaultHook: (result, c) => {
       if (result.success) return undefined;
-      const body = errorBody(c, "BAD_REQUEST", "Invalid request.");
-      // The same code, with the issues the body leaves out (09 §5).
-      noteError(c, {
-        code: "BAD_REQUEST",
-        issues: loggedIssues(result.target, result.error.issues),
-      });
-      return c.json(body, 400);
+      const issues = loggedIssues(result.target, result.error.issues);
+      return c.json(errorBody(c, "BAD_REQUEST", "Invalid request.", { issues }), 400);
     },
   });
 

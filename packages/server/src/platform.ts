@@ -46,13 +46,16 @@ export interface Platform {
   now(): Date;
 }
 
-/** The fixed reasons a `BAD_REQUEST` can carry beyond its code (09 §5), kept here with the context variable that carries it. */
+/**
+ * The fixed reasons a `BAD_REQUEST` can carry beyond its code (09 §5). Kept here with the context
+ * variable that carries it, so `platform.ts` needn't import the error-log module.
+ */
 export type ErrorReason = "invalid_email" | "no_email" | "no_client_ip";
 
 /** What a failed request leaves for its log line. */
 export interface ErrorLog {
   readonly code: string;
-  /** A fixed label for a refusal several places can raise (09 §5), kept here with the context variable that carries it; never input-derived. */
+  /** A fixed label for a refusal several places can raise (09 §5); never input-derived. */
   readonly reason?: ErrorReason;
   /** `path:zodCode` pairs, comma-separated (log fields are flat): `json.email:invalid_format`. */
   readonly issues?: string;

@@ -77,7 +77,7 @@ function fail<S extends ErrorStatus, C extends Code>(
   code: C,
   reason?: ErrorReason,
 ) {
-  return c.json(errorBody(c, code, MESSAGES[code], reason), status);
+  return c.json(errorBody(c, code, MESSAGES[code], reason === undefined ? {} : { reason }), status);
 }
 
 /**
@@ -344,7 +344,8 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
   app.openapi(deleteOtpRoute, async (c) => {
     const active = c.get("session");
     const email = active.user.email;
-    if (email === null) return fail(c, 400, "BAD_REQUEST", "invalid_email");
+    // The session user's own address is missing (an account without one), not a typed one.
+    if (email === null) return fail(c, 400, "BAD_REQUEST", "no_email");
     const issued = await issueStepUpCode(
       await deps(),
       { id: active.user.id, email },
@@ -359,7 +360,8 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
   app.openapi(deleteMeRoute, async (c) => {
     const active = c.get("session");
     const email = active.user.email;
-    if (email === null) return fail(c, 400, "BAD_REQUEST", "invalid_email");
+    // The session user's own address is missing (an account without one), not a typed one.
+    if (email === null) return fail(c, 400, "BAD_REQUEST", "no_email");
     const context = await deps();
     const buckets = await clientBuckets(c, context.keys);
     if (buckets === null) return fail(c, 400, "BAD_REQUEST", "no_client_ip");

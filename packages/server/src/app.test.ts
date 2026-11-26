@@ -538,6 +538,19 @@ describe("errors and logging", () => {
         expect(requestLine(platform.lines)[0]).toMatchObject({ status: 403, code: "SUSPENDED" });
       });
 
+      it("gives requesting a deletion code for an account without an address the reason no_email", async () => {
+        const { app, platform } = signedInAs({ email: null, onboardedAt: 1 });
+        const res = await app.request("/api/v1/me/delete/otp", {
+          method: "POST",
+          headers: { ...COOKIE, Origin: "https://play.example.org" },
+        });
+        expect(res.status).toBe(400);
+        expect(requestLine(platform.lines)[0]).toMatchObject({
+          code: "BAD_REQUEST",
+          reason: "no_email",
+        });
+      });
+
       it("gives turning nudges on for an account without an address the reason no_email", async () => {
         const { app, platform } = signedInAs({ email: null, onboardedAt: 1 });
         const res = await app.request(ME, {

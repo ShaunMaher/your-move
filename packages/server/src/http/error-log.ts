@@ -32,14 +32,21 @@ export function notedError(c: Context<AppEnv>): ErrorLog | undefined {
   return c.get("errorLog");
 }
 
-/** The framework's error body (05 §Conventions), noting its `code` for the request log line. */
+/**
+ * The framework's error body (05 §Conventions), noting its `code` (and any `reason` or `issues`)
+ * for the request log line, once.
+ */
 export function errorBody<C extends string>(
   c: Context<AppEnv>,
   code: C,
   message: string,
-  reason?: ErrorReason,
+  extra: Pick<ErrorLog, "reason" | "issues"> = {},
 ): { error: { code: C; message: string } } {
-  noteError(c, { code, ...(reason === undefined ? {} : { reason }) });
+  noteError(c, {
+    code,
+    ...(extra.reason === undefined ? {} : { reason: extra.reason }),
+    ...(extra.issues === undefined ? {} : { issues: extra.issues }),
+  });
   return { error: { code, message } };
 }
 
