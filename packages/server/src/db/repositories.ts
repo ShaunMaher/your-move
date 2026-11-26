@@ -7,7 +7,8 @@
  * check (02 §7.3); M2b adds what sign-in needs: OTP challenges, sessions, rate limits, auth events
  * and API-token revocation; the alpha's framework core (A2) what one game needs: its resources and
  * invites, the game list, history, unread markers and past opponents; alpha A6 the email-nudge
- * setting, the seats due a nudge and the suppression list; alpha A8 the push subscriptions.
+ * setting, the seats due a nudge and the suppression list; alpha A8 the push subscriptions; alpha
+ * A12 picking past opponents and the blocks among a game's players.
  */
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
@@ -45,6 +46,20 @@ type EmailNudgesChange =
 export type UserUpdate = Partial<Pick<UserRecord, "displayName" | "onboardedAt">> &
   Pick<UserRecord, "updatedAt">;
 
+/** One of a user's past opponents, as `GET /api/v1/players/recent` lists them (05). */
+export interface RecentOpponent {
+  readonly userId: string;
+  readonly displayName: string;
+  /** `past_opponents.last_finished_at`. */
+  readonly lastPlayedAt: number;
+}
+
+/** One block (04 `blocks`): `blockerId` blocked `blockedId`. */
+export interface BlockPair {
+  readonly blockerId: string;
+  readonly blockedId: string;
+}
+
 export interface UserRepo {
   /** Inserts a user; a duplicate id or email is a constraint error. */
   create(user: NewUser): Promise<void>;
@@ -62,6 +77,22 @@ export interface UserRepo {
    * user simply aren't returned, so callers can pass a placeholder to keep the query the same.
    */
   pastOpponentsOf(userId: string, candidates: readonly string[]): Promise<string[]>;
+  /**
+   * Which of `candidates` the user may add to a game by id (06 §6.1, alpha A12): past opponents
+   * (04 `past_opponents`) with no block between the two in either direction, who are onboarded
+   * humans, neither suspended nor being deleted. The same rule as {@link recentOpponents}.
+   */
+  pickableOpponents(userId: string, candidates: readonly string[]): Promise<string[]>;
+  /**
+   * The user's past opponents for `GET /api/v1/players/recent` (05): only the user's own pairs,
+   * filtered as {@link pickableOpponents}, newest `last_finished_at` first, at most `limit`.
+   */
+  recentOpponents(userId: string, limit: number): Promise<RecentOpponent[]>;
+  /**
+   * The blocks (04 `blocks`) whose blocker and blocked are both among `userIds`, in either
+   * direction. Ids that match no user simply match nothing.
+   */
+  blocksAmong(userIds: readonly string[]): Promise<BlockPair[]>;
   update(id: string, set: UserUpdate): Promise<void>;
   /**
    * Sets `settings.lastGameType` and, unless `input` is null, `settings.lastOptions[gameType]` to
@@ -378,6 +409,13 @@ export interface GameRepo {
    * typed invitees (05 `TOO_MANY_GAMES`, per pair).
    */
   countLiveCreatedWithInvite(userId: string, emailHash: string): Promise<number>;
+  /**
+   * How many `lobby`/`active` games the user created in which `otherId` has joined or holds an
+   * invitation picked by id (`invite_email` NULL) (05 `TOO_MANY_GAMES`, per pair for a picked past
+   * opponent). An invitation to a typed address isn't counted here, even when it resolves to
+   * `otherId`: it counts by its `emailId` alone (06 §6.7, Q3).
+   */
+  countLiveCreatedWithUser(userId: string, otherId: string): Promise<number>;
   /**
    * Applies one transition atomically (03 §5.2): bumps `version` and sets a fresh `write_token`
    * only if the game is still at `expectedVersion`, and applies every dependent write only if

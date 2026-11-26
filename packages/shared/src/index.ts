@@ -53,6 +53,8 @@ export {
   PreviewBodySchema,
   PreviewResultSchema,
   previewRoute,
+  RecentPlayersSchema,
+  recentPlayersRoute,
   resignGameRoute,
   RulesSchema,
   rulesRoute,

@@ -12,8 +12,8 @@
  *    the bag or deck order are rewritten in the stored state, and every read must answer the viewer
  *    byte for byte as before — so even a partial leak (one tile, a count derived from the order)
  *    fails;
- * 3. **coverage**: every `/api/v1/games*` and `/api/v1/catalog` route the app registers must have
- *    been exercised, so a new route can't escape the test.
+ * 3. **coverage**: every `/api/v1/games*`, `/api/v1/players*` and `/api/v1/catalog` route the app
+ *    registers must have been exercised, so a new route can't escape the test.
  */
 import type { InstalledGame } from "@your-move/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -275,6 +275,7 @@ async function reads(gameId: string, viewer: Player): Promise<string[]> {
     ["/api/v1/games/:id/history", { id: gameId }],
     ["/api/v1/games", {}],
     ["/api/v1/catalog", {}],
+    ["/api/v1/players/recent", {}],
   ] as const) {
     bodies.push((await hit(viewer, "GET", template, params)).text);
   }
@@ -816,6 +817,19 @@ describe("route-wide secrecy (04 invariant 4)", () => {
       expect(stored(game).status).toBe("finished");
       await readEverything(game, players, stranger);
       await hit(a, "GET", "/api/v1/games/types/:type/rules", { type: "example" });
+
+      // Past opponents picked from the list: the game starts at creation (alpha A12), and the
+      // creator's response is checked like every other.
+      const recent = await hit(a, "GET", "/api/v1/players/recent");
+      expect(recent.text).toContain(b.id);
+      const rematch = await created(a, {
+        gameType: "example",
+        seats: 3,
+        invitees: [{ userId: c.id }, { userId: b.id }],
+      });
+      expect(stored(rematch).status).toBe("active");
+      await readEverything(rematch, players, stranger);
+      expect(await unchangedByHiddenState(rematch, players)).toBe(3);
     },
   );
 
@@ -898,7 +912,9 @@ describe("coverage (A2 review S-2)", () => {
         .filter(
           (route) =>
             route.method !== "ALL" &&
-            (route.path.startsWith("/api/v1/games") || route.path === "/api/v1/catalog"),
+            (route.path.startsWith("/api/v1/games") ||
+              route.path.startsWith("/api/v1/players") ||
+              route.path === "/api/v1/catalog"),
         )
         .map((route) => `${route.method} ${route.path}`),
     );

@@ -3,7 +3,22 @@
  * adapter's {@link Database} (docs/spec/03-architecture.md §4). Multi-statement writes go through
  * one atomic batch; nothing here opens an interactive transaction.
  */
-import { and, asc, count, desc, eq, gte, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 
 import {
   apiTokenRepo,
@@ -244,6 +259,25 @@ function gameRepo(db: Database): GameRepo {
           and(
             eq(invites.inviterId, userId),
             eq(invites.emailHash, emailHash),
+            eq(games.createdBy, userId),
+            LIVE,
+          ),
+        )
+        .get();
+      return row?.n ?? 0;
+    },
+    async countLiveCreatedWithUser(userId, otherId) {
+      const row = await db
+        .select({ n: count(sql`DISTINCT ${games.id}`) })
+        .from(gamePlayers)
+        .innerJoin(games, eq(games.id, gamePlayers.gameId))
+        .where(
+          and(
+            eq(gamePlayers.userId, otherId),
+            or(
+              isNotNull(gamePlayers.joinedAt),
+              and(eq(gamePlayers.state, "invited"), isNull(gamePlayers.inviteEmail)),
+            ),
             eq(games.createdBy, userId),
             LIVE,
           ),

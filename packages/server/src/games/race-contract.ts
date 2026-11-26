@@ -19,7 +19,12 @@ import { normaliseAddress } from "../accounts/email.js";
 import { createApp, type App } from "../app.js";
 import { createSession } from "../auth/session.js";
 import { parseConfig } from "../config/parse.js";
-import type { GamePlayerRecord, LoadedGame, Repositories } from "../db/repositories.js";
+import type {
+  GamePlayerRecord,
+  GameWriteSet,
+  LoadedGame,
+  Repositories,
+} from "../db/repositories.js";
 import { createConsoleEmailSender } from "../email/sender.js";
 import { createJsonLogger } from "../log.js";
 import { DISABLED_PUSH_SENDER } from "../push/sender.js";
@@ -61,8 +66,21 @@ function racing(repos: Repositories) {
     opened: Promise<void>;
   } | null = null;
   let stale = 0;
+  let created: ((gameId: string) => void) | null = null;
+  /** While set, the transition it matches waits until another transition has been applied. */
+  let holding: {
+    matches: (writes: GameWriteSet) => boolean;
+    held: boolean;
+    release: () => void;
+    released: Promise<void>;
+  } | null = null;
   const games: Repositories["games"] = {
     ...repos.games,
+    async create(...args) {
+      await repos.games.create(...args);
+      created?.(args[0].id);
+      created = null;
+    },
     async load(id): Promise<LoadedGame | null> {
       const loaded = await repos.games.load(id);
       const current = barrier;
@@ -74,23 +92,51 @@ function racing(repos: Repositories) {
       return loaded;
     },
     async applyTransition(...args) {
+      const gate = holding;
+      if (gate !== null && !gate.held && gate.matches(args[2])) {
+        gate.held = true;
+        await gate.released;
+      }
       const result = await repos.games.applyTransition(...args);
       if (result === "stale") stale += 1;
+      if (gate !== null && !gate.matches(args[2])) gate.release();
       return result;
     },
   };
   return {
     repos: { ...repos, games },
-    /** Runs the requests of one race through the barrier; returns their answers and the stale count. */
+    /** The id of the next game created, once it is stored. */
+    nextCreated(): Promise<string> {
+      return new Promise((resolve) => {
+        created = resolve;
+      });
+    },
+    /**
+     * Runs the requests of one race through the barrier; returns their answers and the stale
+     * count. `hold` picks a transition that waits, after every request has loaded the game, until
+     * another has been applied: so each side of a race can be made the winner.
+     */
     async race<T>(
       requests: readonly (() => Promise<T>)[],
+      options: { readonly hold?: (writes: GameWriteSet) => boolean } = {},
     ): Promise<{ answers: T[]; stale: number }> {
       let open = (): void => undefined;
       const opened = new Promise<void>((resolve) => {
         open = resolve;
       });
-      const timer = setTimeout(open, BARRIER_TIMEOUT_MS);
+      let release = (): void => undefined;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const timer = setTimeout(() => {
+        open();
+        release();
+      }, BARRIER_TIMEOUT_MS);
       barrier = { parties: requests.length, arrived: 0, open, opened };
+      holding =
+        options.hold === undefined
+          ? null
+          : { matches: options.hold, held: false, release, released };
       stale = 0;
       try {
         const answers = await Promise.all(requests.map((request) => request()));
@@ -98,6 +144,7 @@ function racing(repos: Repositories) {
       } finally {
         clearTimeout(timer);
         barrier = null;
+        holding = null;
       }
     },
   };
@@ -405,6 +452,87 @@ export function gameRaceContract(
             lastSeenVersion: rowOf(before, b).lastSeenVersion,
           });
         }
+      }
+    });
+
+    /**
+     * Two people as past opponents (04 `past_opponents`), written by a transition on a game of
+     * their own, as a finished game writes them: no repository writes the pair any other way.
+     */
+    const pastOpponents = async (a: Player, b: Player) => {
+      const id = crypto.randomUUID();
+      await target.repos.games.create(
+        {
+          id,
+          gameType: game.type,
+          gameVersion: 1,
+          options: "{}",
+          status: "finished",
+          seats: 2,
+          turnTimeoutDays: 3,
+          seatOrder: "join",
+          aiAssistance: "off",
+          lastActionAt: clock,
+          createdAt: clock,
+          updatedAt: clock,
+        },
+        [],
+      );
+      const result = await target.repos.games.applyTransition(id, 0, {
+        game: { updatedAt: clock },
+        pastOpponents: [
+          { userId: a.id, otherId: b.id, lastFinishedAt: clock },
+          { userId: b.id, otherId: a.id, lastFinishedAt: clock },
+        ],
+      });
+      expect(result).toBe("ok");
+    };
+
+    it("the start at creation against the added player's decline: exactly one happens (alpha A12)", async () => {
+      for (let round = 0; round < 5; round++) {
+        const a = await player();
+        const b = await player();
+        await pastOpponents(a, b);
+        const created = races.nextCreated();
+        // Both load version 0 first; then the start or the decline is held, so each side wins.
+        const startWins = round % 2 === 0;
+        const { answers, stale } = await races.race(
+          [
+            () =>
+              send(a, "POST", "/api/v1/games", {
+                gameType: game.type,
+                seats: 2,
+                invitees: [{ userId: b.id }],
+              }),
+            async () =>
+              send(b, "POST", `/api/v1/games/${await created}/decline`, { expectedVersion: 0 }),
+          ],
+          {
+            hold: (writes) =>
+              startWins ? writes.game.status === "declined" : writes.game.status === "active",
+          },
+        );
+        const [creating, declining] = answers;
+        const gameId = await created;
+        // Creating never fails on a lost start: the creator is shown what won.
+        expect(creating?.status).toBe(201);
+        expect(stale).toBe(1);
+        const { game: stored, players } = await consistent(gameId, 1);
+        if (startWins) {
+          expect(declining?.status).toBe(409);
+          expect(declining.body?.error?.code).toBe("STALE_GAME");
+          expect(stored?.status).toBe("active");
+          expect(rowOf(players, b)).toMatchObject({ state: "playing", seat: 1 });
+          expect(creating?.body?.game?.status).toBe("active");
+        } else {
+          // The decline won: the lobby ends declined, never started, no seats, no state.
+          expect(declining?.status).toBe(204);
+          expect(stored).toMatchObject({ status: "declined", state: null, setupRng: null });
+          expect(players.every((row) => row.seat === null)).toBe(true);
+          expect(rowOf(players, b).state).toBe("declined");
+          expect(creating?.body?.game?.status).toBe("declined");
+        }
+        clock += 1;
       }
     });
 

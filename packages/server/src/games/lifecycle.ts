@@ -260,14 +260,14 @@ function lobbyCounts(players: readonly GamePlayerRecord[]): { joined: number; in
  */
 function startWrites(ctx: GameContext, now: number): GameWriteSet | GameError {
   const { definition, game } = ctx;
+  // The creator first, then in joining order (02 §4 seat order `join`). Rows that joined in the
+  // same millisecond keep the order they were added in (the sort is stable, and the rows come in
+  // that order): past opponents added at creation sit in the order the creator listed them.
   const joined = ctx.players
     .filter((row) => row.state === "joined")
     .sort((a, b) => {
-      // The creator first, then in joining order (02 §4 seat order `join`).
       const creator = Number(b.joinedVia === "creator") - Number(a.joinedVia === "creator");
-      return creator !== 0
-        ? creator
-        : (a.joinedAt ?? 0) - (b.joinedAt ?? 0) || (a.id < b.id ? -1 : 1);
+      return creator !== 0 ? creator : (a.joinedAt ?? 0) - (b.joinedAt ?? 0);
     });
   const checked = definition.validateStart(ctx.options, joined.length);
   if (isGameError(checked)) return checked;
@@ -322,6 +322,18 @@ function autoStarts(game: GameRecord, players: readonly GamePlayerRecord[]): boo
   // AI assistance allowed with another human: every human starts knowingly, by the creator's Start.
   const aiHeld = game.aiAssistance === "allowed" && joined > 1;
   return joined === game.seats && !aiHeld;
+}
+
+/**
+ * The start of a game created with every seat filled (05 `POST /api/v1/games` Created, 02 §4):
+ * the creator and the past opponents added at once. The same rules as any automatic start, so
+ * AI assistance allowed with another person keeps it in the lobby, and a `validateStart` refusal
+ * simply leaves it there; null when it doesn't start.
+ */
+export function startAtCreation(ctx: GameContext, now: number): GameWriteSet | null {
+  if (ctx.game.status !== "lobby" || !autoStarts(ctx.game, ctx.players)) return null;
+  const writes = startWrites(ctx, now);
+  return isGameError(writes) ? null : writes;
 }
 
 /** Merges the start's writes after another transition's row updates. */

@@ -10,7 +10,7 @@ import type { GamePlayerRecord, UserRecord } from "../db/repositories.js";
 /** A seat whose account was deleted (02 §5, 04 §Account deletion). */
 const DELETED_PLAYER = "Deleted player";
 /** A display name that isn't set (04 `users.display_name`). */
-const NEW_PLAYER = "New player";
+export const NEW_PLAYER_NAME = "New player";
 
 /** The rows holding a seat in a started game: `playing` or `out`. */
 export function seatedRows(players: readonly GamePlayerRecord[]): GamePlayerRecord[] {
@@ -28,7 +28,7 @@ export function playerName(
   users: ReadonlyMap<string, Pick<UserRecord, "displayName">>,
 ): string {
   const user = row.userId === null ? undefined : users.get(row.userId);
-  return user === undefined ? DELETED_PLAYER : (user.displayName ?? NEW_PLAYER);
+  return user === undefined ? DELETED_PLAYER : (user.displayName ?? NEW_PLAYER_NAME);
 }
 
 /** Names by seat, "You" for the recipient's seat (02 §5). Every seated row gets one. */

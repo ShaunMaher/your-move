@@ -93,6 +93,7 @@ describe("GET /api/v1/openapi.json", () => {
       "/api/v1/health",
       "/api/v1/me",
       "/api/v1/me/delete/otp",
+      "/api/v1/players/recent",
       "/api/v1/push/subscriptions",
     ]);
   });

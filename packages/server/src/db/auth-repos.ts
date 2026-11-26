@@ -3,7 +3,7 @@
  * auth events, account deletion and API-token revocation. Written once over the shared schema and
  * run by either adapter's {@link Database}; every multi-statement write is one atomic batch.
  */
-import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 
 import { type Database, runBatch } from "./database.js";
 import { guardedInsert } from "./queries/transition.js";
@@ -41,6 +41,21 @@ const SETTINGS_OBJECT = sql`(CASE WHEN json_valid(${users.settings}) AND json_ty
 
 /** The user has email nudges on: `settings.emailNudges` is JSON `true`, nothing else (03 §7). */
 export const NUDGES_ON = sql`json_type(${SETTINGS_OBJECT}, '$.emailNudges') = 'true'`;
+
+/**
+ * A past-opponent row (of `past_opponents.user_id`) whose other user may be picked for a game
+ * (06 §6.1, alpha A12): an onboarded human, neither suspended nor being deleted, with no block
+ * between the two in either direction. A blocked pair has no row anyway (04 invariant 6); the
+ * block is checked explicitly rather than relying on that (06 §6.1).
+ */
+const PICKABLE = and(
+  eq(users.kind, "human"),
+  isNotNull(users.onboardedAt),
+  isNotNull(users.displayName),
+  isNull(users.suspendedAt),
+  isNull(users.deletionRequestedAt),
+  sql`NOT EXISTS (SELECT 1 FROM ${blocks} WHERE (${blocks.blockerId} = ${pastOpponents.userId} AND ${blocks.blockedId} = ${pastOpponents.otherId}) OR (${blocks.blockerId} = ${pastOpponents.otherId} AND ${blocks.blockedId} = ${pastOpponents.userId}))`,
+);
 
 export function userRepo(db: Database): UserRepo {
   return {
@@ -82,6 +97,44 @@ export function userRepo(db: Database): UserRepo {
           and(eq(pastOpponents.userId, userId), inArray(pastOpponents.otherId, [...candidates])),
         );
       return rows.map((row) => row.otherId);
+    },
+    async pickableOpponents(userId, candidates) {
+      if (candidates.length === 0) return [];
+      const rows = await db
+        .select({ otherId: pastOpponents.otherId })
+        .from(pastOpponents)
+        .innerJoin(users, eq(users.id, pastOpponents.otherId))
+        .where(
+          and(
+            eq(pastOpponents.userId, userId),
+            inArray(pastOpponents.otherId, [...candidates]),
+            PICKABLE,
+          ),
+        );
+      return rows.map((row) => row.otherId);
+    },
+    async recentOpponents(userId, limit) {
+      const rows = await db
+        .select({
+          userId: pastOpponents.otherId,
+          displayName: users.displayName,
+          lastPlayedAt: pastOpponents.lastFinishedAt,
+        })
+        .from(pastOpponents)
+        .innerJoin(users, eq(users.id, pastOpponents.otherId))
+        .where(and(eq(pastOpponents.userId, userId), PICKABLE))
+        .orderBy(desc(pastOpponents.lastFinishedAt), asc(pastOpponents.otherId))
+        .limit(limit);
+      // PICKABLE keeps only rows with a display name.
+      return rows.map((row) => ({ ...row, displayName: row.displayName ?? "" }));
+    },
+    async blocksAmong(userIds) {
+      if (userIds.length === 0) return [];
+      const ids = [...userIds];
+      return db
+        .select({ blockerId: blocks.blockerId, blockedId: blocks.blockedId })
+        .from(blocks)
+        .where(and(inArray(blocks.blockerId, ids), inArray(blocks.blockedId, ids)));
     },
     async rememberGameOptions(id, remember) {
       // Only the two keys change, in SQL, so a concurrent change to any other setting survives

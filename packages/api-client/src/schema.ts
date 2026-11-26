@@ -247,9 +247,29 @@ export interface paths {
     put?: never;
     /**
      * Create a game
-     * @description Every valid address gets a seat and the same response, whatever it turns out to be (Q3). The game starts at once only if every seat is filled; otherwise it waits in the lobby.
+     * @description Every valid address gets a seat and the same response, whatever it turns out to be (Q3). A past opponent picked by `userId` is added at once. The game starts at once (`active`) only if every seat is filled by past opponents added that way; otherwise it waits in the lobby.
      */
     post: operations["createGame"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/players/recent": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Your past opponents, to pick for a new game
+     * @description People you've finished a game with, both having acted (04 `past_opponents`), newest first, at most 50, across all game types; never anyone with a block between you either way (06 §6.9).
+     */
+    get: operations["listRecentPlayers"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -692,10 +712,24 @@ export interface components {
        * @enum {string}
        */
       aiAssistance?: "off" | "allowed";
-      /** @description At most `seats - 1` people to invite, by address. */
-      invitees: {
-        /** @description An address to invite. The response never reveals whether it has an account (06 §6.1). */
-        email: string;
+      /** @description At most `seats - 1` people: addresses to invite, or past opponents to add by `userId`. */
+      invitees: (
+        | {
+            /** @description An address to invite. The response never reveals whether it has an account (06 §6.1). */
+            email: string;
+          }
+        | {
+            /** @description A past opponent's id, from `GET /api/v1/players/recent` (06 §6.1). They are added at once (`joined`) unless AI assistance is allowed, when they get an invitation (02 §4); anyone else is `INVALID_INVITEES`. */
+            userId: string;
+          }
+      )[];
+    };
+    RecentPlayers: {
+      players: {
+        userId: string;
+        displayName: string;
+        /** @description When your latest finished game together ended (ms since the epoch). */
+        lastPlayedAt: number;
       }[];
     };
     GameList: {
@@ -2081,6 +2115,80 @@ export interface operations {
       };
       /** @description Too many games or email invitees (`RATE_LIMITED`); nothing is created. */
       429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  listRecentPlayers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Your past opponents. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RecentPlayers"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `ONBOARDING_REQUIRED` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
         headers: {
           [name: string]: unknown;
         };

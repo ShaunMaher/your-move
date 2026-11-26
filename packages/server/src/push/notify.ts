@@ -2,8 +2,9 @@
  * Which pushes a game transition sends, and sending them (docs/spec/03-architecture.md §7, 02 §8,
  * 08 T18; alpha A8): "your turn" to every seat whose clock the transition started, and "game over"
  * to every seated player when a game that reached `active` ends — never to the person whose
- * request made the transition, who is looking at it. A lobby event sends nothing: the alpha has
- * neither auto-join nor invitation pushes, and lobby endings never push (02 §4).
+ * request made the transition, who is looking at it. A lobby transition sends nothing: lobby
+ * endings never push, and the invitation push is M4's (02 §4). A past opponent added to a new game
+ * at once gets "<creator> added you to a game" (alpha A12, 06 §6.2), sent by the create route.
  *
  * The text is built only from the public `describe` text and display names (T18): no state, no
  * options, no scores beyond what `describe` says, no addresses. Runs in the background after the
@@ -13,7 +14,7 @@ import { formatText, type Text } from "@your-move/sdk";
 
 import { liveSessionCutoffs } from "../auth/session.js";
 import type { GamePlayerRecord, GameWriteSet, LoadedGame, UserRecord } from "../db/repositories.js";
-import { namesBySeat, playerName, seatedRows } from "../games/names.js";
+import { NEW_PLAYER_NAME, namesBySeat, playerName, seatedRows } from "../games/names.js";
 import type { Platform } from "../platform.js";
 import type { PushMessage } from "./sender.js";
 
@@ -174,11 +175,95 @@ export async function sendTransitionPushes(
   platform: Platform,
   transition: PushedTransition,
 ): Promise<void> {
-  const { repos, log, push } = platform;
+  const { repos, push } = platform;
   if (!push.enabled) return;
   const recipients = transitionPushes(transition);
   if (recipients.length === 0) return;
-  const recipientIds = [...new Set(recipients.map((recipient) => recipient.userId))];
+  const seatedIds = seatedRows(playersAfter(transition)).flatMap((row) =>
+    row.userId === null ? [] : [row.userId],
+  );
+  await deliver(
+    platform,
+    [...new Set(recipients.map((recipient) => recipient.userId))],
+    async () => {
+      const users = new Map(
+        (await repos.users.findByIds(seatedIds)).map((user) => [user.id, user]),
+      );
+      return new Map(
+        recipients.map((recipient) => [
+          recipient.userId,
+          pushMessage(transition, recipient, users, platform.config.appName),
+        ]),
+      );
+    },
+  );
+}
+
+/** A new game's past opponents added at once (alpha A12), as the create route reports them. */
+export interface AddedToGame {
+  readonly gameId: string;
+  /** The creator, who is never pushed to: they are looking at the game. */
+  readonly creator: Pick<UserRecord, "id" | "displayName">;
+  /** The added users' ids. */
+  readonly added: readonly string[];
+}
+
+/**
+ * The "added you" push (06 §6.2, 03 §7, T18): it names the creator and nothing else they chose.
+ * A game that started at creation adds "Your turn." for a recipient whose seat is to act, in place
+ * of the start's own push, so one notification says both.
+ */
+export function addedMessage(
+  gameId: string,
+  creatorName: string,
+  yourTurn: boolean,
+  appName: string,
+): PushMessage {
+  return {
+    title: appName,
+    body: cut(`${creatorName} added you to a game.${yourTurn ? " Your turn." : ""}`),
+    url: `/g/${encodeURIComponent(gameId)}`,
+    tag: `game-${gameId}`,
+  };
+}
+
+/**
+ * Sends the "added you" push to each past opponent added to a new game, never to the creator.
+ * Whose turn it is comes from the game as it is now, so a start at creation is reflected.
+ */
+export async function sendAddedPushes(platform: Platform, event: AddedToGame): Promise<void> {
+  const { repos, push } = platform;
+  if (!push.enabled) return;
+  const recipients = event.added.filter((userId) => userId !== event.creator.id);
+  if (recipients.length === 0) return;
+  await deliver(platform, recipients, async () => {
+    const rows = await repos.games.players(event.gameId);
+    const toAct = new Set(
+      rows.flatMap((row) =>
+        row.toAct === 1 && row.state === "playing" && row.userId !== null ? [row.userId] : [],
+      ),
+    );
+    const creatorName = event.creator.displayName ?? NEW_PLAYER_NAME;
+    return new Map(
+      recipients.map((userId) => [
+        userId,
+        addedMessage(event.gameId, creatorName, toAct.has(userId), platform.config.appName),
+      ]),
+    );
+  });
+}
+
+/**
+ * Sends each recipient's message to every live subscription they have, at most
+ * {@link MAX_PUSHES_PER_TRANSITION} in all, interleaved by recipient. The messages are built only
+ * when there is a subscription to send to.
+ */
+async function deliver(
+  platform: Platform,
+  recipientIds: readonly string[],
+  messagesFor: () => Promise<ReadonlyMap<string, PushMessage>>,
+): Promise<void> {
+  const { repos, log, push } = platform;
   const subscriptions = interleaveByRecipient(
     await repos.pushSubscriptions.forUsers(
       recipientIds,
@@ -187,16 +272,7 @@ export async function sendTransitionPushes(
     recipientIds,
   );
   if (subscriptions.length === 0) return;
-  const seatedIds = seatedRows(playersAfter(transition)).flatMap((row) =>
-    row.userId === null ? [] : [row.userId],
-  );
-  const users = new Map((await repos.users.findByIds(seatedIds)).map((user) => [user.id, user]));
-  const messages = new Map(
-    recipients.map((recipient) => [
-      recipient.userId,
-      pushMessage(transition, recipient, users, platform.config.appName),
-    ]),
-  );
+  const messages = await messagesFor();
   if (subscriptions.length > MAX_PUSHES_PER_TRANSITION) {
     log.warn("push: more subscriptions than one transition sends to", {
       subscriptions: subscriptions.length,

@@ -16,6 +16,7 @@ import type {
   GameWriteSet,
   NewGame,
   NewGamePlayer,
+  NewUser,
   Repositories,
 } from "./repositories.js";
 
@@ -329,6 +330,121 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         expect(await repos.users.pastOpponentsOf(user, [])).toEqual([]);
       });
 
+      /** An onboarded human with a display name, as a past opponent who can be picked must be. */
+      const pickable = async (
+        name = "Pat",
+        extra: Partial<Pick<NewUser, "suspendedAt" | "deletionRequestedAt">> = {},
+      ) => {
+        const id = crypto.randomUUID();
+        await repos.users.create({
+          id,
+          email: address(id),
+          displayName: name,
+          onboardedAt: T0,
+          createdAt: T0,
+          updatedAt: T0,
+          ...extra,
+        });
+        return id;
+      };
+      const pair = async (a: string, b: string, at: number) =>
+        target.sql(
+          "INSERT INTO past_opponents (user_id, other_id, last_finished_at) VALUES (?, ?, ?), (?, ?, ?)",
+          a,
+          b,
+          at,
+          b,
+          a,
+          at,
+        );
+      const block = async (blocker: string, blocked: string) =>
+        target.sql(
+          "INSERT INTO blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)",
+          blocker,
+          blocked,
+          T0,
+        );
+
+      it("tells which candidates can be picked: onboarded human past opponents with no block (A12)", async () => {
+        const user = await pickable("Me");
+        const ok = await pickable("Ok");
+        const notOnboarded = await human();
+        const blockedByMe = await pickable("Blocked");
+        const blockingMe = await pickable("Blocking");
+        const suspended = await pickable("Gone", { suspendedAt: T0 });
+        const leaving = await pickable("Leaving", { deletionRequestedAt: T0 });
+        const stranger = await pickable("Stranger");
+        for (const other of [ok, notOnboarded, blockedByMe, blockingMe, suspended, leaving]) {
+          await pair(user, other, T0);
+        }
+        await block(user, blockedByMe);
+        await block(blockingMe, user);
+        const candidates = [
+          ok,
+          notOnboarded,
+          blockedByMe,
+          blockingMe,
+          suspended,
+          leaving,
+          stranger,
+          "",
+        ];
+        expect(await repos.users.pickableOpponents(user, candidates)).toEqual([ok]);
+        expect(await repos.users.pickableOpponents(user, [])).toEqual([]);
+        // Only the user's own pairs: the other side's view is its own.
+        expect(await repos.users.pickableOpponents(stranger, [user, ok])).toEqual([]);
+      });
+
+      it("lists a user's recent opponents newest first, at most the limit, never another user's pairs (A12)", async () => {
+        const user = await pickable("Me");
+        const [old, recent, newest] = [
+          await pickable("Old"),
+          await pickable("Recent"),
+          await pickable("Newest"),
+        ];
+        const blocked = await pickable("Blocked");
+        const theirs = await pickable("Theirs");
+        const theirOpponent = await pickable("Their opponent");
+        await pair(user, old, T0 + 1);
+        await pair(user, recent, T0 + 2);
+        await pair(user, newest, T0 + 3);
+        await pair(user, blocked, T0 + 4);
+        await pair(theirs, theirOpponent, T0 + 5);
+        await block(blocked, user);
+        expect(await repos.users.recentOpponents(user, 50)).toEqual([
+          { userId: newest, displayName: "Newest", lastPlayedAt: T0 + 3 },
+          { userId: recent, displayName: "Recent", lastPlayedAt: T0 + 2 },
+          { userId: old, displayName: "Old", lastPlayedAt: T0 + 1 },
+        ]);
+        expect((await repos.users.recentOpponents(user, 2)).map((row) => row.userId)).toEqual([
+          newest,
+          recent,
+        ]);
+        expect((await repos.users.recentOpponents(theirs, 50)).map((row) => row.userId)).toEqual([
+          theirOpponent,
+        ]);
+        expect(await repos.users.recentOpponents(await pickable(), 50)).toEqual([]);
+      });
+
+      it("finds the blocks among a set of users, in either direction (A12)", async () => {
+        const [a, b, c, d] = [await human(), await human(), await human(), await human()];
+        await block(a, b);
+        await block(c, a);
+        await block(d, a);
+        expect(
+          (await repos.users.blocksAmong([a, b, c, ""])).sort((x, y) =>
+            x.blockerId < y.blockerId ? -1 : 1,
+          ),
+        ).toEqual(
+          [
+            { blockerId: a, blockedId: b },
+            { blockerId: c, blockedId: a },
+          ].sort((x, y) => (x.blockerId < y.blockerId ? -1 : 1)),
+        );
+        expect(await repos.users.blocksAmong([b, c])).toEqual([]);
+        expect(await repos.users.blocksAmong([])).toEqual([]);
+      });
+
       it("finds a user's overdue lobbies, oldest first (lazy expiry)", async () => {
         const user = await human();
         const other = await human();
@@ -540,6 +656,33 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         expect(await repos.games.countLiveCreated(user)).toBe(3);
         expect(await repos.games.countLiveCreatedWithInvite(user, "pair")).toBe(2);
         expect(await repos.games.countLiveCreatedWithInvite(user, "none")).toBe(0);
+      });
+
+      it("counts the live games a user created with a picked past opponent (A12)", async () => {
+        const user = await human();
+        const other = await human();
+        const create = async (status: NewGame["status"], row: Partial<NewGamePlayer>) => {
+          const game = newGame({ status, createdBy: user });
+          await repos.games.create(game, [player({ userId: user }), player(row)]);
+        };
+        // Counted: joined (picked or accepted), and an invitation picked by id.
+        await create("lobby", { userId: other, state: "joined", joinedVia: "added" });
+        await create("active", { userId: other, state: "playing", seat: 1 });
+        await create("lobby", { userId: other, state: "invited", joinedAt: null });
+        // Not counted: an ended game, a typed address's invitation, a decline, another creator's.
+        await create("finished", { userId: other, state: "out", seat: 1 });
+        await create("lobby", {
+          userId: other,
+          state: "invited",
+          joinedAt: null,
+          inviteEmail: "typed@example.org",
+        });
+        await create("lobby", { userId: other, state: "declined", joinedAt: null });
+        const theirs = newGame({ createdBy: other });
+        await repos.games.create(theirs, [player({ userId: other }), player({ userId: user })]);
+        expect(await repos.games.countLiveCreatedWithUser(user, other)).toBe(3);
+        expect(await repos.games.countLiveCreatedWithUser(other, user)).toBe(1);
+        expect(await repos.games.countLiveCreatedWithUser(user, "nobody")).toBe(0);
       });
 
       it("writes past opponents only with the winning transition, and never for a blocked pair", async () => {

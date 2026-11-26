@@ -354,6 +354,91 @@ describe("pushes from a game's transitions (03 §7, 08 T18)", () => {
   });
 });
 
+describe("the push to a past opponent added to a new game (alpha A12, 06 §6.2)", () => {
+  const pastOpponents = (a: Player, b: Player) => {
+    const at = h.platform.now().getTime();
+    h.exec(
+      "INSERT INTO past_opponents (user_id, other_id, last_finished_at) VALUES (?, ?, ?), (?, ?, ?)",
+      a.id,
+      b.id,
+      at,
+      b.id,
+      a.id,
+      at,
+    );
+  };
+
+  it("names the creator, says when it's their turn, and never pushes to the creator", async () => {
+    const [ada, bo, cy] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
+    const [adaPhone, boPhone, cyPhone] = [await device(), await device(), await device()];
+    await subscribe(ada, adaPhone);
+    await subscribe(bo, boPhone);
+    await subscribe(cy, cyPhone);
+    pastOpponents(ada, bo);
+    pastOpponents(ada, cy);
+
+    // Words, join order: Ada plays first, so Bo is told only that he's in. One push, not two:
+    // the start's own push isn't sent as well.
+    const words = await createGame(h, ada, { gameType: "words", invitees: [{ userId: bo.id }] });
+    expect(words.status).toBe("active");
+    const wordsAt = { url: `/g/${words.id}`, tag: `game-${words.id}` };
+    expect(await received(boPhone)).toEqual([
+      { title: "Family Games", body: "Ada added you to a game.", ...wordsAt },
+    ]);
+
+    // The example game's first round has every seat to act: each added player is told so.
+    const example = await createGame(h, ada, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ userId: bo.id }, { userId: cy.id }],
+    });
+    expect(example.status).toBe("active");
+    const exampleAt = { url: `/g/${example.id}`, tag: `game-${example.id}` };
+    expect((await received(boPhone)).at(-1)).toEqual({
+      title: "Family Games",
+      body: "Ada added you to a game. Your turn.",
+      ...exampleAt,
+    });
+    expect(await received(cyPhone)).toEqual([
+      { title: "Family Games", body: "Ada added you to a game. Your turn.", ...exampleAt },
+    ]);
+    expect(await received(adaPhone)).toEqual([]);
+  });
+
+  it("pushes to an added player waiting in a lobby, and nothing for an invitation or a typed address", async () => {
+    const [ada, bo, cy] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
+    const [boPhone, cyPhone] = [await device(), await device()];
+    await subscribe(bo, boPhone);
+    await subscribe(cy, cyPhone);
+    pastOpponents(ada, bo);
+    const lobby = await createGame(h, ada, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ userId: bo.id }, { email: cy.email }],
+    });
+    expect(lobby.status).toBe("lobby");
+    expect(await received(boPhone)).toEqual([
+      {
+        title: "Family Games",
+        body: "Ada added you to a game.",
+        url: `/g/${lobby.id}`,
+        tag: `game-${lobby.id}`,
+      },
+    ]);
+    // The invitation push is M4's: an invitation by address sends nothing yet.
+    expect(await received(cyPhone)).toEqual([]);
+
+    // With AI assistance allowed it's an invitation (02 §4): no "added you" push.
+    const invited = await createGame(h, ada, {
+      gameType: "words",
+      aiAssistance: "allowed",
+      invitees: [{ userId: bo.id }],
+    });
+    expect(invited.status).toBe("lobby");
+    expect(await received(boPhone)).toHaveLength(1);
+  });
+});
+
 describe("pushes and sessions (A8-S-2)", () => {
   it("sends nothing to a subscription whose session has expired", async () => {
     const ada = await signUp(h, "Ada");

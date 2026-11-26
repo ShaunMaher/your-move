@@ -45,15 +45,48 @@ export function memberRow(
 }
 
 /**
- * The users whose names a game's rows may show: only rows that have joined. Reading no others
- * keeps a lobby's reads the same whatever its typed addresses resolve to (Q3).
+ * An invitation to a past opponent the creator picked by id (alpha A12), in an open lobby: a user
+ * id but no typed address. While the lobby is open a typed address stays on its row until the row
+ * leaves `invited` (06 §6.5); a lobby that ended has cleared every address, so there the two kinds
+ * look alike and neither shows anything but its state. The creator already knows who they picked,
+ * so they see the name (05 §Who sees what); nothing about a typed address decides whether a row is
+ * one.
  */
-export function shownUserIds(players: readonly GamePlayerRecord[]): string[] {
+function isPickedInvitation(row: GamePlayerRecord, lobbyOpen: boolean): boolean {
+  return lobbyOpen && row.state === "invited" && row.userId !== null && row.inviteEmail === null;
+}
+
+/**
+ * The users whose names a game's rows may show: rows that have joined, and invitations picked by
+ * id in an open lobby (for the creator's `invitedAs`). Reading no others keeps a lobby's reads the
+ * same whatever its typed addresses resolve to (Q3).
+ */
+export function shownUserIds(
+  players: readonly GamePlayerRecord[],
+  lobbyOpen: (gameId: string) => boolean,
+): string[] {
   return [
     ...new Set(
-      players.flatMap((row) => (row.userId === null || row.joinedAt === null ? [] : [row.userId])),
+      players.flatMap((row) =>
+        row.userId === null ||
+        (row.joinedAt === null && !isPickedInvitation(row, lobbyOpen(row.gameId)))
+          ? []
+          : [row.userId],
+      ),
     ),
   ];
+}
+
+/** What the creator sees of an invitation (05 `invitedAs`): the typed address or the picked name. */
+function invitedAsOf(
+  row: GamePlayerRecord,
+  users: ReadonlyMap<string, UserRecord>,
+  lobbyOpen: boolean,
+): string | undefined {
+  if (row.state !== "invited") return undefined;
+  if (row.inviteEmail !== null) return row.inviteEmail;
+  if (!isPickedInvitation(row, lobbyOpen) || row.userId === null) return undefined;
+  return users.get(row.userId)?.displayName ?? undefined;
 }
 
 export interface PresentInput {
@@ -83,15 +116,14 @@ function playerOf(row: ShownRow, input: PlayersInput, creatorView: boolean): Env
   const user = joined && row.userId !== null ? input.users.get(row.userId) : undefined;
   const lobby = game.status === "lobby";
   const deadline = deadlineOf(row, game.turnTimeoutDays);
+  const invitedAs = creatorView ? invitedAsOf(row, input.users, lobby) : undefined;
   return {
     ...(creatorView && lobby ? { playerId: row.id } : {}),
     seat: row.seat,
     userId: joined ? row.userId : null,
     displayName: joined ? (user?.displayName ?? null) : null,
     kind: user?.kind ?? "human",
-    ...(creatorView && row.state === "invited" && row.inviteEmail !== null
-      ? { invitedAs: row.inviteEmail }
-      : {}),
+    ...(invitedAs === undefined ? {} : { invitedAs }),
     state: row.state,
     ...(row.outReason === null ? {} : { outReason: row.outReason }),
     ...(row.rank === null ? {} : { rank: row.rank }),

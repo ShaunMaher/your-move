@@ -472,22 +472,62 @@
           "invitees": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "email": {
-                  "type": "string",
-                  "maxLength": 320,
-                  "description": "An address to invite. The response never reveals whether it has an account (06 §6.1)."
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "email": {
+                      "type": "string",
+                      "maxLength": 320,
+                      "description": "An address to invite. The response never reveals whether it has an account (06 §6.1)."
+                    }
+                  },
+                  "required": ["email"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "description": "A past opponent's id, from `GET /api/v1/players/recent` (06 §6.1). They are added at once (`joined`) unless AI assistance is allowed, when they get an invitation (02 §4); anyone else is `INVALID_INVITEES`."
+                    }
+                  },
+                  "required": ["userId"],
+                  "additionalProperties": false
                 }
-              },
-              "required": ["email"],
-              "additionalProperties": false
+              ]
             },
             "maxItems": 16,
-            "description": "At most `seats - 1` people to invite, by address."
+            "description": "At most `seats - 1` people: addresses to invite, or past opponents to add by `userId`."
           }
         },
         "required": ["gameType", "invitees"],
+        "additionalProperties": false
+      },
+      "RecentPlayers": {
+        "type": "object",
+        "properties": {
+          "players": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "userId": { "type": "string" },
+                "displayName": { "type": "string" },
+                "lastPlayedAt": {
+                  "type": "integer",
+                  "description": "When your latest finished game together ended (ms since the epoch)."
+                }
+              },
+              "required": ["userId", "displayName", "lastPlayedAt"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["players"],
         "additionalProperties": false
       },
       "GameList": {
@@ -1705,7 +1745,7 @@
         "security": [{ "sessionCookie": [] }],
         "tags": ["Games"],
         "summary": "Create a game",
-        "description": "Every valid address gets a seat and the same response, whatever it turns out to be (Q3). The game starts at once only if every seat is filled; otherwise it waits in the lobby.",
+        "description": "Every valid address gets a seat and the same response, whatever it turns out to be (Q3). A past opponent picked by `userId` is added at once. The game starts at once (`active`) only if every seat is filled by past opponents added that way; otherwise it waits in the lobby.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1815,6 +1855,60 @@
             "description": "Your games.",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/GameList" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`ONBOARDING_REQUIRED` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/players/recent": {
+      "get": {
+        "operationId": "listRecentPlayers",
+        "x-scope": "games:create",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Your past opponents, to pick for a new game",
+        "description": "People you've finished a game with, both having acted (04 `past_opponents`), newest first, at most 50, across all game types; never anyone with a block between you either way (06 §6.9).",
+        "responses": {
+          "200": {
+            "description": "Your past opponents.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/RecentPlayers" } }
             }
           },
           "400": {

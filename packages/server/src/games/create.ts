@@ -9,6 +9,14 @@
  * onboarding (an email-invite seat, claimed at onboarding once email invites exist, M4). No email
  * is sent yet (M4). Per-pair counts use the typed address's `emailId`, never the user it resolves
  * to (Q3). An invitation over the target's inbound cap is `hidden` (06 §6.7).
+ *
+ * A past opponent picked by `userId` (alpha A12) must be one the creator may pick (no block either
+ * way, `INVALID_INVITEES` otherwise) and is added at once (`joined`, `joined_via = added`), unless
+ * AI assistance is allowed, when it is an invitation (02 §4). Picked invitees are seated before
+ * typed addresses, whatever their order in the request, so a typed address never changes how a
+ * picked one is seated: an address that resolves to a picked user, or to a user with a block
+ * against anyone seated before it, gets an `inert` seat instead (06 §6.1). The route starts a game
+ * whose seats are all filled this way (05 Created).
  */
 import type { z } from "@hono/zod-openapi";
 import { isGameError, type GameError, type OptionsContext } from "@your-move/sdk";
@@ -84,22 +92,61 @@ function timeoutDays(type: GameType, options: unknown, days: number | undefined)
   return value;
 }
 
-/** The typed addresses, normalised and checked (05 `INVALID_INVITEES`, `CANNOT_PLAY_SELF`). */
-function invitees(
-  body: CreateGameBody,
-  creator: UserRecord,
-  seats: number,
-): readonly NormalisedEmail[] {
+/** The invitees: typed addresses, normalised, and past opponents picked by id. */
+interface Invitees {
+  readonly emails: readonly NormalisedEmail[];
+  readonly picked: readonly string[];
+}
+
+/** The invitees, checked (05 `INVALID_INVITEES`, `CANNOT_PLAY_SELF`). */
+function invitees(body: CreateGameBody, creator: UserRecord, seats: number): Invitees {
   if (body.invitees.length > seats - 1) throw ApiError.of("INVALID_INVITEES");
-  const addresses = body.invitees.map((invitee) => normaliseAddress(invitee.email));
-  const valid = addresses.filter((address): address is NormalisedEmail => address !== null);
-  if (valid.length !== addresses.length) throw ApiError.of("INVALID_INVITEES");
-  if (creator.email !== null && valid.includes(creator.email)) {
+  const emails: NormalisedEmail[] = [];
+  const picked: string[] = [];
+  for (const invitee of body.invitees) {
+    if ("userId" in invitee) {
+      picked.push(invitee.userId);
+      continue;
+    }
+    const address = normaliseAddress(invitee.email);
+    if (address === null) throw ApiError.of("INVALID_INVITEES");
+    emails.push(address);
+  }
+  if ((creator.email !== null && emails.includes(creator.email)) || picked.includes(creator.id)) {
     throw ApiError.of("CANNOT_PLAY_SELF");
   }
   // Only literal duplicates are refused, so the response never says whose address it is (06 §6.1).
-  if (new Set(valid).size !== valid.length) throw ApiError.of("INVALID_INVITEES");
-  return valid;
+  if (new Set(emails).size !== emails.length || new Set(picked).size !== picked.length) {
+    throw ApiError.of("INVALID_INVITEES");
+  }
+  return { emails, picked };
+}
+
+/**
+ * Every picked id must be a past opponent the creator may pick: no block either way, an onboarded
+ * human (06 §6.1). Anything else is `INVALID_INVITEES`, the same answer whatever the reason.
+ */
+async function checkPicked(deps: CreateDeps, creator: UserRecord, picked: readonly string[]) {
+  if (picked.length === 0) return;
+  const pickable = new Set(await deps.platform.repos.users.pickableOpponents(creator.id, picked));
+  if (picked.some((id) => !pickable.has(id))) throw ApiError.of("INVALID_INVITEES");
+}
+
+/**
+ * Whether a picked past opponent is added at once (02 §4, 06 §6.2). `whoCanAddMe` is everyone's
+ * default, `pastOpponents`, until the setting exists (M4): only AI assistance makes it an
+ * invitation, so every person sees the AI setting before they're in. AI seats arrive with AI
+ * accounts (M8).
+ */
+function addsAtOnce(aiAssistance: "off" | "allowed"): boolean {
+  return aiAssistance === "off";
+}
+
+/** The blocks among a set of users, as a lookup either way round (04 `blocks`). */
+async function blockLookup(deps: CreateDeps, userIds: readonly string[]) {
+  const pairs = await deps.platform.repos.users.blocksAmong(userIds);
+  const keys = new Set(pairs.map((pair) => `${pair.blockerId} ${pair.blockedId}`));
+  return (a: string, b: string): boolean => keys.has(`${a} ${b}`) || keys.has(`${b} ${a}`);
 }
 
 /** Stands in for "no user" in the past-opponent lookup, so it runs the same for every address. */
@@ -157,13 +204,20 @@ async function inboundDelivery(
   );
 }
 
-/** Creates the game and returns its id. Throws {@link ApiError} for every refusal. */
+/** A created game: its id and the past opponents added to it at once. */
+export interface CreatedGame {
+  readonly gameId: string;
+  /** User ids of the picked past opponents seated as `joined` (02 §4), in request order. */
+  readonly added: readonly string[];
+}
+
+/** Creates the game. Throws {@link ApiError} for every refusal. */
 export async function createGame(
   deps: CreateDeps,
   creator: UserRecord,
   type: GameType | undefined,
   body: CreateGameBody,
-): Promise<string> {
+): Promise<CreatedGame> {
   const { platform, resources, keys } = deps;
   const { repos, config } = platform;
   if (type?.enabled !== true) throw ApiError.of("UNKNOWN_GAME");
@@ -176,7 +230,7 @@ export async function createGame(
   const { options, input } = resolve(type, body.options, remembered, ctx);
   const seats = seatCount(type, options, body.seats);
   const turnTimeoutDays = timeoutDays(type, options, body.turnTimeoutDays);
-  const emails = invitees(body, creator, seats);
+  const { emails, picked } = invitees(body, creator, seats);
 
   const requested = type.latest.resources(options);
   for (const resource of requested) {
@@ -193,6 +247,8 @@ export async function createGame(
     });
   }
 
+  await checkPicked(deps, creator, picked);
+
   const emailIds = await Promise.all(emails.map((email) => emailId(keys, email)));
   // The live-game caps are read before the insert, so concurrent creates can pass them together
   // and go a few games over. That is accepted: the atomic daily limits below (30 games a day, 5 a
@@ -200,9 +256,11 @@ export async function createGame(
   // An overdue lobby isn't live: expire the creator's before counting them (lazy expiry).
   await expireOverdueLobbies(repos, creator.id, platform.now().getTime());
   const live = await repos.games.countLiveCreated(creator.id);
-  const perPair = await Promise.all(
-    emailIds.map((hash) => repos.games.countLiveCreatedWithInvite(creator.id, hash)),
-  );
+  const perPair = await Promise.all([
+    ...emailIds.map((hash) => repos.games.countLiveCreatedWithInvite(creator.id, hash)),
+    // A picked past opponent's pair is (creator, userId) (06 §6.7).
+    ...picked.map((id) => repos.games.countLiveCreatedWithUser(creator.id, id)),
+  ]);
   if (live >= MAX_LIVE_CREATED || perPair.some((count) => count >= MAX_LIVE_CREATED_PER_PAIR)) {
     throw ApiError.of("TOO_MANY_GAMES");
   }
@@ -221,6 +279,11 @@ export async function createGame(
       key: `${creator.id}:${hash}`,
       amount: 1,
     })),
+    ...picked.map((id): LimitCheck => ({
+      name: "GAMES_CREATED_PAIR_DAY",
+      key: `${creator.id}:user:${id}`,
+      amount: 1,
+    })),
   ];
   const limits = await checkLimits(repos, config, now, checks);
   if (limits.some((limit) => limit.exceeded)) throw ApiError.of("RATE_LIMITED");
@@ -231,6 +294,47 @@ export async function createGame(
     user?.kind === "human" && user.onboardedAt !== null ? user : null,
   );
   const delivery = await inboundDelivery(deps, creator, emailIds, invitable, now);
+  // One lookup for every request, with a placeholder for each address that resolves to no one,
+  // so the reads don't depend on what the addresses turn out to be (Q3).
+  const blocked = await blockLookup(deps, [
+    creator.id,
+    ...picked,
+    ...invitable.map((user) => user?.id ?? NO_USER),
+  ]);
+  const aiAssistance = body.aiAssistance ?? "off";
+  const atOnce = addsAtOnce(aiAssistance);
+  /** Users holding a row so far, in seating order: the creator, then each invitee. */
+  const seated: string[] = [creator.id];
+  const blockedWithSeated = (userId: string) => seated.some((other) => blocked(userId, other));
+
+  const pickedRows = picked.map((userId): NewGamePlayer => {
+    // A block with the creator was refused above; one with an earlier picked invitee gives an
+    // `inert` seat (06 §6.1).
+    const inert = blockedWithSeated(userId);
+    seated.push(userId);
+    const base = { id: crypto.randomUUID(), userId, lastSeenVersion: NEVER_SEEN };
+    if (inert) return { ...base, state: "invited", delivery: "inert" };
+    if (!atOnce) return { ...base, state: "invited", delivery: "normal" };
+    // Unread until they open it, like an invitation (04 `last_seen_version`).
+    return { ...base, state: "joined", joinedVia: "added", joinedAt: now };
+  });
+  const emailRows = emails.map((email, i): NewGamePlayer => {
+    const user = invitable[i] ?? null;
+    // Already added in this request: an `inert` email-only seat, so the response never confirms
+    // whose address it is (06 §6.1).
+    const duplicate = user !== null && seated.includes(user.id);
+    const inert = duplicate || (user !== null && blockedWithSeated(user.id));
+    if (user !== null && !duplicate) seated.push(user.id);
+    return {
+      id: crypto.randomUUID(),
+      userId: duplicate ? null : (user?.id ?? null),
+      inviteEmail: email,
+      state: "invited",
+      delivery: inert ? "inert" : (delivery[i] ?? "normal"),
+      // Never seen: a new invitation is unread (A2 review P-6).
+      lastSeenVersion: NEVER_SEEN,
+    };
+  });
   const gameId = crypto.randomUUID();
   const players: NewGamePlayer[] = [
     {
@@ -240,15 +344,8 @@ export async function createGame(
       joinedVia: "creator",
       joinedAt: now,
     },
-    ...emails.map((email, i): NewGamePlayer => ({
-      id: crypto.randomUUID(),
-      userId: invitable[i]?.id ?? null,
-      inviteEmail: email,
-      state: "invited",
-      delivery: delivery[i] ?? "normal",
-      // Never seen: a new invitation is unread (A2 review P-6).
-      lastSeenVersion: NEVER_SEEN,
-    })),
+    ...pickedRows,
+    ...emailRows,
   ];
   await repos.games.create(
     {
@@ -263,7 +360,7 @@ export async function createGame(
       seatOrder: body.seatOrder ?? "join",
       // Off whenever a seat is open or two people play (02 §4), which is every game until AI
       // accounts exist (M3); the creator may still allow it.
-      aiAssistance: body.aiAssistance ?? "off",
+      aiAssistance,
       lastActionAt: now,
       createdAt: now,
       updatedAt: now,
@@ -289,5 +386,10 @@ export async function createGame(
     input: rememberedInput(input),
     updatedAt: now,
   });
-  return gameId;
+  return {
+    gameId,
+    added: pickedRows.flatMap((row) =>
+      row.state === "joined" && row.userId != null ? [row.userId] : [],
+    ),
+  };
 }

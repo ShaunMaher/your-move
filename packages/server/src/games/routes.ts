@@ -20,6 +20,7 @@ import {
   listGamesRoute,
   markSeenRoute,
   previewRoute,
+  recentPlayersRoute,
   resignGameRoute,
   rulesRoute,
   startGameRoute,
@@ -34,7 +35,7 @@ import type { GamePlayerRecord, GameWriteSet, LoadedGame, UserRecord } from "../
 import { ApiError } from "../http/api-error.js";
 import { background } from "../http/background.js";
 import type { AppEnv, Platform } from "../platform.js";
-import { sendTransitionPushes } from "../push/notify.js";
+import { sendAddedPushes, sendTransitionPushes } from "../push/notify.js";
 import { createGame } from "./create.js";
 import { expireOverdueLobbies, loadCurrent } from "./expiry.js";
 import {
@@ -49,6 +50,7 @@ import {
   type Refusal,
   resign,
   start,
+  startAtCreation,
 } from "./lifecycle.js";
 import {
   engineOf,
@@ -71,6 +73,8 @@ import { lastOptionsOf } from "./settings.js";
 const DAY = 86_400_000;
 const LIST_PAGE = 50;
 const HISTORY_PAGE = 100;
+/** `GET /api/v1/players/recent` lists at most this many past opponents (05). */
+const RECENT_PLAYERS = 50;
 /** `GET /api/v1/games` keeps finished games 90 days and other endings 7 days (05). */
 const FINISHED_LISTED_MS = 90 * DAY;
 const ENDED_LISTED_MS = 7 * DAY;
@@ -130,6 +134,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     resignGameRoute,
     cancelGameRoute,
     markSeenRoute,
+    recentPlayersRoute,
   ]) {
     // Registered for the method only, so the public rules route under /games/types is unaffected.
     app.on(route.method.toUpperCase(), honoPath(route.path), session);
@@ -173,7 +178,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
   ): Promise<PresentInput> => {
     const [gameResources, users] = await Promise.all([
       repos.games.resources(loaded.game.id),
-      repos.users.findByIds(shownUserIds(loaded.players)),
+      repos.users.findByIds(shownUserIds(loaded.players, () => loaded.game.status === "lobby")),
     ]);
     return {
       game: loaded.game,
@@ -219,6 +224,24 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
   };
 
   /**
+   * Applies a write set from the version it was computed at, with the actor's own unread marker
+   * moved to the version it creates, in the same transition.
+   */
+  const applyAs = async (loaded: LoadedGame, writes: GameWriteSet, actor: GamePlayerRecord) => {
+    const seen = { lastSeenVersion: loaded.game.version + 1 };
+    const updates = writes.updatePlayers ?? [];
+    const own = updates.some((update) => update.id === actor.id);
+    return repos.games.applyTransition(loaded.game.id, loaded.game.version, {
+      ...writes,
+      updatePlayers: own
+        ? updates.map((update) =>
+            update.id === actor.id ? { id: update.id, set: { ...update.set, ...seen } } : update,
+          )
+        : [...updates, { id: actor.id, set: seen }],
+    });
+  };
+
+  /**
    * Applies a write set from the version it was computed at; `409 STALE_GAME` if it lost. The
    * actor has seen what they did: their own unread marker moves to the new version (A2 review
    * P-6), in the same transition. A transition that won sends its pushes in the background
@@ -231,17 +254,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     actor: GamePlayerRecord,
     describe: Text | null,
   ): Promise<void> => {
-    const seen = { lastSeenVersion: loaded.game.version + 1 };
-    const updates = writes.updatePlayers ?? [];
-    const own = updates.some((update) => update.id === actor.id);
-    const result = await repos.games.applyTransition(loaded.game.id, loaded.game.version, {
-      ...writes,
-      updatePlayers: own
-        ? updates.map((update) =>
-            update.id === actor.id ? { id: update.id, set: { ...update.set, ...seen } } : update,
-          )
-        : [...updates, { id: actor.id, set: seen }],
-    });
+    const result = await applyAs(loaded, writes, actor);
     if (result === "stale") throw ApiError.of("STALE_GAME");
     if (platform.push.enabled) {
       background(c, platform, () =>
@@ -253,6 +266,21 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
         }),
       );
     }
+  };
+
+  /**
+   * Starts a game just created with every seat filled by past opponents added at once (05
+   * Created, 02 §4), as the creator's transition from version 0. Losing that race to a transition
+   * one of the added players made meanwhile (a decline) isn't an error: the game is what that
+   * transition left, and the creator is shown it. The start's own "your turn" push is not sent:
+   * the added players' "added you" push says it instead (03 §7).
+   */
+  const startIfFull = async (gameId: string, user: UserRecord): Promise<void> => {
+    const loaded = await repos.games.load(gameId);
+    const creator = loaded === null ? undefined : memberRow(loaded.players, user.id);
+    if (loaded === null || creator === undefined) return;
+    const writes = startAtCreation(contextOf(loaded), now());
+    if (writes !== null) await applyAs(loaded, writes, creator);
   };
 
   /** A lifecycle transition (05 §Lifecycle transitions) from `expectedVersion`. */
@@ -354,14 +382,27 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     onboarded(user);
     await limit(user, "WRITES_USER_MINUTE");
     const body = c.req.valid("json");
-    const gameId = await createGame(
+    const { gameId, added } = await createGame(
       { platform, resources, keys: await options.keys() },
       user,
       registry.get(body.gameType),
       body,
     );
+    if (added.length > 0) {
+      await startIfFull(gameId, user);
+      if (platform.push.enabled) {
+        background(c, platform, () => sendAddedPushes(platform, { gameId, creator: user, added }));
+      }
+    }
     const { game } = await gameWithView(gameId, user);
     return c.json({ game }, 201);
+  });
+
+  app.openapi(recentPlayersRoute, async (c) => {
+    const user = userOf(c);
+    onboarded(user);
+    const players = await repos.users.recentOpponents(user.id, RECENT_PLAYERS);
+    return c.json({ players }, 200);
   });
 
   app.openapi(listGamesRoute, async (c) => {
@@ -390,8 +431,13 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       repos.games.playersOf(ids),
       repos.games.lastActions(ids),
     ]);
+    const lobbies = new Set(
+      page.filter((row) => row.game.status === "lobby").map((row) => row.game.id),
+    );
     const users = new Map(
-      (await repos.users.findByIds(shownUserIds(players))).map((u) => [u.id, u]),
+      (await repos.users.findByIds(shownUserIds(players, (gameId) => lobbies.has(gameId)))).map(
+        (u) => [u.id, u],
+      ),
     );
     const games = page.map(({ game, member }) => {
       const rows = players.filter((row) => row.gameId === game.id);

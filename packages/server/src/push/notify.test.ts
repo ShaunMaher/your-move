@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { GamePlayerRecord, GameRecord, GameWriteSet, LoadedGame } from "../db/repositories.js";
 import type { Platform } from "../platform.js";
 import {
+  addedMessage,
   interleaveByRecipient,
   type PushedTransition,
   pushMessage,
@@ -322,6 +323,26 @@ describe("pushMessage (08 T18)", () => {
     expect(
       JSON.stringify(pushMessage(MOVE, { userId: "bob", seat: 1, kind: "turn" }, USERS, "G")),
     ).not.toContain("rack");
+  });
+});
+
+describe("addedMessage (alpha A12, 06 §6.2, T18)", () => {
+  it("names the creator and nothing else, adding 'Your turn.' when it is", () => {
+    expect(addedMessage("game-1", "Alice", false, "Games")).toEqual({
+      title: "Games",
+      body: "Alice added you to a game.",
+      url: "/g/game-1",
+      tag: "game-game-1",
+    });
+    expect(addedMessage("game-1", "Alice", true, "Games").body).toBe(
+      "Alice added you to a game. Your turn.",
+    );
+  });
+
+  it("cuts a long name like any other push text", () => {
+    const body = addedMessage("g", "😀".repeat(300), true, "Games").body;
+    expect(Array.from(body)).toHaveLength(240);
+    expect(body.endsWith("…")).toBe(true);
   });
 });
 

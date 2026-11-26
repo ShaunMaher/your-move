@@ -166,7 +166,7 @@ export const rulesRoute = createRoute({
 
 // Creating a game -----------------------------------------------------------------------------
 
-const Invitee = z
+const EmailInvitee = z
   .object({
     email: z.string().max(320).openapi({
       description:
@@ -174,6 +174,17 @@ const Invitee = z
     }),
   })
   .strict();
+
+const PickedInvitee = z
+  .object({
+    userId: z.string().min(1).max(64).openapi({
+      description:
+        "A past opponent's id, from `GET /api/v1/players/recent` (06 §6.1). They are added at once (`joined`) unless AI assistance is allowed, when they get an invitation (02 §4); anyone else is `INVALID_INVITEES`.",
+    }),
+  })
+  .strict();
+
+const Invitee = z.union([EmailInvitee, PickedInvitee]);
 
 export const CreateGameBodySchema = z
   .object({
@@ -196,7 +207,8 @@ export const CreateGameBodySchema = z
         "Default `off` while any seat is open or two or more people play (02 §4); fixed at creation.",
     }),
     invitees: z.array(Invitee).max(16).openapi({
-      description: "At most `seats - 1` people to invite, by address.",
+      description:
+        "At most `seats - 1` people: addresses to invite, or past opponents to add by `userId`.",
     }),
   })
   .strict()
@@ -216,7 +228,7 @@ export const createGameRoute = createRoute({
   tags: ["Games"],
   summary: "Create a game",
   description:
-    "Every valid address gets a seat and the same response, whatever it turns out to be (Q3). The game starts at once only if every seat is filled; otherwise it waits in the lobby.",
+    "Every valid address gets a seat and the same response, whatever it turns out to be (Q3). A past opponent picked by `userId` is added at once. The game starts at once (`active`) only if every seat is filled by past opponents added that way; otherwise it waits in the lobby.",
   request: { body: jsonBody(CreateGameBodySchema) },
   responses: {
     201: { description: "The game.", content: json(CreatedGameSchema) },
@@ -555,5 +567,40 @@ export const markSeenRoute = createRoute({
       403: "`BAD_ORIGIN` or `SUSPENDED`.",
       429: "Too many game writes (`RATE_LIMITED`).",
     }),
+  },
+});
+
+// Players -------------------------------------------------------------------------------------
+
+export const RecentPlayersSchema = z
+  .object({
+    players: z.array(
+      z
+        .object({
+          userId: z.string(),
+          displayName: z.string(),
+          lastPlayedAt: z.number().int().openapi({
+            description: "When your latest finished game together ended (ms since the epoch).",
+          }),
+        })
+        .strict(),
+    ),
+  })
+  .strict()
+  .openapi("RecentPlayers");
+
+export const recentPlayersRoute = createRoute({
+  operationId: "listRecentPlayers",
+  "x-scope": "games:create",
+  security: SESSION,
+  method: "get",
+  path: `${API_V1}/players/recent`,
+  tags: ["Games"],
+  summary: "Your past opponents, to pick for a new game",
+  description:
+    "People you've finished a game with, both having acted (04 `past_opponents`), newest first, at most 50, across all game types; never anyone with a block between you either way (06 §6.9).",
+  responses: {
+    200: { description: "Your past opponents.", content: json(RecentPlayersSchema) },
+    ...errors({ ...COMMON_ERRORS, 403: "`ONBOARDING_REQUIRED` or `SUSPENDED`." }),
   },
 });
