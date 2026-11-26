@@ -389,7 +389,15 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       body,
     );
     if (added.length > 0) {
-      await startIfFull(gameId, user);
+      try {
+        await startIfFull(gameId, user);
+      } catch (error) {
+        // The game exists whatever happened to its start: the creator is shown it as stored (a
+        // lobby the creator can still start), never a 500 for a game that was created (A12-P-1).
+        platform.log.error("start at creation failed", {
+          errorClass: error instanceof Error ? error.name : typeof error,
+        });
+      }
       if (platform.push.enabled) {
         background(c, platform, () => sendAddedPushes(platform, { gameId, creator: user, added }));
       }
