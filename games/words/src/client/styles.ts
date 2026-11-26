@@ -99,7 +99,8 @@ const CSS = `
 .ym-w { ${VARS} --w-rack: 2.75rem;
   color: var(--w-ink); background: var(--w-paper); display: flex; flex-direction: column;
   gap: 0.4rem; max-width: 34rem; font-family: system-ui, -apple-system, sans-serif; margin: 0 auto; padding: 0.5rem 0.5rem
-  calc(0.5rem + env(safe-area-inset-bottom)); box-sizing: border-box; font-size: 1rem; }
+  calc(0.5rem + env(safe-area-inset-bottom)); box-sizing: border-box; font-size: 1rem;
+  color-scheme: light; }
 .ym-w *, .ym-w *::before, .ym-w *::after { box-sizing: border-box; }
 .ym-w button { font: inherit; color: inherit; cursor: pointer; }
 .ym-w button:disabled { cursor: default; opacity: 0.55; }
@@ -201,6 +202,7 @@ const CSS = `
 .ym-w-racks { display: flex; flex-wrap: wrap; gap: 2px; margin-inline-start: 0.5rem;
   vertical-align: middle; }
 .ym-w-mini { display: inline-flex; width: 1.5rem; height: 1.5rem; }
+.ym-w select { color: var(--w-ink); background: var(--w-paper); border-color: var(--w-muted); }
 .ym-w-options fieldset { margin: 0 0 1rem; padding: 0; border: 0; }
 .ym-w-card { display: flex; gap: 0.75rem; align-items: center; padding: 0.5rem; margin: 0.5rem 0;
   border: 2px solid var(--w-line); border-radius: 8px; }

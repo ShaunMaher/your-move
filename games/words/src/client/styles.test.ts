@@ -111,6 +111,19 @@ describe("the board's colours", () => {
     // The stripes are painted on the square, which the chip covers where the label is.
     expect(STYLE_TEXT).toMatch(/\.ym-w-face \{[^}]*padding/u);
   });
+
+  it("keep form controls light on the paper when the shell is dark", () => {
+    // The module is a light panel in either theme: the shell's dark `select` rule gave the word
+    // list a dark field with the module's dark ink inherited on it, so it read black on black.
+    const set = (selector: string): string[] =>
+      declarations(STYLE_TEXT)
+        .filter((d) => d.selector === selector)
+        .map((d) => d.property);
+    expect(STYLE_TEXT).toMatch(/\.ym-w \{[^}]*color-scheme: light;/u);
+    expect(set(".ym-w select")).toEqual(
+      expect.arrayContaining(["color", "background", "border-color"]),
+    );
+  });
 });
 
 /** A selector's specificity as a comparable number (ids, then classes, then elements). */
