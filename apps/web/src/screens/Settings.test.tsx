@@ -1,5 +1,5 @@
 /** The Settings toggles: email nudges (03 §7; alpha A6) and notifications (07 §4; alpha A8). */
-import { cleanup, configure, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../App.js";
@@ -13,8 +13,6 @@ import {
   PUSH_KEY,
   removeFakePush,
 } from "../test-support.js";
-
-configure({ asyncUtilTimeout: 10_000 });
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/settings");

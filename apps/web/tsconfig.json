@@ -18,6 +18,7 @@
     "sw",
     "vite.config.ts",
     "vitest.config.ts",
+    "vitest.setup.ts",
     "../../generated/client-games.ts"
   ],
   "references": [{ "path": "../../packages/api-client" }, { "path": "../../packages/sdk" }]

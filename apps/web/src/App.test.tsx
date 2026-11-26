@@ -1,4 +1,4 @@
-import { cleanup, configure, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App.js";
@@ -14,9 +14,6 @@ const signedIn = (me: object = ME) => ({
   "GET /api/v1/config": json(CONFIG),
   "GET /api/v1/me": json(me),
 });
-
-// The whole suite runs in parallel with the server tests, so a slow machine gets a wide margin.
-configure({ asyncUtilTimeout: 10_000 });
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/");

@@ -29,6 +29,8 @@ export default {
           "[.]d[.]ts$",
           "(^|/)tsconfig[.]json$",
           "(^|/)(?:vite|vitest|playwright)[.]config[.]ts$",
+          // Named by vitest.config.ts setupFiles, never imported.
+          "^apps/web/vitest[.]setup[.]ts$",
           // Read by the build's service-worker plugin (vite.config.ts), never imported.
           "^apps/web/sw/sw[.]js$",
         ],
