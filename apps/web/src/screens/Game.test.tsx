@@ -202,6 +202,27 @@ describe("the lobby", () => {
     expect(posts(calls, "decline")).toHaveLength(1);
   });
 
+  it("lets a player who was added (joined, not the creator) decline, and goes home (A12-P-4)", async () => {
+    const added = lobby({
+      players: [
+        player({ seat: null, state: "joined", isYou: false, displayName: "Robin" }),
+        player({ seat: null, state: "joined", isCreator: false }),
+      ],
+    });
+    const { calls } = open({
+      "GET /api/v1/games/g1": json({ game: added, view: null }),
+      "POST /api/v1/games/g1/decline": new Response(null, { status: 204 }),
+    });
+    expect(await screen.findByText(/You can still decline/u)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start game" })).toBeNull();
+    click("Decline");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/");
+    });
+    expect(posts(calls, "decline")).toHaveLength(1);
+  });
+
   it("polls while in the lobby, so the creator sees the game start by itself", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let answer = json({ game: lobby(), view: null });

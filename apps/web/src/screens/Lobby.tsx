@@ -1,6 +1,7 @@
 /**
  * A game waiting for its players (07 §1, 02 §4): who is invited and who has joined, Accept or
- * Decline for an invitation, Start or Cancel for the creator.
+ * Decline for an invitation, Decline for a player already in (a past opponent added them without
+ * asking, alpha A12), Start or Cancel for the creator.
  */
 import { useState } from "react";
 
@@ -46,6 +47,8 @@ export function Lobby({ appName, gameName, game, onAction, notice }: LobbyProps)
   const you = game.players.find((player) => player.isYou);
   const isCreator = you?.isCreator === true;
   const invited = game.yourInvitation !== null;
+  /** In the lobby but not its creator: added by a past opponent, or accepted. Either may decline. */
+  const joinedNotCreator = you?.state === "joined" && !isCreator;
   const creator = game.players.find((player) => player.isCreator);
   const joined = game.players.filter((player) => player.state === "joined").length;
 
@@ -65,7 +68,9 @@ export function Lobby({ appName, gameName, game, onAction, notice }: LobbyProps)
       : "Everyone is here. Start when you're ready."
     : invited
       ? `${creator === undefined ? "Someone" : seatLabel(creator)} invited you to play.`
-      : "Waiting for the creator to start the game.";
+      : joinedNotCreator
+        ? "Waiting for the creator to start the game. You can still decline."
+        : "Waiting for the creator to start the game.";
 
   return (
     <Page appName={appName} nav={<Link to="/">Home</Link>}>
@@ -112,6 +117,16 @@ export function Lobby({ appName, gameName, game, onAction, notice }: LobbyProps)
               {pending === "decline" ? "Declining…" : "Decline"}
             </button>
           </>
+        ) : null}
+        {joinedNotCreator ? (
+          <button
+            type="button"
+            className="button secondary"
+            disabled={pending !== null}
+            onClick={() => void run("decline")}
+          >
+            {pending === "decline" ? "Declining…" : "Decline"}
+          </button>
         ) : null}
         {isCreator ? (
           <>
