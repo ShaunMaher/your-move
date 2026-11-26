@@ -59,8 +59,9 @@ There is no admin UI in v1; operators use the Admin API and its command-line cli
    unpick someone to choose another."); each pick fills one seat and removes one address field,
    an empty one first, unpicking gives it back, and lowering the seat count drops the latest
    picks. The list isn't shown when it's empty or couldn't be loaded. The review step
-   shows each pick as "Playing with <name>" (alpha A12). A player added this way sees Decline in
-   the lobby (they never chose to join), the lobby decline of 02 §4. Typed addresses are shown back before Create ("Check the address:
+   shows each pick as "Playing with <name>" (alpha A12). Any player who has joined a lobby and isn't its creator
+   sees Decline there, the lobby decline of 02 §4, so a player added this way (who never chose to
+   join) can leave before the start. Typed addresses are shown back before Create ("Check the address:
    sam@example.org") because the app never says whether an address has an account (06 §6.1, Q3);
    a typo just becomes an invitation nobody receives. There's also an "Add a join link for the
    open seats" toggle (with the warning that anyone with the link can see the game and join, and

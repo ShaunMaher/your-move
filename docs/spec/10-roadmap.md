@@ -313,7 +313,10 @@ tests are green in CI.
   `add-player` with a block is a silent `204` no-op;
   **before anything can write `blocks`**: Q29 is settled (default: with two or more picked past
   opponents in one request every pick is an invitation, so no pick's state reveals a block between
-  them; 06 §6.1), with a test that replaces A12's test of today's behaviour;
+  them; 06 §6.1), with a test that replaces A12's test of today's behaviour; an explicit pick
+  marker on `game_players` (e.g. `invited_via`) to replace A12's inference from `invite_email`,
+  which also lets the (creator, `userId`) pair count every picked row safely (the stricter count
+  of review P-6, reverted in A12 round 2 because typed rows lose their address while live, 05);
   lobby endings and lobby events other than auto-join and invitation send no push or email, the
   invitation push names nobody (T18); unsubscribe GET/POST e2e on both targets with the service worker active; onboarding:
   `403 ONBOARDING_REQUIRED` on game list, create, accept, join lookup and join until done, invites

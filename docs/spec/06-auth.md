@@ -265,6 +265,11 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
      (02 §4).
    - `nobody`: every game is an invitation, even from past opponents.
 
+   Decision (alpha A12 review S2-2): a creator who picks someone whose setting is `nobody` sees that
+   seat as invited rather than joined, which reveals that person's global preference to their past
+   opponents. That is acceptable: it says nothing about an address or a block, and Q29's default
+   (every pick an invitation when a request picks two or more) hides it in group games.
+
    (There's no "anyone" setting: adding by email must never auto-join, or the creator would learn
    that the address has an account.)
 
