@@ -51,3 +51,12 @@ export const GAME_LOOP_BUDGET_MS = 60_000;
  * former, the same to-be-measured margin as the full game's.
  */
 export const RESIGN_TEST_TIMEOUT_MS = 60_000;
+
+/**
+ * The rematch test (opponents.spec.ts, alpha A12): two sign-ins, an invitation, one pass each and
+ * a resignation, then a second game started by picking the other person from the list. The short
+ * game test plus two moves and a second game; 90 s sits between that test's 60 s and the full
+ * game's 120 s, the same to-be-measured margin as theirs. Measured locally in the pinned image
+ * with a warm browser: 5.0 s (Chromium) and 6.3 s (WebKit), 2026-11-26.
+ */
+export const REMATCH_TEST_TIMEOUT_MS = 90_000;

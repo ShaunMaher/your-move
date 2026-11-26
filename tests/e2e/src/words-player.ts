@@ -166,6 +166,14 @@ async function place(
   }
 }
 
+/** Passes the turn through the board's own dialog. */
+export async function pass(page: Page): Promise<void> {
+  await press(page.getByRole("button", { name: "Pass", exact: true }));
+  await press(
+    page.getByRole("dialog", { name: "Pass your turn?" }).getByRole("button", { name: "Pass" }),
+  );
+}
+
 /** Makes a play on the page, or passes; resolves to whether it was a play. */
 export async function takeTurn(page: Page, words: ReadonlySet<string>): Promise<boolean> {
   const board = await readBoard(page);
@@ -173,10 +181,7 @@ export async function takeTurn(page: Page, words: ReadonlySet<string>): Promise<
   const play =
     board.tiles.size === 0 ? openingPlay(board, rack, words) : singleTilePlay(board, rack, words);
   if (play === null) {
-    await press(page.getByRole("button", { name: "Pass", exact: true }));
-    await press(
-      page.getByRole("dialog", { name: "Pass your turn?" }).getByRole("button", { name: "Pass" }),
-    );
+    await pass(page);
     return false;
   }
   await place(page, play);

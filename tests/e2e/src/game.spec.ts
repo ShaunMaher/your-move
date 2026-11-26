@@ -9,6 +9,7 @@ import type { Page } from "@playwright/test";
 
 import { GAME_LOOP_BUDGET_MS, GAME_TEST_TIMEOUT_MS, RESIGN_TEST_TIMEOUT_MS } from "./budgets.js";
 import { expect, test } from "./fixtures.js";
+import { createAndAccept, FAR, isMyTurn, refocus } from "./game-steps.js";
 import {
   expectAccessible,
   expectOnlyShellAndWordLists,
@@ -33,23 +34,6 @@ async function shot(page: Page, name: string): Promise<void> {
   await ignore(false);
 }
 
-/** The page's own refresh on regaining focus (the alpha has no realtime): what a person's return to the tab does. */
-async function refocus(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    window.dispatchEvent(new Event("focus"));
-  });
-}
-
-/**
- * The words board draws the scores and whose turn it is (the shell adds neither while a board is
- * on screen, 02 §3), so a page's turn is read off the board's score bar: the entry marked as to
- * act is the viewer's when it says "(you)".
- */
-const toAct = (page: Page) => page.locator('.ym-w-scores li[aria-current="true"]');
-async function isMyTurn(page: Page): Promise<boolean> {
-  return (await toAct(page).allTextContents()).some((text) => text.includes("(you)"));
-}
-
 /** The viewer's and the opponent's scores, as the board's score bar shows them. */
 async function scoresOf(page: Page): Promise<number[]> {
   const entries = await page
@@ -57,34 +41,6 @@ async function scoresOf(page: Page): Promise<number[]> {
     .getByRole("listitem")
     .allTextContents();
   return entries.map((entry) => Number(/(\d+)$/u.exec(entry.trim())?.[1] ?? Number.NaN));
-}
-
-const FAR = { timeout: 20_000 };
-
-/** Ann creates a words game and invites Bob by address; both are on the game's screen after. */
-async function createAndAccept(ann: Page, bob: Page, bobAddress: string): Promise<string> {
-  await ann.getByRole("link", { name: "New game" }).click();
-  await expect(ann.getByRole("heading", { level: 1 })).toHaveText("New game");
-  await ann.getByRole("button", { name: /^Words/u }).click();
-  await expect(ann.getByRole("heading", { name: /options/u })).toBeVisible();
-  await ann.getByRole("button", { name: "Next" }).click();
-  await ann.getByLabel("Their email address").fill(bobAddress);
-  await expect(ann.getByText(/must have signed in to E2E Games at least once/u)).toBeVisible();
-  await ann.getByRole("button", { name: "Review" }).click();
-  await expect(ann.getByText(`Check the address: ${bobAddress}`)).toBeVisible();
-  await ann.getByRole("button", { name: "Create game" }).click();
-  await expect(ann.getByRole("heading", { level: 1 })).toHaveText("Words lobby");
-  const gameId = /\/g\/([^/]+)$/u.exec(new URL(ann.url()).pathname)?.[1] ?? "";
-  expect(gameId).not.toBe("");
-
-  // Bob finds the invitation in his list and opens it.
-  await bob.goto("/");
-  const invitations = bob.getByRole("region", { name: /Invitations/u });
-  await expect(invitations).toBeVisible();
-  await invitations.getByRole("link", { name: /Words with Ann/u }).click();
-  await expect(bob.getByRole("heading", { level: 1 })).toHaveText("Words lobby");
-  await bob.getByRole("button", { name: "Accept" }).click();
-  return gameId;
 }
 
 test("two people play a words game on phones and one resigns", async ({
