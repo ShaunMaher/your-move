@@ -275,6 +275,21 @@ test("a game can be resigned straight after it starts", async ({ page: ann, frie
   // The game is under way for both, and Bob's list shows it among the games waiting on someone.
   await refocus(ann);
   await expect(ann.getByRole("region", { name: "Words board" })).toBeVisible(FAR);
+
+  // Whose turn it is is plain, and a tile placed off turn is marked as a plan (07 §2).
+  const [waiting, acting] =
+    (await ann.locator('.ym-w-turn[data-yours="true"]').count()) === 0 ? [ann, bob] : [bob, ann];
+  await expect(acting.locator('.ym-w-turn[data-yours="true"]')).toHaveText("Your turn");
+  await expect(waiting.locator('.ym-w-turn[data-yours="false"]')).toContainText(/'s turn$/u);
+  await waiting.getByRole("group", { name: "Your rack" }).getByRole("button").first().click();
+  await waiting.locator("[data-square]").nth(112).click();
+  await expect(waiting.locator('.ym-w-tile[data-state="planned"]')).toHaveCount(1);
+  await expect(waiting.getByRole("button", { name: /Planned tile/u })).toHaveCount(1);
+  await expect(waiting.getByRole("button", { name: "Play", exact: true })).toBeDisabled();
+  await expectAccessible(waiting);
+  await waiting.getByRole("button", { name: "Recall" }).click();
+  await expect(waiting.locator('.ym-w-tile[data-state="planned"]')).toHaveCount(0);
+
   // On the smallest supported phone the board's top is on the first screen (02 §3).
   await ann.setViewportSize({ width: 320, height: 568 });
   const board = ann.getByRole("region", { name: "Words board" });
