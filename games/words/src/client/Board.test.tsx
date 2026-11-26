@@ -814,7 +814,7 @@ describe("when it isn't your turn", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("draws and names placed tiles as planned, with no score, check or request", () => {
+  it("draws and names placed tiles as planned, with the local score and no check or request", () => {
     vi.useFakeTimers();
     const { preview, submit } = setup(fresh({ turn: 1 }), { yourTurn: false });
     place("S, 1 point", SR, SC + 2);
@@ -824,8 +824,10 @@ describe("when it isn't your turn", () => {
     );
     expect(tile.querySelector(".ym-w-tile")?.getAttribute("data-state")).toBe("planned");
     expect(screen.getByText(PLAN)).toBeTruthy();
-    expect(screen.queryByText("+6")).toBeNull();
+    // The local score shows; the word list isn't asked.
+    expect(screen.getByText("+6")).toBeTruthy();
     expect(screen.queryByText("Checking the words…")).toBeNull();
+    expect(screen.queryByText("All words are in the word list.")).toBeNull();
     act(() => {
       vi.advanceTimersByTime(5000);
     });
@@ -834,6 +836,15 @@ describe("when it isn't your turn", () => {
     }
     expect(preview).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("still explains a plan the rules refuse, and keeps Play disabled", () => {
+    setup(fresh({ turn: 1 }), { yourTurn: false });
+    place("S, 1 point", SR, SC + 2);
+    place("E, 1 point", SR - 3, SC + 6);
+    expect(screen.queryByText("+6")).toBeNull();
+    expect(screen.getByText(PLAN)).toBeTruthy();
+    expect(button("Play").hasAttribute("disabled")).toBe(true);
   });
 
   it("lets the plan be moved and recalled", () => {

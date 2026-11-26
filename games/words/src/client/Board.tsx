@@ -181,8 +181,8 @@ function Table(
 
   const placements = useMemo(() => toPlacements(t, rack), [t, rack]);
   const analysis = useMemo(
-    () => (!canAct || placements.length === 0 ? null : analyseViewPlay(view, placements)),
-    [view, placements, canAct],
+    () => (placements.length === 0 ? null : analyseViewPlay(view, placements)),
+    [view, placements],
   );
   const playable = analysis !== null && !isGameError(analysis);
   // An answer holds for one version of the game and one set of tiles.
@@ -610,27 +610,35 @@ function Status(props: {
   // Selecting a tile (by tap or by keyboard) is announced, with what to do next.
   const holding = held === null ? null : <span>{held} selected. Choose a square.</span>;
   if (props.sent) return <span>Sent. Waiting for the board to update.</span>;
-  if (!props.canAct) {
-    // Off turn nothing is scored or checked: the tiles are a plan (07 §2).
-    return (
-      <>
-        {holding}
-        <span>{PLANNING}</span>
-      </>
-    );
+  // Off turn the tiles are a plan: the local score and the placement rules show, the word list
+  // isn't asked (07 §2), and the line says so.
+  const plan = props.canAct ? null : <span className="ym-w-meta">{PLANNING}</span>;
+  if (analysis === null) {
+    if (!props.canAct) {
+      return (
+        <>
+          {holding}
+          <span>{PLANNING}</span>
+        </>
+      );
+    }
+    return holding ?? <span>Place tiles to make a word.</span>;
   }
-  if (analysis === null) return holding ?? <span>Place tiles to make a word.</span>;
   if (isGameError(analysis)) {
     return (
       <>
         {holding}
         <span>{errorText(analysis)}</span>
+        {plan}
       </>
     );
   }
   const words = analysis.words.map((w) => `${w.word.toUpperCase()} ${String(w.score)}`).join(", ");
-  const result = answer !== null && answer !== "unchecked" && !isGameError(answer) ? answer : null;
-  const refusal = isRefusal(answer) ? answer : null;
+  // An answer from before the turn passed is not shown while the tiles are only a plan.
+  const current = props.canAct ? answer : null;
+  const result =
+    current !== null && current !== "unchecked" && !isGameError(current) ? current : null;
+  const refusal = isRefusal(current) ? current : null;
   return (
     <>
       {holding}
@@ -638,14 +646,15 @@ function Status(props: {
         <span className="ym-w-score">+{result?.score ?? analysis.score}</span> {words}
         {analysis.bingo ? " · uses every tile" : ""}
       </span>
-      {answer === null && <span className="ym-w-meta">Checking the words…</span>}
-      {answer === "unchecked" && (
+      {props.canAct && answer === null && <span className="ym-w-meta">Checking the words…</span>}
+      {props.canAct && answer === "unchecked" && (
         <span className="ym-w-meta">
           Couldn&apos;t check the words now; the server will when you play.
         </span>
       )}
       {refusal !== null && <span data-tone="bad">{errorText(refusal)}</span>}
       {result !== null && <span data-tone="ok">All words are in the word list.</span>}
+      {plan}
     </>
   );
 }

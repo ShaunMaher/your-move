@@ -129,11 +129,13 @@ by the shell for every game.)
   it is not their turn. Such tiles are a plan, not a move: they are drawn as **planned tiles** (a
   paler tile with a dashed outline; the letter keeps its own contrast pair, never reduced
   opacity), named "Planned tile E, 1 point, not your turn, not played", and the status line says
-  "Not your turn yet. Tiles you place now are only a plan." Nothing is scored, checked or sent
-  while it isn't their turn: no engine analysis is shown, no `preview` request is made, and Play,
-  Swap and Pass stay disabled. Recall, Shuffle and moving the tiles work as usual. When the turn
-  becomes theirs, the same tiles become ordinary placements in place, and the score and the word
-  check start. When a new version of the game takes a planned tile's square, the tile goes back
+  "Not your turn yet. Tiles you place now are only a plan." The local engine analysis still
+  shows, so a planner sees what the plan would score and why tiles can't go where they are (the
+  score and words, or the placement rule's text), but the word list isn't checked: no "Checking
+  the words…" or word-list answer, no `preview` request and nothing else sent, and Play, Swap and
+  Pass stay disabled. Recall, Shuffle and moving the tiles work as usual. When the turn
+  becomes theirs, the same tiles become ordinary placements in place, and the word
+  check starts. When a new version of the game takes a planned tile's square, the tile goes back
   to the rack; no tile is lost or overlaps another.
 - **Swap and Pass are board controls**, each a dialog on the board (swap: pick the rack tiles, with
   the reason when the bag is too small; pass: confirm). **Resign is the shell's menu** (02 §3): the
