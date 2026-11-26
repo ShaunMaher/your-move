@@ -117,6 +117,24 @@ by the shell for every game.)
   shell feature of the alpha's A4 slice and M3, not the module's.
 - Submit button disabled when the client engine says the play is invalid; the server still
   validates.
+- **Whose turn it is is plain at a glance** (alpha A10). A turn chip under the scores says "Your
+  turn" (a filled chip in a strong colour, larger text) or, quietly, "Sam's turn" (several seats:
+  "Waiting for Sam and Alex"); it is absent when the game isn't under way or nobody is to act. The
+  seat or seats to act are a filled chip in the score list (the underline stays as a second cue;
+  `aria-current` names them to assistive technology). The chip is the board's one announcement of a
+  change of turn (`role="status"`, filled in place so a change is read once); the status line
+  doesn't repeat it. The shell's frame bar keeps its own "Your turn" / "Waiting for …" text, which
+  says the same thing.
+- **Planning off turn** (alpha A10). With a rack in an active game a player may place tiles while
+  it is not their turn. Such tiles are a plan, not a move: they are drawn as **planned tiles** (a
+  paler tile with a dashed outline; the letter keeps its own contrast pair, never reduced
+  opacity), named "Planned tile E, 1 point, not your turn, not played", and the status line says
+  "Not your turn yet. Tiles you place now are only a plan." Nothing is scored, checked or sent
+  while it isn't their turn: no engine analysis is shown, no `preview` request is made, and Play,
+  Swap and Pass stay disabled. Recall, Shuffle and moving the tiles work as usual. When the turn
+  becomes theirs, the same tiles become ordinary placements in place, and the score and the word
+  check start. When a new version of the game takes a planned tile's square, the tile goes back
+  to the rack; no tile is lost or overlaps another.
 - **Swap and Pass are board controls**, each a dialog on the board (swap: pick the rack tiles, with
   the reason when the bag is too small; pass: confirm). **Resign is the shell's menu** (02 §3): the
   module's `Action` has no resign, and the shell's `resign` call is not part of `BoardProps`.
