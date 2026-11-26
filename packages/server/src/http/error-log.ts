@@ -1,21 +1,27 @@
 /**
  * What the request log line says about a failed request (09 §5): the error code, and for a
- * validation failure the issue paths and Zod issue codes. Whatever builds an error response notes it
- * here on the request context and the logging middleware reads it back, so the response body is
- * never parsed. Never record input values, Zod messages or request bodies.
+ * validation failure the issue paths and Zod issue codes. {@link errorBody} builds every
+ * `{ error: { code, message } }` body outside `ApiError` and notes its code on the request context
+ * in the same call, so a body and its log entry can't drift apart; the logging middleware reads the
+ * note back and never parses a response. Never record input values, Zod messages or request bodies.
  */
 import type { Context } from "hono";
+
+import type { AppEnv } from "../platform.js";
 
 /** At most this many validation issues are logged, so a hostile body can't bloat the log. */
 const MAX_ISSUES = 5;
 /** A path segment that looks like a field name; anything else (an input-chosen key) is masked. */
 const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,31}$/u;
 
+/** The fixed reasons a `BAD_REQUEST` can carry beyond its code (09 §5). */
+export type ErrorReason = "invalid_email" | "no_email" | "no_client_ip";
+
 /** What a failed request leaves for its log line. */
 export interface ErrorLog {
   readonly code: string;
-  /** A fixed, non-input-derived label for a refusal several places can raise (09 §5). */
-  readonly reason?: string;
+  /** A fixed label for a refusal several places can raise (09 §5); never input-derived. */
+  readonly reason?: ErrorReason;
   /** `path:zodCode` pairs, comma-separated (log fields are flat): `json.email:invalid_format`. */
   readonly issues?: string;
 }
@@ -27,18 +33,33 @@ interface IssueLike {
 }
 
 /** Records the error `code` the response carries, for the request log line. */
-export function noteError(c: Context, error: ErrorLog): void {
+export function noteError(c: Context<AppEnv>, error: ErrorLog): void {
   c.set("errorLog", error);
 }
 
-/** The noted error, if the request failed with a body built by {@link noteError}'s callers. */
-export function notedError(c: Context): ErrorLog | undefined {
-  return c.get("errorLog") as ErrorLog | undefined;
+/** The noted error of a failed request. */
+export function notedError(c: Context<AppEnv>): ErrorLog | undefined {
+  return c.get("errorLog");
+}
+
+/** The framework's error body (05 §Conventions), noting its `code` for the request log line. */
+export function errorBody<C extends string>(
+  c: Context<AppEnv>,
+  code: C,
+  message: string,
+  reason?: ErrorReason,
+): { error: { code: C; message: string } } {
+  noteError(c, { code, ...(reason === undefined ? {} : { reason }) });
+  return { error: { code, message } };
 }
 
 /**
- * Paths as `json.email` or `json.items.0.id` (the validation target, then the field path). Object keys the client chose (records, unknown keys)
- * can carry input, so only identifier-like names are kept and the rest become `*`.
+ * Paths as `json.email` or `json.items.0.id` (the validation target, then the field path). Only
+ * identifier-shaped names are kept and the rest become `*`. That is enough while no request schema
+ * has client-chosen keys: Zod v4 reports an unknown key of a `.strict()` object in `keys`, not in
+ * `path`, and this never reads `keys`. A future `z.record` keyed by client input puts the key in
+ * `path`, and an identifier-shaped key could still be a secret: such a schema must have its
+ * record-key segments masked unconditionally.
  */
 export function loggedIssues(target: string, issues: readonly IssueLike[]): string {
   return issues

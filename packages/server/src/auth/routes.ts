@@ -35,7 +35,7 @@ import {
   type TemplateContext,
 } from "../email/templates.js";
 import { background } from "../http/background.js";
-import { noteError } from "../http/error-log.js";
+import { errorBody, type ErrorReason } from "../http/error-log.js";
 import type { AppEnv, Platform } from "../platform.js";
 import { ipBuckets } from "./client-ip.js";
 import { checkLimits } from "./limits.js";
@@ -72,13 +72,12 @@ const MESSAGES: Readonly<Record<Code, string>> = {
 };
 
 function fail<S extends ErrorStatus, C extends Code>(
-  c: Context,
+  c: Context<AppEnv>,
   status: S,
   code: C,
-  reason?: "invalid_email" | "no_client_ip",
+  reason?: ErrorReason,
 ) {
-  noteError(c, { code, ...(reason === undefined ? {} : { reason }) });
-  return c.json({ error: { code, message: MESSAGES[code] } }, status);
+  return c.json(errorBody(c, code, MESSAGES[code], reason), status);
 }
 
 /**
@@ -323,7 +322,7 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     if (nudges !== undefined) {
       if (nudges) {
         // Nudges go to the account's address: an account without one can't have them.
-        if (user.email === null) return fail(c, 400, "BAD_REQUEST");
+        if (user.email === null) return fail(c, 400, "BAD_REQUEST", "no_email");
         // Records the address's emailId, which a nudges unsubscribe link finds the account by
         // (04 `users.email_id`, 05 §Email links).
         const id = await emailId(await options.keys(), user.email);

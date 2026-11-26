@@ -50,6 +50,7 @@ export function createNodeApp(options: NodeAppOptions): App {
   );
   app.use("*", serveStatic({ root: options.staticRoot }));
   // A missing hashed asset is a 404, never the shell (which would then be cached as immutable).
+  // Static-file misses are outside the API error contract (05 §Errors): a plain 404, not JSON.
   app.get(`${HASHED_ASSETS_PREFIX}*`, (c) => c.notFound());
   // SPA fallback: every other GET gets the shell.
   app.get("*", serveStatic({ root: options.staticRoot, path: "index.html" }));

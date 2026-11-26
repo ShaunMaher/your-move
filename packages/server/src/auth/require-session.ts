@@ -7,6 +7,7 @@ import type { MiddlewareHandler } from "hono";
 
 import { isLocalDev } from "../config/local-dev.js";
 import { background } from "../http/background.js";
+import { errorBody } from "../http/error-log.js";
 import type { AppEnv, Platform } from "../platform.js";
 import { clearedSessionCookie, loadSession, readSessionCookie } from "./session.js";
 
@@ -20,7 +21,7 @@ export function requireSession(platform: Platform): MiddlewareHandler<AppEnv> {
   const localDev = isLocalDev(platform.config);
   return async (c, next) => {
     const fail = (status: 400 | 401 | 403, code: keyof typeof MESSAGES) =>
-      c.json({ error: { code, message: MESSAGES[code] } }, status);
+      c.json(errorBody(c, code, MESSAGES[code]), status);
     const token = readSessionCookie(c.req.header("Cookie"), localDev);
     if (c.req.header("Authorization") !== undefined) {
       // A cookie and a bearer token together are refused (05 §Conventions); tokens alone can't

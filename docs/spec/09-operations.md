@@ -278,7 +278,13 @@ that work on both runtimes, plus SMTP for Node only.
 ## 5. Observability
 
 - Structured JSON logs (`level`, `msg`, `requestId`, `route`, `status`, `durationMs`, `userId`
-  where relevant). `route` is the route **pattern** (`/api/v1/games/:id`), never the raw path. Never
+  where relevant). A request that gets an error response adds `code`, the error code the body
+  carries, to its one `request` line; it is noted where the body is built and never read back from
+  the response. A `400 BAD_REQUEST` that several places can raise also carries a fixed `reason`
+  (`invalid_email`, `no_email` or `no_client_ip`). A request-validation failure adds `issues`: flat
+  `target.path:zodCode` pairs (`json.email:too_big`), comma-separated, at most 5, with every path
+  segment that isn't an identifier-shaped field name masked as `*`, and never Zod's `message`,
+  `input` or `received`. `route` is the route **pattern** (`/api/v1/games/:id`), never the raw path. Never
   log OTPs, tokens, cookies, the `Authorization` header, request bodies, emails in any form other
   than the HMAC `emailId`, or game secrets. Edge logs must exclude `Authorization` too: the Caddy
   compose's log config drops it, and on Workers the operator checks that Workers Logs/Logpush don't

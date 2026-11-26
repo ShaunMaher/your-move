@@ -472,6 +472,99 @@ describe("errors and logging", () => {
       expect(JSON.stringify(platform.lines)).not.toContain("a@example.org");
     });
 
+    describe("session-gate refusals", () => {
+      const ME = "/api/v1/me";
+      const NOW = Date.UTC(2026, 0, 1);
+      const TOKEN = "stale-token".padEnd(43, "x");
+      const COOKIE = { Cookie: `__Host-sid=${TOKEN}` };
+
+      it.each([
+        ["no cookie", {}, 401, "UNAUTHENTICATED"],
+        ["a bearer token alone", { Authorization: "Bearer x" }, 401, "UNAUTHENTICATED"],
+        [
+          "a cookie and a bearer token",
+          { ...COOKIE, Authorization: "Bearer x" },
+          400,
+          "BAD_REQUEST",
+        ],
+      ])("carries the code for %s", async (_, headers, status, code) => {
+        const { app, platform } = setup();
+        const res = await app.request(ME, { headers });
+        expect(res.status).toBe(status);
+        expect(requestLine(platform.lines)[0]).toMatchObject({ status, code });
+        expect(JSON.stringify(platform.lines)).not.toContain(TOKEN);
+      });
+
+      it("carries the code for a stale cookie", async () => {
+        const { app, platform } = signedInAs(null);
+        const res = await app.request(ME, { headers: COOKIE });
+        expect(res.status).toBe(401);
+        expect(requestLine(platform.lines)[0]).toMatchObject({ code: "UNAUTHENTICATED" });
+      });
+
+      /** An app whose session cookie resolves to a stored user with these fields. */
+      function signedInAs(user: Record<string, unknown> | null) {
+        const platform = testPlatform(PROD_ENV);
+        const repos = {
+          ...platform.repos,
+          sessions: {
+            ...platform.repos.sessions,
+            findByTokenHash: () =>
+              Promise.resolve(
+                user === null
+                  ? null
+                  : {
+                      session: {
+                        id: "s",
+                        createdAt: NOW,
+                        lastSeenAt: NOW,
+                        expiresAt: Number.MAX_SAFE_INTEGER,
+                      },
+                      user: { id: "u", suspendedAt: null, ...user },
+                    },
+              ),
+          },
+        };
+        return {
+          platform,
+          app: createApp({ platform: { ...platform, repos } as never, games: [] }),
+        };
+      }
+
+      it("carries SUSPENDED for a suspended account", async () => {
+        const { app, platform } = signedInAs({ suspendedAt: 1 });
+        const res = await app.request(ME, { headers: COOKIE });
+        expect(res.status).toBe(403);
+        expect(requestLine(platform.lines)[0]).toMatchObject({ status: 403, code: "SUSPENDED" });
+      });
+
+      it("gives turning nudges on for an account without an address the reason no_email", async () => {
+        const { app, platform } = signedInAs({ email: null, onboardedAt: 1 });
+        const res = await app.request(ME, {
+          method: "PATCH",
+          headers: {
+            ...COOKIE,
+            "Content-Type": "application/json",
+            Origin: "https://play.example.org",
+          },
+          body: JSON.stringify({ settings: { emailNudges: true } }),
+        });
+        expect(res.status).toBe(400);
+        expect(requestLine(platform.lines)[0]).toMatchObject({
+          code: "BAD_REQUEST",
+          reason: "no_email",
+        });
+      });
+    });
+
+    it("never logs an identifier-shaped unknown key of a strict object", async () => {
+      const { app, platform } = setup();
+      const key = "planted_key_9c1e";
+      await app.request(OTP, post(JSON.stringify({ email: "a@example.org", [key]: 1 })));
+      expect(requestLine(platform.lines)[0]).toMatchObject({ issues: "json:unrecognized_keys" });
+      expect(JSON.stringify(platform.lines)).not.toContain(key);
+    });
+
     it("leaves a successful request without a code", async () => {
       const { app, platform } = setup();
       await app.request("/api/v1/health");

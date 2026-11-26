@@ -11,6 +11,7 @@ import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 
 import { UNSUBSCRIBE_PATH } from "../email/unsubscribe-token.js";
+import type { AppEnv } from "../platform.js";
 
 /** Paths exempt from the Origin rule (05 §Conventions). */
 const ORIGIN_EXEMPT: ReadonlySet<string> = new Set<string>([UNSUBSCRIBE_PATH]);
@@ -34,7 +35,7 @@ export interface RequestRuleOptions {
   readonly reject: (
     status: 400 | 403 | 415,
     code: "BAD_REQUEST" | "BAD_ORIGIN" | "UNSUPPORTED_MEDIA_TYPE",
-    c: Context,
+    c: Context<AppEnv>,
   ) => Response;
 }
 
@@ -47,7 +48,7 @@ export interface RequestRuleOptions {
  *   names another origin is refused too: with no CORS, no legitimate browser sends one;
  * - a request with a body must be `application/json`, else `415`.
  */
-export function requestRules(options: RequestRuleOptions): MiddlewareHandler {
+export function requestRules(options: RequestRuleOptions): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const path = c.req.path;
     const cookie = options.hasSessionCookie(c.req.header("Cookie"));

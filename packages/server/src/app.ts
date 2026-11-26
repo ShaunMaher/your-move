@@ -21,7 +21,7 @@ import { cryptoRandom, type RandomFactory } from "./games/random.js";
 import type { InstalledGame } from "./games/registry.js";
 import { registerGameRoutes } from "./games/routes.js";
 import { ApiError } from "./http/api-error.js";
-import { loggedIssues, noteError, notedError } from "./http/error-log.js";
+import { errorBody, loggedIssues, noteError, notedError } from "./http/error-log.js";
 import { webManifest } from "./http/manifest.js";
 import { apiBodyLimit, requestRules } from "./http/request-rules.js";
 import { API_CACHE_CONTROL, securityHeadersMiddleware } from "./http/security-headers.js";
@@ -48,14 +48,9 @@ export type App = OpenAPIHono<AppEnv>;
 /** An OpenAPI 3.1 document as `@hono/zod-openapi` produces it. */
 export type OpenApiDocument = ReturnType<OpenAPIHono["getOpenAPI31Document"]>;
 
-function errorBody(code: ErrorCode, message: string) {
-  return { error: { code, message } };
-}
-
 /** The JSON 404 for a path the server handles but has no route for. */
 function notFound(c: Context<AppEnv>) {
-  noteError(c as Context, { code: "NOT_FOUND" });
-  return c.json(errorBody("NOT_FOUND", "Not found."), 404);
+  return c.json(errorBody(c, "NOT_FOUND", "Not found."), 404);
 }
 
 /**
@@ -159,20 +154,22 @@ export function createApp(options: AppOptions): App {
     // Request validation failures never echo input values (09 §5).
     defaultHook: (result, c) => {
       if (result.success) return undefined;
-      noteError(c as Context, {
+      const body = errorBody(c, "BAD_REQUEST", "Invalid request.");
+      // The same code, with the issues the body leaves out (09 §5).
+      noteError(c, {
         code: "BAD_REQUEST",
         issues: loggedIssues(result.target, result.error.issues),
       });
-      return c.json(errorBody("BAD_REQUEST", "Invalid request."), 400);
+      return c.json(body, 400);
     },
   });
 
-  app.use("*", async (c, next) => {
+  app.use("*", async (c: Context<AppEnv>, next) => {
     const started = platform.now().getTime();
     const requestId = crypto.randomUUID();
     c.set("requestId", requestId);
     await next();
-    const failure = notedError(c as Context);
+    const failure = notedError(c);
     log.info("request", {
       requestId,
       method: c.req.method,
@@ -204,8 +201,7 @@ export function createApp(options: AppOptions): App {
       origin: new URL(config.publicUrl).origin,
       hasSessionCookie: (header) => readSessionCookie(header, localDev) !== null,
       reject: (status, code, c) => {
-        noteError(c, { code });
-        return new Response(JSON.stringify(errorBody(code, REQUEST_RULE_MESSAGES[code])), {
+        return new Response(JSON.stringify(errorBody(c, code, REQUEST_RULE_MESSAGES[code])), {
           status,
           headers: { "Content-Type": "application/json" },
         });
@@ -281,8 +277,7 @@ export function createApp(options: AppOptions): App {
     const context = { requestId: c.get("requestId"), route: respondedRoute(c as Context) };
     if (error instanceof ApiError) {
       // A refusal the handler chose (05 §Errors): the client's to act on, not a server fault.
-      noteError(c as Context, { code: error.code });
-      log.info("request refused", { ...context, status: error.status, code: error.code });
+      noteError(c, { code: error.code });
       return new Response(JSON.stringify(error.body()), {
         status: error.status,
         headers: { "Content-Type": "application/json" },
@@ -292,22 +287,21 @@ export function createApp(options: AppOptions): App {
     if (error instanceof HTTPException && code !== undefined) {
       // A request the client got wrong: its own status and code, not an error-level log, and never
       // the message, which can quote the input (09 §5).
-      noteError(c as Context, { code });
+      // The request line carries the code; this entry adds the exception's class and stack frames.
       log.info("request rejected", {
         ...context,
         status: error.status,
         errorClass: error.name,
         stack: stackFrames(error),
       });
-      return c.json(errorBody(code, "The request was rejected."), error.status);
+      return c.json(errorBody(c, code, "The request was rejected."), error.status);
     }
     // Anything else is a server fault, including an HTTPException with a 5xx or unmapped status
     // and a SyntaxError from parsing something other than the request (stored JSON, an engine).
     // V8's JSON.parse messages quote the text being parsed, which may be input or game secrets, so
     // a SyntaxError is logged by class and stack frames only (09 §5).
-    noteError(c as Context, { code: "INTERNAL" });
     log.error("unhandled error", { ...context, ...faultFields(error) });
-    return c.json(errorBody("INTERNAL", "Something went wrong."), 500);
+    return c.json(errorBody(c, "INTERNAL", "Something went wrong."), 500);
   });
 
   return app;
