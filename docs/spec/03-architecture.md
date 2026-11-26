@@ -298,6 +298,15 @@ filesystems are unsupported for the database anyway).
   one's first device, then each one's second, a recipient's devices most recently useful first), so
   no recipient's devices crowd out another's; the delivery marks and deletions are one statement
   each.
+- **The auto-join push (alpha A12).** When a past opponent picked from the list is added at once
+  (06 §6.2), the create request schedules, in the background like a transition's pushes, one push
+  to each added player and never to the creator: `body` is "<creator> added you to a game." (the
+  creator's display name, "New player" without one), followed by " Your turn." when the game
+  started at creation and the added player's seat is to act; `url`, `tag`, the TTL, the 240-code-
+  point cut, the per-request cap of 40 and the live-session rule are as above. The start at
+  creation sends no "your turn" push of its own: the auto-join push says it, so an added player
+  gets one notification, not two (they'd share a `tag` anyway). Invitations still send nothing
+  until M4's generic invitation push.
 - Optional email nudge (default off, per-user setting): "It's your turn" after 24 h idle, max one
   per game per day; and at most one email per normal invitation, sent when it's created or claimed
   (06 §6.2), not by the sweep. Precisely (alpha A6): the sweep nudges a `playing` seat of an

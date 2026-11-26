@@ -238,6 +238,15 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    seat, exactly as on the email path, so the response reveals neither whether a typed address has
    an account nor whether two other people have blocked each other.
 
+   Picked (`userId`) invitees are seated before typed addresses, whatever their order in the
+   request (alpha A12): "already added" and "earlier invitee" above always put a picked invitee
+   before every typed one, so a typed address can only ever get the `inert` seat itself and never
+   changes how a picked one is seated (which the creator would see, since an auto-join shows as
+   `joined`). Between two picked invitees with a block, the later one gets an `inert` invitation
+   instead of an auto-join; the creator sees it as invited rather than joined, so this one case
+   does tell the creator that two of their past opponents have a block between them (an open item
+   for M4, when blocks can be made).
+
    To limit typo invites, the players step shows each typed address back for confirmation before
    Create ("Check the address: …"). A row that has never been `joined` never shows a name or user
    id to anyone, in any state: while it's `invited` the creator sees the address they typed (or the
@@ -248,7 +257,8 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
 2. **Who can add me to games** (`users.settings.whoCanAddMe`, set in Settings):
    - `pastOpponents` (default): people I've finished a game with (04 `past_opponents`) can pick me
      from their list and I'm auto-joined and notified (push "<creator> added you to a game" +
-     realtime). Everyone else — including a
+     realtime; when the game starts at creation and it's my turn, the one push says "<creator>
+     added you to a game. Your turn.", 03 §7). Everyone else — including a
      past opponent who types my email — sends me an **invitation**. A game with AI seats or with
      AI assistance allowed is always an invitation too, so I see the AI setup before I'm in
      (02 §4).

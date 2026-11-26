@@ -169,6 +169,19 @@ seat with `user_id` NULL). The work done and the response time are the same in e
 approach: same reads and writes, emails sent via `waitUntil`). Per-pair limits count an email
 invitee by its `emailId` (the HMAC of the typed address), never by the user it resolves to (06 §6.7).
 
+**Past opponents by `userId`** (alpha A12). A `userId` invitee must be one the creator can pick: a
+past opponent with no block in either direction, an onboarded human, not suspended or being deleted
+(the same rule as `GET /api/v1/players/recent`); anything else is `INVALID_INVITEES`, the same
+answer for every reason. Picked invitees are seated before typed addresses, whatever their order
+in the request, so a typed address never changes how a picked one is seated: an address that
+resolves to a picked user gets the `inert` email-only seat above, and one whose user has a block
+with a picked invitee an `inert` seat. A picked past opponent is `joined` at once (`joined_via =
+added`), or gets an invitation when AI assistance is allowed (02 §4). When every seat is then
+`joined`, the game starts in the creator's start transition from version 0, right after the insert
+(03 §5.2); if a transition by an added player (a decline) wins that race, the game stays as that
+transition left it and the `201` shows it so. Picked invitees count toward the per-pair limits
+by (creator, `userId`) and never toward the email-invitee or inbound caps.
+
 | Case | Response |
 |---|---|
 | Created | `201 { game: GameEnvelope, joinLinkUrl?: string }` — `active` immediately if every seat is filled by auto-joined past opponents and/or the creator's own AI accounts (no join link requested, and no AI rule in 02 §4 preventing auto-start), else `lobby` |
@@ -183,7 +196,7 @@ invitee by its `emailId` (the HMAC of the typed address), never by the user it r
 | AI seats in a game type with hidden information while another human seat is possible (02 §4) | `400 AI_SEATS_NOT_ALLOWED` |
 | The caller is an AI account's token (agents can't create games, 02 §9.2) | `403 AGENT_NOT_ALLOWED` |
 | A token request with an email invitee | `403 NOT_ALLOWED` |
-| Creator has too many `lobby`/`active` games they created (per pair > 5, total > 50) — counts only games the **creator** created; a pair is (creator, `userId`) for picked invitees and (creator, `emailId`) for every typed address, whatever it resolves to | `409 TOO_MANY_GAMES` |
+| Creator has too many `lobby`/`active` games they created (per pair > 5, total > 50) — counts only games the **creator** created; a pair is (creator, `userId`) for picked invitees and (creator, `emailId`) for every typed address, whatever it resolves to. A (creator, `userId`) pair counts the games in which that user has joined or holds an invitation picked by `userId`; an invitation to a typed address counts only by its `emailId`, even when it resolves to that user, so picking someone never reveals which addresses are theirs (Q3) | `409 TOO_MANY_GAMES` |
 | More email invitees than allowed (per user, 08 §4; counted for every email, whatever it turns out to be) | `429 RATE_LIMITED` — nothing created |
 | Onboarding incomplete | `403 ONBOARDING_REQUIRED` |
 | Other rate limits (06 §6) | `429 RATE_LIMITED` |
@@ -290,7 +303,7 @@ creator's game caps. Joining always requires an explicit tap on Join (07 §1).
 ### Other
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/v1/players/recent` | Past opponents (04 `past_opponents`): `[{ userId, displayName, lastPlayedAt }]` up to 50, across all game types |
+| GET | `/api/v1/players/recent` | Past opponents (04 `past_opponents`): `{ players: [{ userId, displayName, lastPlayedAt }] }` (an object, like the game list, so it can gain fields without a breaking change), the viewer's own pairs only, newest `last_finished_at` first, up to 50, across all game types. Only people who can be picked (06 §6.1): onboarded humans, not suspended or being deleted, with no block between them and the viewer in either direction. `403 ONBOARDING_REQUIRED` until onboarding is complete (alpha A12) |
 | GET | `/api/v1/games/types/:type/rules?version=` **public** | `200 { type, version, markdown }` from the installed manifest (02 §7.2); `404` for an unknown type or version |
 | GET | `/api/v1/games/types/:type/schemas` **public** | JSON Schemas of the module's options, action, view, record and preview (§Versioning) |
 

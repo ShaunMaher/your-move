@@ -169,13 +169,15 @@ and slices without a dependency on each other are built in parallel.
 | A8 — turn notifications | M4 | Web Push for "your turn" and "game over" (03 §7, 02 §8): RFC 8291 encryption and RFC 8292 VAPID on WebCrypto in `packages/server`, sent in the background after the transition and never to its actor; `push_subscriptions` with its 10-per-user cap and session cascade (04), the two `/api/v1/push/subscriptions` endpoints (05) with T12's endpoint allow-list and key checks, removal on `404`/`410`, `pnpm gen:vapid` and the VAPID secrets in the tunnel compose file (09 §1); in the web app the service worker's `push` and `notificationclick` handlers, the Settings toggle with its iOS Safari explanation, the once-per-device offer after a game is created, the launch re-save and the sign-out unsubscribe (07 §4). Tests: RFC 8291's example, the VAPID token, T12's allow-list table, the cap, cascade and clean-up on both adapters, who is pushed to, payloads decrypted as a device would with no hidden state (T18), and the worker's handlers; checked by hand on an iPhone with the app on the Home Screen of the proof-of-concept deployment | A2, A4, A7 |
 | A9 — theme choice | M4 | The manual light/dark override of 07 §5: `settings.theme` (`"system"`, `"light"` or `"dark"`, default `"system"`) in `PATCH /api/v1/me` (04, 05), the Settings "Appearance" choice, `data-theme` on the page's root element and the per-device `ym.theme` copy that stops a flash on launch (07 §5, 06 §4); tests for the setting on both adapters, the choice and its storage failures, and a Chromium accessibility check of the dark theme | A1, A4 |
 | A10 — clearer turns | M3 | The words board's turn chip, filled acting seat and off-turn planned tiles (07 §2): the local score but no word check or request while it isn't your turn, and the plan becomes a placement in place when it is; Board and styles tests (contrast pairs) and a Playwright check that an off-turn tile is marked planned | A3 |
+| A12 — past opponents | M3, M4 | Starting the next game with someone you've finished one with, without typing an address or accepting an invitation: `GET /api/v1/players/recent` (05), `{ userId }` invitees in `POST /api/v1/games` checked against `past_opponents` and blocks (`INVALID_INVITEES` otherwise, 06 §6.1), the auto-join of a picked past opponent under the default `whoCanAddMe` (an invitation instead when AI assistance is allowed, 02 §4), the start at creation when every seat is filled that way (05 Created), the per-pair limits by (creator, `userId`) (06 §6.7), the "<creator> added you to a game" push to the added player (06 §6.2, 03 §7), and the new-game players step's "People you've played" (07 §1.1). Tests: the rules above on both adapters (the repository contract and the transition race of a start at creation against the added player's decline), the route-wide secrecy test over a game started at creation, the push recipients and text, and a Playwright rematch: two people finish a game, then one picks the other and both land on the board. Stays at M4: the `whoCanAddMe` setting itself (everyone has the default, `pastOpponents`), blocking (the `blocks` table is read wherever 06 requires, but nothing writes it until M4), the generic invitation push and link joiners' "Add <name> to your players?" (join links are M4's) | A2, A4, A8 |
 
 Not in the alpha, kept at their milestones: API tokens, the Admin API (operators use
 `ADMIN_EMAILS` and the database), AI assistance, realtime (the alpha refetches on focus and on a
 short poll while it's someone's turn to see), turn timeouts, reminders and every sweep step but
-A6's email nudges, lobby expiry, remove seat and leave, past-opponent auto-join, email invites
-(and the invitation email to users with nudges on, 06 §6.2) and join links, the auto-join and
-invitation pushes (A8 sends only "your turn" and "game over"), blocks, the
+A6's email nudges, lobby expiry, remove seat and leave, the `whoCanAddMe` setting (A12 gives
+everyone its default), email invites (and the invitation email to users with nudges on, 06 §6.2)
+and join links, the invitation push (A8 sends "your turn" and "game over", A12 the auto-join
+push), blocks, the
 sessions list, account deletion's game steps, `MIN_AGE`, the rest of M4's settings and the polish pass (dark mode itself follows the device, and A9 adds the override). Security
 controls for what the alpha ships are not cut: every slice meets 08 for its own surface, and the
 M2 acceptance (including the iPhone home-screen check) is completed by A1 and A5.
@@ -270,12 +272,15 @@ tests are green in CI.
 - Join links (fragment tokens, create/rotate/revoke, landing page with explicit Join and
   `sessionStorage` return path, rate limits, block checks against every member, no re-entry after
   decline/leave/remove).
-- Past opponents, blocks, sessions list, account deletion (resumable).
+- Past opponents (picking them, auto-join and `GET /api/v1/players/recent` are alpha A12; the
+  `whoCanAddMe` setting and link joiners' "Add <name> to your players?" are here), blocks,
+  sessions list, account deletion (resumable).
 - **Before the path game (08 §5, Q20)**: `MIN_AGE` confirmation at onboarding, the
   "don't use your full name" warning, privacy page wording about children playing through a parent's
   account, and a copy review that nothing markets the service to children.
-- Web Push: the auto-join push and the generic invitation push (06 §6.2), on the sender, endpoints
-  and service worker alpha A8 built for "your turn" and "game over"; optional email nudges ("It's
+- Web Push: the generic invitation push (06 §6.2), on the sender, endpoints and service worker
+  alpha A8 built for "your turn" and "game over" (the auto-join push is alpha A12's); optional
+  email nudges ("It's
   your turn" from alpha A6; the invitation email to users with nudges on, 06 §6.2).
 - With bounce/complaint handling (09 §2): Settings tells a user with email nudges on when their
   address is suppressed as `bounced` or `complained`, so the toggle isn't silently ineffective.

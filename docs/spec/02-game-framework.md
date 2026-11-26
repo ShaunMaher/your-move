@@ -295,8 +295,8 @@ without it. Keys outside the prefix are not the module's to use.
 **Creating.** The creator chooses the game type, options (resolved by `resolveOptions`), the seat
 count (within `players(options)`, else `400 INVALID_SEAT_COUNT`), the **turn timeout** (whole days,
 1–30, default `defaultTurnTimeoutDays(options)`; validated by the framework, never by the module)
-the **seat order** (`join`: the creator first, then others in the order they joined; or
-`random`) and **AI assistance** (`aiAssistance: "off" | "allowed"`, §9.3). The default is `off`
+the **seat order** (`join`: the creator first, then others in the order they joined, past
+opponents added at creation in the order the creator listed them; or `random`) and **AI assistance** (`aiAssistance: "off" | "allowed"`, §9.3). The default is `off`
 whenever the game has **any open seat** (a seat not filled by the creator or one of the creator's
 own AI accounts at creation: invitees, email seats and link seats are all open) or two or more
 human seats; otherwise (the creator alone with their own AI accounts) it is `allowed`. It is fixed

@@ -107,7 +107,7 @@ At most 3 *live* challenges per (email, purpose); issuing a 4th burns the oldest
 | to_act_since | INTEGER NULL | per-seat timeout clock (02 §2.3) |
 | acted_once | INTEGER NOT NULL DEFAULT 0 | for "decline before first action" (02 §4) |
 | rank, score | INTEGER NULL | from module `result()`, re-ranked without `declined` seats (02 §4); NULL for everyone when the game ends `declined` |
-| last_seen_version | INTEGER NOT NULL DEFAULT 0 | unread badges: the game is unread while `games.version` is above it. A member's own transition sets it to the version it creates; an invitation starts at `-1`, so it is unread until seen |
+| last_seen_version | INTEGER NOT NULL DEFAULT 0 | unread badges: the game is unread while `games.version` is above it. A member's own transition sets it to the version it creates; an invitation, and a past opponent added at once (`joined_via = added`), starts at `-1`, so it is unread until seen |
 | last_nudged_at | INTEGER NULL | email nudge throttle |
 | timeout_reminders_sent | INTEGER NOT NULL DEFAULT 0 | 0–2 (02 §4) |
 
