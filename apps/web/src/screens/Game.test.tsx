@@ -377,9 +377,12 @@ describe("the game frame", () => {
     expect(screen.getByRole("region", { name: "Fake board" })).toBeDefined();
     answer = withView(envelope({ yourTurn: false, toAct: [1] }));
     window.dispatchEvent(new Event("focus"));
-    await waitFor(() => {
-      expect(screen.queryByText(/You seem to be offline/u)).toBeNull();
-    });
+    await waitFor(
+      () => {
+        expect(screen.queryByText(/You seem to be offline/u)).toBeNull();
+      },
+      { timeout: 1000 },
+    );
   });
 
   it("runs one more refetch when the game moves on under a refetch already in flight", async () => {
@@ -477,9 +480,12 @@ describe("the game frame", () => {
     expect(screen.getByRole("region", { name: "Fake board" })).toBeDefined();
     answer = withView();
     window.dispatchEvent(new Event("focus"));
-    await waitFor(() => {
-      expect(screen.queryByText(/server isn't answering/u)).toBeNull();
-    });
+    await waitFor(
+      () => {
+        expect(screen.queryByText(/server isn't answering/u)).toBeNull();
+      },
+      { timeout: 1000 },
+    );
   });
 
   it("downloads the public word lists the game uses, and none that only the server holds", async () => {
@@ -622,10 +628,13 @@ describe("resigning", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("no longer available");
     expect(posts(calls, "resign")).toHaveLength(1);
     // Settled, it can be dismissed again.
-    await waitFor(() => {
-      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
-      expect(screen.queryByRole("dialog")).toBeNull();
-    });
+    await waitFor(
+      () => {
+        fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+        expect(screen.queryByRole("dialog")).toBeNull();
+      },
+      { timeout: 1000 },
+    );
   });
 
   it("says so when the game's engine has gone", async () => {
@@ -839,9 +848,12 @@ describe("the notifications offer after accepting an invitation (A8-P-2)", () =>
     await screen.findByRole("dialog", { name: "Know when it's your turn?" });
     click("Turn on notifications");
     expect(device.requestPermission).toHaveBeenCalledOnce();
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).toBeNull();
-    });
+    await waitFor(
+      () => {
+        expect(screen.queryByRole("dialog")).toBeNull();
+      },
+      { timeout: 1000 },
+    );
     expect(calls.some((call) => call.path === "/api/v1/push/subscriptions")).toBe(true);
     // Focus lands on the screen's heading, not the page (A8-R2-4).
     await waitFor(() => {

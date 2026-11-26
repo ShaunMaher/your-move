@@ -677,7 +677,8 @@ describe("route-wide secrecy (04 invariant 4)", () => {
   });
 
   // A whole game over a real SQLite file in tmpdir (CI puts that on tmpfs): three sign-ups and
-  // every route, so it needs more than Vitest's 5 s default when the machine is busy.
+  // every route. It takes about 0.8 s unloaded (measured 2026-11-26), but more than Vitest's 5 s
+  // default when the machine is busy.
   it(
     "the example game: lobbies, a full game with previews and refusals, the frozen declined ending",
     { timeout: FULL_GAME_TIMEOUT_MS },
