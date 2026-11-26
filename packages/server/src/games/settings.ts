@@ -1,6 +1,6 @@
 /**
  * The game parts of `users.settings` (04): the remembered options per game type and the last game
- * type (05 §Remembered options). The column is JSON; anything unreadable counts as unset. Writes
+ * type (05 §Remembered options), and `whoCanAddMe` (06 §6.2). The column is JSON; anything unreadable counts as unset. Writes
  * go through `UserRepo.rememberGameOptions`, which changes only these keys in SQL.
  */
 const MAX_REMEMBERED_BYTES = 4096;
@@ -19,6 +19,15 @@ function read(json: string): Record<string, unknown> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Who may add the user to games (06 §6.2, 04 `users.settings.whoCanAddMe`): `nobody` only when the
+ * stored value says exactly that, otherwise the default, `pastOpponents`. Nothing in the app sets
+ * it before M4's Settings choice; a stored value is honoured already (A12-P-3).
+ */
+export function whoCanAddMeOf(settings: string): "pastOpponents" | "nobody" {
+  return read(settings)["whoCanAddMe"] === "nobody" ? "nobody" : "pastOpponents";
 }
 
 /** The remembered option input for a game type, if any. */

@@ -12,7 +12,8 @@
  *
  * A past opponent picked by `userId` (alpha A12) must be one the creator may pick (no block either
  * way, `INVALID_INVITEES` otherwise) and is added at once (`joined`, `joined_via = added`), unless
- * AI assistance is allowed, when it is an invitation (02 §4). Picked invitees are seated before
+ * AI assistance is allowed or their stored `whoCanAddMe` is `nobody`, when it is an invitation
+ * (02 §4, 06 §6.2). Picked invitees are seated before
  * typed addresses, whatever their order in the request, so a typed address never changes how a
  * picked one is seated: an address that resolves to a picked user, or to a user with a block
  * against anyone seated before it, gets an `inert` seat instead (06 §6.1). The route starts a game
@@ -32,7 +33,7 @@ import { expireOverdueLobbies } from "./expiry.js";
 import { LOBBY_LIFETIME_MS } from "./lifecycle.js";
 import type { GameType } from "./registry.js";
 import type { ResourceProvider } from "./resources.js";
-import { lastOptionsOf, mergeOptions, rememberedInput } from "./settings.js";
+import { lastOptionsOf, mergeOptions, rememberedInput, whoCanAddMeOf } from "./settings.js";
 
 type CreateGameBody = z.infer<typeof CreateGameBodySchema>;
 
@@ -133,13 +134,15 @@ async function checkPicked(deps: CreateDeps, creator: UserRecord, picked: readon
 }
 
 /**
- * Whether a picked past opponent is added at once (02 §4, 06 §6.2). `whoCanAddMe` is everyone's
- * default, `pastOpponents`, until the setting exists (M4): only AI assistance makes it an
- * invitation, so every person sees the AI setting before they're in. AI seats arrive with AI
- * accounts (M8).
+ * Whether a picked past opponent is added at once (02 §4, 06 §6.2): under their `whoCanAddMe`
+ * default, `pastOpponents`, unless AI assistance is allowed, so every person sees the AI setting
+ * before they're in. A stored `nobody` makes it an invitation (the Settings choice is M4's). AI
+ * seats arrive with AI accounts (M8).
  */
-function addsAtOnce(aiAssistance: "off" | "allowed"): boolean {
-  return aiAssistance === "off";
+function addsAtOnce(aiAssistance: "off" | "allowed", user: UserRecord | undefined): boolean {
+  return (
+    aiAssistance === "off" && user !== undefined && whoCanAddMeOf(user.settings) === "pastOpponents"
+  );
 }
 
 /** The blocks among a set of users, as a lookup either way round (04 `blocks`). */
@@ -248,6 +251,7 @@ export async function createGame(
   }
 
   await checkPicked(deps, creator, picked);
+  const pickedUsers = new Map((await repos.users.findByIds(picked)).map((user) => [user.id, user]));
 
   const emailIds = await Promise.all(emails.map((email) => emailId(keys, email)));
   // The live-game caps are read before the insert, so concurrent creates can pass them together
@@ -302,7 +306,6 @@ export async function createGame(
     ...invitable.map((user) => user?.id ?? NO_USER),
   ]);
   const aiAssistance = body.aiAssistance ?? "off";
-  const atOnce = addsAtOnce(aiAssistance);
   /** Users holding a row so far, in seating order: the creator, then each invitee. */
   const seated: string[] = [creator.id];
   const blockedWithSeated = (userId: string) => seated.some((other) => blocked(userId, other));
@@ -314,7 +317,9 @@ export async function createGame(
     seated.push(userId);
     const base = { id: crypto.randomUUID(), userId, lastSeenVersion: NEVER_SEEN };
     if (inert) return { ...base, state: "invited", delivery: "inert" };
-    if (!atOnce) return { ...base, state: "invited", delivery: "normal" };
+    if (!addsAtOnce(aiAssistance, pickedUsers.get(userId))) {
+      return { ...base, state: "invited", delivery: "normal" };
+    }
     // Unread until they open it, like an invitation (04 `last_seen_version`).
     return { ...base, state: "joined", joinedVia: "added", joinedAt: now };
   });
