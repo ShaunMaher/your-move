@@ -115,13 +115,10 @@ describe("the board's colours", () => {
   it("keep form controls light on the paper when the shell is dark", () => {
     // The module is a light panel in either theme: the shell's dark `select` rule gave the word
     // list a dark field with the module's dark ink inherited on it, so it read black on black.
-    const set = (selector: string): string[] =>
-      declarations(STYLE_TEXT)
-        .filter((d) => d.selector === selector)
-        .map((d) => d.property);
+    // Its colours are pairs above: ink on paper as text, muted on paper as the field's border.
     expect(STYLE_TEXT).toMatch(/\.ym-w \{[^}]*color-scheme: light;/u);
-    expect(set(".ym-w select")).toEqual(
-      expect.arrayContaining(["color", "background", "border-color"]),
+    expect(STYLE_TEXT).toContain(
+      ".ym-w select { color: var(--w-ink); background: var(--w-paper); border-color: var(--w-muted); }",
     );
   });
 });

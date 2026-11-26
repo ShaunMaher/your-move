@@ -66,6 +66,7 @@ export const PAIRS: readonly Pair[] = [
   { what: "label of a double word square", fg: "dw-ink", bg: "dw-bg", kind: "text" },
   { what: "label of a triple word square", fg: "tw-ink", bg: "tw-bg", kind: "text" },
   { what: "primary button label", fg: "paper", bg: "ink", kind: "text" },
+  { what: "border of a form field on the page", fg: "muted", bg: "paper", kind: "non-text" },
   { what: "focus ring on the page", fg: "accent", bg: "paper", kind: "non-text" },
   { what: "focus and placed ring on a square", fg: "accent", bg: "cell", kind: "non-text" },
   { what: "focus ring on the rack", fg: "accent", bg: "line", kind: "non-text" },
@@ -104,6 +105,7 @@ const CSS = `
 .ym-w *, .ym-w *::before, .ym-w *::after { box-sizing: border-box; }
 .ym-w button { font: inherit; color: inherit; cursor: pointer; }
 .ym-w button:disabled { cursor: default; opacity: 0.55; }
+.ym-w select { color: var(--w-ink); background: var(--w-paper); border-color: var(--w-muted); }
 .ym-w :focus-visible { outline: 3px solid var(--w-accent); outline-offset: 2px; }
 .ym-w-scores { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; align-items: baseline;
   margin: 0; padding: 0; list-style: none; }
@@ -202,7 +204,6 @@ const CSS = `
 .ym-w-racks { display: flex; flex-wrap: wrap; gap: 2px; margin-inline-start: 0.5rem;
   vertical-align: middle; }
 .ym-w-mini { display: inline-flex; width: 1.5rem; height: 1.5rem; }
-.ym-w select { color: var(--w-ink); background: var(--w-paper); border-color: var(--w-muted); }
 .ym-w-options fieldset { margin: 0 0 1rem; padding: 0; border: 0; }
 .ym-w-card { display: flex; gap: 0.75rem; align-items: center; padding: 0.5rem; margin: 0.5rem 0;
   border: 2px solid var(--w-line); border-radius: 8px; }
