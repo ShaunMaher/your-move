@@ -112,6 +112,34 @@ describe("the board's colours", () => {
     expect(STYLE_TEXT).toMatch(/\.ym-w-face \{[^}]*padding/u);
   });
 
+  it("pair every colour the planned tile and the turn chip use", () => {
+    const pairs = new Set(PAIRS.map((pair) => `${pair.fg}/${pair.bg}`));
+    for (const pair of [
+      "planned-ink/planned-tile",
+      "planned-edge/planned-tile",
+      "planned-edge/cell",
+    ])
+      expect(pairs.has(pair)).toBe(true);
+    expect(pairs.has("turn-ink/turn-bg")).toBe(true);
+    expect(pairs.has("paper/ink")).toBe(true);
+  });
+
+  it("mark a planned tile by more than colour, without fading its letter", () => {
+    const rule = /\.ym-w-tile\[data-state="planned"\] \{([^}]*)\}/u.exec(STYLE_TEXT)?.[1] ?? "";
+    expect(rule).toContain("outline: 2px dashed");
+    expect(rule).toContain("color: var(--w-planned-ink)");
+    expect(rule).not.toContain("opacity");
+  });
+
+  it("fill the acting seat's chip and the your-turn chip, not only underline them", () => {
+    expect(STYLE_TEXT).toMatch(
+      /\.ym-w-scores \[aria-current="true"\] \{[^}]*background: var\(--w-ink\)/u,
+    );
+    expect(STYLE_TEXT).toMatch(
+      /\.ym-w-turn\[data-yours="true"\] \{[^}]*background: var\(--w-turn-bg\)/u,
+    );
+  });
+
   it("keep form controls light on the paper when the shell is dark", () => {
     // The module is a light panel in either theme: the shell's dark `select` rule gave the word
     // list a dark field with the module's dark ink inherited on it, so it read black on black.

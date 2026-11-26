@@ -46,6 +46,8 @@ export interface GridProps {
   readonly board: View["board"];
   /** Tentative tiles by square key, with their rack tile and letter. */
   readonly placed: Readonly<Record<string, { put: Put; tile: string }>>;
+  /** Off turn: the placed tiles are a plan, drawn and named as one (07 §2). */
+  readonly planned: boolean;
   /** Squares of the last play, highlighted. */
   readonly last: ReadonlySet<string>;
   readonly selected: string | null;
@@ -247,8 +249,12 @@ export function BoardGrid({ frame, ...props }: GridProps): ReactElement {
                       .filter((part) => part !== null)
                       .join(", ")
                   : [
-                      tileName(tile, points, tile === "?" ? letter : undefined),
-                      put === undefined ? null : "your tile, not played yet",
+                      `${put !== undefined && props.planned ? "Planned tile " : ""}${tileName(tile, points, tile === "?" ? letter : undefined)}`,
+                      put === undefined
+                        ? null
+                        : props.planned
+                          ? "not your turn, not played"
+                          : "your tile, not played yet",
                       props.last.has(key) ? "last play" : null,
                     ]
                       .filter((part) => part !== null)
@@ -291,7 +297,13 @@ export function BoardGrid({ frame, ...props }: GridProps): ReactElement {
                       className="ym-w-tile"
                       data-blank={tile === "?"}
                       data-state={
-                        put !== undefined ? "placed" : props.last.has(key) ? "last" : undefined
+                        put !== undefined
+                          ? props.planned
+                            ? "planned"
+                            : "placed"
+                          : props.last.has(key)
+                            ? "last"
+                            : undefined
                       }
                       data-selected={props.selected === key}
                     >

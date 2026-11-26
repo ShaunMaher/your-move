@@ -115,7 +115,10 @@ describe("the table", () => {
     ).toEqual(["Ann (you) 12", "Bo 7"]);
     expect(within(scores).getAllByRole("listitem")[0]?.getAttribute("aria-current")).toBe("true");
     expect(screen.getByText(/in the bag · Bo played CAT for 5/u)).toBeTruthy();
-    expect(screen.getByText("Your turn. Place tiles to make a word.")).toBeTruthy();
+    expect(screen.getByText("Place tiles to make a word.")).toBeTruthy();
+    const chip = screen.getByRole("status");
+    expect(chip.textContent).toBe("Your turn");
+    expect(chip.getAttribute("data-yours")).toBe("true");
   });
 
   it("labels every square: position, premium (its face text first), start, tile and last play", () => {
@@ -225,7 +228,7 @@ describe("placing tiles by tap", () => {
     setup();
     fireEvent.click(square(SR, SC - 1));
     fireEvent.click(square(SR + 1, SC));
-    expect(screen.getByText("Your turn. Place tiles to make a word.")).toBeTruthy();
+    expect(screen.getByText("Place tiles to make a word.")).toBeTruthy();
   });
 
   it("returns a placed tile with Backspace on its square", () => {
@@ -549,7 +552,7 @@ describe("the live preview", () => {
     fireEvent.click(button("Recall"));
     await advance(5000);
     expect(preview).not.toHaveBeenCalled();
-    expect(screen.getByText("Your turn. Place tiles to make a word.")).toBeTruthy();
+    expect(screen.getByText("Place tiles to make a word.")).toBeTruthy();
   });
 
   it("says when a play uses every tile", () => {
@@ -576,7 +579,7 @@ describe("the status line", () => {
     fireEvent.click(rackTile("S, 1 point"));
     expect(screen.getByText("Tile S selected. Choose a square.")).toBeTruthy();
     fireEvent.click(rackTile("S, 1 point"));
-    expect(screen.getByText("Your turn. Place tiles to make a word.")).toBeTruthy();
+    expect(screen.getByText("Place tiles to make a word.")).toBeTruthy();
     fireEvent.click(rackTile("Blank tile"));
     expect(screen.getByText("Blank tile selected. Choose a square.")).toBeTruthy();
   });
@@ -789,28 +792,121 @@ describe("swapping and passing", () => {
 });
 
 describe("when it isn't your turn", () => {
-  it("lets you plan but not play, swap or pass, and never asks the shell", () => {
-    const { preview } = setup(fresh({ turn: 1 }), { yourTurn: false });
-    expect(screen.getByText("Waiting for Bo. You can plan your next play.")).toBeTruthy();
+  const PLAN = "Not your turn yet. Tiles you place now are only a plan.";
+  const props = () => ({ submit: vi.fn(), preview: vi.fn() });
+
+  it("names whose turn it is, quietly, and marks the acting seat", () => {
+    setup(fresh({ turn: 1 }), { yourTurn: false });
+    const chip = screen.getByRole("status");
+    expect(chip.textContent).toBe("Bo's turn");
+    expect(chip.getAttribute("data-yours")).toBe("false");
+    const seats = within(screen.getByRole("list", { name: "Scores" })).getAllByRole("listitem");
+    expect(seats.map((li) => li.getAttribute("aria-current"))).toEqual(["false", "true"]);
+    expect(screen.getByText(PLAN)).toBeTruthy();
+  });
+
+  it("names every seat that is to act, and nothing when nobody is", () => {
+    const s = fresh({ turn: 1 });
+    const game = envelope(NAMES, 1, { yourTurn: false, toAct: [0, 1] });
+    const { rerender } = render(<Board game={game} view={view(s, 0)} {...props()} />);
+    expect(screen.getByRole("status").textContent).toBe("Waiting for Ann and Bo");
+    rerender(<Board game={{ ...game, toAct: [] }} view={view(s, 0)} {...props()} />);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("draws and names placed tiles as planned, with no score, check or request", () => {
+    vi.useFakeTimers();
+    const { preview, submit } = setup(fresh({ turn: 1 }), { yourTurn: false });
     place("S, 1 point", SR, SC + 2);
-    expect(screen.getByText("+6")).toBeTruthy();
+    const tile = square(SR, SC + 2);
+    expect(tile.getAttribute("aria-label")).toBe(
+      "Row 8, column 10, Planned tile S, 1 point, not your turn, not played",
+    );
+    expect(tile.querySelector(".ym-w-tile")?.getAttribute("data-state")).toBe("planned");
+    expect(screen.getByText(PLAN)).toBeTruthy();
+    expect(screen.queryByText("+6")).toBeNull();
+    expect(screen.queryByText("Checking the words…")).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
     for (const name of ["Play", "Swap", "Pass"]) {
       expect(button(name).hasAttribute("disabled")).toBe(true);
     }
     expect(preview).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
   });
 
-  it("says to plan when nobody is to act", () => {
-    const s = fresh({ turn: 1 });
+  it("lets the plan be moved and recalled", () => {
+    setup(fresh({ turn: 1 }), { yourTurn: false });
+    place("S, 1 point", SR, SC + 2);
+    fireEvent.click(square(SR, SC + 2));
+    fireEvent.click(square(SR, SC + 3));
+    expect(square(SR, SC + 3).getAttribute("aria-label")).toContain("Planned tile S");
+    fireEvent.click(button("Recall"));
+    expect(square(SR, SC + 3).getAttribute("aria-label")).toContain("empty");
+  });
+
+  it("turns the plan into a real placement, in place, when the turn comes", async () => {
+    const game = envelope(NAMES, 0, { yourTurn: false, toAct: [1] });
+    const { rerender } = render(
+      <Board game={game} view={view(fresh({ turn: 1 }), 0)} {...props()} />,
+    );
+    place("S, 1 point", SR, SC + 2);
+    const preview = vi.fn(() => Promise.resolve(OK_PREVIEW));
+    rerender(
+      <Board
+        game={{ ...game, version: 4, yourTurn: true, toAct: [0] }}
+        view={view(fresh(), 0)}
+        submit={vi.fn()}
+        preview={preview}
+      />,
+    );
+    expect(screen.getByRole("status").textContent).toBe("Your turn");
+    expect(screen.getByRole("status").getAttribute("data-yours")).toBe("true");
+    const label = square(SR, SC + 2).getAttribute("aria-label") ?? "";
+    expect(label).toContain("your tile, not played yet");
+    expect(label).not.toContain("Planned");
+    expect(
+      square(SR, SC + 2)
+        .querySelector(".ym-w-tile")
+        ?.getAttribute("data-state"),
+    ).toBe("placed");
+    expect(screen.getByText("+6")).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(preview).toHaveBeenCalledTimes(1);
+    });
+    expect(button("Play").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("returns a planned tile to the rack when the opponent plays on its square", () => {
+    const game = envelope(NAMES, 0, { yourTurn: false, toAct: [1] });
+    const p = props();
+    const { rerender } = render(<Board game={game} view={view(fresh({ turn: 1 }), 0)} {...p} />);
+    place("S, 1 point", SR, SC + 2);
+    place("E, 1 point", SR - 1, SC);
+    // The opponent plays CATS: the square under my S is taken.
+    const next = fresh({
+      turn: 1,
+      board: board(CLASSIC, [{ row: SR, col: SC - 1, word: "cats" }]),
+    });
+    rerender(<Board game={{ ...game, version: 4 }} view={view(next, 0)} {...p} />);
+    expect(square(SR, SC + 2).getAttribute("aria-label")).toContain("S, 1 point");
+    expect(square(SR, SC + 2).getAttribute("aria-label")).not.toContain("lanned");
+    expect(rackTile("S, 1 point")).toBeTruthy();
+    expect(square(SR - 1, SC).getAttribute("aria-label")).toContain("Planned tile E");
+    expect(screen.getAllByRole("button", { name: /^Row \d+, column \d+/u })).toHaveLength(225);
+    expect(p.preview).not.toHaveBeenCalled();
+  });
+
+  it("says it is a plan even when nobody is to act", () => {
     render(
       <Board
         game={envelope(NAMES, 0, { yourTurn: false, toAct: [] })}
-        view={view(s, 0)}
-        submit={vi.fn()}
-        preview={vi.fn()}
+        view={view(fresh({ turn: 1 }), 0)}
+        {...props()}
       />,
     );
-    expect(screen.getByText("Plan your next play.")).toBeTruthy();
+    expect(screen.getByText(PLAN)).toBeTruthy();
   });
 
   it("shows a spectator the board and no rack", () => {

@@ -181,8 +181,8 @@ function Table(
 
   const placements = useMemo(() => toPlacements(t, rack), [t, rack]);
   const analysis = useMemo(
-    () => (placements.length === 0 ? null : analyseViewPlay(view, placements)),
-    [view, placements],
+    () => (!canAct || placements.length === 0 ? null : analyseViewPlay(view, placements)),
+    [view, placements, canAct],
   );
   const playable = analysis !== null && !isGameError(analysis);
   // An answer holds for one version of the game and one set of tiles.
@@ -393,6 +393,7 @@ function Table(
         : undefined;
   const heldRack = heldId === undefined ? undefined : rack[heldId];
   const held = heldRack === undefined ? null : heldName(heldRack);
+  const turn = turnLine(game, names);
   const idle = !canAct || busy || sent;
   /** Where focus goes when a dialog closes and what opened it is gone: the board's own square. */
   const restoreTo = (): HTMLElement | null =>
@@ -408,6 +409,11 @@ function Table(
           </li>
         ))}
       </ul>
+      {turn !== null && (
+        <p className="ym-w-turn" role="status" data-yours={game.yourTurn}>
+          {turn}
+        </p>
+      )}
       <p className="ym-w-meta">
         {plural(view.bagCount, "tile", "tiles")} in the bag
         {view.lastMove === null ? "" : ` · ${formatText(engine.describe(view.lastMove), names)}`}
@@ -421,6 +427,7 @@ function Table(
         ruleset={ruleset}
         board={view.board}
         placed={placedView}
+        planned={canArrange && !canAct}
         last={last}
         selected={selected?.kind === "square" ? selected.key : null}
         holding={selected !== null}
@@ -438,15 +445,7 @@ function Table(
       {canArrange && (
         <>
           <div className="ym-w-status" aria-live="polite" aria-atomic="true">
-            <Status
-              names={names}
-              game={game}
-              analysis={analysis}
-              answer={answer}
-              held={held}
-              sent={sent}
-              canAct={canAct}
-            />
+            <Status analysis={analysis} answer={answer} held={held} sent={sent} canAct={canAct} />
           </div>
           {message !== null && (
             <p role="alert" className="ym-w-status" data-tone="bad">
@@ -579,15 +578,28 @@ function Table(
   );
 }
 
+/** Off turn, what the status line says about the tiles on the board. */
+const PLANNING = "Not your turn yet. Tiles you place now are only a plan.";
+
 /** A tile as the status line names it: "Tile A", "Blank tile". */
 function heldName(tile: string): string {
   return tile === "?" ? "Blank tile" : `Tile ${shown(tile)}`;
 }
 
-/** The line under the board: whose turn it is, or what the tiles on the board would do. */
+/**
+ * Whose turn it is, for the chip under the scores: "Your turn", "Sam's turn" or "Waiting for Sam
+ * and Alex"; null when the game isn't under way or nobody is to act. It is the board's one
+ * announcement of a change of turn (the status line below doesn't repeat it).
+ */
+function turnLine(game: Props["game"], names: readonly string[]): string | null {
+  if (game.status !== "active" || game.toAct.length === 0) return null;
+  if (game.yourTurn) return "Your turn";
+  const acting = game.toAct.map((seat) => names[seat] ?? "");
+  return acting.length === 1 ? `${acting[0] ?? ""}'s turn` : `Waiting for ${acting.join(" and ")}`;
+}
+
+/** The line under the board: what the tiles on the board would do, or what to do next. */
 function Status(props: {
-  readonly names: readonly string[];
-  readonly game: Props["game"];
   readonly analysis: ReturnType<typeof analyseViewPlay> | null;
   readonly answer: Answer | null;
   readonly held: string | null;
@@ -598,18 +610,16 @@ function Status(props: {
   // Selecting a tile (by tap or by keyboard) is announced, with what to do next.
   const holding = held === null ? null : <span>{held} selected. Choose a square.</span>;
   if (props.sent) return <span>Sent. Waiting for the board to update.</span>;
-  if (analysis === null) {
-    if (holding !== null) return holding;
-    if (props.canAct) return <span>Your turn. Place tiles to make a word.</span>;
-    const waiting = props.game.toAct.map((seat) => props.names[seat] ?? "").join(", ");
+  if (!props.canAct) {
+    // Off turn nothing is scored or checked: the tiles are a plan (07 §2).
     return (
-      <span>
-        {waiting === ""
-          ? "Plan your next play."
-          : `Waiting for ${waiting}. You can plan your next play.`}
-      </span>
+      <>
+        {holding}
+        <span>{PLANNING}</span>
+      </>
     );
   }
+  if (analysis === null) return holding ?? <span>Place tiles to make a word.</span>;
   if (isGameError(analysis)) {
     return (
       <>
@@ -628,7 +638,7 @@ function Status(props: {
         <span className="ym-w-score">+{result?.score ?? analysis.score}</span> {words}
         {analysis.bingo ? " · uses every tile" : ""}
       </span>
-      {props.canAct && answer === null && <span className="ym-w-meta">Checking the words…</span>}
+      {answer === null && <span className="ym-w-meta">Checking the words…</span>}
       {answer === "unchecked" && (
         <span className="ym-w-meta">
           Couldn&apos;t check the words now; the server will when you play.

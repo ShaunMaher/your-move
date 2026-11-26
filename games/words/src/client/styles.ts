@@ -26,6 +26,11 @@ export const TOKENS = {
   ok: "#1c6b3a",
   tile: "#243b55",
   "tile-ink": "#ffffff",
+  "planned-tile": "#cfdaea",
+  "planned-ink": "#1b2230",
+  "planned-edge": "#243b55",
+  "turn-bg": "#92400e",
+  "turn-ink": "#ffffff",
   "blank-tile": "#eef2f7",
   "blank-ink": "#243b55",
   "dl-bg": "#cdebd6",
@@ -60,6 +65,22 @@ export const PAIRS: readonly Pair[] = [
   { what: "text on the rack", fg: "ink", bg: "line", kind: "text" },
   { what: "text on an empty square", fg: "ink", bg: "cell", kind: "text" },
   { what: "letter on a tile", fg: "tile-ink", bg: "tile", kind: "text" },
+  { what: "letter on a planned tile", fg: "planned-ink", bg: "planned-tile", kind: "text" },
+  {
+    what: "dashed edge of a planned tile",
+    fg: "planned-edge",
+    bg: "planned-tile",
+    kind: "non-text",
+  },
+  {
+    what: "planned tile against an empty square",
+    fg: "planned-edge",
+    bg: "cell",
+    kind: "non-text",
+  },
+  { what: "your-turn chip", fg: "turn-ink", bg: "turn-bg", kind: "text" },
+  { what: "your-turn chip against the page", fg: "turn-bg", bg: "paper", kind: "non-text" },
+  { what: "acting seat's chip in the score list", fg: "paper", bg: "ink", kind: "text" },
   { what: "letter on a blank tile", fg: "blank-ink", bg: "blank-tile", kind: "text" },
   { what: "label of a double letter square", fg: "dl-ink", bg: "dl-bg", kind: "text" },
   { what: "label of a triple letter square", fg: "tl-ink", bg: "tl-bg", kind: "text" },
@@ -109,8 +130,14 @@ const CSS = `
 .ym-w :focus-visible { outline: 3px solid var(--w-accent); outline-offset: 2px; }
 .ym-w-scores { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; align-items: baseline;
   margin: 0; padding: 0; list-style: none; }
-.ym-w-scores li { font-weight: 600; }
-.ym-w-scores [aria-current="true"] { text-decoration: underline; text-underline-offset: 0.25em; }
+.ym-w-scores li { font-weight: 600; padding: 0.1rem 0.6rem; border: 2px solid transparent;
+  border-radius: 999px; }
+.ym-w-scores [aria-current="true"] { background: var(--w-ink); color: var(--w-paper);
+  border-color: var(--w-ink); text-decoration: underline; text-underline-offset: 0.25em; }
+.ym-w-turn { margin: 0; padding: 0.35rem 0.75rem; border: 2px solid var(--w-line);
+  border-radius: 8px; font-weight: 600; color: var(--w-muted); }
+.ym-w-turn[data-yours="true"] { background: var(--w-turn-bg); color: var(--w-turn-ink);
+  border-color: var(--w-turn-bg); font-weight: 800; font-size: 1.125rem; }
 .ym-w-meta { margin: 0; color: var(--w-muted); font-size: 0.875rem; }
 .ym-w-frame { position: relative; width: 100%; aspect-ratio: 1; overflow: hidden;
   border: 2px solid var(--w-ink); border-radius: 6px; background: var(--w-line); touch-action: none;
@@ -149,6 +176,8 @@ const CSS = `
   box-shadow: inset 0 0 0 2px var(--w-blank-ink); font-style: italic; }
 .ym-w .ym-w-tile[data-state="placed"] { outline: 3px solid var(--w-ring); outline-offset: -3px; }
 .ym-w .ym-w-tile[data-state="placed"][data-blank="true"] { outline-color: var(--w-accent); }
+.ym-w .ym-w-tile[data-state="planned"] { background: var(--w-planned-tile);
+  color: var(--w-planned-ink); outline: 2px dashed var(--w-planned-edge); outline-offset: -3px; }
 .ym-w .ym-w-tile[data-state="last"]::after { content: ""; position: absolute; top: 0; left: 0;
   border: 0.45em solid var(--w-notch); border-right-color: transparent; border-bottom-color: transparent; }
 .ym-w .ym-w-tile[data-state="last"][data-blank="true"]::after { border-top-color: var(--w-accent);
