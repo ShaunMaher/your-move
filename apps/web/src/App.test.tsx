@@ -891,7 +891,9 @@ describe("the sign-in request refused as malformed", () => {
     typeInto("Email address", "sam@example.org");
     click("Email me a code");
     await waitFor(() => {
-      expect(alertText()).toBe("Something went wrong sending your code. Try again later.");
+      expect(alertText()).toBe(
+        "Check your email address. If it looks right, please try again later.",
+      );
     });
   });
 });

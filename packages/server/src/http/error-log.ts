@@ -7,24 +7,14 @@
  */
 import type { Context } from "hono";
 
-import type { AppEnv } from "../platform.js";
+import type { AppEnv, ErrorLog, ErrorReason } from "../platform.js";
+
+export type { ErrorLog, ErrorReason };
 
 /** At most this many validation issues are logged, so a hostile body can't bloat the log. */
 const MAX_ISSUES = 5;
 /** A path segment that looks like a field name; anything else (an input-chosen key) is masked. */
 const FIELD_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,31}$/u;
-
-/** The fixed reasons a `BAD_REQUEST` can carry beyond its code (09 §5). */
-export type ErrorReason = "invalid_email" | "no_email" | "no_client_ip";
-
-/** What a failed request leaves for its log line. */
-export interface ErrorLog {
-  readonly code: string;
-  /** A fixed label for a refusal several places can raise (09 §5); never input-derived. */
-  readonly reason?: ErrorReason;
-  /** `path:zodCode` pairs, comma-separated (log fields are flat): `json.email:invalid_format`. */
-  readonly issues?: string;
-}
 
 /** The slice of a Zod issue that is safe to log: never `message`, `input` or `received`. */
 interface IssueLike {

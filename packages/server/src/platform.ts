@@ -8,7 +8,6 @@ import type { AppConfig } from "./config/parse.js";
 import type { Repositories } from "./db/repositories.js";
 import type { CoreEmailSender } from "./email/providers.js";
 import type { BuiltinDictionaries } from "./games/resources.js";
-import type { ErrorLog } from "./http/error-log.js";
 import type { Logger } from "./log.js";
 import type { PushSender } from "./push/sender.js";
 
@@ -45,6 +44,18 @@ export interface Platform {
   readonly dictionaries: BuiltinDictionaries;
   /** Injectable clock: tests control time through it. */
   now(): Date;
+}
+
+/** The fixed reasons a `BAD_REQUEST` can carry beyond its code (09 §5), kept here with the context variable that carries it. */
+export type ErrorReason = "invalid_email" | "no_email" | "no_client_ip";
+
+/** What a failed request leaves for its log line. */
+export interface ErrorLog {
+  readonly code: string;
+  /** A fixed label for a refusal several places can raise (09 §5), kept here with the context variable that carries it; never input-derived. */
+  readonly reason?: ErrorReason;
+  /** `path:zodCode` pairs, comma-separated (log fields are flat): `json.email:invalid_format`. */
+  readonly issues?: string;
 }
 
 /** Hono environment of the app: per-request variables. */
