@@ -47,7 +47,7 @@ export type UserUpdate = Partial<Pick<UserRecord, "displayName" | "onboardedAt">
   Pick<UserRecord, "updatedAt">;
 
 /** One of a user's past opponents, as `GET /api/v1/players/recent` lists them (05). */
-export interface RecentOpponent {
+interface RecentOpponent {
   readonly userId: string;
   readonly displayName: string;
   /** `past_opponents.last_finished_at`. */
@@ -55,7 +55,7 @@ export interface RecentOpponent {
 }
 
 /** One block (04 `blocks`): `blockerId` blocked `blockedId`. */
-export interface BlockPair {
+interface BlockPair {
   readonly blockerId: string;
   readonly blockedId: string;
 }
