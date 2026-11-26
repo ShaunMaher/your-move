@@ -176,10 +176,12 @@ answer for every reason. Picked invitees are seated before typed addresses, what
 in the request, so a typed address never changes how a picked one is seated: an address that
 resolves to a picked user gets the `inert` email-only seat above, and one whose user has a block
 with a picked invitee an `inert` seat. A picked past opponent is `joined` at once (`joined_via =
-added`), or gets an invitation when AI assistance is allowed (02 §4). When every seat is then
+added`), or gets an invitation when AI assistance is allowed or their stored `whoCanAddMe` is
+`nobody` (02 §4, 06 §6.2; the Settings choice is M4's). When every seat is then
 `joined`, the game starts in the creator's start transition from version 0, right after the insert
 (03 §5.2); if a transition by an added player (a decline) wins that race, the game stays as that
-transition left it and the `201` shows it so. Picked invitees count toward the per-pair limits
+transition left it and the `201` shows it so; a start that fails for any other reason is logged
+by error class and the `201` shows the stored lobby, which the creator can start. Picked invitees count toward the per-pair limits
 by (creator, `userId`) and never toward the email-invitee or inbound caps.
 
 | Case | Response |
@@ -196,7 +198,7 @@ by (creator, `userId`) and never toward the email-invitee or inbound caps.
 | AI seats in a game type with hidden information while another human seat is possible (02 §4) | `400 AI_SEATS_NOT_ALLOWED` |
 | The caller is an AI account's token (agents can't create games, 02 §9.2) | `403 AGENT_NOT_ALLOWED` |
 | A token request with an email invitee | `403 NOT_ALLOWED` |
-| Creator has too many `lobby`/`active` games they created (per pair > 5, total > 50) — counts only games the **creator** created; a pair is (creator, `userId`) for picked invitees and (creator, `emailId`) for every typed address, whatever it resolves to. A (creator, `userId`) pair counts the games in which that user has joined or holds an invitation picked by `userId`; an invitation to a typed address counts only by its `emailId`, even when it resolves to that user, so picking someone never reveals which addresses are theirs (Q3) | `409 TOO_MANY_GAMES` |
+| Creator has too many `lobby`/`active` games they created (per pair > 5, total > 50) — counts only games the **creator** created; a pair is (creator, `userId`) for picked invitees and (creator, `emailId`) for every typed address, whatever it resolves to. A (creator, `userId`) pair counts the games in which that user holds a row without a typed address (`invite_email` NULL), whatever its state, as an `emailId` pair counts every game with that typed address; an open invitation to a typed address keeps its address and counts only by its `emailId`, even when it resolves to that user, so picking someone never reveals which addresses are theirs (Q3). Only the person's own accept or decline clears it, a residual 06's privacy note already accepts | `409 TOO_MANY_GAMES` |
 | More email invitees than allowed (per user, 08 §4; counted for every email, whatever it turns out to be) | `429 RATE_LIMITED` — nothing created |
 | Onboarding incomplete | `403 ONBOARDING_REQUIRED` |
 | Other rate limits (06 §6) | `429 RATE_LIMITED` |

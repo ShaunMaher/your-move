@@ -305,8 +305,12 @@ filesystems are unsupported for the database anyway).
   started at creation and the added player's seat is to act; `url`, `tag`, the TTL, the 240-code-
   point cut, the per-request cap of 40 and the live-session rule are as above. The start at
   creation sends no "your turn" push of its own: the auto-join push says it, so an added player
-  gets one notification, not two (they'd share a `tag` anyway). Invitations still send nothing
-  until M4's generic invitation push.
+  gets one notification, not two (they'd share a `tag` anyway). The push reads the game when it
+  is sent: nothing once the game has ended (a decline that won the race with the start ends a
+  two-seat lobby), and only to added players still `joined` or `playing`. A start at creation
+  that fails is logged by error class and leaves the created lobby, which the `201` shows; the
+  push is scheduled either way. Invitations still send nothing until M4's generic invitation
+  push.
 - Optional email nudge (default off, per-user setting): "It's your turn" after 24 h idle, max one
   per game per day; and at most one email per normal invitation, sent when it's created or claimed
   (06 §6.2), not by the sweep. Precisely (alpha A6): the sweep nudges a `playing` seat of an

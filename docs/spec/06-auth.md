@@ -244,8 +244,9 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    changes how a picked one is seated (which the creator would see, since an auto-join shows as
    `joined`). Between two picked invitees with a block, the later one gets an `inert` invitation
    instead of an auto-join; the creator sees it as invited rather than joined, so this one case
-   does tell the creator that two of their past opponents have a block between them (an open item
-   for M4, when blocks can be made).
+   does tell the creator that two of their past opponents have a block between them. It can't arise
+   until blocks can be made (M4), and Q29 settles it before then (default: with two or more picks
+   in a request, every pick is an invitation).
 
    To limit typo invites, the players step shows each typed address back for confirmation before
    Create ("Check the address: …"). A row that has never been `joined` never shows a name or user

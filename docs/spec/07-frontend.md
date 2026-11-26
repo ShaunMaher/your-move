@@ -53,11 +53,14 @@ There is no admin UI in v1; operators use the Admin API and its command-line cli
      to `/settings/word-lists`.
 3. **Players**: seat count stepper, shown only when the game allows more than one count. Pick past
    opponents, or type emails. Past opponents (`GET /api/v1/players/recent`) are listed by display
-   name only, as a checkbox group with the legend "People you've played" (rows at least 44 pt
-   tall; once every seat is filled, the unpicked ones are disabled); each pick fills one seat and
-   removes one address field, unpicking gives it back, and lowering the seat count drops the
-   latest picks. The list isn't shown when it's empty or couldn't be loaded. The review step
-   shows each pick as "Playing with <name>" (alpha A12). Typed addresses are shown back before Create ("Check the address:
+   name, each with "last played <date>" (the device's locale) as secondary text, as a checkbox
+   group with the legend "People you've played" (rows at least 44 pt tall; once every seat is
+   filled, the unpicked ones are disabled and the note under the group says "Every seat is filled;
+   unpick someone to choose another."); each pick fills one seat and removes one address field,
+   an empty one first, unpicking gives it back, and lowering the seat count drops the latest
+   picks. The list isn't shown when it's empty or couldn't be loaded. The review step
+   shows each pick as "Playing with <name>" (alpha A12). A player added this way sees Decline in
+   the lobby (they never chose to join), the lobby decline of 02 §4. Typed addresses are shown back before Create ("Check the address:
    sam@example.org") because the app never says whether an address has an account (06 §6.1, Q3);
    a typo just becomes an invitation nobody receives. There's also an "Add a join link for the
    open seats" toggle (with the warning that anyone with the link can see the game and join, and
