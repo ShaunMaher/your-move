@@ -75,9 +75,9 @@ export async function planInviteMail(
     repos.emailSuppressions.suppressedAmong(emailIds),
     repos.users.hasFinishedGame(creator.id),
   ]);
-  const blocked = new Set(suppressed);
+  const unmailable = new Set(suppressed);
   const young = creator.createdAt > now - NEW_ACCOUNT_MS && !finished;
-  const wouldSend = emailIds.map((hash, i) => input.invitable[i] === null && !blocked.has(hash));
+  const wouldSend = emailIds.map((hash, i) => input.invitable[i] === null && !unmailable.has(hash));
 
   const keyFor = (name: (typeof CAPS)[number], i: number): string => {
     if (wouldSend[i] !== true) return SILENT;

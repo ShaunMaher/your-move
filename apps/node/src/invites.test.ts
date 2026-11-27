@@ -309,6 +309,25 @@ describe("invite-email caps (06 §6.6, 08 §4)", () => {
     expect(await invitesTo(address)).toHaveLength(4);
   });
 
+  it("counts every typed address toward the creator's email-invitee cap, whatever it is (08 §4)", async () => {
+    h = gameHarness();
+    const ada = await seasoned("Ada");
+    const known = await signUp(h, "Bo");
+    const halfway = await signUp(h, null);
+    // Five an hour: a known address, an un-onboarded one and three nobody holds.
+    for (const address of [known.email, halfway.email, freshEmail(), freshEmail(), freshEmail()]) {
+      await invite(ada, address);
+    }
+    const last = freshEmail();
+    const over = await call(h, ada, "POST", "/api/v1/games", {
+      gameType: "words",
+      invitees: [{ email: last }],
+    });
+    expect([over.status, code(over.body)]).toEqual([429, "RATE_LIMITED"]);
+    expect(h.query("SELECT count(*) AS n FROM games")[0]?.["n"]).toBe(5);
+    expect(await invitesTo(last)).toEqual([]);
+  });
+
   it("caps the instance a day, with one alert", async () => {
     h = gameHarness({ LIMIT_INVITE_EMAILS_GLOBAL_DAY: "2" });
     const addresses: string[] = [];
