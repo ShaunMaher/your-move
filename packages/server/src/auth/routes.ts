@@ -47,6 +47,7 @@ import {
   type ClientBuckets,
   chargeNewAccount,
   newAccountAllowed,
+  takeOtpEmailRoom,
   verifyCode,
 } from "./otp.js";
 import { requireSession } from "./require-session.js";
@@ -404,7 +405,18 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
         createdAt: context.now,
       },
     );
-    send(c, accountDeletedEmail(email, templateContext()));
+    // The confirmation is informational: over the instance-wide OTP email caps it is skipped, and
+    // the account is deleted all the same (06 §7, 08 §4.2). So is a failure to count it: the
+    // deletion has happened, so it is logged by class only (09 §5) and the answer is still 204.
+    let confirm = false;
+    try {
+      confirm = await takeOtpEmailRoom(context);
+    } catch (error) {
+      platform.log.error("account-deleted email not counted", {
+        errorClass: error instanceof Error ? error.constructor.name : typeof error,
+      });
+    }
+    if (confirm) send(c, accountDeletedEmail(email, templateContext()));
     clearCookie(c);
     return c.body(null, 204);
   });

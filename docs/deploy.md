@@ -78,7 +78,7 @@ The server also runs the scheduled sweep itself, every 15 minutes (03 §8). It e
 nobody started within 14 days (clearing the addresses typed into them), gives an emailed invitation
 to anyone who finished signing up with that address while the game was being created, and sends
 the "It's your turn" email nudges: off by default, each person turns them on in Settings, and every
-nudge carries a one-click unsubscribe link (05 §Email links). It sends at most 100 per run, 200 a
+nudge carries a one-click unsubscribe link (05 §Email links). It sends at most 100 per run, 150 a
 day across the instance (`LIMIT_NUDGE_EMAILS_PER_DAY`, so nudges can't use up the sender's daily
 quota that sign-in codes need) and 10 a day to any one person
 (`LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`); at the instance cap it stops with one
@@ -177,8 +177,16 @@ holds an address, a code or a token):
 | `email_send_failed`          | One message wasn't sent (`status` is Gmail's HTTP status where there is one)                                                   |
 | `email_provider_unavailable` | `EMAIL_PROVIDER` names a provider that isn't built: nothing is sent                                                            |
 
-Gmail allows a Workspace user about 2,000 messages a day, well above the instance's own limits.
-Move to a transactional provider before the instance grows beyond friends and family.
+Gmail allows a paid Workspace user 2,000 messages in any 24 hours (500 on a trial). The instance's
+email caps (sign-in codes 500 a day, invite emails 100, nudges 150) can each send up to twice their
+figure in the 24 hours around midnight UTC, so together at most 1,500, and the server refuses to
+start if `LIMIT_*` overrides could take that past `EMAIL_DAILY_QUOTA` (2,000 for `gmail`). On a
+trial set `EMAIL_DAILY_QUOTA=500` and lower the caps to fit, e.g. `LIMIT_OTP_EMAIL_GLOBAL_DAY=150`,
+`LIMIT_INVITE_EMAILS_GLOBAL_DAY=50` and `LIMIT_NUDGE_EMAILS_PER_DAY=50` (2 × 250 = 500); the tunnel
+compose file passes these four through from its env file, empty meaning the defaults. Use the sender
+user for this instance only. The `smtp` provider pointed at Google's SMTP relay with the same
+Workspace user shares its quota but has no default one, so set `EMAIL_DAILY_QUOTA` there too. Move
+to a transactional provider before the instance grows beyond friends and family.
 
 ## Web Push
 

@@ -1,7 +1,9 @@
 /**
  * Rate limits (docs/spec/08-security.md §4) as sliding windows over the `rate_limits` table
  * (06 §3.1): two adjacent fixed windows, the previous one weighted by how much of it still
- * overlaps the sliding window, so a burst at a window boundary can't double the limit.
+ * overlaps the sliding window, so a burst at a window boundary can't double the limit. Over any
+ * span of one window's length the count can still reach twice it (the previous window's weight
+ * fades as the next fills), which the outbound email budget allows for (08 §4.2).
  *
  * Each limit has a `LIMIT_<NAME>` override (09 §1); the names below are the known ones.
  */
@@ -30,7 +32,7 @@ const LIMITS = {
   OTP_VERIFY_FAIL_EMAIL_HOUR: { limit: 10, windowMs: HOUR },
   OTP_VERIFY_IP_HOUR: { limit: 50, windowMs: HOUR },
   OTP_EMAIL_GLOBAL_HOUR: { limit: 200, windowMs: HOUR },
-  OTP_EMAIL_GLOBAL_DAY: { limit: 1000, windowMs: DAY },
+  OTP_EMAIL_GLOBAL_DAY: { limit: 500, windowMs: DAY },
   OTP_VERIFY_FAIL_GLOBAL_HOUR: { limit: 500, windowMs: HOUR },
   NEW_ACCOUNTS_IP_DAY: { limit: 10, windowMs: DAY },
   DISPLAY_NAME_CHANGES_30D: { limit: 3, windowMs: 30 * DAY },
@@ -48,7 +50,7 @@ const LIMITS = {
   INVITATIONS_RECEIVED_PAIR_DAY: { limit: 1, windowMs: DAY },
   INVITATIONS_RECEIVED_DAY: { limit: 3, windowMs: DAY },
   // "It's your turn" email nudges sent, instance-wide and per recipient (alpha A6, 03 §7).
-  NUDGE_EMAILS_PER_DAY: { limit: 200, windowMs: DAY },
+  NUDGE_EMAILS_PER_DAY: { limit: 150, windowMs: DAY },
   NUDGE_EMAILS_PER_USER_PER_DAY: { limit: 10, windowMs: DAY },
   // Invite emails to email-invite seats (alpha A17, 06 §6.6): per inviter, the rate of an account
   // younger than 7 days that hasn't completed a game, per address and instance-wide.
@@ -63,6 +65,31 @@ export type LimitName = keyof typeof LIMITS;
 
 /** Every `LIMIT_*` name the rate limiter reads (the config parser refuses unknown ones). */
 export const RATE_LIMIT_NAMES: readonly string[] = Object.keys(LIMITS);
+
+/**
+ * The instance-wide day caps of the outbound email budget (08 §4.2): every email the server sends
+ * counts toward exactly one of them.
+ */
+export const EMAIL_DAY_CAPS = [
+  "OTP_EMAIL_GLOBAL_DAY",
+  "INVITE_EMAILS_GLOBAL_DAY",
+  "NUDGE_EMAILS_PER_DAY",
+] as const satisfies readonly LimitName[];
+
+/** The effective allowance of each instance-wide email day cap (08 §4.2). */
+export function emailDayCapLimits(
+  config: LimitConfig,
+): { readonly name: (typeof EMAIL_DAY_CAPS)[number]; readonly limit: number }[] {
+  return EMAIL_DAY_CAPS.map((name) => ({ name, limit: limitOf(config, name) }));
+}
+
+/**
+ * The most email the instance-wide caps can send in any 24 hours (08 §4.2): a sliding day window
+ * sends at most its cap in each fixed UTC day, and any 24 hours overlap two of them.
+ */
+export function emailWorstCasePer24h(config: LimitConfig): number {
+  return emailDayCapLimits(config).reduce((sum, cap) => sum + 2 * cap.limit, 0);
+}
 
 /** One counter to update: a limit, the key it counts under, and how much to add. */
 export interface LimitCheck {

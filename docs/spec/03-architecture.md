@@ -269,11 +269,12 @@ filesystems are unsupported for the database anyway).
 - **Web Push** (VAPID) to subscribed devices when it becomes a user's turn, a past opponent adds
   them to a new game (auto-join), or a game that reached `active` ends. A new invitation (not
   `hidden` or `inert`) sends only the generic "You have a new game invitation" push, at most one per
-  recipient per day (06 §6.2). Every other lobby event (joins by others, accepts, declines,
-  leaves, removals) and lobby endings (`cancelled`, `expired`, `declined` from the lobby, including
-  cancels caused by account deletion) send realtime invalidations only — no push, no email (02 §4). iOS supports this only for home-screen web apps (16.4+) and only
-  after a user gesture grants permission — the UI asks after the first game is created or the
-  first invitation is accepted (Q28), not at sign-in.
+  recipient per day (06 §6.2). Every other lobby event (joins by others, accepts, declines, leaves,
+  removals) and lobby endings (`cancelled`, `expired`, `declined` from the lobby, including cancels
+  caused by account deletion) send realtime invalidations only — no push, no email (02 §4). iOS
+  supports this only for home-screen web apps (16.4+) and only after a user gesture grants
+  permission — the UI asks after the first game is created or the first invitation is accepted
+  (Q28), not at sign-in.
 - Push text is built only from public `describe` text (02 §5) and display names, never from state
   (e.g. "Alex played QUIZ for 64. Your turn."). The auto-join push is "<creator> added you to a
   game"; the invitation push names nobody (06 §6.2).
@@ -305,19 +306,18 @@ filesystems are unsupported for the database anyway).
   no recipient's devices crowd out another's; the delivery marks and deletions are one statement
   each.
 - **The auto-join push (alpha A12).** When a past opponent picked from the list is added at once
-  (06 §6.2), the create request schedules, in the background like a transition's pushes, one push
-  to each added player and never to the creator: `body` is "<creator> added you to a game." (the
+  (06 §6.2), the create request schedules, in the background like a transition's pushes, one push to
+  each added player and never to the creator: `body` is "<creator> added you to a game." (the
   creator's display name, "New player" without one), or "<creator> wants a rematch." when the game
-  is a finished game's rematch (05 `POST /api/v1/games/:id/rematch`, alpha A15), followed by " Your turn." when the game
-  started at creation and the added player's seat is to act; `url`, `tag`, the TTL, the 240-code-
-  point cut, the per-request cap of 40 and the live-session rule are as above. The start at
-  creation sends no "your turn" push of its own: the auto-join push says it, so an added player
-  gets one notification, not two (they'd share a `tag` anyway). The push reads the game when it
-  is sent: nothing once the game has ended (a decline that won the race with the start ends a
-  two-seat lobby), and only to added players still `joined` or `playing`. A start at creation
-  that fails is logged by error class and leaves the created lobby, which the `201` shows; the
-  push is scheduled either way. Invitations still send nothing until M4's generic invitation
-  push.
+  is a finished game's rematch (05 `POST /api/v1/games/:id/rematch`, alpha A15), followed by " Your
+  turn." when the game started at creation and the added player's seat is to act; `url`, `tag`, the
+  TTL, the 240-code-point cut, the per-request cap of 40 and the live-session rule are as above.
+  The start at creation sends no "your turn" push of its own: the auto-join push says it, so an
+  added player gets one notification, not two (they'd share a `tag` anyway). The push reads the game
+  when it is sent: nothing once the game has ended (a decline that won the race with the start ends
+  a two-seat lobby), and only to added players still `joined` or `playing`. A start at creation that
+  fails is logged by error class and leaves the created lobby, which the `201` shows; the push is
+  scheduled either way. Invitations still send nothing until M4's generic invitation push.
 - Optional email nudge (default off, per-user setting): "It's your turn" after 24 h idle, max one
   per game per day; and at most one email per normal invitation, sent when it's created or claimed
   (06 §6.2), not by the sweep. Precisely (alpha A6): the sweep nudges a `playing` seat of an
@@ -325,30 +325,34 @@ filesystems are unsupported for the database anyway).
   acting) and whose `last_nudged_at` is unset or at least 24 h old, if its user is a human with
   `settings.emailNudges` true, onboarded, not suspended or being deleted, whose `email_id` is set
   and has no `bounced` or `complained` row in `email_suppressions`. An `unsubscribed` row doesn't
-  stop nudges: only the invites unsubscribe and the under-age exit write one, and nudges have
-  their own opt-out (the setting, and `email_id`, which a `nudges` unsubscribe clears). Only games
-  of an installed game type and rules version are looked at, in SQL, so orphaned games never take
-  a place in the queue. A run's page holds at most one seat per recipient (their least recently
-  nudged, then longest waiting), recipients nudged least recently in any game first, so neither
-  one recipient's many games nor a recipient held back by their own cap keeps anyone else
-  waiting; a recipient's other due games follow in later runs.
-  Two daily caps apply (08 §4): instance-wide `LIMIT_NUDGE_EMAILS_PER_DAY` and per recipient
-  `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`. The run reads the room left under each without counting;
-  a nudge over either waits unclaimed for a later run (at the instance-wide cap the run stops),
-  only claimed nudges are counted, and the instance-wide cap is alerted once per fixed window,
-  through a counter of its own. Then `last_nudged_at` is claimed with one conditional update that
-  re-checks everything above — the seat, the game being `active` and the user's eligibility —
-  **before** the email is sent (so two sweeps can't both send, an unsubscribe or a move in
-  between stops it, and a failed send isn't retried that day). It is a notification throttle, not game state: it is
-  not a transition (§5.2) and doesn't bump `version`. The email is a fixed template: the game
-  type's name, the other seated players' display names ("New player" for a name that isn't set,
-  "Deleted player" for a deleted account, 02 §5, 04), the last public `describe` text (names filled in, "You" for the
+  stop nudges: only the invites unsubscribe and the under-age exit write one, and nudges have their
+  own opt-out (the setting, and `email_id`, which a `nudges` unsubscribe clears). Only games of an
+  installed game type and rules version are looked at, in SQL, so orphaned games never take a place
+  in the queue. A run's page holds at most one seat per recipient (their least recently nudged, then
+  longest waiting), recipients nudged least recently in any game first, so neither one recipient's
+  many games nor a recipient held back by their own cap keeps anyone else waiting; a recipient's
+  other due games follow in later runs. Two daily caps apply (08 §4): instance-wide
+  `LIMIT_NUDGE_EMAILS_PER_DAY` and per recipient `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`. The run
+  reads the room left under each without counting; a nudge over either waits unclaimed for a later
+  run (at the instance-wide cap the run stops), only claimed nudges are counted, and the
+  instance-wide cap is alerted once per fixed window, through a counter of its own. Then
+  `last_nudged_at` is claimed with one conditional update that re-checks everything above — the
+  seat, the game being `active` and the user's eligibility — **before** the email is sent (so two
+  sweeps can't both send, an unsubscribe or a move in between stops it, and a failed send isn't
+  retried that day), and the claimed nudge is counted. The room is read once per run, so the run
+  also checks the instance-wide count each claimed nudge adds: one that goes over the cap (only
+  possible when two runs overlap) isn't sent, the run stops there as at the cap, and that seat is
+  due again once `NUDGE_INTERVAL_MS` (24 h) has passed since the claim, so no fixed UTC day sends
+  more than the cap (08 §4.2). It is a notification throttle, not game state: it is not a transition
+  (§5.2) and doesn't bump `version`. The email is a fixed template: the game type's name, the other
+  seated players' display names ("New player" for a name that isn't set, "Deleted player" for a
+  deleted account, 02 §5, 04), the last public `describe` text (names filled in, "You" for the
   recipient), a link to the game, and the unsubscribe link and headers (05 §Email links) — never
-  state, options, totals or standings (a move's points only as its `describe` text gives them),
-  nor addresses (08 T18). A run sends at most a per-runtime number of nudges, bounded by what one
-  invocation may spend (100 on Node; 4 on Workers, 09 §3); the rest wait for the next run.
-  Turning nudges on changes no suppression; a `bounced` or `complained` row keeps stopping them
-  (surfacing that in Settings is M4's, with bounce handling).
+  state, options, totals or standings (a move's points only as its `describe` text gives them), nor
+  addresses (08 T18). A run sends at most a per-runtime number of nudges, bounded by what one
+  invocation may spend (100 on Node; 4 on Workers, 09 §3); the rest wait for the next run. Turning
+  nudges on changes no suppression; a `bounced` or `complained` row keeps stopping them (surfacing
+  that in Settings is M4's, with bounce handling).
 
 ## 8. Scheduled work
 

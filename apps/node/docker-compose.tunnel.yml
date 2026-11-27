@@ -40,6 +40,11 @@ services:
       EMAIL_PROVIDER: gmail
       EMAIL_FROM: ${EMAIL_FROM:?set EMAIL_FROM to "Name" <address>}
       GMAIL_SENDER: ${GMAIL_SENDER:?set GMAIL_SENDER to the sender user's address (EMAIL_FROM's address)}
+      # The outbound email budget (docs/deploy.md): empty keeps the defaults.
+      EMAIL_DAILY_QUOTA: ${EMAIL_DAILY_QUOTA:-}
+      LIMIT_OTP_EMAIL_GLOBAL_DAY: ${LIMIT_OTP_EMAIL_GLOBAL_DAY:-}
+      LIMIT_INVITE_EMAILS_GLOBAL_DAY: ${LIMIT_INVITE_EMAILS_GLOBAL_DAY:-}
+      LIMIT_NUDGE_EMAILS_PER_DAY: ${LIMIT_NUDGE_EMAILS_PER_DAY:-}
       TRUST_PROXY: cloudflare
       TRUST_PROXY_PEERS: 172.30.99.2/32
       APP_SECRET_FILE: /run/secrets/app_secret

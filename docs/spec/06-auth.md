@@ -474,8 +474,10 @@ to the account's email (same OTP machinery and limits as sign-in, purpose-bound 
 
 - **Account deletion** (purpose `delete_account`): the client requests a code
   (`POST /api/v1/me/delete/otp`), then calls `DELETE /api/v1/me { code }`. Then → 04 §Account
-  deletion. Sends a confirmation email afterwards. Immediate and irreversible (no grace period in
-  v1); backups age out per the documented retention (09 §4).
+  deletion. Sends a confirmation email afterwards, counted toward the instance-wide OTP email caps
+  (08 §4.2); over either cap the confirmation is skipped, since it only informs, and the account is
+  deleted all the same. Immediate and irreversible (no grace period in v1); backups age out per the
+  documented retention (09 §4).
 - **Creating an API token** (purpose `token_create`, §8): the code is sent with the create
   request.
 - **Creating an admin token** (purpose `token_admin`, §8, 05 §Admin API): a separate purpose, so a

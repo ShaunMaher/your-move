@@ -695,6 +695,75 @@ describe("account deletion with a step-up code (06 §7)", () => {
     expect((await otpVerify(email, deleteCode)).status).toBe(400);
   });
 
+  const otpEmailsCounted = () =>
+    h.query(
+      "SELECT key, coalesce(sum(count), 0) AS n FROM rate_limits WHERE key LIKE 'OTP_EMAIL_GLOBAL_%:all' GROUP BY key ORDER BY key",
+    );
+
+  it("the confirmation counts toward the instance-wide OTP email caps (08 §4.2, B2-S-1)", async () => {
+    const email = fresh();
+    const cookie = await h.signIn(email);
+    await h.request("POST", "/api/v1/me/delete/otp", {}, { cookie });
+    const code = codeOf(await h.lastEmail(email));
+    expect(otpEmailsCounted()).toEqual([
+      { key: "OTP_EMAIL_GLOBAL_DAY:all", n: 2 },
+      { key: "OTP_EMAIL_GLOBAL_HOUR:all", n: 2 },
+    ]);
+    expect((await h.request("DELETE", "/api/v1/me", { code }, { cookie })).status).toBe(204);
+    expect(otpEmailsCounted()).toEqual([
+      { key: "OTP_EMAIL_GLOBAL_DAY:all", n: 3 },
+      { key: "OTP_EMAIL_GLOBAL_HOUR:all", n: 3 },
+    ]);
+  });
+
+  it("a failure to count the confirmation skips it, logs its class only, and still deletes (B2-S2-2)", async () => {
+    h.close();
+    let failCounting = false;
+    h = createHarness(PROD_ENV, {
+      wrapRepos: (repos) => ({
+        ...repos,
+        rateLimits: {
+          hit: (hits) =>
+            failCounting && hits.some((hit) => hit.key.startsWith("OTP_EMAIL_GLOBAL_"))
+              ? Promise.reject(new TypeError("the database is unavailable"))
+              : repos.rateLimits.hit(hits),
+        },
+      }),
+    });
+    const email = fresh();
+    const cookie = await h.signIn(email);
+    await h.request("POST", "/api/v1/me/delete/otp", {}, { cookie });
+    const code = codeOf(await h.lastEmail(email));
+    const before = (await h.emails()).length;
+    failCounting = true;
+    expect((await h.request("DELETE", "/api/v1/me", { code }, { cookie })).status).toBe(204);
+    expect((await h.request("GET", "/api/v1/me", undefined, { cookie })).status).toBe(401);
+    expect((await h.emails()).length).toBe(before);
+    const logged = h.logs.filter((line) => line["msg"] === "account-deleted email not counted");
+    expect(logged).toHaveLength(1);
+    expect(logged[0]?.["errorClass"]).toBe("TypeError");
+    expect(JSON.stringify(h.logs)).not.toContain(email);
+  });
+
+  it.each(["LIMIT_OTP_EMAIL_GLOBAL_DAY", "LIMIT_OTP_EMAIL_GLOBAL_HOUR"])(
+    "over %s the account is still deleted, without the confirmation (06 §7, B2-S-1)",
+    async (limit) => {
+      h.close();
+      // Room for the sign-in code and the delete code only.
+      h = createHarness({ ...PROD_ENV, [limit]: "2" });
+      const email = fresh();
+      const cookie = await h.signIn(email);
+      await h.request("POST", "/api/v1/me/delete/otp", {}, { cookie });
+      const code = codeOf(await h.lastEmail(email));
+      const before = (await h.emails()).length;
+      expect((await h.request("DELETE", "/api/v1/me", { code }, { cookie })).status).toBe(204);
+      expect((await h.request("GET", "/api/v1/me", undefined, { cookie })).status).toBe(401);
+      expect(h.query("SELECT count(*) AS n FROM users WHERE email = ?", email)).toEqual([{ n: 0 }]);
+      expect((await h.emails()).length).toBe(before);
+      expect(h.logs.some((line) => line["alert"] === limit.slice("LIMIT_".length))).toBe(true);
+    },
+  );
+
   it("step-up requests are limited per user: 5 an hour", async () => {
     const cookie = await h.signIn(fresh());
     for (let i = 0; i < 5; i++) {

@@ -4,7 +4,8 @@
  * for users who turned nudges on. The room left under the instance-wide and per-recipient daily
  * caps (`LIMIT_NUDGE_EMAILS_PER_DAY`, `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`, 08 §4) is read first,
  * a nudge is claimed (`last_nudged_at`) before it is sent, so two sweeps never both send one and a
- * failed send isn't retried that day (Q27), and only claimed nudges are counted.
+ * failed send isn't retried that day (Q27), and only claimed nudges are counted. Each count is
+ * checked too, so overlapping runs can't together pass the instance-wide cap (08 §4.2).
  *
  * The email carries only the game type's name, display names and the last public `describe` text
  * (08 T18): the game's state, options and scores are never read here.
@@ -38,7 +39,9 @@ interface NudgeCounts {
 
 /**
  * What one run of the step did. When the instance-wide daily cap stopped it, the rest wait
- * unclaimed (08 §4) and how many were due isn't reported: it is only the first page of them.
+ * unclaimed (08 §4) and how many were due isn't reported: it is only the first page of them; a
+ * nudge claimed by a run that overlapped another and found the cap used up is in none of the
+ * counts (03 §7).
  */
 export type NudgeReport =
   | (NudgeCounts & { readonly capped: false; readonly due: number })
@@ -135,10 +138,18 @@ export async function sendDueNudges(options: NudgeStepOptions): Promise<NudgeRep
       skipped++;
       continue;
     }
-    await checkLimits(repos, config, now, [
+    const [counted] = await checkLimits(repos, config, now, [
       { name: "NUDGE_EMAILS_PER_DAY", key: "all", amount: 1 },
       { name: "NUDGE_EMAILS_PER_USER_PER_DAY", key: nudge.userId, amount: 1 },
     ]);
+    // The room was read once for the run; an overlapping run may have used it since. A claimed
+    // nudge whose count goes over the cap isn't sent and the run stops as at the cap: it is no
+    // failed send, so it is in none of the counts, and the seat is due again a day after the claim.
+    // So no fixed UTC day sends more than the cap (08 §4.2).
+    if (counted?.exceeded !== false) {
+      capped = true;
+      break;
+    }
     room--;
     try {
       const message = await buildNudge(

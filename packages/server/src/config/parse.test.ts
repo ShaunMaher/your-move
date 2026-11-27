@@ -424,6 +424,89 @@ describe("parseConfig: invalid configurations", () => {
   });
 });
 
+describe("parseConfig: the outbound email budget (08 §4.2)", () => {
+  it("accepts gmail's defaults: 2 × (500 + 100 + 150) = 1,500 in any 24 hours, under 2,000", () => {
+    expect(issuesOf(GMAIL_ENV)).toEqual([]);
+  });
+
+  it.each<[string, Env, string]>([
+    ["sign-in codes", { LIMIT_OTP_EMAIL_GLOBAL_DAY: "751" }, "751 + 100 + 150"],
+    ["invite emails", { LIMIT_INVITE_EMAILS_GLOBAL_DAY: "351" }, "500 + 351 + 150"],
+    ["nudges", { LIMIT_NUDGE_EMAILS_PER_DAY: "401" }, "500 + 100 + 401"],
+  ])("refuses gmail when raising %s takes twice the sum past 2,000", (_label, raised, sum) => {
+    const [otp = "", invites = "", nudges = ""] = sum.split(" + ");
+    expect(issuesOf({ ...GMAIL_ENV, ...raised })).toEqual([
+      `LIMIT_OTP_EMAIL_GLOBAL_DAY=${otp}, LIMIT_INVITE_EMAILS_GLOBAL_DAY=${invites}, ` +
+        `LIMIT_NUDGE_EMAILS_PER_DAY=${nudges}: they can send W = 2 × (${sum}) = 2002 in some 24 ` +
+        "hours, more than EMAIL_DAILY_QUOTA 2000 (gmail default); lower them, or set " +
+        "EMAIL_DAILY_QUOTA to the provider's real limit (docs/spec/08-security.md §4.2)",
+    ]);
+  });
+
+  it("treats the budget's variables given empty (as the tunnel compose file does) as unset", () => {
+    const empty = {
+      EMAIL_DAILY_QUOTA: "",
+      LIMIT_OTP_EMAIL_GLOBAL_DAY: "",
+      LIMIT_INVITE_EMAILS_GLOBAL_DAY: "",
+      LIMIT_NUDGE_EMAILS_PER_DAY: "",
+    };
+    expect(issuesOf({ ...GMAIL_ENV, ...empty })).toEqual([]);
+    expect(parseConfig({ ...GMAIL_ENV, ...empty }, NODE).limits).toEqual({
+      DICT_TOTAL_BYTES: 2_147_483_648,
+    });
+    // The gmail default still applies: an empty quota isn't "no quota".
+    expect(issuesOf({ ...GMAIL_ENV, ...empty, LIMIT_OTP_EMAIL_GLOBAL_DAY: "751" })).toHaveLength(1);
+  });
+
+  it("accepts gmail at exactly the quota", () => {
+    expect(issuesOf({ ...GMAIL_ENV, LIMIT_OTP_EMAIL_GLOBAL_DAY: "750" })).toEqual([]);
+  });
+
+  it("judges an explicit EMAIL_DAILY_QUOTA, e.g. a Workspace trial's 500, and names it", () => {
+    const trial = { ...GMAIL_ENV, EMAIL_DAILY_QUOTA: "500" };
+    expect(issuesOf(trial)).toEqual([
+      expect.stringContaining("W = 2 × (500 + 100 + 150) = 1500 in some 24 hours"),
+    ]);
+    expect(issuesOf(trial)[0]).toContain("more than EMAIL_DAILY_QUOTA 500 (set)");
+    expect(
+      issuesOf({
+        ...trial,
+        LIMIT_OTP_EMAIL_GLOBAL_DAY: "150",
+        LIMIT_INVITE_EMAILS_GLOBAL_DAY: "50",
+        LIMIT_NUDGE_EMAILS_PER_DAY: "50",
+      }),
+    ).toEqual([]);
+    // A larger plan lets the caps go up with it.
+    expect(
+      issuesOf({ ...GMAIL_ENV, EMAIL_DAILY_QUOTA: "10000", LIMIT_OTP_EMAIL_GLOBAL_DAY: "4000" }),
+    ).toEqual([]);
+  });
+
+  it("checks nothing for a provider with no known quota and EMAIL_DAILY_QUOTA unset", () => {
+    expect(issuesOf({ ...PROD_ENV, LIMIT_OTP_EMAIL_GLOBAL_DAY: "100000" })).toEqual([]);
+    expect(issuesOf({ ...LOCAL_ENV, LIMIT_NUDGE_EMAILS_PER_DAY: "100000" })).toEqual([]);
+  });
+
+  it("checks another provider against the EMAIL_DAILY_QUOTA it is given", () => {
+    expect(issuesOf({ ...PROD_ENV, EMAIL_DAILY_QUOTA: "1499" })).toEqual([
+      expect.stringContaining("= 1500 in some 24 hours, more than EMAIL_DAILY_QUOTA 1499 (set)"),
+    ]);
+    expect(issuesOf({ ...PROD_ENV, EMAIL_DAILY_QUOTA: "1500" })).toEqual([]);
+  });
+
+  it.each(["0", "-1", "2k", "1.5", " 2000"])("refuses EMAIL_DAILY_QUOTA=%j", (value) => {
+    expect(issuesOf({ ...PROD_ENV, EMAIL_DAILY_QUOTA: value })).toEqual([
+      "EMAIL_DAILY_QUOTA: must be a positive whole number",
+    ]);
+  });
+
+  it("reports an invalid cap on its own and judges the budget on the valid ones", () => {
+    expect(issuesOf({ ...GMAIL_ENV, LIMIT_OTP_EMAIL_GLOBAL_DAY: "lots" })).toEqual([
+      "LIMIT_OTP_EMAIL_GLOBAL_DAY: must be a positive whole number",
+    ]);
+  });
+});
+
 describe("secret redaction", () => {
   const secretValue = fc
     .string({ minLength: 8, maxLength: 40 })
