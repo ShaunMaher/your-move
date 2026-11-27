@@ -206,7 +206,7 @@ Verify on a real device during M2.
   zero-width characters (U+200B–200F, U+FEFF; the joiner U+200D only when it isn't between two
   emoji code points, so emoji sequences such as families and flags work), anything containing
   `://`, `www.` or `@`, anything
-  that looks like a domain (`\p{L}\.\p{L}{2,}`, case-insensitive) or contains a run of ≥ 7 digits,
+  that looks like a domain (`\p{L}\.\p{L}{2,}`, case-insensitive) or contains 7 or more digits anywhere, counted with separators ignored (`555 123 4567`, `5-5-5-1-2-3-4`; alpha A17 review S-4; applied when a name is set, never to stored names),
   and (case-insensitively) the configured `APP_NAME`, "admin", "support", "official", "staff".
   (Discourages spam via invite emails/push and impersonation.)
 - Not unique. The UI disambiguates where needed (e.g. "Sam (2)" is *not* done; instead the start-game
