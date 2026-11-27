@@ -168,6 +168,29 @@ describe("followingLetters (words §10.8)", () => {
     );
   });
 
+  // A14-S-1: characters above `z` used to send the walk back to the same line for ever.
+  it.each([
+    ["aa\naé\n", "", "a"],
+    ["aa\naé\n", "a", "a"],
+    ["a{\n", "", "a"],
+    ["a{\n", "a", ""],
+    ["a{\nab\n", "a", "b"],
+    ["é\nzz\n", "", "z"],
+    ["aa\na\u00ff\u00ff\nab\n", "a", "ab"],
+  ])("ends on a text that isn't a word list: %j after %j → %j", (text, prefix, letters) => {
+    expect(named(followingLetters(text, prefix))).toBe(letters);
+  });
+
+  it("ends on any text, and answers only a–z", () => {
+    assert(
+      property(string({ maxLength: 40 }), stringMatching(/^[a-c{é]{0,3}$/u), (text, prefix) => {
+        const mask = followingLetters(`${text}\n`, prefix);
+        expect(mask >>> 26).toBe(0);
+      }),
+      { seed: 20261127, numRuns: 500 },
+    );
+  });
+
   it("is what a word list's follows answers", () => {
     expect(named(createWordList("t", 1, LIST).follows("ba"))).toBe("t");
   });

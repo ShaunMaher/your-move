@@ -68,28 +68,36 @@ function lowerBound(text: string, key: string): number {
 }
 
 /**
- * The letters that follow `prefix` in some word of `text` (a valid word list), as a bit mask: bit
- * 0 for `a` up to bit 25 for `z` (words §10.8). Each letter costs one binary search, which then
- * skips every word under it, so the answer reads a few dozen lines at most and builds nothing.
+ * The letters `a`–`z` that follow `prefix` in some word of `text`, as a bit mask: bit 0 for `a` up
+ * to bit 25 for `z` (words §10.8). Each letter found costs one binary search, which then jumps
+ * past every word that continues with it, so nothing is built. Only `a`–`z` are answered: in a
+ * text that isn't a valid word list (`checkWordList`), a word with any other character is
+ * skipped one line at a time, and every step moves forward, so the answer always comes.
  */
 export function followingLetters(text: string, prefix: string): number {
   if (!PREFIX.test(prefix)) return 0;
   let mask = 0;
   for (let at = lowerBound(text, prefix); at < text.length;) {
-    // A prefix holds no line break, so this fails on any line shorter than it.
+    // The line at `at` continues `prefix` only if it starts with it; lines are sorted, so once
+    // one doesn't, none after it does.
     if (!text.startsWith(prefix, at)) break;
     const next = text.charCodeAt(at + prefix.length) - A;
-    if (!(next >= 0 && next <= 25)) {
-      // The word is the prefix itself (its line, or the text, ends here): the next line may go on.
-      const newline = text.indexOf("\n", at);
-      if (newline === -1) break;
-      at = newline + 1;
-      continue;
-    }
-    mask |= 1 << next;
-    at = lowerBound(text, prefix + String.fromCharCode(A + next) + AFTER_Z);
+    const jump =
+      next >= 0 && next <= 25
+        ? lowerBound(text, prefix + String.fromCharCode(A + next) + AFTER_Z)
+        : at;
+    if (next >= 0 && next <= 25) mask |= 1 << next;
+    // Past every word that continues with this letter; if the line sorts oddly (a character
+    // above `z` after it, or the word is the prefix itself), just the next line.
+    at = jump > at ? jump : nextLine(text, at);
   }
   return mask;
+}
+
+/** The start of the line after the one at `at`, or the end of the text. */
+function nextLine(text: string, at: number): number {
+  const newline = text.indexOf("\n", at);
+  return newline === -1 ? text.length : newline + 1;
 }
 
 /**
