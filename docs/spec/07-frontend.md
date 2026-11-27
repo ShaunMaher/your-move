@@ -193,12 +193,12 @@ debounced preview endpoint (05). Until validity is known (either way),
 previews show score only. The module itself never downloads a list: holding and caching the list
 for public dictionaries is the shell's job. The shell hands the game's public list to the board as
 `resources.dictionary` (02 §3), and the board uses it for the no-play hint (words §10.8) and for
-previews (alpha A16): when the list's id is the game's own dictionary's, the board computes the
-whole preview locally with the engine's own code, the same score, words, bingo and error codes in
-the same check order as the server's `preview` (words §10.5), instantly and with no request. When
-there is no list, the id differs, or the local computation fails, the board asks the shell's
-`preview` (the server) as before; a local answer is never shown that the server could contradict,
-and Play still goes through `submit`, where the server is authoritative.
+previews (alpha A16): when the list's id is the game's own dictionary's, the board computes
+the whole preview locally with the engine's own code, the same score, words, bingo and error
+codes in the same check order as the server's `preview` (words §10.5), instantly and with no
+request. When there is no list, the id differs, or the local computation fails, the board asks the
+shell's `preview` (the server) as before; a local answer is never shown that the server could
+contradict, and Play still goes through `submit`, where the server remains authoritative.
 
 ## 4. PWA requirements
 

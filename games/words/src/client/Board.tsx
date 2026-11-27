@@ -7,7 +7,8 @@
  * Previews: the score and the placement rules come from the engine's view-level analysis, at
  * once, offline. Whether the words are in the dictionary comes from the engine run here on the
  * game's own public list when the shell has handed it over (words §10.5), else from the shell's
- * `preview` (the server), debounced; until that answers, the score shows alone (07 §3). Nothing here is authoritative: the server validates every play.
+ * `preview` (the server), debounced; until that answers, the score shows alone
+ * (07 §3). Nothing here is authoritative: the server validates every play.
  */
 import { isGameError, shuffle, type GameError } from "@your-move/sdk";
 import { formatText, type BoardProps, type PublicWordList } from "@your-move/sdk/client";

@@ -5,11 +5,12 @@
  * sparse one so that refused words are common. Same score, words and bingo, same error codes in
  * the same order.
  */
+import { createWordList } from "@your-move/dictionary";
 import { isGameError, recordRandom, type Resources } from "@your-move/sdk";
 import { seededRandom } from "@your-move/testkit";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { options, realDictionary, ruleset } from "../test-support.js";
+import { options, realDictionary, realWordList, ruleset } from "../test-support.js";
 import { previewViewPlay } from "./analysis.js";
 import { wordsV1 as words } from "./definition.js";
 import { view } from "./present.js";
@@ -87,7 +88,7 @@ describe.each([...RULESETS.keys()])("the local preview under the %s ruleset", (i
             const has = (word: string): boolean => list.dictionary?.has(word) === true;
             const server = preview(state, seat, { type: "play", placements }, list);
             const local = previewViewPlay(mine, placements, has);
-            expect(local).toEqual(server);
+            expect(local).toStrictEqual(server);
             const kind = isGameError(server) ? server.code : "ok";
             kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
           }
@@ -101,4 +102,50 @@ describe.each([...RULESETS.keys()])("the local preview under the %s ruleset", (i
       expect(kinds.get(kind) ?? 0, kind).toBeGreaterThan(0);
     }
   }, 120_000);
+});
+
+describe("the browser's word list", () => {
+  it("agrees with the server's lookup, and so does the preview built on it", async () => {
+    const all = await realWordList();
+    const text = `${all.join("\n")}\n`;
+    const set = new Set(all);
+    // What the shell opens from the downloaded text (07 §4), and a plain set as the server's `has`.
+    const browser = createWordList("enable", 1, text);
+    const probes = [
+      all[0] ?? "",
+      all.at(-1) ?? "",
+      ...all.filter((_, i) => i % 997 === 0),
+      "",
+      "a",
+      "zzzzzz",
+      "qxqx",
+      "catz",
+      "aaaaaaaaaaaaaa",
+      "ca",
+    ];
+    for (const word of probes) expect(browser.has(word), word).toBe(set.has(word));
+    expect(probes.some((w) => !set.has(w))).toBe(true);
+
+    const rules = ruleset("classic");
+    const [row, col] = rules.start;
+    const state = words.setup({
+      options: options("classic"),
+      seats: 2,
+      rng: recordRandom(seededRandom(7)).rng,
+    });
+    const rack = state.racks[state.turn] ?? [];
+    const placements: Placement[] = rack
+      .slice(0, 3)
+      .map((tile, i) => ({ row, col: col + i, tile, ...(tile === "?" ? { letter: "a" } : {}) }));
+    const server = preview(
+      state,
+      state.turn,
+      { type: "play", placements },
+      {
+        dictionary: { id: "enable", version: 1, has: (w) => set.has(w) },
+      },
+    );
+    const local = previewViewPlay(view(state, state.turn), placements, (w) => browser.has(w));
+    expect(local).toStrictEqual(server);
+  });
 });

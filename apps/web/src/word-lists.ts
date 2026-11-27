@@ -14,8 +14,8 @@
  * where an entry that fails is deleted and downloaded again once; then it gets lookups over the
  * sorted text, as the server does them (words §9.4), with nothing built. An opened list is kept
  * by its URL, which names its content, so another game with the same list gets the same object;
- * the three most recently used are kept. The board uses it for the no-play hint (words §10.8); its previews still come from the
- * server.
+ * the three most recently used are kept. The board uses it for the no-play hint (words §10.8) and to preview
+ * plays locally (words §10.5); previews fall back to the server without it.
  */
 import { checkWordList, createWordList } from "@your-move/dictionary";
 import type { PublicWordList } from "@your-move/sdk/client";
