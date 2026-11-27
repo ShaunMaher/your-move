@@ -262,6 +262,25 @@ const proofs: Record<string, Proof> = {
     });
   },
 
+  "db:check: a temporary trigger, which would live on in the migrating connection, in a scratch copy"() {
+    return withMigrationsCopy((dir) => {
+      addMigration(
+        dir,
+        "0003_gate_fixture",
+        "CREATE TEMP TRIGGER `gate_fixture` AFTER INSERT ON main.`sessions` BEGIN DELETE FROM main.`sessions` WHERE 1; END;",
+      );
+      const result = exec("pnpm", ["db:check", "--migrations", dir]);
+      if (result.status === 0) return "db:check passed";
+      for (const expected of [
+        "0003_gate_fixture.sql creates or names a temporary object",
+        "the migrations create temporary objects (trigger gate_fixture)",
+      ]) {
+        if (!result.output.includes(expected)) return `db:check did not report: ${expected}`;
+      }
+      return null;
+    });
+  },
+
   "games:verify: the installed example's engine importing React and reading the clock"() {
     const engineDir = join(ROOT_DIR, "games/example/src/engine");
     const index = join(engineDir, "index.ts");
