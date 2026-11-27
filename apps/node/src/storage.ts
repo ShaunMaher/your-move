@@ -1,6 +1,7 @@
 /**
  * The storage half of Node startup (docs/spec/02-game-framework.md §7.3, 09 §4): take the
- * single-instance lock, open the database, apply migrations, then refuse to start while any
+ * single-instance lock, apply migrations on a connection of their own, open the server's
+ * connection, then refuse to start while any
  * `lobby`/`active` game would be orphaned by this build's games — checked against
  * `installed.json` only, before any game code is loaded.
  *
@@ -69,15 +70,40 @@ function refusal(orphans: readonly Orphan[], digest: string): StartupRefusal {
 }
 
 /**
- * Takes the single-instance lock (03 §5.3), opens and migrates the database and runs the orphan
- * check; throws to refuse the start.
+ * Applies the migrations on a connection of their own, closed before the server's connection
+ * opens, so nothing a migration could leave on its connection (a temporary trigger, say) reaches
+ * the server (04 §Migrations, B1-S2-1).
+ */
+function migrateOnItsOwnConnection(
+  databasePath: string,
+  migrationsFolder: string,
+): MigrationOutcome {
+  const migrator = openSqlite(databasePath);
+  try {
+    return migrate(migrator, migrationsFolder);
+  } finally {
+    migrator.close();
+  }
+}
+
+/**
+ * Takes the single-instance lock (03 §5.3), migrates the database on its own connection, opens the
+ * server's connection and runs the orphan check; throws to refuse the start. An in-memory
+ * database exists only on its one connection, so it is migrated on that (local development and
+ * tests).
  */
 export async function openStorage(options: StorageOptions): Promise<Storage> {
   const lock: InstanceLock = acquireInstanceLock(options.databasePath);
   let sqlite: DatabaseSync | null = null;
   try {
-    sqlite = openSqlite(options.databasePath);
-    const migrations = migrate(sqlite, options.migrationsFolder);
+    let migrations: MigrationOutcome;
+    if (options.databasePath === ":memory:") {
+      sqlite = openSqlite(options.databasePath);
+      migrations = migrate(sqlite, options.migrationsFolder);
+    } else {
+      migrations = migrateOnItsOwnConnection(options.databasePath, options.migrationsFolder);
+      sqlite = openSqlite(options.databasePath);
+    }
     const repos = nodeRepositories(sqlite);
     const orphans = await findLiveOrphans(repos.games, options.installed);
     if (orphans.length > 0) {
