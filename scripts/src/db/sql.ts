@@ -21,6 +21,8 @@ export interface LexedSql {
    * delimiters.
    */
   readonly comments: readonly string[];
+  /** Whether a block comment, string literal or quoted identifier runs to the end unclosed. */
+  readonly unterminated: boolean;
 }
 
 const QUOTE_CLOSERS: Readonly<Record<string, string>> = { "'": "'", '"': '"', "`": "`", "[": "]" };
@@ -29,8 +31,11 @@ const normalise = (text: string): string => text.replace(/\s+/gu, " ").trim();
 
 const TRIGGER = /^CREATE (?:TEMP |TEMPORARY )?TRIGGER\b/iu;
 
-/** The index just past the quoted run starting at `start` (to the end if it never closes). */
-function skipQuoted(sql: string, start: number): number {
+/**
+ * The index just past the quoted run starting at `start`, or the end of `sql` with `closed` false
+ * when it never closes.
+ */
+function skipQuoted(sql: string, start: number): { end: number; closed: boolean } {
   const open = sql.charAt(start);
   const close = QUOTE_CLOSERS[open] ?? open;
   let at = start + 1;
@@ -41,11 +46,11 @@ function skipQuoted(sql: string, start: number): number {
         at += 2;
         continue;
       }
-      return at + 1;
+      return { end: at + 1, closed: true };
     }
     at += 1;
   }
-  return sql.length;
+  return { end: sql.length, closed: false };
 }
 
 /** Splits `sql` into normalised statements and its comments. */
@@ -55,6 +60,7 @@ export function lexSql(sql: string): LexedSql {
   let current = "";
   // Where the text after the statement's last `;` starts (inside a trigger body).
   let segmentStart = 0;
+  let unterminated = false;
   let at = 0;
 
   const endStatement = (): void => {
@@ -68,7 +74,8 @@ export function lexSql(sql: string): LexedSql {
     const char = sql.charAt(at);
     const pair = sql.slice(at, at + 2);
     if (char in QUOTE_CLOSERS) {
-      const end = skipQuoted(sql, at);
+      const { end, closed } = skipQuoted(sql, at);
+      unterminated ||= !closed;
       current += sql.slice(at, end);
       at = end;
     } else if (pair === "--") {
@@ -79,6 +86,7 @@ export function lexSql(sql: string): LexedSql {
       at = end;
     } else if (pair === "/*") {
       const close = sql.indexOf("*/", at + 2);
+      unterminated ||= close === -1;
       const end = close === -1 ? sql.length : close + 2;
       comments.push(sql.slice(at, end));
       current += " ";
@@ -98,7 +106,7 @@ export function lexSql(sql: string): LexedSql {
     }
   }
   endStatement();
-  return { statements, comments };
+  return { statements, comments, unterminated };
 }
 
 /**
@@ -113,6 +121,7 @@ export function migrationReadings(sql: string): readonly LexedSql[] {
     {
       statements: pieces.flatMap((piece) => piece.statements),
       comments: pieces.flatMap((piece) => piece.comments),
+      unterminated: pieces.some((piece) => piece.unterminated),
     },
   ];
 }
@@ -145,7 +154,7 @@ export function tokenizeSql(sql: string): SqlToken[] {
       const close = sql.indexOf("*/", at + 2);
       at = close === -1 ? sql.length : close + 2;
     } else if (char in QUOTE_CLOSERS) {
-      const end = skipQuoted(sql, at);
+      const { end } = skipQuoted(sql, at);
       const quoted = sql.slice(at, end);
       if (char === "'") {
         tokens.push({ kind: "string", text: quoted });

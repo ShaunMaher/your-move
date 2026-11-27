@@ -124,14 +124,58 @@ describe("lintMigration (issue #13 S-2: dropped columns)", () => {
   });
 });
 
-describe("lintMigration (issue #13 R-2, R-3: both readings and CRLF)", () => {
+const AFTER_BREAKPOINT = 'has text after "--> statement-breakpoint"';
+const UNTERMINATED = "has an unterminated block comment, string or quoted identifier";
+const DISAGREE = "reads as different statements on D1";
+
+/** `problems` contains exactly these fragments, one problem each, in this order. */
+const exactly = (...fragments: string[]): unknown[] =>
+  fragments.map((fragment) => expect.stringContaining(fragment) as unknown);
+
+describe("lintMigration (issue #13 R-2, B1-S-1: both readings must agree)", () => {
   it("ends a statement at a breakpoint, as Node's migrator does", () => {
     // A trigger with no `;` after its END: SQLite would read COMMIT as part of it, Node doesn't.
     const sql =
       "CREATE TRIGGER t AFTER INSERT ON a BEGIN SELECT 1; END\n--> statement-breakpoint\nCOMMIT;";
-    expect(lintMigration("0003_x.sql", sql)).toEqual([
-      expect.stringContaining("begins, ends or nests a transaction") as unknown,
-    ]);
+    expect(lintMigration("0003_x.sql", sql)).toEqual(
+      exactly(DISAGREE, "begins, ends or nests a transaction"),
+    );
+  });
+
+  it("refuses two statements a breakpoint separates without a `;`", () => {
+    const sql = "CREATE TABLE a (x text)\n--> statement-breakpoint\nCREATE TABLE b (y text);";
+    expect(lintMigration("0003_x.sql", sql)).toEqual(exactly(DISAGREE));
+  });
+
+  it.each([
+    ["a statement", "CREATE TABLE a (x int);\n--> statement-breakpoint DELETE FROM a;\n"],
+    ["a comment", "SELECT 1;--> statement-breakpoint -- note\nSELECT 2;"],
+    ["a CR alone", "SELECT 1;--> statement-breakpoint\rSELECT 2;"],
+  ])("refuses %s after a breakpoint on its line", (_name, sql) => {
+    expect(lintMigration("0003_x.sql", sql)).toEqual(
+      expect.arrayContaining(exactly(AFTER_BREAKPOINT)),
+    );
+  });
+
+  it("names the line of the breakpoint with text after it", () => {
+    const sql = "SELECT 1;\r\n--> statement-breakpoint\r\nSELECT 2;--> statement-breakpoint x\n";
+    expect(lintMigration("0003_x.sql", sql)).toEqual(
+      expect.arrayContaining([expect.stringContaining("on line 3") as unknown]),
+    );
+  });
+
+  it.each([
+    [
+      "a block comment",
+      "CREATE TABLE a (x int);\n/* note\n--> statement-breakpoint\nDELETE FROM a;\n",
+    ],
+    ["a block comment at the end", "SELECT 1; /* note"],
+    ["a string", "SELECT 'open;"],
+    ["a quoted identifier", 'SELECT "open;'],
+    ["a backquoted identifier", "SELECT `open;"],
+    ["a bracketed identifier", "SELECT [open;"],
+  ])("refuses %s left unterminated", (_name, sql) => {
+    expect(lintMigration("0003_x.sql", sql)).toEqual(expect.arrayContaining(exactly(UNTERMINATED)));
   });
 
   it("sees a statement a breakpoint lets out of a comment or a literal on Node", () => {
@@ -139,9 +183,9 @@ describe("lintMigration (issue #13 R-2, R-3: both readings and CRLF)", () => {
       "/* --> statement-breakpoint\nDROP TABLE users; /* */",
       "SELECT '--> statement-breakpoint\nDROP TABLE users; --';",
     ]) {
-      expect(lintMigration("0003_x.sql", sql), sql).toEqual([
-        expect.stringContaining("drops a table") as unknown,
-      ]);
+      expect(lintMigration("0003_x.sql", sql), sql).toEqual(
+        exactly(UNTERMINATED, DISAGREE, "drops a table"),
+      );
     }
   });
 
@@ -149,15 +193,102 @@ describe("lintMigration (issue #13 R-2, R-3: both readings and CRLF)", () => {
     // On Node the breakpoint turns the line into a `--` comment; on D1 it is inside /* … */.
     const sql =
       "/* --> statement-breakpoint\n-- migration-reviewed: users has no children yet */\nDROP TABLE users;";
-    expect(lintMigration("0003_x.sql", sql)).toEqual([
-      expect.stringContaining("drops a table") as unknown,
-    ]);
+    expect(lintMigration("0003_x.sql", sql)).toEqual(
+      expect.arrayContaining(exactly("drops a table")),
+    );
   });
 
+  it("accepts drizzle-kit's layout: breakpoints at line ends or the end of the file", () => {
+    const sql =
+      "CREATE TABLE a (x int);--> statement-breakpoint\nCREATE INDEX i ON a (x);\r\n--> statement-breakpoint\r\nSELECT 1;--> statement-breakpoint";
+    expect(lintMigration("0003_x.sql", sql)).toEqual([]);
+  });
+});
+
+describe("lintMigration (R-3, B1-S-7: characters and line endings)", () => {
   it("accepts a review line in a CRLF file", () => {
     const sql =
       "-- migration-reviewed: users has no children yet\r\nDROP TABLE `users`;\r\n--> statement-breakpoint\r\nSELECT 1;\r\n";
     expect(lintMigration("0003_x.sql", sql)).toEqual([]);
+  });
+
+  it("accepts tabs", () => {
+    expect(lintMigration("0003_x.sql", "CREATE TABLE a (\n\t`x` int\n);")).toEqual([]);
+  });
+
+  it.each([
+    ["a no-break space", "DROP\u00a0TABLE a;", "U+00A0 on line 1"],
+    ["a byte-order mark", "\ufeffSELECT 1;", "U+FEFF on line 1"],
+    ["a CR alone", "-- migration-reviewed: this is reviewed ok\rDROP TABLE a;", "U+000D on line 1"],
+    ["a form feed", "SELECT 1;\r\n\fSELECT 2;", "U+000C on line 2"],
+    ["a NUL", "SELECT 1;\0", "U+0000 on line 1"],
+    [
+      "an emoji in a literal",
+      "SELECT 1;\nINSERT INTO a VALUES ('\u{1F600}');",
+      "U+1F600 on line 2",
+    ],
+    ["a replacement character (bytes that weren't UTF-8)", "SELECT '\ufffd';", "U+FFFD on line 1"],
+  ])("refuses %s", (_name, sql, where) => {
+    expect(lintMigration("0003_x.sql", sql)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          `0003_x.sql has ${where}: a migration is printable ASCII`,
+        ) as unknown,
+      ]),
+    );
+  });
+});
+
+describe("lintMigration (B1-S-3, B1-S-4: refused statements)", () => {
+  const reviewed = "-- migration-reviewed: users has no children on any instance\n";
+
+  it.each([
+    "PRAGMA writable_schema = 1;",
+    "PRAGMA defer_foreign_keys = ON;",
+    'PRAGMA main."legacy_alter_table" = 1;',
+    "PRAGMA foreign_key_check;",
+    "pragma journal_mode=DELETE;",
+    "EXPLAIN PRAGMA writable_schema = 1;",
+    "EXPLAIN QUERY PLAN PRAGMA writable_schema = 1;",
+    "/* x */ PRAGMA trusted_schema = 1;",
+  ])("refuses %j, review line or not", (sql) => {
+    for (const text of [sql, `${reviewed}${sql}`]) {
+      expect(lintMigration("0003_x.sql", text)).toEqual(
+        exactly("0003_x.sql uses a pragma other than foreign_keys"),
+      );
+    }
+  });
+
+  it.each([
+    "PRAGMA foreign_keys=OFF;",
+    'PRAGMA main."foreign_keys" = ON;',
+    "PRAGMA foreign_keys(0);",
+    "EXPLAIN PRAGMA foreign_keys = OFF;",
+  ])("allows %j with a review line only, as the rebuild rule says", (sql) => {
+    expect(lintMigration("0003_x.sql", sql)).toEqual(exactly("changes foreign_keys"));
+    expect(lintMigration("0003_x.sql", `${reviewed}${sql}`)).toEqual([]);
+  });
+
+  it.each([
+    "ATTACH DATABASE ':memory:' AS aux;",
+    "attach ':memory:' as aux;",
+    "DETACH DATABASE aux;",
+    "VACUUM;",
+    "VACUUM INTO 'copy.db';",
+    "EXPLAIN VACUUM;",
+  ])("refuses %j, review line or not", (sql) => {
+    for (const text of [sql, `${reviewed}${sql}`]) {
+      expect(lintMigration("0003_x.sql", text)).toEqual(
+        exactly("0003_x.sql attaches, detaches or vacuums a database"),
+      );
+    }
+  });
+
+  it("leaves the words alone inside literals and identifiers", () => {
+    expect(
+      lintMigration("0003_x.sql", "INSERT INTO t VALUES ('PRAGMA x; ATTACH y; VACUUM');"),
+    ).toEqual([]);
+    expect(lintMigration("0003_x.sql", 'CREATE TABLE "vacuum" ("pragma" text);')).toEqual([]);
   });
 });
 
@@ -204,6 +335,7 @@ describe("lexSql", () => {
     expect(lexSql(sql)).toEqual({
       statements: ["CREATE TABLE a (x text)", "CREATE INDEX i ON a (x)"],
       comments: ["--> statement-breakpoint", "/* c */"],
+      unterminated: false,
     });
   });
 
