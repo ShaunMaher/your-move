@@ -98,6 +98,11 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
   in a CI job of their own, never alongside another suite, are run locally before any change to
   the paths they time is handed off, and are re-measured rather than retried when they fail
   (ADR 0006).
+- Two causes of load-dependent flakes in UI tests, found by looping a file under CPU load: React runs
+  passive effects (`useEffect`) after the commit, and under load a `findBy*` can resolve, and the
+  test act, before they have run. So a test never asserts an effect's result (the address bar, a
+  `data-theme` attribute, focus) synchronously after a `findBy*`: it uses `waitFor`, or flushes
+  with `await act(async () => {})` before acting on state an effect may still overwrite.
 - The tunnel stack test (`apps/node/src/tunnel-stack.test.ts`, which runs
   `apps/node/scripts/check-tunnel-routing.sh` against a real compose stack) needs a Docker engine
   and the app image, so it is skipped unless `TUNNEL_STACK_IMAGE` names one. Run it after any

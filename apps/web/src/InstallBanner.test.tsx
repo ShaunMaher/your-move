@@ -241,7 +241,10 @@ describe("the install guide in the app", () => {
     expect(
       await screen.findByRole("heading", { name: "Add to Home Screen", level: 1 }),
     ).toBeTruthy();
-    expect(window.location.pathname).toBe("/install");
+    // The guide renders before the address bar catches up (the redirect runs in an effect).
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/install");
+    });
   });
 
   it("keeps the dismissal across a real sign-out while the game keys go", async () => {
