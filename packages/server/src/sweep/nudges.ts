@@ -4,7 +4,8 @@
  * for users who turned nudges on. The room left under the instance-wide and per-recipient daily
  * caps (`LIMIT_NUDGE_EMAILS_PER_DAY`, `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`, 08 §4) is read first,
  * a nudge is claimed (`last_nudged_at`) before it is sent, so two sweeps never both send one and a
- * failed send isn't retried that day (Q27), and only claimed nudges are counted.
+ * failed send isn't retried that day (Q27), and only claimed nudges are counted. Each count is
+ * checked too, so overlapping runs can't together pass the instance-wide cap (08 §4.2).
  *
  * The email carries only the game type's name, display names and the last public `describe` text
  * (08 T18): the game's state, options and scores are never read here.
@@ -27,7 +28,10 @@ const NUDGE_INTERVAL_MS = 24 * HOUR;
 
 interface NudgeCounts {
   readonly sent: number;
-  /** Claimed, but building or sending the email failed: that day's nudge is lost. */
+  /**
+   * Claimed, but not sent: building or sending the email failed, or (only when runs overlap) its
+   * count went over the instance-wide cap. That day's nudge is lost.
+   */
   readonly failed: number;
   /**
    * Not claimed: the recipient is at their daily cap, the seat moved on, the user stopped being
@@ -135,10 +139,18 @@ export async function sendDueNudges(options: NudgeStepOptions): Promise<NudgeRep
       skipped++;
       continue;
     }
-    await checkLimits(repos, config, now, [
+    const [counted] = await checkLimits(repos, config, now, [
       { name: "NUDGE_EMAILS_PER_DAY", key: "all", amount: 1 },
       { name: "NUDGE_EMAILS_PER_USER_PER_DAY", key: nudge.userId, amount: 1 },
     ]);
+    // The room was read once for the run; an overlapping run may have used it since. A claimed
+    // nudge whose count goes over the cap isn't sent (lost for the day like a failed send), so no
+    // fixed UTC day sends more than the cap (08 §4.2).
+    if (counted?.exceeded !== false) {
+      failed++;
+      capped = true;
+      break;
+    }
     room--;
     try {
       const message = await buildNudge(

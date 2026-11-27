@@ -2,7 +2,7 @@ import { isGameType } from "@your-move/sdk";
 import { z } from "zod";
 
 import { isSendableAddress, normaliseAddress, type NormalisedEmail } from "../accounts/email.js";
-import { RATE_LIMIT_NAMES } from "../auth/limits.js";
+import { EMAIL_DAY_CAPS, emailWorstCasePer24h, RATE_LIMIT_NAMES } from "../auth/limits.js";
 import { vapidKeyShapes } from "../push/vapid.js";
 import { DEFAULT_APP_NAME } from "./defaults.js";
 import { isEmailAddress, normaliseEmail, parseMailbox } from "./email.js";
@@ -33,6 +33,14 @@ const EMAIL_PROVIDERS = [
   "cloudflare",
   "console",
 ] as const;
+
+/**
+ * The most messages a provider accepts in any 24 hours when `EMAIL_DAILY_QUOTA` is unset (09 §2):
+ * known only for `gmail`, a paid Workspace user's limit.
+ */
+const DEFAULT_DAILY_QUOTA: Readonly<Partial<Record<(typeof EMAIL_PROVIDERS)[number], number>>> = {
+  gmail: 2000,
+};
 
 const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 
@@ -155,6 +163,10 @@ const envSchema = z.looseObject({
     error: `is required and must be one of ${EMAIL_PROVIDERS.join(", ")}`,
   }),
   EMAIL_FROM: required(),
+  EMAIL_DAILY_QUOTA: z
+    .string()
+    .regex(POSITIVE_INTEGER, { error: "must be a positive whole number" })
+    .optional(),
   EMAIL_API_KEY: z.string().optional(),
   SMTP_URL: z.string().optional(),
   GMAIL_CLIENT_ID: z.string().optional(),
@@ -351,7 +363,39 @@ function crossFieldIssues(raw: RawEnv, options: ParseConfigOptions): string[] {
     }
   }
 
+  issues.push(...emailBudgetIssues(raw));
   return [...new Set(issues)];
+}
+
+/**
+ * The outbound email budget (08 §4.2): the instance-wide email caps must not be able to send more
+ * in some 24 hours than the provider's quota, when that is known.
+ */
+function emailBudgetIssues(raw: RawEnv): string[] {
+  if (raw.EMAIL_DAILY_QUOTA !== undefined && !POSITIVE_INTEGER.test(raw.EMAIL_DAILY_QUOTA)) {
+    return []; // reported by its own rule
+  }
+  const quota =
+    raw.EMAIL_DAILY_QUOTA === undefined
+      ? DEFAULT_DAILY_QUOTA[raw.EMAIL_PROVIDER]
+      : Number(raw.EMAIL_DAILY_QUOTA);
+  if (quota === undefined) return [];
+  const limits: Record<string, number> = {};
+  for (const name of EMAIL_DAY_CAPS) {
+    const value = raw[`LIMIT_${name}`];
+    // An invalid override is reported on its own; judge the budget only on valid ones.
+    if (typeof value === "string" && POSITIVE_INTEGER.test(value)) limits[name] = Number(value);
+  }
+  const worst = emailWorstCasePer24h({ limits });
+  if (worst <= quota) return [];
+  const names = EMAIL_DAY_CAPS.map((name) => `LIMIT_${name}`).join(", ");
+  const source =
+    raw.EMAIL_DAILY_QUOTA === undefined ? `${raw.EMAIL_PROVIDER}'s default` : "EMAIL_DAILY_QUOTA";
+  return [
+    `${names}: twice their sum (${String(worst)}) is what they can send in some 24 hours, more ` +
+      `than the provider accepts (EMAIL_DAILY_QUOTA ${String(quota)}, ${source}); lower them, or ` +
+      "set EMAIL_DAILY_QUOTA to the provider's real limit (docs/spec/08-security.md §4.2)",
+  ];
 }
 
 /** Placeholder for values the cross-variable rules have already proven present. */

@@ -383,6 +383,40 @@ describe("the sweep's email nudges (03 §7)", () => {
     expect(days).toEqual(["2026-01-02", "2026-01-03"]);
   });
 
+  it("a run that overlaps another doesn't send past the instance-wide cap: each count is checked (08 §4.2)", async () => {
+    // Another run counts a nudge between this run's read of the room and its own claim.
+    h = gameHarness(
+      { LIMIT_NUDGE_EMAILS_PER_DAY: "1" },
+      {
+        wrapRepos: (repos) => ({
+          ...repos,
+          nudges: {
+            ...repos.nudges,
+            async claim(playerId, now, window) {
+              const windowStart = Math.floor(now / DAY) * DAY;
+              await repos.rateLimits.hit([
+                {
+                  key: "NUDGE_EMAILS_PER_DAY:all",
+                  windowStart,
+                  previousWindowStart: windowStart - DAY,
+                  amount: 1,
+                },
+              ]);
+              return repos.nudges.claim(playerId, now, window);
+            },
+          },
+        }),
+      },
+    );
+    const { ada, bo } = await started({ ada: true, bo: true });
+    h.setTime(T0 + DAY);
+    // The room read said 1; the claimed nudge's count made 2, so it is lost, not sent.
+    expect((await h.sweep()).nudges).toEqual({ sent: 0, failed: 1, skipped: 0, capped: true });
+    expect([...(await nudgesTo(ada)), ...(await nudgesTo(bo))]).toEqual([]);
+    expect(counted("NUDGE_EMAILS_PER_DAY:all")).toBe(2);
+    expect(alerts()).toHaveLength(1);
+  });
+
   /** `bo` in `extra` more games with `ada` than the one `started` made. */
   async function moreGames(ada: Player, bo: Player, extra: number): Promise<void> {
     for (let i = 0; i < extra; i++) {
