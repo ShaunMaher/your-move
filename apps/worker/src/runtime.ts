@@ -10,14 +10,14 @@ import { createApp, createSweep, type InstalledGame, type Platform } from "@your
  * lobby expired (at most 4 statements and one per typed address), one email-invite seat claimed
  * (5) and 2 email nudges (10 each, and up to 5 per run), 35 for a two-seat game.
  */
-export const WORKER_NUDGES_PER_RUN = 2;
-export const WORKER_CLAIMS_PER_RUN = 1;
-export const WORKER_LOBBIES_PER_RUN = 1;
+const WORKER_NUDGES_PER_RUN = 2;
+const WORKER_CLAIMS_PER_RUN = 1;
+const WORKER_LOBBIES_PER_RUN = 1;
 /**
  * Email-invite seats the request completing onboarding claims at most (06 §6.4): 4 statements
  * each, so 8 keep the request at about 36 (09 §3); the sweep claims the rest.
  */
-export const WORKER_ONBOARDING_CLAIMS = 8;
+const WORKER_ONBOARDING_CLAIMS = 8;
 
 export interface Built {
   readonly app: ReturnType<typeof createApp>;
