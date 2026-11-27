@@ -102,7 +102,7 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
   passive effects (`useEffect`) after the commit, and under load a `findBy*` can resolve, and the
   test act, before they have run. So a test never asserts an effect's result (the address bar, a
   `data-theme` attribute, focus) synchronously after a `findBy*`: it uses `waitFor`, or flushes
-  with `await act(async () => {})` before acting on state an effect may still overwrite.
+  with `await act(() => Promise.resolve())` before acting on state an effect may still overwrite.
 - The tunnel stack test (`apps/node/src/tunnel-stack.test.ts`, which runs
   `apps/node/scripts/check-tunnel-routing.sh` against a real compose stack) needs a Docker engine
   and the app image, so it is skipped unless `TUNNEL_STACK_IMAGE` names one. Run it after any
