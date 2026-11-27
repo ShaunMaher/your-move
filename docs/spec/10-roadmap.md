@@ -436,3 +436,21 @@ D1 first, as a self-contained bundle built in stage 3 and carried in the artifac
 Workers-specific commands `pnpm cf:migrate` and `pnpm cf:deploy` arrive with it. It also
 re-measures what one Cron Trigger invocation of the sweep spends (subrequests, D1 queries, CPU)
 and sets the Worker's nudges-per-run cap from that (4 until then; 09 §3, alpha A6 review P-4).
+
+**Workers cost model (before the first Workers deployment).** Before choosing a plan, estimate
+what the Workers Free plan carries, as games per month, from measurements rather than guesses:
+
+- **Usage per game, from the Docker deployment.** The request log (09 §5) already has one line per
+  request; count requests per route over finished games and derive requests per move, per game and
+  per player per day (game screens, polling, history, push subscription, sign-in). Add a script
+  that reads the logs and prints these, with no new personal data logged.
+- **Cost per request, on the Worker build.** On the Worker's request log line, record the D1
+  queries and the rows read and written that the request caused (from each D1 result's `meta`),
+  and the Durable Object requests. Measure CPU per endpoint under workerd in the contract suite as
+  an upper bound, and in production from Cloudflare's analytics once deployed (09 §3 "record
+  measured CPU per endpoint").
+- **The model.** A short document (an ADR or 09 §3) that multiplies the two against each Free plan
+  limit — requests per day, CPU per request, D1 rows read and written per day and storage, Durable
+  Object requests and duration, Cron Trigger runs, R2 — and names the limit that binds first and
+  the games per month it allows, with the Paid plan ($5 a month) alongside. Email (Gmail) and push
+  cost nothing on Cloudflare but have their own caps (08 §4); list them too.
