@@ -154,9 +154,9 @@ by the shell for every game.)
   be played, the status line says "No word can be played with your tiles. Try swapping some." (the
   bag holds at least the ruleset's `swapMinBag`) or "No word can be played with your tiles. You can
   pass." in place of "Place tiles to make a word.", announced by its live region. It runs once per
-  game version in slices that yield to the browser, never off turn or while dragging; when the
-  search can't finish within its step limit, or there is no `public` list, it says nothing. Play
-  stays available and nothing is done automatically.
+  game version in slices that yield to the browser, never off turn or while a tile is pressed or
+  dragged; when the search can't finish within its step limit, or there is no `public` list, it
+  says nothing. Play stays available and nothing is done automatically.
 - **Swap and Pass are board controls**, each a dialog on the board (swap: pick the rack tiles, with
   the reason when the bag is too small; pass: confirm). **Resign is the shell's menu** (02 §3): the
   module's `Action` has no resign, and the shell's `resign` call is not part of `BoardProps`.
@@ -264,12 +264,12 @@ previews from the list locally is a follow-up that can build on the same `resour
     without `distribution: "public"` is never fetched, whatever else it carries. Downloads run one
     at a time. The game's own list (its one resource of kind `dictionary`; with none or several,
     nothing), when it is public, is then opened for the board as `resources.dictionary` (02 §3).
-    Its bytes are hashed once: as they are downloaded, or as they are read back from this cache,
-    where an entry that no longer matches its digest is deleted and downloaded again once. The
-    text must pass the word-list check (lower-case `a`–`z` words, sorted; about 30 ms on a laptop
-    for the built-in list, once per list and page). The opened list is kept for the page's life by
-    its URL, which names its content, so every game with that list gets the same object; at most
-    three are kept. It is held as the list's sorted text (about one byte a character, 1.7 MB for
+    Its bytes are hashed, and its text put through the word-list check (lower-case `a`–`z`
+    words, sorted; about 30 ms on a laptop for the built-in list), once: as they are downloaded,
+    and only a list that passes both is stored, or as they are read back from this cache, where
+    an entry that fails either is deleted and downloaded again once. The opened list is kept by
+    its URL, which names its content, so every game with that list gets the same object; the
+    three most recently used are kept. It is held as the list's sorted text (about one byte a character, 1.7 MB for
     the built-in list) with binary-search lookups and nothing built. A failed download, a digest
     that doesn't match, a text that isn't a word list, no Cache Storage, or a list that isn't
     public hands nothing over, and the board goes on without it. Previews still answer

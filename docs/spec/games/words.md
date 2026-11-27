@@ -594,7 +594,8 @@ pass instead of hunting for a word that isn't there.
   anchors.
 - **When it runs.** Only on the player's turn in an active game, once per game version and rack
   (the answer is kept for them), in slices of 5,000 steps that yield to the browser between them.
-  While a tile is being dragged no slice runs; the search waits and goes on after the drop. A new
+  While a tile is pressed or dragged no slice runs; the search waits and goes on after it is
+  let go. A new
   version or rack stops the search under way, and nothing it would have said is shown. Off turn
   nothing runs.
 - **In every game, for every player** (A14-S-4). The hint is not an AI assist and is on whatever
