@@ -3,7 +3,8 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import type { GameEnvelope, GameError, SubmitResult } from "@your-move/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { PreviewResult } from "../engine/index.js";
+import type { Lexicon, PreviewResult } from "../engine/index.js";
+import { createLexicon } from "../engine/moves.js";
 import { view } from "../engine/present.js";
 import type { State } from "../engine/state.js";
 import { board, envelope, rack, ruleset, state } from "../test-support.js";
@@ -42,6 +43,7 @@ interface Shell {
   status?: "active" | "finished";
   resources?: GameEnvelope["resources"];
   gameVersion?: number;
+  lexicon?: Lexicon;
 }
 
 function setup(s: State = fresh(), shell: Shell = {}) {
@@ -64,7 +66,13 @@ function setup(s: State = fresh(), shell: Shell = {}) {
     ...(shell.gameVersion === undefined ? {} : { gameVersion: shell.gameVersion }),
   });
   const ui = (version: number, v = view(s, viewer)) => (
-    <Board game={{ ...game, version }} view={v} submit={submit} preview={preview} />
+    <Board
+      game={{ ...game, version }}
+      view={v}
+      submit={submit}
+      preview={preview}
+      {...(shell.lexicon === undefined ? {} : { lexicon: shell.lexicon })}
+    />
   );
   const result = render(ui(3));
   return {
@@ -1040,5 +1048,138 @@ describe("a finished game", () => {
   it("falls back to 'a player' when there is no last move", () => {
     setup({ ...over("resign"), lastMove: null }, { status: "finished" });
     expect(screen.getByText("A player resigned. The game is over.")).toBeTruthy();
+  });
+});
+
+describe("the no-play hint", () => {
+  const SWAP_HINT = "No word can be played with your tiles. Try swapping some.";
+  const PASS_HINT = "No word can be played with your tiles. You can pass.";
+  const PROMPT = "Place tiles to make a word.";
+  /** Only CAT and CATS are words: Ann's own rack can make CATS, AEIOULY nothing. */
+  const words = (): Lexicon & { asked: () => number } => {
+    const list = createLexicon(["cat", "cats"]);
+    let asked = 0;
+    return {
+      has: (word) => {
+        asked += 1;
+        return list.has(word);
+      },
+      follows: (prefix) => {
+        asked += 1;
+        return list.follows(prefix);
+      },
+      asked: () => asked,
+    };
+  };
+  const vowels = (fields: Partial<State> = {}): State =>
+    fresh({ racks: [rack("aeiouly"), rack("eeeeeee")], ...fields });
+  const status = (): string => document.querySelector(".ym-w-status[aria-live]")?.textContent ?? "";
+
+  /** Lets the search's slices run. */
+  async function settle(): Promise<void> {
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+  }
+
+  it("says nothing when the rack has a play", async () => {
+    vi.useFakeTimers();
+    const lexicon = words();
+    setup(fresh(), { lexicon });
+    await settle();
+    expect(lexicon.asked()).toBeGreaterThan(0);
+    expect(status()).toBe(PROMPT);
+  });
+
+  it("suggests a swap when there is no play and the bag allows one, in the live status line", async () => {
+    vi.useFakeTimers();
+    setup(vowels(), { lexicon: words() });
+    expect(status()).toBe(PROMPT);
+    await settle();
+    expect(status()).toBe(SWAP_HINT);
+    // A hint only: nothing is disabled or done for the player.
+    expect(button("Swap").hasAttribute("disabled")).toBe(false);
+    expect(button("Pass").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("suggests a pass when the bag is too small to swap", async () => {
+    vi.useFakeTimers();
+    setup(vowels({ bag: ["a", "b", "c", "d", "e", "f"] }), { lexicon: words() });
+    await settle();
+    expect(status()).toBe(PASS_HINT);
+  });
+
+  it("gives way to the play's own status while tiles are on the board, and comes back", async () => {
+    vi.useFakeTimers();
+    setup(vowels(), { lexicon: words() });
+    await settle();
+    place("E, 1 point", SR + 1, SC);
+    expect(status()).not.toContain("No word");
+    fireEvent.click(button("Recall"));
+    expect(status()).toBe(SWAP_HINT);
+  });
+
+  it("says nothing when the search can't finish or fails", async () => {
+    vi.useFakeTimers();
+    // Every prefix goes on and no word ends: the search runs out of steps.
+    const endless: Lexicon = { has: () => false, follows: () => (1 << 26) - 1 };
+    setup(fresh(), { lexicon: endless });
+    await settle();
+    expect(status()).toBe(PROMPT);
+    cleanup();
+    const broken: Lexicon = {
+      has: () => {
+        throw new Error("broken");
+      },
+      follows: () => 1,
+    };
+    setup(vowels(), { lexicon: broken });
+    await settle();
+    expect(status()).toBe(PROMPT);
+  });
+
+  it("says nothing without a word list", async () => {
+    vi.useFakeTimers();
+    setup(vowels());
+    await settle();
+    expect(status()).toBe(PROMPT);
+  });
+
+  it("doesn't search off turn", async () => {
+    vi.useFakeTimers();
+    const lexicon = words();
+    setup(vowels({ turn: 1 }), { yourTurn: false, lexicon });
+    await settle();
+    expect(lexicon.asked()).toBe(0);
+    expect(status()).not.toContain("No word");
+  });
+
+  it("searches once per version of the game, and again for a new one", async () => {
+    vi.useFakeTimers();
+    const lexicon = words();
+    const { rerenderAt } = setup(vowels(), { lexicon });
+    await settle();
+    const once = lexicon.asked();
+    rerenderAt(3);
+    await settle();
+    expect(lexicon.asked()).toBe(once);
+    expect(status()).toBe(SWAP_HINT);
+    rerenderAt(4, view(fresh(), 0));
+    expect(status()).toBe(PROMPT);
+    await settle();
+    expect(lexicon.asked()).toBeGreaterThan(once);
+    expect(status()).toBe(PROMPT);
+  });
+
+  it("yields to the browser between slices", async () => {
+    vi.useFakeTimers();
+    const endless: Lexicon = { has: () => false, follows: () => (1 << 26) - 1 };
+    setup(fresh(), { lexicon: endless });
+    // Each slice is one timer; the first runs only after the board has rendered.
+    expect(vi.getTimerCount()).toBe(1);
+    await act(async () => {
+      await vi.advanceTimersToNextTimerAsync();
+    });
+    expect(vi.getTimerCount()).toBe(1);
   });
 });

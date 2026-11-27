@@ -19,6 +19,7 @@ import {
   findRuleset,
   tilePoints,
   type Action,
+  type Lexicon,
   type PreviewResult,
   type Ruleset,
   type View,
@@ -35,6 +36,7 @@ import {
   zoomAround,
   type Viewport,
 } from "./geometry.js";
+import { useNoPlayHint } from "./hint.js";
 import { Rack } from "./Rack.js";
 import { webCryptoRandom } from "./random.js";
 import { clearOrder, loadOrder, rackOrderKey, saveOrder } from "./storage.js";
@@ -58,7 +60,12 @@ import {
 import { errorText, plural, seatNames, shown } from "./text.js";
 import { Unsupported } from "./Unsupported.js";
 
-type Props = BoardProps<Action, View, PreviewResult>;
+/**
+ * The contract's props, plus the game's `public` word list for the no-play hint (words §10.8).
+ * The contract has no channel for the list yet (07 §4), so the shell doesn't pass it and the hint
+ * stays silent in the app until one is specified.
+ */
+type Props = BoardProps<Action, View, PreviewResult> & { readonly lexicon?: Lexicon | null };
 
 const NO_TILES: readonly string[] = [];
 const PREVIEW_DELAY_MS = 250;
@@ -120,6 +127,13 @@ function Table(
   const canArrange = view.yourRack !== null && view.final === undefined && game.status === "active";
   const canAct = canArrange && game.yourTurn;
   const points = (tile: string): number => tilePoints(ruleset, tile);
+  const noPlay = useNoPlayHint({
+    active: canAct,
+    version: game.version,
+    ruleset,
+    view,
+    lexicon: props.lexicon ?? null,
+  });
 
   const [t, setT] = useState<Tentative>(() =>
     initial(rack, canArrange ? loadOrder(storageKey, rack.length) : null),
@@ -450,7 +464,14 @@ function Table(
       {canArrange && (
         <>
           <div className="ym-w-status" aria-live="polite" aria-atomic="true">
-            <Status analysis={analysis} answer={answer} held={held} sent={sent} canAct={canAct} />
+            <Status
+              analysis={analysis}
+              answer={answer}
+              held={held}
+              sent={sent}
+              canAct={canAct}
+              noPlay={noPlay}
+            />
           </div>
           {message !== null && (
             <p role="alert" className="ym-w-status" data-tone="bad">
@@ -614,6 +635,8 @@ function Status(props: {
   readonly held: string | null;
   readonly sent: boolean;
   readonly canAct: boolean;
+  /** The no-play hint, shown instead of the prompt while no tiles are on the board. */
+  readonly noPlay: string | null;
 }): ReactElement {
   const { analysis, answer, held } = props;
   // Selecting a tile (by tap or by keyboard) is announced, with what to do next.
@@ -631,7 +654,7 @@ function Status(props: {
         </>
       );
     }
-    return holding ?? <span>Place tiles to make a word.</span>;
+    return holding ?? <span>{props.noPlay ?? "Place tiles to make a word."}</span>;
   }
   if (isGameError(analysis)) {
     return (
