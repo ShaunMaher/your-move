@@ -78,7 +78,17 @@ export function checkConfig(config: ModuleConfig, catalog: ResourceCatalog): Ok 
   return OK;
 }
 
-const INPUT_KEYS: ReadonlySet<string> = new Set(["rulesetId", "dictionaryId"]);
+/**
+ * The input keys: the choices, plus the versions resolved options carry, accepted and ignored so
+ * that resolved options resolve again to the same choices at their current versions (a rematch,
+ * 02 §2.1 rule 10).
+ */
+const INPUT_KEYS: ReadonlySet<string> = new Set([
+  "rulesetId",
+  "rulesetVersion",
+  "dictionaryId",
+  "dictionaryVersion",
+]);
 
 /** The unknown keys `UNKNOWN_OPTION` may name in its detail (words §10.3). */
 const SAFE_KEY = /^[A-Za-z0-9_]{1,64}$/u;
@@ -87,7 +97,8 @@ const SAFE_KEY = /^[A-Za-z0-9_]{1,64}$/u;
  * Resolves a creator's input `{ rulesetId?, dictionaryId? }` (words §10.1): missing fields take
  * the instance defaults; an unknown or disabled ruleset, a dictionary the creator may not use, or
  * an incompatible pair is an error value. Resolves the ruleset's latest version and the
- * dictionary's current version. `undefined` and `null` mean "all defaults".
+ * dictionary's current version, whatever versions the input names (resolved options are a valid
+ * input). `undefined` and `null` mean "all defaults".
  */
 export function resolveOptions(input: unknown, ctx: OptionsContext): Options | GameError {
   const given: unknown = input ?? {};

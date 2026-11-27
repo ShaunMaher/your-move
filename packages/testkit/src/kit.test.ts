@@ -1,4 +1,5 @@
 import type { Resources } from "@your-move/sdk";
+import { z } from "@your-move/sdk/schema";
 import { describe, expect, it } from "vitest";
 
 import { runKit, type KitOptions } from "./kit.js";
@@ -115,6 +116,17 @@ describe("runKit's static checks", () => {
       "resolveOptions returns options outside the schema",
       { resolveOptions: () => ({ seats: "two" }) },
       /optionsSchema/u,
+    ],
+    [
+      "resolveOptions doesn't accept its own options",
+      {
+        resolveOptions: (input: unknown) =>
+          typeof input === "object" && input !== null && "resolved" in input
+            ? { code: "BAD_OPTIONS" }
+            : { resolved: true },
+        optionsSchema: z.object({ resolved: z.literal(true) }),
+      },
+      /doesn't return its own options unchanged for \{\} \(02 §2\.1 rule 10\)/u,
     ],
     [
       "resolveOptions throws",

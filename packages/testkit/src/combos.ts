@@ -9,13 +9,13 @@ import {
   type OptionsContext,
 } from "@your-move/sdk";
 
-import { canonical } from "./canonical.js";
+import { canonical, sameJson } from "./canonical.js";
 import { errorName, type Combo, type Reporter } from "./report.js";
 import type { KitOptions } from "./types.js";
 
 /**
  * The static checks of 02 §6.1 (reserved and undeclared codes, catalog, config and option
- * schemas, player counts, timeouts), and what to play: each option input with every seat count
+ * schemas, options that resolve to themselves, player counts, timeouts), and what to play: each option input with every seat count
  * `validateStart` accepts.
  */
 export function resolveCombos(
@@ -76,6 +76,19 @@ export function resolveCombos(
     if (!def.optionsSchema.safeParse(options).success) {
       report.fail("schema", "resolved options don't match optionsSchema", where);
       continue;
+    }
+    try {
+      // A rematch resolves a game's stored options again (02 §2.1 rule 10).
+      const again = def.resolveOptions(options, ctx);
+      if (!sameJson(again, options)) {
+        report.fail(
+          "schema",
+          `resolveOptions doesn't return its own options unchanged for ${canonical(input)} (02 §2.1 rule 10)`,
+          where,
+        );
+      }
+    } catch (error) {
+      report.fail("schema", `resolveOptions threw ${errorName(error)} on its own options`, where);
     }
     try {
       const { min, max } = def.players(options);
