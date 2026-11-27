@@ -43,6 +43,7 @@ function game(status: GameRecord["status"]): GameRecord {
     updatedAt: T0,
     startedAt: T0,
     endedAt: null,
+    rematchGameId: null,
   };
 }
 
@@ -336,6 +337,15 @@ describe("addedMessage (alpha A12, 06 §6.2, T18)", () => {
     });
     expect(addedMessage("game-1", "Alice", true, "Games").body).toBe(
       "Alice added you to a game. Your turn.",
+    );
+  });
+
+  it("says '<creator> wants a rematch.' for a rematch (alpha A15)", () => {
+    expect(addedMessage("game-1", "Alice", false, "Games", true).body).toBe(
+      "Alice wants a rematch.",
+    );
+    expect(addedMessage("game-1", "Alice", true, "Games", true).body).toBe(
+      "Alice wants a rematch. Your turn.",
     );
   });
 

@@ -240,10 +240,13 @@ export type GameResourceRecord = Omit<InferSelectModel<typeof gameResources>, "g
 /** A logged transition without its secret columns (`action`, `rng`): what history may show. */
 export type PublicActionRecord = Omit<GameActionRecord, "action" | "rng">;
 
-/** A new game row; `version`, `write_token` and `action_count` start at their defaults. */
+/**
+ * A new game row; `version`, `write_token` and `action_count` start at their defaults, and
+ * `rematch_game_id` is NULL until a rematch of the game is created ({@link GameRepo.createRematch}).
+ */
 export type NewGame = Omit<
   InferInsertModel<typeof games>,
-  "version" | "writeToken" | "actionCount"
+  "version" | "writeToken" | "actionCount" | "rematchGameId"
 >;
 /** A new `game_players` row of a known game. */
 export type NewGamePlayer = Omit<InferInsertModel<typeof gamePlayers>, "gameId">;
@@ -322,6 +325,30 @@ export interface LoadedGame {
   readonly players: readonly GamePlayerRecord[];
 }
 
+/**
+ * How a game ended unplayed, so that as a finished game's rematch it may be replaced (04
+ * `rematch_game_id`): every `declined` ending (02 §2.1 rule 9: a seat refused before acting), and
+ * a `cancelled` or `expired` one with no action logged, except an operator's cancel.
+ */
+export const UNPLAYED = {
+  /** Unplayed whatever was logged. */
+  always: "declined",
+  /** Unplayed only with `action_count = 0`. */
+  ifNoAction: ["cancelled", "expired"],
+  /** The `end_reason` of an operator's cancel, which is never unplayed (02 §4). */
+  operatorCancel: "operator_cancelled",
+} as const;
+
+/**
+ * What a finished game's players see of its rematch (05 `rematch`): a few columns of the rematch
+ * and one user's own row state in it, if any.
+ */
+export interface RematchRead {
+  readonly game: Pick<GameRecord, "id" | "status" | "createdAt" | "actionCount" | "endReason">;
+  /** The user's `game_players.state` in the rematch; null when they hold no row. */
+  readonly viewerState: GamePlayerRecord["state"] | null;
+}
+
 /** Which of a user's games to list (05 `GET /api/v1/games`). */
 export interface GameListQuery {
   readonly userId: string;
@@ -374,8 +401,24 @@ export interface GameListRow {
 export interface GameRepo {
   /** Inserts a new game, its first `game_players` rows, resources and invites atomically. */
   create(game: NewGame, players: readonly NewGamePlayer[], extras?: NewGameExtras): Promise<void>;
+  /**
+   * Creates the rematch of a finished game (05 `POST /api/v1/games/:id/rematch`) exactly as
+   * {@link create} does, and links it as that game's `rematch_game_id`, in one atomic batch that
+   * writes anything only while `finishedId` is a `finished` game whose link is NULL or names a
+   * game that ended unplayed ({@link UNPLAYED}), which it replaces. True if it did; false if it wrote nothing, so of several calls racing for one
+   * finished game exactly one creates a game and the others leave no row behind. Not a
+   * transition: the finished game's `version` is unchanged.
+   */
+  createRematch(
+    finishedId: string,
+    game: NewGame,
+    players: readonly NewGamePlayer[],
+    extras?: NewGameExtras,
+  ): Promise<boolean>;
   /** The game row, secret columns included (the core decides what leaves the server). */
   get(id: string): Promise<GameRecord | null>;
+  /** The rematch `gameId` as `userId` sees it from the finished game; null if no such game. */
+  rematchRead(gameId: string, userId: string): Promise<RematchRead | null>;
   /** The game row and its players, read in one batch. */
   load(id: string): Promise<LoadedGame | null>;
   /** The game's `game_players` rows, ordered by seat and then as they were added. */

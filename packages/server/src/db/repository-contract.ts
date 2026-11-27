@@ -814,6 +814,248 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
       });
     });
 
+    describe("rematches (05 `POST /api/v1/games/:id/rematch`, alpha A15)", () => {
+      const human = async () => {
+        const id = crypto.randomUUID();
+        await repos.users.create({ id, email: address(id), createdAt: T0, updatedAt: T0 });
+        return id;
+      };
+
+      /** A finished game, and a rematch of it ready to insert: its row, players and extras. */
+      async function finishedAndRematch() {
+        const finished = newGame({ status: "finished", startedAt: T0, endedAt: T0 + 1 });
+        await repos.games.create(finished, [player({ seat: 0, state: "out" })]);
+        return { finishedId: finished.id, ...rematchOf(await human()) };
+      }
+
+      function rematchOf(creator: string) {
+        const game = newGame({ createdBy: creator, createdAt: T0 + 2 });
+        const players = [player({ userId: creator, joinedVia: "creator" }), player()];
+        const extras = {
+          resources: [{ kind: "dictionary", resourceId: "enable", version: 1 }],
+          invites: [
+            { id: crypto.randomUUID(), inviterId: creator, emailHash: "h", expiresAt: T0 + 9 },
+          ],
+        };
+        return { game, players, extras };
+      }
+
+      /** Everything a created game wrote: its row, players, resources and invites. */
+      async function written(gameId: string) {
+        return {
+          game: await repos.games.get(gameId),
+          players: (await repos.games.players(gameId)).length,
+          resources: (await repos.games.resources(gameId)).length,
+          invites: (await target.sql("SELECT id FROM invites WHERE game_id = ?", gameId)).length,
+        };
+      }
+
+      const linkOf = async (gameId: string) => (await repos.games.get(gameId))?.rematchGameId;
+
+      it("creates the rematch with everything it has and links it, without a transition", async () => {
+        const { finishedId, game, players, extras } = await finishedAndRematch();
+        const before = await repos.games.get(finishedId);
+        expect(await repos.games.createRematch(finishedId, game, players, extras)).toBe(true);
+        const rows = await written(game.id);
+        expect(rows.game).toMatchObject({ ...game, version: 0, rematchGameId: null });
+        expect(rows).toMatchObject({ players: 2, resources: 1, invites: 1 });
+        // Only the link changed: the finished game's version and write token are as they were.
+        expect(await repos.games.get(finishedId)).toEqual({ ...before, rematchGameId: game.id });
+      });
+
+      it("creates nothing once the game has a live rematch, or isn't finished, or doesn't exist", async () => {
+        const { finishedId, game, players, extras } = await finishedAndRematch();
+        expect(await repos.games.createRematch(finishedId, game, players, extras)).toBe(true);
+        const second = rematchOf(await human());
+        expect(
+          await repos.games.createRematch(finishedId, second.game, second.players, second.extras),
+        ).toBe(false);
+        expect(await written(second.game.id)).toEqual({
+          game: null,
+          players: 0,
+          resources: 0,
+          invites: 0,
+        });
+        expect(await linkOf(finishedId)).toBe(game.id);
+
+        const active = newGame({ status: "active", startedAt: T0 });
+        await repos.games.create(active, []);
+        for (const id of [active.id, crypto.randomUUID()]) {
+          const other = rematchOf(await human());
+          expect(await repos.games.createRematch(id, other.game, other.players, other.extras)).toBe(
+            false,
+          );
+          expect((await written(other.game.id)).game).toBeNull();
+        }
+        expect(await linkOf(active.id)).toBeNull();
+      });
+
+      it("creates nothing and links nothing when one of its rows is refused", async () => {
+        const { finishedId, game } = await finishedAndRematch();
+        const user = await human();
+        await expect(
+          repos.games.createRematch(finishedId, game, [
+            player({ userId: user }),
+            player({ userId: user }),
+          ]),
+        ).rejects.toThrow();
+        expect((await written(game.id)).game).toBeNull();
+        expect(await linkOf(finishedId)).toBeNull();
+      });
+
+      it("refuses a game as the rematch of a second game: a rematch belongs to one game", async () => {
+        const { finishedId, game, players } = await finishedAndRematch();
+        expect(await repos.games.createRematch(finishedId, game, players)).toBe(true);
+        const other = await finishedAndRematch();
+        // The unique index on `rematch_game_id`: the same game id can't be linked twice.
+        // (Wrapped: an adapter's `sql` may throw before it returns a promise.)
+        await expect(
+          (async () =>
+            target.sql(
+              "UPDATE games SET rematch_game_id = ? WHERE id = ?",
+              game.id,
+              other.finishedId,
+            ))(),
+        ).rejects.toThrow();
+        expect(await linkOf(other.finishedId)).toBeNull();
+      });
+
+      // On Node the calls interleave only at await points (one connection); on D1 they are real
+      // concurrent requests. Either way the conditional link decides the race.
+      it("of rematches started together for one game, exactly one is created, and no row of the others is left", async () => {
+        for (let round = 0; round < 5; round++) {
+          const finished = newGame({ status: "finished", startedAt: T0, endedAt: T0 + 1 });
+          await repos.games.create(finished, []);
+          const contenders = await Promise.all(
+            [0, 1, 2, 3].map(async () => rematchOf(await human())),
+          );
+          const results = await Promise.all(
+            contenders.map(({ game, players, extras }) =>
+              repos.games.createRematch(finished.id, game, players, extras),
+            ),
+          );
+          expect(results.filter((result) => result)).toHaveLength(1);
+          const winner = contenders[results.indexOf(true)];
+          expect(await linkOf(finished.id)).toBe(winner?.game.id);
+          for (const contender of contenders) {
+            const rows = await written(contender.game.id);
+            if (contender === winner) expect(rows.players).toBe(2);
+            else expect(rows).toEqual({ game: null, players: 0, resources: 0, invites: 0 });
+          }
+        }
+      });
+
+      /** Links a stored game as the finished game's rematch, by creating it through the repo. */
+      async function linked(finishedId: string, overrides: Partial<NewGame>) {
+        const made = rematchOf(await human());
+        const game = { ...made.game, ...overrides };
+        expect(await repos.games.createRematch(finishedId, game, made.players)).toBe(true);
+        return game.id;
+      }
+
+      it("replaces a rematch that ended unplayed: cancelled or expired with no action, or any declined ending", async () => {
+        const cases: [Partial<NewGame>, number][] = [
+          [{ status: "cancelled", endReason: "cancelled" }, 0],
+          [{ status: "expired", endReason: "expired" }, 0],
+          [{ status: "declined", endReason: "declined" }, 0],
+          // A three-seat game, or a timeout path, that ended declined after one action: the
+          // decliner refused before acting (02 §2.1 rule 9), so it never got going (A15-R2-1).
+          [{ status: "declined", endReason: "declined", startedAt: T0 }, 1],
+        ];
+        for (const [overrides, actions] of cases) {
+          const status = overrides.status;
+          const { finishedId } = await finishedAndRematch();
+          const old = await linked(finishedId, overrides);
+          if (actions > 0) {
+            await target.sql("UPDATE games SET action_count = ? WHERE id = ?", actions, old);
+          }
+          const next = rematchOf(await human());
+          expect(
+            await repos.games.createRematch(finishedId, next.game, next.players, next.extras),
+          ).toBe(true);
+          expect(await linkOf(finishedId)).toBe(next.game.id);
+          expect((await written(next.game.id)).players).toBe(2);
+          // The replaced game stays as it was, only no longer linked.
+          expect((await repos.games.get(old))?.status).toBe(status);
+        }
+      });
+
+      it("never replaces a rematch that is live, was played, or an operator cancelled", async () => {
+        const cases: [Partial<NewGame>, number][] = [
+          [{ status: "lobby" }, 0],
+          [{ status: "active", startedAt: T0 }, 0],
+          [{ status: "finished", startedAt: T0, endedAt: T0 + 1 }, 0],
+          // Cancelled or expired after someone acted: played, so it stays.
+          [{ status: "cancelled", endReason: "cancelled", startedAt: T0 }, 2],
+          [{ status: "expired", endReason: "expired" }, 2],
+          // An operator's cancel is never unplayed, moves or not (A15-S2-1).
+          [{ status: "cancelled", endReason: "operator_cancelled", startedAt: T0 }, 0],
+        ];
+        for (const [overrides, actions] of cases) {
+          const { finishedId } = await finishedAndRematch();
+          const old = await linked(finishedId, overrides);
+          if (actions > 0) {
+            await target.sql("UPDATE games SET action_count = ? WHERE id = ?", actions, old);
+          }
+          const next = rematchOf(await human());
+          expect(
+            await repos.games.createRematch(finishedId, next.game, next.players, next.extras),
+          ).toBe(false);
+          expect(await written(next.game.id)).toEqual({
+            game: null,
+            players: 0,
+            resources: 0,
+            invites: 0,
+          });
+          expect(await linkOf(finishedId)).toBe(old);
+        }
+      });
+
+      it("of replacements started together, exactly one is created, and no row of the others is left", async () => {
+        for (let round = 0; round < 3; round++) {
+          const { finishedId } = await finishedAndRematch();
+          await linked(finishedId, { status: "expired" });
+          const contenders = await Promise.all(
+            [0, 1, 2, 3].map(async () => rematchOf(await human())),
+          );
+          const results = await Promise.all(
+            contenders.map(({ game, players, extras }) =>
+              repos.games.createRematch(finishedId, game, players, extras),
+            ),
+          );
+          expect(results.filter((result) => result)).toHaveLength(1);
+          const winner = contenders[results.indexOf(true)];
+          expect(await linkOf(finishedId)).toBe(winner?.game.id);
+          for (const contender of contenders) {
+            if (contender === winner) continue;
+            expect(await written(contender.game.id)).toEqual({
+              game: null,
+              players: 0,
+              resources: 0,
+              invites: 0,
+            });
+          }
+        }
+      });
+
+      it("reads a rematch's state for one user: a few columns and that user's own row", async () => {
+        const creator = await human();
+        const other = await human();
+        const game = newGame({ status: "lobby", createdBy: creator });
+        await repos.games.create(game, [
+          player({ userId: creator, joinedVia: "creator" }),
+          player({ userId: other, state: "invited", joinedAt: null }),
+        ]);
+        expect(await repos.games.rematchRead(game.id, other)).toEqual({
+          game: { id: game.id, status: "lobby", createdAt: T0, actionCount: 0, endReason: null },
+          viewerState: "invited",
+        });
+        expect((await repos.games.rematchRead(game.id, creator))?.viewerState).toBe("joined");
+        expect((await repos.games.rematchRead(game.id, await human()))?.viewerState).toBeNull();
+        expect(await repos.games.rematchRead(crypto.randomUUID(), creator)).toBeNull();
+      });
+    });
+
     describe("write_token transitions (03 §5.2)", () => {
       it("applies a transition and every dependent write", async () => {
         const ids = await activeGame(repos);

@@ -435,7 +435,7 @@ The page never links to unofficial copies.
 ### 10.1 Options, players, resources, catalog
 
 ```ts
-Input   = { rulesetId?: string; dictionaryId?: string }
+Input   = { rulesetId?: string; dictionaryId?: string; rulesetVersion?: number; dictionaryVersion?: number /* non-negative integers, accepted and ignored */ }
 Options = { rulesetId: string; rulesetVersion: number; dictionaryId: string; dictionaryVersion: number }
 ```
 
@@ -448,7 +448,10 @@ Options = { rulesetId: string; rulesetVersion: number; dictionaryId: string; dic
   a dictionary not in `ctx.resources` (unknown, disabled, deleted, or someone else's upload) →
   `UNKNOWN_DICTIONARY`; incompatible pair (language/alphabet from the resource metadata) →
   `INCOMPATIBLE_DICTIONARY` (§9.3). Resolves the latest ruleset version and the dictionary's
-  current version.
+  current version, whatever versions the input names: resolved options are a valid input and
+  resolve to themselves while nothing has changed (02 §2.1 rule 10, a rematch). A version key that
+  isn't a non-negative integer → `INVALID_OPTION` with `detail: { option }`; a valid one is never
+  honoured (no game can pin an old version).
 - `catalog(ctx)`: enabled rulesets (id, version, name, description, key numbers, premium preview),
   the dictionaries in `ctx.resources` with their compatibility per ruleset, and the defaults.
 - `players(options)` = `{ min: ruleset.minPlayers, max: ruleset.maxPlayers }` (2/2 in the MVP).
@@ -482,7 +485,7 @@ Action =
 `preview` for a seat that isn't in `toAct`, which the framework never asks), plus
 `UNKNOWN_RULESET`, `UNKNOWN_DICTIONARY`, `INCOMPATIBLE_DICTIONARY`, `NOT_ENOUGH_TILES`
 (`detail: { needed, tiles }`: `rackSize × seats` and the ruleset's tile count),
-`OPTIONS_NOT_OBJECT` and `UNKNOWN_OPTION` from option resolution, `checkConfig` (with `detail: {
+`OPTIONS_NOT_OBJECT`, `UNKNOWN_OPTION` and `INVALID_OPTION` from option resolution, `checkConfig` (with `detail: {
 key }` naming the config key, never its value) and start. `UNKNOWN_OPTION` has `detail: { option
 }` naming the unknown key only when the key matches `^[A-Za-z0-9_]{1,64}$`, and no `detail`
 otherwise, so arbitrary input is never echoed.

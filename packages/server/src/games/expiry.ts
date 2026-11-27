@@ -36,6 +36,25 @@ export async function loadCurrent(
   }
 }
 
+/**
+ * Expires the game if it is an overdue lobby, whoever asks: a finished game's rematch that
+ * expired may be replaced (05 `POST /api/v1/games/:id/rematch`), and its players needn't be
+ * members of it. Retried on `stale` like any server-started transition; whatever won is kept.
+ */
+export async function expireIfOverdue(
+  repos: Repositories,
+  gameId: string,
+  now: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    const loaded = await repos.games.load(gameId);
+    if (loaded === null) return;
+    const writes = expire(loaded.game, loaded.players, now);
+    if (writes === null) return;
+    if ((await repos.games.applyTransition(gameId, loaded.game.version, writes)) === "ok") return;
+  }
+}
+
 /** Expires the overdue lobbies the user holds a row in (before listing or counting them). */
 export async function expireOverdueLobbies(
   repos: Repositories,

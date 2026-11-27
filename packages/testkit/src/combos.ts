@@ -15,7 +15,7 @@ import type { KitOptions } from "./types.js";
 
 /**
  * The static checks of 02 §6.1 (reserved and undeclared codes, catalog, config and option
- * schemas, player counts, timeouts), and what to play: each option input with every seat count
+ * schemas, options that resolve to themselves, player counts, timeouts), and what to play: each option input with every seat count
  * `validateStart` accepts.
  */
 export function resolveCombos(
@@ -76,6 +76,22 @@ export function resolveCombos(
     if (!def.optionsSchema.safeParse(options).success) {
       report.fail("schema", "resolved options don't match optionsSchema", where);
       continue;
+    }
+    try {
+      // A rematch resolves a game's stored options again (02 §2.1 rule 10). The module gets a
+      // copy, and the result is compared with a snapshot taken before the call, so a module that
+      // changes its input can't pass by changing the options it is compared with (A15-P-5).
+      const before = canonical(options);
+      const again = def.resolveOptions(structuredClone(options), ctx);
+      if (canonical(again) !== before) {
+        report.fail(
+          "schema",
+          `resolveOptions doesn't return its own options unchanged for ${canonical(input)} (02 §2.1 rule 10)`,
+          where,
+        );
+      }
+    } catch (error) {
+      report.fail("schema", `resolveOptions threw ${errorName(error)} on its own options`, where);
     }
     try {
       const { min, max } = def.players(options);

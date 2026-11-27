@@ -1,7 +1,9 @@
 /**
  * Playing again with someone you've played (alpha A12, 07 §1.1, 06 §6.1): Ann and Bob finish a
  * words game in which both moved, then Ann starts the next one by picking Bob from "People you've
- * played". No address is typed and nothing is accepted: both land on an active board.
+ * played". No address is typed and nothing is accepted: both land on an active board. Then the
+ * finished game's own Rematch button (alpha A15, 07 §1, 05 `POST /api/v1/games/:id/rematch`): Ann
+ * presses it, Bob's finished screen offers "Go to rematch", and both land on the same board.
  */
 import { REMATCH_TEST_TIMEOUT_MS } from "./budgets.js";
 import { expect, test } from "./fixtures.js";
@@ -9,7 +11,7 @@ import { createAndAccept, FAR, isMyTurn, refocus } from "./game-steps.js";
 import { expectAccessible, freshAddress, signUp } from "./helpers.js";
 import { pass } from "./words-player.js";
 
-test("a finished game's players start the next one from the list, straight onto the board", async ({
+test("a finished game's players start the next one from the list or its Rematch button, straight onto the board", async ({
   page: ann,
   friend: bob,
 }) => {
@@ -67,4 +69,28 @@ test("a finished game's players start the next one from the list, straight onto 
   await expect(bob).toHaveURL(new RegExp(`/g/${second}$`, "u"));
   await expect(bob.getByRole("region", { name: "Words board" })).toBeVisible(FAR);
   await expectAccessible(bob);
+
+  // The finished game's Rematch button: one press, the same setup, both straight onto the board.
+  await ann.goto(`/g/${first}`);
+  const annResults = ann.getByRole("region", { name: "Final result" });
+  await expect(annResults).toBeVisible(FAR);
+  await expectAccessible(ann);
+  await annResults.getByRole("button", { name: "Rematch" }).click();
+  // The finished game shows its final board too: wait for the move to the new game first.
+  await expect(ann).not.toHaveURL(new RegExp(`/g/${first}$`, "u"), FAR);
+  await expect(ann.getByRole("region", { name: "Words board" })).toBeVisible(FAR);
+  await expect(ann.getByRole("region", { name: "Final result" })).toHaveCount(0);
+  const third = /\/g\/([^/]+)$/u.exec(new URL(ann.url()).pathname)?.[1] ?? "";
+  expect([first, second, ""]).not.toContain(third);
+
+  await bob.goto(`/g/${first}`);
+  const bobResults = bob.getByRole("region", { name: "Final result" });
+  await bobResults.getByRole("button", { name: "Go to rematch" }).click(FAR);
+  await expect(bob).toHaveURL(new RegExp(`/g/${third}$`, "u"));
+  await expect(bob.getByRole("region", { name: "Words board" })).toBeVisible(FAR);
+
+  // Ann's finished game now leads to the same rematch.
+  await ann.goto(`/g/${first}`);
+  await annResults.getByRole("button", { name: "Go to rematch" }).click(FAR);
+  await expect(ann).toHaveURL(new RegExp(`/g/${third}$`, "u"));
 });

@@ -11,6 +11,7 @@ import {
   accept,
   cancel,
   decline,
+  endedUnplayed,
   expire,
   isModuleOutcome,
   isRefusal,
@@ -19,6 +20,7 @@ import {
   start,
   startAtCreation,
 } from "./lifecycle.js";
+import { rematchOf } from "./present.js";
 import { cryptoRandom, recorded } from "./random.js";
 import { createGameRegistry, GameConfigError } from "./registry.js";
 import {
@@ -530,5 +532,66 @@ describe("typed addresses on open invitations (A12-S-3)", () => {
     }
     // Not vacuous: accepts, declines and endings did clear addresses.
     expect(checked).toBeGreaterThan(4);
+  });
+});
+
+describe("a finished game's rematch as one of its players sees it (05 `rematch`, alpha A15)", () => {
+  type Status = GameRecord["status"];
+  const game = (status: Status = "lobby", actionCount = 0, endReason: string | null = null) =>
+    ({ id: "r", status, createdAt: 1000, actionCount, endReason }) as const;
+  const at = (
+    viewerState: GamePlayerRecord["state"] | null,
+    status: Status = "lobby",
+    now = 2000,
+  ) => rematchOf({ game: game(status), viewerState }, now)?.you;
+
+  it("is joined for a joined or seated row, invited for an invitation, none otherwise", () => {
+    expect(
+      (["joined", "invited", "declined", "left", "removed", null] as const).map((state) =>
+        at(state),
+      ),
+    ).toEqual(["joined", "invited", "none", "none", "none", "none"]);
+    expect([at("playing", "active"), at("out", "finished"), at("dropped", "active")]).toEqual([
+      "joined",
+      "joined",
+      "none",
+    ]);
+    expect(rematchOf({ game: game(), viewerState: "joined" }, 2000)).toEqual({
+      gameId: "r",
+      you: "joined",
+    });
+  });
+
+  it("is null once its lobby is past its expiry: it has ended unplayed", () => {
+    expect(
+      rematchOf({ game: game(), viewerState: "invited" }, 1000 + LOBBY_LIFETIME_MS),
+    ).toBeNull();
+    expect(at("invited", "lobby", 999 + LOBBY_LIFETIME_MS)).toBe("invited");
+  });
+
+  it("is null once the rematch ended unplayed, so it may be replaced (A15-P-2, R2-1, S2-1)", () => {
+    for (const status of ["cancelled", "expired", "declined"] as const) {
+      expect(rematchOf({ game: game(status), viewerState: "invited" }, 2000)).toBeNull();
+    }
+    // Every declined ending is a seat refusing before it acted (02 §2.1 rule 9), even after
+    // others played.
+    expect(endedUnplayed(game("declined", 3, "declined"))).toBe(true);
+    // A cancel or expiry after moves was played, and an operator's cancel is never unplayed.
+    expect(rematchOf({ game: game("cancelled", 3), viewerState: "out" }, 2000)?.you).toBe("joined");
+    expect(endedUnplayed(game("expired", 1))).toBe(false);
+    expect(endedUnplayed(game("cancelled", 0, "operator_cancelled"))).toBe(false);
+    expect(endedUnplayed(game("cancelled", 0, "cancelled"))).toBe(true);
+    expect(endedUnplayed(game("finished"))).toBe(false);
+    expect(endedUnplayed(game("lobby"))).toBe(false);
+  });
+});
+
+describe("remembered options leave version keys out (05 §Remembered options, A15-P-10)", () => {
+  it("drops top-level *Version keys and keeps everything else", () => {
+    expect(
+      rememberedInput({ rulesetId: "casual", rulesetVersion: 1, dictionaryVersion: 2, x: 1 }),
+    ).toBe('{"rulesetId":"casual","x":1}');
+    expect(rememberedInput(undefined)).toBe("{}");
+    expect(rememberedInput("raw")).toBe('"raw"');
   });
 });

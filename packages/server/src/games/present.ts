@@ -11,9 +11,10 @@ import type {
   GameRecord,
   GameResourceRecord,
   ListedGame,
+  RematchRead,
   UserRecord,
 } from "../db/repositories.js";
-import { deadlineOf, type FinalViews } from "./lifecycle.js";
+import { deadlineOf, endedUnplayed, type FinalViews, lobbyExpiresAt } from "./lifecycle.js";
 import type { GameType } from "./registry.js";
 
 type EnvelopePlayer = GameEnvelope["players"][number];
@@ -103,6 +104,8 @@ export interface PresentInput {
   /** The installed game type, if any; its engine for this version decides `available`. */
   readonly type: GameType | undefined;
   readonly describeResource: (kind: "dictionary", id: string) => ResourceMeta | undefined;
+  /** A finished game's rematch as the viewer sees it ({@link rematchOf}); null if it has none. */
+  readonly rematch?: GameEnvelope["rematch"];
 }
 
 /** What presenting the players needs: a few game columns, the rows, their users, the viewer. */
@@ -187,6 +190,31 @@ export function invitationOf(
   return viewer.delivery;
 }
 
+/**
+ * A finished game's rematch as one of its players sees it (05 `rematch`):
+ * - `null` when it ended unplayed ({@link endedUnplayed}) or is a lobby past its expiry: it may be
+ *   replaced, and the press expires an overdue lobby first;
+ * - otherwise `joined` if they hold a joined or seated row in it, `invited` while they hold an
+ *   invitation in its open lobby, and `none` otherwise (declined, left, removed, dropped at its
+ *   start, or no row).
+ *
+ * An `inert` invitation shows as `invited`, like any other: whether a row is inert never shows,
+ * and accepting it is refused as `404`, as accepting an invitation with a block is (05).
+ */
+export function rematchOf(rematch: RematchRead, now: number): GameEnvelope["rematch"] {
+  const { game, viewerState } = rematch;
+  if (endedUnplayed(game)) return null;
+  if (game.status === "lobby" && now >= lobbyExpiresAt(game)) return null;
+  const lobbyOpen = game.status === "lobby";
+  const you =
+    viewerState === "joined" || viewerState === "playing" || viewerState === "out"
+      ? "joined"
+      : viewerState === "invited" && lobbyOpen
+        ? "invited"
+        : "none";
+  return { gameId: game.id, you };
+}
+
 /** The seats in `toAct`, and whether the viewer's is one of them. */
 export function turnOf(
   players: readonly GamePlayerRecord[],
@@ -221,6 +249,8 @@ export function envelope(input: PresentInput): GameEnvelope {
     toAct,
     yourTurn,
     yourInvitation: invitationOf(game, viewer),
+    // Finished games only, and only ever to their players: nobody else reads a finished game.
+    ...(game.status === "finished" ? { rematch: input.rematch ?? null } : {}),
     createdAt: game.createdAt,
     lastActionAt: game.lastActionAt,
   };

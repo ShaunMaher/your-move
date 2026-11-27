@@ -99,6 +99,13 @@ export const getHistory = (api: ApiClient, id: string, cursor?: string) =>
 export const createGame = (api: ApiClient, body: CreateGameRequest) =>
   settle(api.POST("/api/v1/games", { body }));
 
+/**
+ * A finished game's rematch (05 `POST /api/v1/games/:id/rematch`): created now (`201`), or the one
+ * that exists (`200`), with your invitation in it accepted.
+ */
+export const rematchGame = (api: ApiClient, id: string) =>
+  settle(api.POST("/api/v1/games/{id}/rematch", { params: { path: { id } }, body: {} }));
+
 /** Your past opponents, to pick for a new game (05 `GET /api/v1/players/recent`). */
 export const listRecentPlayers = (api: ApiClient) => settle(api.GET("/api/v1/players/recent"));
 

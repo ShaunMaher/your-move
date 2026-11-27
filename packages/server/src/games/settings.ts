@@ -47,11 +47,19 @@ export function mergeOptions(input: unknown, remembered: unknown): unknown {
   return { ...remembered, ...input };
 }
 
+/** The suffix of a version key of resolved options (02 §2.1 rule 10): never remembered. */
+const VERSION_SUFFIX = "Version";
+
 /**
- * The option input as stored in `lastOptions[gameType]`, or null when it is too large to be worth
- * keeping (the options came from a 16 kB body): then only `lastGameType` changes.
+ * The option input as stored in `lastOptions[gameType]`, without its top-level version keys (05
+ * §Remembered options: a module ignores them anyway, and an old version is never worth keeping),
+ * or null when it is too large to be worth keeping (the options came from a 16 kB body): then only
+ * `lastGameType` changes.
  */
 export function rememberedInput(input: unknown): string | null {
-  const serialised = JSON.stringify(input ?? {});
+  const kept = isRecord(input)
+    ? Object.fromEntries(Object.entries(input).filter(([key]) => !key.endsWith(VERSION_SUFFIX)))
+    : input;
+  const serialised = JSON.stringify(kept ?? {});
   return serialised.length > MAX_REMEMBERED_BYTES ? null : serialised;
 }

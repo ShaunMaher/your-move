@@ -406,6 +406,52 @@ describe("the push to a past opponent added to a new game (alpha A12, 06 §6.2)"
     expect(await received(adaPhone)).toEqual([]);
   });
 
+  it("says '<creator> wants a rematch.' for a rematch (alpha A15, 03 §7)", async () => {
+    const [ada, bo] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
+    const [adaPhone, boPhone] = [await device(), await device()];
+    await subscribe(ada, adaPhone);
+    await subscribe(bo, boPhone);
+    pastOpponents(ada, bo);
+    // A game between them, finished as if played out (the rematch reads only its setup).
+    const game = await createGame(h, bo, { gameType: "example", invitees: [{ userId: ada.id }] });
+    const final = { view: null, summary: { headline: [] } };
+    h.exec(
+      "UPDATE games SET status = 'finished', ended_at = ?, final_views = ? WHERE id = ?",
+      h.platform.now().getTime(),
+      JSON.stringify({ seats: [final, final], public: final }),
+      game.id,
+    );
+    h.exec("UPDATE game_players SET acted_once = 1 WHERE game_id = ?", game.id);
+    await h.drain();
+    const before = (await received(boPhone)).length;
+    const asked = await h.request(
+      "POST",
+      `/api/v1/games/${game.id}/rematch`,
+      {},
+      {
+        cookie: ada.cookie,
+      },
+    );
+    expect(asked.status).toBe(201);
+    const { game: made } = (await asked.json()) as { game: { id: string; status: string } };
+    // The example game's first round has every seat to act.
+    expect(made.status).toBe("active");
+    expect((await received(boPhone)).slice(before)).toEqual([
+      {
+        title: "Family Games",
+        body: "Ada wants a rematch. Your turn.",
+        url: `/g/${made.id}`,
+        tag: `game-${made.id}`,
+      },
+    ]);
+    // Never to the one who asked; a later call by Bo sends nothing more.
+    const adaBefore = (await received(adaPhone)).length;
+    await h.request("POST", `/api/v1/games/${game.id}/rematch`, {}, { cookie: bo.cookie });
+    await h.drain();
+    expect((await received(adaPhone)).length).toBe(adaBefore);
+    expect((await received(boPhone)).length).toBe(before + 1);
+  });
+
   it("pushes to an added player waiting in a lobby, and nothing for an invitation or a typed address", async () => {
     const [ada, bo, cy] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
     const [boPhone, cyPhone] = [await device(), await device()];

@@ -267,6 +267,14 @@ export interface GameDefinition<
   /** Every code `validate`, `preview`, `resolveOptions`, `validateStart` and `checkConfig` return. */
   readonly errorCodes: readonly string[];
 
+  /**
+   * Turns a creator's untrusted option input into complete options (defaults, current versions,
+   * enabled lists, compatibility), or an error value (02 §2). Options this function resolved itself
+   * are a valid input and come back unchanged under the same `ctx` (02 §2.1 rule 10; a rematch
+   * resolves a finished game's stored options this way). Version keys of the options, named
+   * `<name>Version`, are accepted in the input and ignored — validate their shape, but never honour
+   * them: an input must not be able to pin an old version. Must not change `input`.
+   */
   resolveOptions(input: unknown, ctx: OptionsContext): Options | GameError;
   catalog(ctx: OptionsContext): unknown;
   players(options: Options): { readonly min: number; readonly max: number };
@@ -380,6 +388,7 @@ export const RESERVED_ERROR_CODES: readonly string[] = Object.freeze([
   "ALREADY_ACTED",
   "ALREADY_JOINED",
   "TOO_MANY_GAMES",
+  "REMATCH_UNAVAILABLE",
   "TOO_MANY_DICTIONARIES",
   "TOO_MANY_TOKENS",
   "TOO_MANY_AGENTS",

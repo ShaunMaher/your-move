@@ -429,13 +429,22 @@ async function readEverything(gameId: string, players: readonly Player[], strang
     actions: { expectedVersion: 0, action: { type: "pass" } },
     preview: { action: { type: "pass" } },
   };
-  for (const name of ["actions", "preview", "start", "accept", "decline", "resign", "cancel"]) {
+  for (const name of [
+    "actions",
+    "preview",
+    "start",
+    "accept",
+    "decline",
+    "resign",
+    "cancel",
+    "rematch",
+  ]) {
     const answer = await hit(
       stranger,
       "POST",
       `/api/v1/games/:id/${name}`,
       { id: gameId },
-      bodies[name] ?? { expectedVersion: 0 },
+      bodies[name] ?? (name === "rematch" ? {} : { expectedVersion: 0 }),
     );
     expect([answer.status, answer.json.error?.code], name).toEqual([404, "NOT_FOUND"]);
   }
@@ -830,6 +839,30 @@ describe("route-wide secrecy (04 invariant 4)", () => {
       expect(stored(rematch).status).toBe("active");
       await readEverything(rematch, players, stranger);
       expect(await unchangedByHiddenState(rematch, players)).toBe(3);
+
+      // The finished game's own rematch (alpha A15): created by one player, answered to the
+      // others with the same game, and shown on the finished game to its players only.
+      h.advance(HOUR);
+      const asked = await hit(b, "POST", "/api/v1/games/:id/rematch", { id: game }, {});
+      expect(asked.status, asked.text).toBe(201);
+      const again = asked.json.game?.id ?? "";
+      gamesInPlay.push(again);
+      for (const player of [a, c]) {
+        const answer = await hit(player, "POST", "/api/v1/games/:id/rematch", { id: game }, {});
+        expect([answer.status, answer.json.game?.id]).toEqual([200, again]);
+      }
+      for (const player of players) {
+        const finishedGame = await hit(player, "GET", "/api/v1/games/:id", { id: game });
+        expect(finishedGame.text).toContain(`"rematch":{"gameId":"${again}","you":"joined"}`);
+      }
+      // Nothing about it anywhere else: not in a list row, not to a stranger.
+      for (const viewer of [...players, stranger]) {
+        const listed = await hit(viewer, "GET", "/api/v1/games");
+        expect(listed.text).not.toContain('"rematch"');
+      }
+      await readEverything(game, players, stranger);
+      await readEverything(again, players, stranger);
+      expect(await unchangedByHiddenState(again, players)).toBe(3);
     },
   );
 

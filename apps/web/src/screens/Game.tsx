@@ -11,6 +11,7 @@ import type { GameClientModule } from "@your-move/sdk/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { loadCatalog } from "../catalog.js";
+import { rematchProblem } from "../create-problems.js";
 import {
   adapt,
   type GameEnvelope,
@@ -18,6 +19,7 @@ import {
   getGame,
   markSeen,
   previewAction,
+  rematchGame,
   submitAction,
   transition,
 } from "../game-api.js";
@@ -287,6 +289,20 @@ export function Game({
     [api, id, game, apply, refetch, onSessionLost, pushKey],
   );
 
+  /** Opens the finished game's rematch, creating or accepting it first (05, 07 §1). */
+  const rematch = useCallback(async (): Promise<string | null> => {
+    const result = await rematchGame(api, id);
+    if (result.ok) {
+      navigate(`/g/${encodeURIComponent(result.data.game.id)}`);
+      return null;
+    }
+    if (result.status === 401) onSessionLost();
+    // The rematch isn't what the screen showed (gone, ended, or another player's meanwhile):
+    // refetch, so the button says what the server now does (A15-P-8).
+    if (result.status === 404 || result.status === 409) void refetch(true);
+    return rematchProblem(result.status, result.code);
+  }, [api, id, onSessionLost, refetch]);
+
   if (load.status === "loading") {
     return (
       <Page appName={appName} nav={<Link to="/">Home</Link>}>
@@ -365,6 +381,7 @@ export function Game({
         submit={submit}
         preview={preview}
         onResign={() => act("resign")}
+        onRematch={rematch}
         onSessionLost={onSessionLost}
         notice={notice}
       />

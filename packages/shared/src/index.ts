@@ -55,6 +55,7 @@ export {
   previewRoute,
   RecentPlayersSchema,
   recentPlayersRoute,
+  rematchRoute,
   resignGameRoute,
   RulesSchema,
   rulesRoute,

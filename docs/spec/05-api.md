@@ -111,6 +111,7 @@ GameEnvelope = {
   yourInvitation: "normal" | "hidden" | null, // you hold an `invited` seat in a `lobby` (accept/decline); null once the lobby ended; hidden ones never badge
   joinLink?: { active: boolean, expiresAt: number | null },  // creator only, lobby only; the URL is shown only on create/rotate
   canAddPlayers?: { userId, displayName }[], // creator only, finished games: link joiners who acted and aren't yet past opponents — blocked ones are still listed so the prompt reveals nothing; add-player is a no-op for them (02 §4)
+  rematch?: { gameId: string, you: "joined" | "invited" | "none" } | null, // finished games only (whose only viewers are their players), null until one exists or while the linked one has ended unplayed (it may then be replaced): the game's rematch (POST …/rematch) and your place in it — a joined or seated row, an invitation in its still-open lobby (an `inert` one looks the same), or neither (alpha A15)
   createdAt, lastActionAt
 }
 GameSummary = { id, gameType, status, endReason, aiAssistance, yourTurn, yourInvitation /* as in the envelope */, players (as in the envelope),
@@ -204,7 +205,8 @@ by (creator, `userId`) and never toward the email-invitee or inbound caps.
 | Other rate limits (06 §6) | `429 RATE_LIMITED` |
 
 **Remembered options.** On success the input options are stored as
-`users.settings.lastOptions[gameType]` and `lastGameType`. On create, omitted top-level option keys
+`users.settings.lastOptions[gameType]` and `lastGameType`, without any top-level key ending in
+`Version` (a version key of resolved options, 02 §2.1 rule 10, which a module ignores anyway). On create, omitted top-level option keys
 are filled from `lastOptions[gameType]` (shallow merge: request keys win). If `resolveOptions`
 rejects the merged input, the server retries once with the request input alone (module defaults for
 the rest); only if that fails too is `INVALID_OPTIONS` returned, so a since-deleted upload or
@@ -216,6 +218,63 @@ hasn't finished onboarding) is created and answered exactly the same (Q3), but n
 until onboarding claims exist (06 §6.4, M4), so it stays unfilled until the lobby is started
 without it, cancelled or expires. Clients tell the creator that the other person must have signed
 in first.
+
+### `POST /api/v1/games/:id/rematch`
+Alpha A15. No input (an empty body or `{}`). A player of a finished game asks for a game with the
+same setup and the same people; the other players see it on the finished screen as "Accept
+rematch" or "Go to rematch" (07 §1).
+
+- **Who.** Only a player who held a seat in the game, and only once it is `finished`. Anyone else
+  gets `404 NOT_FOUND` from the same membership check, with the same reads, as
+  `GET /api/v1/games/:id` gives a non-member (04 §Membership): a finished game's only members are
+  its seated players. A member of a game in any other status (`lobby`, `active`, or ended
+  `declined`, `cancelled` or `expired`) gets `409 WRONG_STATUS`.
+- **Who is carried over.** Every other seated player who acted at least once in the game and whose
+  account still exists. A deleted account's row has no user (04 §Account deletion); a seat that
+  never acted (out as `declined`, or resigned or timed out before a first action) never became
+  anyone's past opponent (04 `past_opponents`), so neither is picked. Both are visible to every
+  player already: "Deleted player" on the finished screen, and who acted in the public history.
+  The rematch has one seat per person carried over plus the caller. If that is fewer than the
+  module's `players(options).min`, the answer is `409 REMATCH_UNAVAILABLE` and nothing is created
+  or counted beyond the write limit; the screen then suggests a new game (07 §1).
+- **Creating it** goes through exactly the path of `POST /api/v1/games`, with the caller as
+  creator, as if they had sent: the finished game's `gameType`; its stored `options` as the option
+  input, resolved again by the module's current version against the caller's own resources (02
+  §2.1 rule 10), so options that no longer resolve (a ruleset the operator has since disabled, a
+  word list that was deleted or is another player's upload) are `400 INVALID_OPTIONS` with the
+  module's code; `seats` as above; its `turnTimeoutDays`, `seatOrder` and `aiAssistance`; and as
+  `invitees`, `{ userId }` for each person carried over, listed in their old seat order. Every rule
+  of that path applies unchanged: the past-opponent and block checks (`400 INVALID_INVITEES` if any
+  of them can't be picked, the same answer for every reason, e.g. a link joiner never added,
+  someone suspended or being deleted, or a block either way), `whoCanAddMe`, the live-game caps and
+  daily limits (`409 TOO_MANY_GAMES`, `429 RATE_LIMITED`), `validateStart`, the start at creation
+  and the "added you" push (worded "<creator> wants a rematch.", 03 §7). Seats follow the normal
+  rules (02 §4): in `join` order the caller sits first and the others as listed; nothing copies who
+  sat where. Two differences only: the caller's remembered options are neither merged in nor
+  updated (they chose nothing), and the insert is the conditional one of 04 `rematch_game_id`.
+  `201 { game }`, as Created.
+- **A finished game has one rematch at a time.** While its linked rematch is live or was played,
+  every later call by one of its players answers `200 { game }` with that rematch, and so does a
+  call that lost the race to create it, whatever its own creation would have answered (a limit,
+  say): the caller's envelope as it is if they hold a joined or seated row in it; or, if they hold
+  an invitation in it (`normal` or `hidden`), after accepting it exactly as `POST …/accept` does
+  (a lobby that ends meanwhile is `409 WRONG_STATUS`; a lost race is retried server-side up to 3
+  times, and only a request that keeps losing gets `409 STALE_GAME`). A player
+  who isn't a member of the rematch — they declined or left it, were removed, their invitation was
+  dropped at its start, or their row is `inert` — gets `404 NOT_FOUND`: they aren't added again,
+  and nothing of a game they may not see is returned (a lobby decline answers `204` for the same
+  reason). They can still start a new game from the list.
+- **A rematch that never got going may be replaced.** Once the linked rematch has **ended
+  unplayed** — any `declined` ending (02 §2.1 rule 9: a seat refused before its first action, whatever others did), or `cancelled` or `expired` with no action logged (`action_count = 0`) — except an operator's cancel (`end_reason = operator_cancelled`), which is never unplayed (04 `rematch_game_id`); a lobby past its expiry included (the call
+  expires it first, 02 §4 lazy expiry) — the finished game shows `rematch: null` again, and the
+  next call creates a new rematch exactly as the first did, replacing the link. A rematch still in
+  its lobby, active or finished, one cancelled or expired after an action, and one an operator
+  cancelled are never replaced. If the call's guarded insert writes nothing and no live rematch is
+  linked either (the one that beat it already ended unplayed), it tries once more; a call that
+  still finds nothing gets `409 STALE_GAME`.
+- Linking the rematch is not a transition of the finished game: its `version` doesn't change and
+  no realtime event is sent, so the other players see `rematch` on their next read; until then their
+  own "Rematch" press simply gets the `200`.
 
 ### `GET /api/v1/games/:id`
 `200 { game: GameEnvelope, view: <module View> | null }`. `view` is `view(state, yourSeat)` while
@@ -397,7 +456,7 @@ token gets `403 INSUFFICIENT_SCOPE`. "Agent" says whether an AI account's token 
 | `/__dev/*` (e.g. `/__dev/emails`) | public, **dev only**: registered only when `isLocalDev(config)` (06 §4), never in a production-config build (the enumeration test runs on production config and asserts they're absent) | — |
 | `GET /api/v1/me`, `GET /api/v1/games`, `GET /api/v1/games/:id`, `GET /api/v1/games/:id/history`, `GET /api/v1/catalog`, `POST /api/v1/games/:id/preview` | session or `read` | yes |
 | `POST /api/v1/games/:id/actions`, `…/resign`, `…/seen`, and `…/decline` by a `playing` seat before its first action | session or `play` (for seats the token's user already holds) | yes |
-| `POST /api/v1/games`, `…/start`, `…/cancel`, `…/remove-seat`, `…/join-link` (POST/DELETE), `…/add-player`, `GET /api/v1/players/recent` | session or `games:create` (tokens: no email invitees) | no |
+| `POST /api/v1/games`, `…/start`, `…/cancel`, `…/remove-seat`, `…/join-link` (POST/DELETE), `…/add-player`, `…/rematch`, `GET /api/v1/players/recent` | session or `games:create` (tokens: no email invitees; a `…/rematch` that would accept an invitation also needs `join`) | no |
 | `POST /api/v1/join/lookup`, `POST /api/v1/join`, `…/accept`, `…/leave`, and `…/decline` of a lobby invitation or lobby seat | session or `join` | no |
 | `PATCH /api/v1/me`, `POST /api/v1/me/under-age`, `/api/v1/me/delete/otp`, `DELETE /api/v1/me`, `/api/v1/me/sessions*`, `/api/v1/me/tokens*`, `/api/v1/me/step-up/otp`, `/api/v1/me/agents*`, `/api/v1/auth/logout*`, `/api/v1/blocks*`, `/api/v1/push/*`, `/api/v1/dictionaries*` | session | no |
 | `GET /api/v1/ws` | session (cookie) only; bearer tokens are rejected | no |
@@ -459,7 +518,7 @@ Framework codes (reserved; modules can't use them, 02 §2.2):
 | 401 | `UNAUTHENTICATED` |
 | 403 | `BAD_ORIGIN`, `NOT_ALLOWED`, `ONBOARDING_REQUIRED`, `AI_NOT_ALLOWED`, `INSUFFICIENT_SCOPE` (token lacks the route's scope, or the route is session only, §Token scopes), `AGENT_NOT_ALLOWED` (an AI account's token on a route agents can't use), `SUSPENDED` |
 | 404 | `NOT_FOUND` |
-| 409 | `STALE_GAME`, `GAME_NOT_ACTIVE`, `GAME_UNAVAILABLE` (orphaned game, 02 §7.3), `NOT_YOUR_TURN`, `WRONG_STATUS`, `NOT_ENOUGH_PLAYERS`, `INVALID_SEATS` (module `validateStart` failed, at create or start), `ALREADY_ACTED`, `ALREADY_JOINED`, `TOO_MANY_GAMES`, `TOO_MANY_DICTIONARIES`, `TOO_MANY_TOKENS`, `TOO_MANY_AGENTS` |
+| 409 | `STALE_GAME`, `GAME_NOT_ACTIVE`, `GAME_UNAVAILABLE` (orphaned game, 02 §7.3), `NOT_YOUR_TURN`, `WRONG_STATUS`, `NOT_ENOUGH_PLAYERS`, `INVALID_SEATS` (module `validateStart` failed, at create or start), `ALREADY_ACTED`, `ALREADY_JOINED`, `TOO_MANY_GAMES`, `REMATCH_UNAVAILABLE` ("Too few players from this game are left to play it again.": fewer than the game's minimum left from a finished game to rematch with, alpha A15), `TOO_MANY_DICTIONARIES`, `TOO_MANY_TOKENS`, `TOO_MANY_AGENTS` |
 | 413 / 415 | `TOO_LARGE` / `UNSUPPORTED_MEDIA_TYPE` |
 | 429 | `RATE_LIMITED` |
 | 500 | `INTERNAL` — never carries detail; the log records a request id only, never inputs or state (09 §5) |

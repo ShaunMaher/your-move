@@ -125,6 +125,14 @@ export const games = sqliteTable(
     ...timestamps,
     startedAt: integer("started_at"),
     endedAt: integer("ended_at"),
+    /**
+     * The one rematch of a finished game (05 `POST /api/v1/games/:id/rematch`): set in the batch
+     * that creates it, only while NULL. Unique, so a game is the rematch of at most one game. No
+     * `ON DELETE` action: games are never deleted, and drizzle-kit's `ADD COLUMN` drops one (04).
+     */
+    rematchGameId: text("rematch_game_id")
+      .unique()
+      .references((): AnySQLiteColumn => games.id),
   },
   (table) => [
     index("games_status").on(table.status, table.gameType),
