@@ -285,7 +285,12 @@ start on a database a newer image has migrated, so keep a backup before an updat
   `COMPOSE="docker compose -f apps/node/docker-compose.tunnel.yml --env-file /path/to/tunnel.env" PUBLIC_URL=https://<hostname> apps/node/scripts/check-tunnel-routing.sh`.
   It sends a sign-in request from `cloudflared`'s own network namespace to `http://app-front:8080`
   (must not be `400`), the same request to `http://app:8080` (must be `400`) and one from the
-  Docker host (must be `400`). It makes one email attempt, to an address that doesn't exist;
+  Docker host (must be `400`). It makes one email attempt, to an address that doesn't exist.
+  On rootless Docker the host cannot reach container networks at all (stricter than the check
+  wants), so the script sends the third request from rootlesskit's network namespace with
+  `nsenter` (using `$XDG_RUNTIME_DIR/docker.pid`); where that is refused it prints
+  `skipped on rootless: the host cannot reach container networks (stricter)` and exits 0 if the
+  first two checks passed;
 - a request to the app from any other address (for example from a container attached only to
   `egress`) gets `400` on `POST /api/v1/auth/otp/request`, and `200` on `GET /api/health`;
 - a request on `front` without `CF-Connecting-IP`, or with only `X-Forwarded-For`, gets `400`;

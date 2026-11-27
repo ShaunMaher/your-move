@@ -1,5 +1,5 @@
 /** The Settings toggles: email nudges (03 §7; alpha A6) and notifications (07 §4; alpha A8). */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../App.js";
@@ -157,6 +157,9 @@ describe("the theme choice (07 §5, alpha A9)", () => {
     );
     render(<App api={api} />);
     await screen.findByRole("heading", { name: "Settings" });
+    // The app applies the saved theme in a passive effect that may not have run yet when the
+    // heading appears (it lags under load); flush it so it cannot overwrite the click below.
+    await act(() => Promise.resolve());
     radio("Dark").focus();
     fireEvent.click(radio("Dark"));
     // Before the server has answered.
