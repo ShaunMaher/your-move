@@ -1,8 +1,9 @@
 /** The Settings toggles: email nudges (03 §7; alpha A6) and notifications (07 §4; alpha A8). */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../App.js";
+import { navigate } from "../router.js";
 import {
   CONFIG,
   fakeApi,
@@ -161,7 +162,8 @@ describe("the theme choice (07 §5, alpha A9)", () => {
     render(<App api={api} />);
     await screen.findByRole("heading", { name: "Settings" });
     // No wait for App's passive effect that shows the saved theme: it may still be pending, and
-    // must not overwrite the click below.
+    // the click's render flushes it first. The assertions below are synchronous because
+    // fireEvent runs inside act, which flushes the effect that applies the choice.
     radio("Dark").focus();
     fireEvent.click(radio("Dark"));
     // Before the server has answered.
@@ -194,6 +196,34 @@ describe("the theme choice (07 §5, alpha A9)", () => {
     expect(radio("System").checked).toBe(true);
     expect(radio("Light").checked).toBe(false);
     // The old theme is shown again by the passive effect that follows the rollback's render.
+    await waitFor(() => {
+      expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+    });
+    expect(window.localStorage.getItem("ym.theme")).toBe("system");
+  });
+
+  it("puts the saved theme back when a save fails after leaving Settings (C4-P-1)", async () => {
+    let answer!: (response: Response) => void;
+    const { api } = routes(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Settings" });
+    fireEvent.click(radio("Dark"));
+    await waitFor(() => {
+      expect(answer).toBeTypeOf("function");
+    });
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    act(() => {
+      navigate("/");
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Settings" })).toBeNull();
+    });
+    answer(problem(500, "INTERNAL"));
     await waitFor(() => {
       expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
     });
