@@ -1,9 +1,9 @@
 /**
- * The routing check's rootless handling (docs/deploy.md, "Check it"), with stub `docker`, `curl`
- * and `nsenter` commands on the path, so no engine is needed. The real run is `tunnel-stack.test.ts`.
+ * The routing check's three requests (docs/deploy.md, "Check it"), with a stub `docker` on the
+ * path, so no engine is needed. The real run is `tunnel-stack.test.ts`.
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,89 +12,75 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const SCRIPT = fileURLToPath(new URL("../scripts/check-tunnel-routing.sh", import.meta.url));
 
-// `docker run` prints 202 for the tunnel's route and 400 for the service name.
+// Records every `docker run` argv, one line each. The tunnel's route answers 202, the service name
+// 400, and a host-network container whatever STUB_HOST_STATUS says (empty: it could not connect).
 const DOCKER = `#!/bin/sh
 case "$1" in
   compose) echo container-id ;;
   inspect) echo image ;;
-  info) echo "$STUB_SECURITY_OPTIONS" ;;
-  run) case "$*" in *TARGET=http://app-front:8080*) echo 202 ;; *) echo 400 ;; esac ;;
+  run)
+    echo "$*" >> "$STUB_LOG"
+    case "$*" in
+      *"--network host"*) [ -n "$STUB_HOST_STATUS" ] || exit 1; echo "$STUB_HOST_STATUS" ;;
+      *TARGET=http://app-front:8080*) echo 202 ;;
+      *) echo 400 ;;
+    esac ;;
 esac
 `;
-const CURL = `#!/bin/sh
-echo "$STUB_HOST_STATUS"
-`;
-// Stands in for entering rootlesskit's namespace: runs the rest, or refuses like a restricted kernel.
-const NSENTER = `#!/bin/sh
-while [ "$1" != "--target" ]; do shift; done
-[ -z "$STUB_NSENTER_REFUSES" ] || exit 1
-shift 2
-exec "$@"
-`;
 
-describe("check-tunnel-routing.sh on rootless and rootful Docker", () => {
+describe("check-tunnel-routing.sh", () => {
   let dir = "";
 
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), "routing-script-"));
     mkdirSync(join(dir, "bin"));
-    for (const [name, body] of Object.entries({ docker: DOCKER, curl: CURL, nsenter: NSENTER })) {
-      writeFileSync(join(dir, "bin", name), body);
-      chmodSync(join(dir, "bin", name), 0o755);
-    }
-    writeFileSync(join(dir, "docker.pid"), "4242\n");
+    writeFileSync(join(dir, "bin", "docker"), DOCKER);
+    chmodSync(join(dir, "bin", "docker"), 0o755);
   });
   afterAll(() => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  function run(options: {
-    security: string;
-    host: string;
-    nsenter?: boolean;
-    pid?: boolean;
-    refuse?: boolean;
-  }) {
+  function run(hostStatus: string) {
+    const log = join(dir, "log");
+    writeFileSync(log, "");
     const result = spawnSync("bash", [SCRIPT], {
       encoding: "utf8",
       env: {
-        // The stubs shadow the real commands; bash, cat, id and the like come from the system.
+        // The stub shadows the real docker; bash and the like come from the system.
         PATH: [join(dir, "bin"), "/usr/bin", "/bin"].join(delimiter),
         COMPOSE: "docker compose",
-        NSENTER: options.nsenter === false ? "no-such-nsenter" : "nsenter",
         PUBLIC_URL: "https://play.example.org",
-        XDG_RUNTIME_DIR: options.pid === false ? join(dir, "none") : dir,
-        STUB_SECURITY_OPTIONS: options.security,
-        STUB_HOST_STATUS: options.host,
-        STUB_NSENTER_REFUSES: options.refuse === true ? "1" : "",
+        STUB_HOST_STATUS: hostStatus,
+        STUB_LOG: log,
       },
     });
-    return { status: result.status, out: result.stdout };
+    return { status: result.status, out: result.stdout, calls: readFileSync(log, "utf8") };
   }
 
-  it("checks from the host on rootful Docker, and fails when the host is not refused", () => {
-    const good = run({ security: "[name=seccomp,profile=builtin]", host: "400" });
-    expect(good.status).toBe(0);
-    expect(good.out).toMatch(/ok .*Docker host.* -> 400/u);
-    const bad = run({ security: "[name=seccomp,profile=builtin]", host: "000" });
-    expect(bad.status).toBe(1);
-    expect(bad.out).toMatch(/FAIL .*Docker host.* -> 000/u);
+  it("passes when the host-network request is refused with 400", () => {
+    const result = run("400");
+    expect(result.status).toBe(0);
+    expect(result.out).toMatch(/ok .*host-network container.* -> 400/u);
+    expect(result.out).not.toContain("skip");
   });
 
-  it("checks from rootlesskit's namespace on rootless Docker", () => {
-    const result = run({ security: "[name=seccomp name=rootless]", host: "400" });
-    expect(result.status).toBe(0);
-    expect(result.out).toMatch(/ok .*Docker host.*rootlesskit.* -> 400/u);
+  it("sends the host request from a container on the host network to the front address", () => {
+    const hostCalls = run("400")
+      .calls.split("\n")
+      .filter((line) => line.includes("--network host"));
+    expect(hostCalls).toHaveLength(1);
+    expect(hostCalls[0]).toContain("TARGET=http://172.30.99.3:8080");
+    expect(hostCalls[0]).toContain("--entrypoint node");
   });
 
   it.each([
-    ["nsenter is missing", { nsenter: false }],
-    ["the daemon's pid file is missing", { pid: false }],
-    ["the kernel refuses the namespace", { refuse: true }],
-  ])("skips check 3 and still passes when %s", (_name, options) => {
-    const result = run({ security: "[name=rootless]", host: "000", ...options });
-    expect(result.status).toBe(0);
-    expect(result.out).toContain("skipped on rootless: the host cannot reach container networks");
-    expect(result.out).not.toContain("FAIL");
+    ["it is let through", "200"],
+    ["it cannot connect", "000"],
+    ["the container fails and prints nothing", ""],
+  ])("fails when the host request is not refused: %s", (_name, status) => {
+    const result = run(status);
+    expect(result.status).toBe(1);
+    expect(result.out).toMatch(/FAIL .*host-network container/u);
   });
 });
