@@ -86,7 +86,7 @@ describe("openSqlite", () => {
     }
   });
 
-  it("opens the database defensively, so writable_schema can't rewrite the schema (B1-S-8)", () => {
+  it("pins defensive mode, whatever Node's default: writable_schema can't rewrite the schema (B1-S-8)", () => {
     const sqlite = openSqlite(":memory:");
     sqlite.exec("CREATE TABLE t (x INTEGER); PRAGMA writable_schema = 1");
     expect(() => {

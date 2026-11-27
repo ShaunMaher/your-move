@@ -8,9 +8,10 @@
  *   this build doesn't know (a newer build's migration, or an edited one) refuses the start.
  * - Pending migrations run in one transaction, so a failed one leaves the schema as it was. A
  *   migration may not begin, end or nest a transaction itself, use a pragma other than
- *   `foreign_keys`, or attach or detach a database: an authorizer denies those actions while its
- *   statements run (`pnpm db:check` refuses such a migration before it is committed; M2a review
- *   P2-1, B1-S-3, B1-S-4).
+ *   `foreign_keys`, attach or detach a database, or create a temporary object: an authorizer
+ *   denies those actions while its statements run (`pnpm db:check` refuses such a migration
+ *   before it is committed; M2a review P2-1, B1-S-3, B1-S-4, B1-S2-1). Node runs them on a
+ *   connection of their own (`storage.ts`).
  * - Foreign keys are off while they run (04 §Migrations): `PRAGMA foreign_keys` is a no-op inside
  *   a transaction, and with it on, the `DROP TABLE` of drizzle-kit's table rebuilds would fire
  *   every child table's `ON DELETE CASCADE` / `SET NULL`. When migrations are pending,
@@ -49,13 +50,21 @@ function readMigrations(migrationsFolder: string): ReturnType<typeof readMigrati
 const foreignKeyViolations = (sqlite: DatabaseSync): number =>
   sqlite.prepare("PRAGMA foreign_key_check").all().length;
 
+/** The authorizer's actions that create an object with the `TEMP` keyword. */
+const TEMPORARY_OBJECTS: ReadonlySet<number> = new Set([
+  constants.SQLITE_CREATE_TEMP_TABLE,
+  constants.SQLITE_CREATE_TEMP_INDEX,
+  constants.SQLITE_CREATE_TEMP_TRIGGER,
+  constants.SQLITE_CREATE_TEMP_VIEW,
+]);
+
 /**
  * What a migration may not do, by SQLite's authorizer action (04 §Migrations): begin, end or nest
  * a transaction (`BEGIN`, `COMMIT`, `END`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`), use any pragma but
- * `foreign_keys` (B1-S-3), or attach or detach a database (B1-S-4). The text is what the error
- * says it did.
+ * `foreign_keys` (B1-S-3), attach or detach a database (B1-S-4), or create anything in the
+ * connection's `temp` schema, with `TEMP` or a `temp.` qualifier (B1-S2-1). The text is what the error says it did.
  */
-function deniedAction(action: number, name: string | null): string | null {
+function deniedAction(action: number, name: string | null, database: string | null): string | null {
   if (action === constants.SQLITE_TRANSACTION || action === constants.SQLITE_SAVEPOINT) {
     return "begins, ends or nests a transaction, which would break the one-transaction guarantee";
   }
@@ -64,6 +73,17 @@ function deniedAction(action: number, name: string | null): string | null {
   }
   if (action === constants.SQLITE_ATTACH || action === constants.SQLITE_DETACH) {
     return "attaches or detaches a database";
+  }
+  if (TEMPORARY_OBJECTS.has(action)) {
+    return "creates a temporary table, index, trigger or view, which would outlive it on its connection";
+  }
+  // Without the keyword (`CREATE TABLE temp.x`, `CREATE TRIGGER temp.t … ON main.x`) SQLite
+  // authorizes an ordinary CREATE, but every temporary object is a row inserted into
+  // `temp.sqlite_temp_master` (for a table or view that insert is authorized first, so this is
+  // the reason given even with TEMP). Reads and updates of `temp` stay allowed: ALTER TABLE … RENAME
+  // reads and rewrites `sqlite_temp_master` even when it is empty.
+  if (action === constants.SQLITE_INSERT && database?.toLowerCase() === "temp") {
+    return "creates an object in the temp schema, which would outlive it on its connection";
   }
   return null;
 }
@@ -74,8 +94,8 @@ function deniedAction(action: number, name: string | null): string | null {
  */
 function runStatements(sqlite: DatabaseSync, statements: readonly string[], index: number): void {
   const denied: { reason: string | null } = { reason: null };
-  sqlite.setAuthorizer((action, name) => {
-    const reason = deniedAction(action, name);
+  sqlite.setAuthorizer((action, name, _detail, database) => {
+    const reason = deniedAction(action, name, database);
     if (reason === null) return constants.SQLITE_OK;
     denied.reason ??= reason;
     return constants.SQLITE_DENY;
