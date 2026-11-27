@@ -310,16 +310,22 @@ The schema (`schema.ts`) also makes these choices, which the tables above leave 
   - the journal's entries aren't numbered in order with strictly increasing `when`, or the `.sql`
     files aren't exactly the journal's tags;
   - a migration breaks one of the text rules below (transaction control, unreviewed table
-    rebuilds);
+    rebuilds or dropped columns);
   - the schema the committed migrations build differs from the schema built by a fresh drizzle-kit
     generation from `schema.ts` into an empty folder. Each is applied to its own in-memory SQLite
-    database and compared by what SQLite reports: every table's `table_info` (column positions
-    aside, since `ALTER TABLE ADD COLUMN` always appends) and `foreign_key_list`, every index's
-    `index_list` entry, `index_xinfo` and SQL in `sqlite_schema` (which carries a partial index's
-    `WHERE`), and the SQL of any view or trigger. A hand edit to a committed `.sql` file (an FK
-    action, a default, an index's columns or predicate) therefore fails. Table-level clauses are
-    **not** compared — `CHECK`, `COLLATE`, generated columns, `STRICT`, `WITHOUT ROWID` and
-    `DEFERRABLE` — so a hand edit to those passes and is the reviewer's to catch (issue #13);
+    database and compared by what SQLite reports: every table's `table_list` entry (its `STRICT`
+    and `WITHOUT ROWID` flags), `table_xinfo` (column positions aside, since
+    `ALTER TABLE ADD COLUMN` always appends; `hidden` marks a generated column) and
+    `foreign_key_list`, every index's `index_list` entry, `index_xinfo` and SQL in `sqlite_schema`
+    (which carries a partial index's `WHERE`), and the SQL of any view or trigger. The clauses no
+    pragma reports are read from each table's SQL in `sqlite_schema` with comments, quoting, case
+    and spacing normalised: each column's `COLLATE`, `CHECK` and generated expression
+    (`[GENERATED ALWAYS] AS (…)`), the table's `CHECK` constraints, and each foreign key's
+    `[NOT] DEFERRABLE [INITIALLY …]`, keyed by its columns and parent table so that an inline
+    `REFERENCES` and a table-level `FOREIGN KEY` compare alike. A hand edit to a committed `.sql`
+    file (an FK action, a default, an index's columns or predicate, any of those clauses) therefore
+    fails. What none of these covers — constraint names, `ON CONFLICT` clauses, `AUTOINCREMENT`,
+    a primary key's `ASC`/`DESC` — is the reviewer's to catch;
   - drizzle-kit, generating over a copy of the committed folder, writes or changes any file there
     (a `schema.ts` change without its migration and snapshot), or doesn't report "No schema
     changes".
@@ -332,6 +338,13 @@ The schema (`schema.ts`) also makes these choices, which the tables above leave 
   `PRAGMA foreign_key_check` must come back empty both before the first one runs (a violation
   already in the database refuses the start with its own message) and before the commit, or
   nothing is applied; with nothing pending it isn't run.
+- **How the text rules read a migration.** The rules below look at statements with comments
+  removed and whitespace collapsed, so neither hides a pattern. A migration is read both ways it
+  is applied: whole, as SQLite and `wrangler d1 migrations apply` read it (where
+  `--> statement-breakpoint` is a comment), and cut at every `--> statement-breakpoint` the way
+  Drizzle's migrator cuts it on Node, even one inside a literal or a comment. A statement either
+  reading finds is checked, and a review line counts only if it is a real `--` comment in both
+  readings. A review line's `\r\n` line ending is not part of it.
 - **No transaction control.** A migration never contains `BEGIN`, `COMMIT`, `END`, `ROLLBACK`,
   `SAVEPOINT` or `RELEASE` (a trigger's `BEGIN … END` body is not transaction control): it would
   break the one-transaction guarantee above. `pnpm db:check` refuses such a migration, with or
@@ -344,8 +357,14 @@ The schema (`schema.ts`) also makes these choices, which the tables above leave 
   (schema-qualified or quoted, as in `PRAGMA main."foreign_keys"`) is refused by `pnpm db:check`
   unless it carries a line `-- migration-reviewed: <how child rows are preserved on both drivers>`,
   added only after a reviewer has checked that claim (for example: the table has no children, or
-  the migration copies and restores them). The patterns are matched with comments removed and
-  whitespace collapsed, so neither hides them; the review line must be a real `--` comment.
+  the migration copies and restores them).
+- **Dropped columns.** `ALTER TABLE … DROP [COLUMN]` deletes the column's data on both drivers.
+  drizzle-kit writes it, beside an `ADD` of the new name, when its rename prompt ("created or
+  renamed from another column?") is answered *create* for a column that was in fact renamed, so a
+  rename silently becomes data loss. A migration containing `ALTER TABLE … DROP` is refused by
+  `pnpm db:check` unless it carries a line `-- migration-reviewed: <why the column's data may go>`,
+  added only after a reviewer has checked that claim (for example: the column was never written,
+  or its data was copied into another column first).
 - **Other statements cascade too.** `REPLACE INTO` (`INSERT OR REPLACE`, an upsert's conflict
   resolution by `REPLACE`) deletes the conflicting row before inserting, and `DELETE` on a parent
   table deletes it outright; either fires the children's `ON DELETE` actions on D1 just as

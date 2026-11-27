@@ -130,7 +130,11 @@ never touches a Drizzle database object. Instead:
   through an async Drizzle database with `batch()` that each adapter supplies: D1 → Drizzle's D1
   driver, whose `db.batch([...])` is D1's transactional batch; Node → Drizzle's `sqlite-proxy`
   driver over `node:sqlite`, whose batch callback runs the statements inside one synchronous
-  `BEGIN IMMEDIATE … COMMIT`. Only `src/db/` and the two adapters (`apps/node/src/db/`,
+  `BEGIN IMMEDIATE … COMMIT`. That transaction is the only one: a statement through the driver
+  that begins, ends or nests a transaction is refused by its text (after any leading comments),
+  and as a backstop a statement that opens a transaction from autocommit is rolled back and
+  refused, and one that closes the batch's transaction is refused before the batch's next
+  statement runs. Only `src/db/` and the two adapters (`apps/node/src/db/`,
   `apps/worker/src/d1.ts`) import Drizzle (a dependency-cruiser rule, 11 §5).
 - A shared repository contract test suite (`@your-move/server/testing`) runs against **both**
   adapters: Node in-process on a real file; D1 in workerd, migrated with
