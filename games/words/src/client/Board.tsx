@@ -61,7 +61,8 @@ import { errorText, plural, seatNames, shown } from "./text.js";
 import { Unsupported } from "./Unsupported.js";
 
 /**
- * The contract's props, plus the game's `public` word list for the no-play hint (words §10.8).
+ * The contract's props, plus the game's `public` word list for the no-play hint (words §10.8):
+ * the same object for as long as the list is the same, since a new one starts the search again.
  * The contract has no channel for the list yet (07 §4), so the shell doesn't pass it and the hint
  * stays silent in the app until one is specified.
  */
