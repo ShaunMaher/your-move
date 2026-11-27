@@ -22,7 +22,13 @@ import {
 } from "../test-support.js";
 import { analysePlay, type Board, type BoardTile } from "./board.js";
 import { wordsV1 as words } from "./definition.js";
-import { hasAnyPlay, searchPlays, type Lexicon, type SearchOutcome } from "./moves.js";
+import {
+  hasAnyPlay,
+  MAX_STEPS_PER_ACTION,
+  searchPlays,
+  type Lexicon,
+  type SearchOutcome,
+} from "./moves.js";
 import { validate } from "./rules.js";
 import { RULESETS } from "./rulesets/index.js";
 import type { Ruleset } from "./rulesets/schema.js";
@@ -285,6 +291,47 @@ describe("the step limit", () => {
     while (sliced.advance(7) === null);
     expect(sliced.steps).toBe(whole.steps);
   });
+});
+
+describe("slices (A14-P-1)", () => {
+  let all: string[];
+  beforeAll(async () => {
+    all = await realWordList();
+  });
+
+  /** Runs a search in slices of `budget`: the most any slice went over it, and the steps in all. */
+  function slices(grid: Board, tiles: string, list: Lexicon, budget: number) {
+    const run = searchPlays({
+      ruleset: CLASSIC,
+      board: grid,
+      rack: rack(tiles),
+      lexicon: list,
+      maxSteps: PLENTY,
+    });
+    let worst = 0;
+    for (let outcome = null as SearchOutcome | null; outcome === null;) {
+      const before = run.steps;
+      outcome = run.advance(budget);
+      worst = Math.max(worst, run.steps - before - budget);
+    }
+    return { worst, steps: run.steps };
+  }
+
+  it.each([1, 7, 100, 5_000])(
+    "never runs a slice of %i steps more than one action over, inside a unit too",
+    (budget) => {
+      // Every prefix of the real list and no word: an opening walk that used to run 60,000 steps
+      // in one unit, and a busy board whose cross-checks are worked out square by square.
+      const list = wordList(all);
+      const noWords: Lexicon = { has: () => false, follows: (prefix) => list.follows(prefix) };
+      for (const grid of [board(CLASSIC), withCat]) {
+        const { worst, steps } = slices(grid, "?moeari", noWords, budget);
+        expect(worst).toBeLessThan(MAX_STEPS_PER_ACTION);
+        // Long enough that one unit spans many slices of the largest budget.
+        expect(steps).toBeGreaterThan(20_000);
+      }
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------------------------

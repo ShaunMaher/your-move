@@ -43,6 +43,9 @@ export interface Lexicon {
  */
 export const HINT_MAX_STEPS = 150_000;
 
+/** The most steps one action of the search takes (an extension: itself, a lookup, a prefix). */
+export const MAX_STEPS_PER_ACTION = 3;
+
 const A = 97;
 const LETTER_COUNT = 26;
 const ALL_LETTERS = (1 << LETTER_COUNT) - 1;
@@ -54,7 +57,10 @@ export type SearchOutcome =
 
 /** A search that runs a slice at a time, so a caller can yield between slices. */
 export interface PlaySearch {
-  /** Searches on for about `steps` more steps: the outcome once known, else null. */
+  /**
+   * Searches on for `steps` more steps (at most `MAX_STEPS_PER_ACTION - 1` over, since one action
+   * of the search is never split): the outcome once known, else null.
+   */
   advance(steps: number): SearchOutcome | null;
   /** The steps used so far. */
   readonly steps: number;
@@ -103,6 +109,46 @@ interface Put {
   readonly letter: string;
 }
 
+/** The tile put down to reach a frame, to take back when the frame is done. */
+interface Undo {
+  readonly letter: number;
+  readonly real: boolean;
+  readonly into: Put[];
+}
+
+/**
+ * One node of the search, kept on an explicit stack so a slice can stop anywhere and the next one
+ * go on: a *left part* (tiles before the anchor, then extended rightwards) or an *extension* (the
+ * word from `start`, growing through tiles on the board and rack tiles on empty squares).
+ */
+interface Frame {
+  readonly kind: "left" | "extend";
+  /** The word so far; an extension grows it in place through tiles already on the board. */
+  prefix: string;
+  /** Extension: where the word starts. Left part: how many more tiles may go before the anchor. */
+  readonly start: number;
+  readonly limit: number;
+  /** 0: not entered; 1 (left part): its own extension is done; 2: trying `letters`. */
+  phase: 0 | 1 | 2;
+  /** The letters still to try here, as a mask. */
+  letters: number;
+  readonly undo: Undo | null;
+}
+
+/** Where the cross-checks of one direction have got to: square by square, letter by letter. */
+interface CrossChecks {
+  readonly down: boolean;
+  readonly masks: number[];
+  /** The next square to look at, as `row * size + col`. */
+  next: number;
+  /** The square being checked, if any: the words either side of it and the letters to try. */
+  square: number;
+  before: string;
+  after: string;
+  letters: number;
+  mask: number;
+}
+
 /** Thrown out of the search when it runs past its step limit. */
 class OutOfSteps extends Error {}
 
@@ -123,8 +169,6 @@ class Search implements PlaySearch {
   private blanks = 0;
   /** The most tiles one play may use: the rack's, and never more than `rackSize` (words §3.1). */
   private readonly most: number;
-  /** The most tiles the plays now being searched may use. */
-  private limit = 0;
   /** Cross-check masks per direction (`down` ? 1 : 0), by `row * size + col`; ALL off a line. */
   private readonly crossChecks: [number[], number[]] = [[], []];
   /** `follows` answers already asked: prefixes repeat across anchors. */
@@ -132,6 +176,13 @@ class Search implements PlaySearch {
   /** The tiles of the left part and of the right part of the play being built. */
   private readonly left: Put[] = [];
   private readonly right: Put[] = [];
+  /** The unit under way: cross-checks being found, or an anchor's frames. */
+  private cross: CrossChecks | null = null;
+  private readonly stack: Frame[] = [];
+  private line: Line = { down: false, index: 0 };
+  private anchor = 0;
+  /** The most tiles the plays of the anchor under way may use. */
+  private limit = 0;
 
   private readonly input: SearchInput;
 
@@ -165,19 +216,16 @@ class Search implements PlaySearch {
     if (this.outcome !== null) return this.outcome;
     const until = this.steps + budget;
     try {
-      while (this.next < this.units.length) {
-        const unit = at(this.units, this.next);
-        this.next += 1;
-        if (unit.kind === "crossChecks") {
-          this.crossChecks[unit.down ? 1 : 0] = this.findCrossChecks(unit.down);
-        } else {
-          this.limit = unit.tiles;
-          const play = this.searchAnchor(unit.line, unit.pos);
-          if (play !== null) return (this.outcome = { kind: "some", play });
+      for (;;) {
+        if (this.cross === null && this.stack.length === 0) {
+          if (this.next >= this.units.length) return (this.outcome = { kind: "none" });
+          this.begin(at(this.units, this.next));
+          this.next += 1;
         }
-        if (this.steps >= until && this.next < this.units.length) return null;
+        if (this.steps >= until) return null;
+        const play = this.cross === null ? this.act() : this.crossAct(this.cross);
+        if (play !== null) return (this.outcome = { kind: "some", play });
       }
-      return (this.outcome = { kind: "none" });
     } catch (error) {
       if (error instanceof OutOfSteps) return (this.outcome = { kind: "unknown" });
       throw error;
@@ -212,15 +260,19 @@ class Search implements PlaySearch {
     for (let row = 0; row < this.size; row += 1) {
       for (let col = 0; col < this.size; col += 1) {
         if (this.letterAt(row, col) !== null) continue;
-        const touches =
-          this.letterAt(row - 1, col) !== null ||
-          this.letterAt(row + 1, col) !== null ||
-          this.letterAt(row, col - 1) !== null ||
-          this.letterAt(row, col + 1) !== null;
-        if (touches) found.push([row, col]);
+        if (this.touches(row, col)) found.push([row, col]);
       }
     }
     return found;
+  }
+
+  private touches(row: number, col: number): boolean {
+    return (
+      this.letterAt(row - 1, col) !== null ||
+      this.letterAt(row + 1, col) !== null ||
+      this.letterAt(row, col - 1) !== null ||
+      this.letterAt(row, col + 1) !== null
+    );
   }
 
   private letterAt(row: number, col: number): string | null {
@@ -240,52 +292,88 @@ class Search implements PlaySearch {
   private isAnchorBefore(line: Line, pos: number): boolean {
     if (this.opening) return false;
     const [row, col] = line.down ? [pos, line.index] : [line.index, pos];
-    return (
-      this.letterAt(row - 1, col) !== null ||
-      this.letterAt(row + 1, col) !== null ||
-      this.letterAt(row, col - 1) !== null ||
-      this.letterAt(row, col + 1) !== null
-    );
+    return this.touches(row, col);
+  }
+
+  /** Starts a unit: the cross-checks of a direction, or the first frame of an anchor's plays. */
+  private begin(unit: Unit): void {
+    if (unit.kind === "crossChecks") {
+      const masks = new Array<number>(this.size * this.size).fill(ALL_LETTERS);
+      this.cross = {
+        down: unit.down,
+        masks,
+        next: 0,
+        square: -1,
+        before: "",
+        after: "",
+        letters: 0,
+        mask: 0,
+      };
+      return;
+    }
+    const { line, pos: anchor } = unit;
+    this.line = line;
+    this.anchor = anchor;
+    this.limit = unit.tiles;
+    // Tiles just before the anchor are the fixed start of every word through it.
+    let start = anchor;
+    let prefix = "";
+    for (let l = this.onLine(line, start - 1); l !== null; l = this.onLine(line, start - 1)) {
+      prefix = l + prefix;
+      start -= 1;
+    }
+    if (start < anchor) {
+      this.push("extend", prefix, start, 0, null);
+      return;
+    }
+    // Otherwise up to `limit` tiles may go on the empty squares before it, none of them an
+    // anchor (a play reaching an earlier anchor is found from that one).
+    let limit = 0;
+    while (
+      limit < this.limit - 1 &&
+      anchor - limit - 1 >= 0 &&
+      this.onLine(line, anchor - limit - 1) === null &&
+      !this.isAnchorBefore(line, anchor - limit - 1)
+    ) {
+      limit += 1;
+    }
+    this.push("left", "", 0, limit, null);
+  }
+
+  private push(
+    kind: Frame["kind"],
+    prefix: string,
+    start: number,
+    limit: number,
+    undo: Undo | null,
+  ): void {
+    this.stack.push({ kind, prefix, start, limit, phase: 0, letters: 0, undo });
+  }
+
+  /** Leaves the top frame, taking back the tile that led to it. */
+  private pop(): null {
+    const frame = this.stack.pop();
+    const undo = frame?.undo;
+    if (undo !== undefined && undo !== null) {
+      undo.into.pop();
+      if (undo.real) this.counts[undo.letter] = at(this.counts, undo.letter) + 1;
+      else this.blanks += 1;
+    }
+    return null;
   }
 
   /**
-   * For plays along `down`, the letters each empty square may take so the word across the line
-   * through it (if it touches tiles that way) is in the list.
+   * Puts down a tile showing `letter` (a real tile when the rack has one, else a blank) and
+   * returns how to take it back. A real tile is never worse than a blank for the rest of the play,
+   * so the blank is used only for a letter the rack lacks.
    */
-  private findCrossChecks(down: boolean): number[] {
-    const masks = new Array<number>(this.size * this.size).fill(ALL_LETTERS);
-    // The cross-word runs across the play line: along a row for a play down a column.
-    const [dr, dc] = down ? [0, 1] : [1, 0];
-    for (let row = 0; row < this.size; row += 1) {
-      for (let col = 0; col < this.size; col += 1) {
-        if (this.letterAt(row, col) !== null) continue;
-        let before = "";
-        for (let r = row - dr, c = col - dc, l = this.letterAt(r, c); l !== null;) {
-          before = l + before;
-          [r, c] = [r - dr, c - dc];
-          l = this.letterAt(r, c);
-        }
-        let after = "";
-        for (let r = row + dr, c = col + dc, l = this.letterAt(r, c); l !== null;) {
-          after += l;
-          [r, c] = [r + dr, c + dc];
-          l = this.letterAt(r, c);
-        }
-        if (before === "" && after === "") continue;
-        let mask = 0;
-        for (let left = this.follows(before); left !== 0; left &= left - 1) {
-          const letter = lowest(left);
-          if (this.has(before + String.fromCharCode(A + letter) + after)) mask |= 1 << letter;
-        }
-        masks[row * this.size + col] = mask;
-      }
-    }
-    return masks;
-  }
-
-  private crossCheck(line: Line, pos: number): number {
-    const [row, col] = line.down ? [pos, line.index] : [line.index, pos];
-    return this.crossChecks[line.down ? 1 : 0][row * this.size + col] ?? ALL_LETTERS;
+  private put(letter: number, into: Put[]): Undo {
+    const shown = String.fromCharCode(A + letter);
+    const real = at(this.counts, letter) > 0;
+    if (real) this.counts[letter] = at(this.counts, letter) - 1;
+    else this.blanks -= 1;
+    into.push({ tile: real ? shown : BLANK, letter: shown });
+    return { letter, real, into };
   }
 
   /** The letters the rack can put down: all of them with a blank, else those it holds. */
@@ -298,106 +386,120 @@ class Search implements PlaySearch {
     return mask;
   }
 
-  /**
-   * Puts down a tile showing `letter` (a real tile when the rack has one, else a blank), runs
-   * `then`, and takes it back. A real tile is never worse than a blank for the rest of the play,
-   * so the blank is tried only for a letter the rack lacks.
-   */
-  private withTile(letter: number, into: Put[], then: () => readonly Placement[] | null) {
-    const shown = String.fromCharCode(A + letter);
-    const real = at(this.counts, letter) > 0;
-    if (real) this.counts[letter] = at(this.counts, letter) - 1;
-    else this.blanks -= 1;
-    into.push({ tile: real ? shown : BLANK, letter: shown });
-    try {
-      return then();
-    } finally {
-      into.pop();
-      if (real) this.counts[letter] = at(this.counts, letter) + 1;
-      else this.blanks += 1;
-    }
+  /** One action on the top frame (at most `MAX_STEPS_PER_ACTION` steps): a play, or null. */
+  private act(): readonly Placement[] | null {
+    const frame = at(this.stack, this.stack.length - 1);
+    if (frame.kind === "left") return this.actLeft(frame);
+    return this.actExtend(frame);
   }
 
-  /** The plays covering one anchor along one line, whose leftmost anchor it is. */
-  private searchAnchor(line: Line, anchor: number): readonly Placement[] | null {
-    // Tiles just before the anchor are the fixed start of every word through it.
-    let start = anchor;
-    let prefix = "";
-    for (let l = this.onLine(line, start - 1); l !== null; l = this.onLine(line, start - 1)) {
-      prefix = l + prefix;
-      start -= 1;
+  /** A left part: its own extension from the anchor, then each next tile before the anchor. */
+  private actLeft(frame: Frame): null {
+    if (frame.phase === 0) {
+      this.step();
+      frame.phase = 1;
+      this.push("extend", frame.prefix, this.anchor - frame.prefix.length, 0, null);
+      return null;
     }
-    if (start < anchor) return this.extend(line, anchor, start, prefix);
-    // Otherwise up to `limit` tiles may go on the empty squares before it, none of them an
-    // anchor (a play reaching an earlier anchor is found from that one).
-    let limit = 0;
-    while (
-      limit < this.limit - 1 &&
-      anchor - limit - 1 >= 0 &&
-      this.onLine(line, anchor - limit - 1) === null &&
-      !this.isAnchorBefore(line, anchor - limit - 1)
-    ) {
-      limit += 1;
+    if (frame.phase === 1) {
+      if (frame.limit === 0) return this.pop();
+      frame.letters = this.follows(frame.prefix) & this.rackMask();
+      frame.phase = 2;
+      return null;
     }
-    return this.leftPart(line, anchor, "", limit);
-  }
-
-  /** Every left part of up to `limit` more tiles from the rack, each then extended rightwards. */
-  private leftPart(
-    line: Line,
-    anchor: number,
-    prefix: string,
-    limit: number,
-  ): readonly Placement[] | null {
-    this.step();
-    const found = this.extend(line, anchor, anchor - prefix.length, prefix);
-    if (found !== null || limit === 0) return found;
-    for (let left = this.follows(prefix) & this.rackMask(); left !== 0; left &= left - 1) {
-      const letter = lowest(left);
-      const play = this.withTile(letter, this.left, () =>
-        this.leftPart(line, anchor, prefix + String.fromCharCode(A + letter), limit - 1),
-      );
-      if (play !== null) return play;
-    }
+    if (frame.letters === 0) return this.pop();
+    const letter = lowest(frame.letters);
+    frame.letters &= frame.letters - 1;
+    const undo = this.put(letter, this.left);
+    this.push("left", frame.prefix + String.fromCharCode(A + letter), 0, frame.limit - 1, undo);
     return null;
   }
 
   /**
-   * Extends `prefix` (the word so far, starting at `start`) from the square after it onwards: through
-   * tiles already there, and with rack tiles on empty squares that pass their cross-check.
+   * An extension: through a tile already on the board, or, on an empty square, the word may end
+   * here (if the anchor is covered and it is a word of two letters or more) and each rack tile
+   * that passes the square's cross-check may go on.
    */
-  private extend(
-    line: Line,
-    anchor: number,
-    start: number,
-    prefix: string,
-  ): readonly Placement[] | null {
+  private actExtend(frame: Frame): readonly Placement[] | null {
+    if (frame.phase === 2) {
+      if (frame.letters === 0) return this.pop();
+      const letter = lowest(frame.letters);
+      frame.letters &= frame.letters - 1;
+      const undo = this.put(letter, this.right);
+      this.push("extend", frame.prefix + String.fromCharCode(A + letter), frame.start, 0, undo);
+      return null;
+    }
     this.step();
-    const pos = start + prefix.length;
+    const { line, anchor } = this;
+    const pos = frame.start + frame.prefix.length;
     const there = pos < this.size ? this.onLine(line, pos) : null;
     if (there !== null) {
       const letter = there.charCodeAt(0) - A;
-      if ((this.follows(prefix) & (1 << letter)) === 0) return null;
-      return this.extend(line, anchor, start, prefix + there);
+      if ((this.follows(frame.prefix) & (1 << letter)) === 0) return this.pop();
+      frame.prefix += there;
+      return null;
     }
-    // The word ends here if the anchor is covered, it is at least two letters and in the list.
-    if (pos > anchor && prefix.length >= 2 && this.has(prefix)) {
-      const play = this.confirm(line, start, prefix);
+    if (pos > anchor && frame.prefix.length >= 2 && this.has(frame.prefix)) {
+      const play = this.confirm(line, frame.start, frame.prefix);
       /* v8 ignore next -- `confirm` refuses nothing the search finds (see there) */
       if (play !== null) return play;
     }
-    if (pos >= this.size || this.left.length + this.right.length >= this.limit) {
+    if (pos >= this.size || this.left.length + this.right.length >= this.limit) return this.pop();
+    frame.letters = this.follows(frame.prefix) & this.crossCheck(line, pos) & this.rackMask();
+    frame.phase = 2;
+    return null;
+  }
+
+  /**
+   * One action of finding cross-checks: for plays along `down`, the letters each empty square may
+   * take so the word across the line through it (if it touches tiles that way) is in the list.
+   * Each action looks at one more square (one prefix question) or tries one more letter there.
+   */
+  private crossAct(cross: CrossChecks): null {
+    if (cross.square >= 0) {
+      if (cross.letters === 0) {
+        cross.masks[cross.square] = cross.mask;
+        cross.square = -1;
+        return null;
+      }
+      const letter = lowest(cross.letters);
+      cross.letters &= cross.letters - 1;
+      if (this.has(cross.before + String.fromCharCode(A + letter) + cross.after)) {
+        cross.mask |= 1 << letter;
+      }
       return null;
     }
-    const allowed = this.follows(prefix) & this.crossCheck(line, pos) & this.rackMask();
-    for (let left = allowed; left !== 0; left &= left - 1) {
-      const letter = lowest(left);
-      const play = this.withTile(letter, this.right, () =>
-        this.extend(line, anchor, start, prefix + String.fromCharCode(A + letter)),
-      );
-      if (play !== null) return play;
+    // The cross-word runs across the play line: along a row for a play down a column.
+    const [dr, dc] = cross.down ? [0, 1] : [1, 0];
+    for (; cross.next < this.size * this.size; cross.next += 1) {
+      const [row, col] = [Math.floor(cross.next / this.size), cross.next % this.size];
+      if (this.letterAt(row, col) !== null) continue;
+      let before = "";
+      for (let r = row - dr, c = col - dc, l = this.letterAt(r, c); l !== null;) {
+        before = l + before;
+        [r, c] = [r - dr, c - dc];
+        l = this.letterAt(r, c);
+      }
+      let after = "";
+      for (let r = row + dr, c = col + dc, l = this.letterAt(r, c); l !== null;) {
+        after += l;
+        [r, c] = [r + dr, c + dc];
+        l = this.letterAt(r, c);
+      }
+      if (before === "" && after === "") continue;
+      Object.assign(cross, { square: cross.next, before, after, mask: 0 });
+      cross.letters = this.follows(before);
+      cross.next += 1;
+      return null;
     }
+    this.crossChecks[cross.down ? 1 : 0] = cross.masks;
+    this.cross = null;
     return null;
+  }
+
+  private crossCheck(line: Line, pos: number): number {
+    const [row, col] = line.down ? [pos, line.index] : [line.index, pos];
+    return this.crossChecks[line.down ? 1 : 0][row * this.size + col] ?? ALL_LETTERS;
   }
 
   /**
