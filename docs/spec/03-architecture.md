@@ -237,7 +237,8 @@ indistinguishable `404`).
 ### 5.3 Docker storage
 
 Single SQLite file on a mounted volume (`/data/app.sqlite`), WAL mode, `busy_timeout` set,
-`foreign_keys=ON`. Backups: documented `sqlite3 .backup` / Litestream recipe in 09.
+`foreign_keys=ON`, and SQLite's defensive flag set explicitly (no `writable_schema`, whatever
+Node's default). Backups: documented `sqlite3 .backup` / Litestream recipe in 09.
 The Node runtime is **single-instance** by design; running two containers against one file is
 unsupported and the app SHOULD refuse to start if it detects another live instance (lock file).
 M2a: the lock is SQLite's own exclusive lock on `<DATABASE_PATH>.lock`, held by an open
