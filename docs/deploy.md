@@ -86,10 +86,11 @@ quota that sign-in codes need) and 10 a day to any one person
 
 Inviting an address with no account sends it an invitation email from the configured provider,
 with a one-click unsubscribe. Those emails are capped too (06 §6.6, 08 §4): per inviter 5 a day
-and 20 in 30 days (2 a day for an account under a week old that hasn't finished a game), 3 in 30
-days to any one address, and 100 a day across the instance (`LIMIT_INVITE_EMAILS_*`); over a cap
-the seat is still created and nothing is sent, and the instance cap logs one
-`INVITE_EMAILS_GLOBAL_DAY` alert when it is crossed.
+and 20 in 30 days (2 a day for an account under a week old with no finished game against anyone),
+where every typed address counts, existing players' included; 3 in 30 days to any one address; and
+100 a day across the instance (`LIMIT_INVITE_EMAILS_*`). Over a cap the seat is still created and
+nothing is sent, and the instance cap logs one `INVITE_EMAILS_GLOBAL_DAY` alert a day while it is
+reached.
 
 The Cloudflare Tunnel compose file is below; the Caddy one arrives in M4 (09 §4).
 
