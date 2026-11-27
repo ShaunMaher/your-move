@@ -158,6 +158,20 @@ export async function issueSignInCode(
 }
 
 /**
+ * Counts one email toward the instance-wide OTP email caps (08 §4, §4.2) and says whether it may
+ * be sent: for an email a signed-in user's own action sends (a step-up code, the account-deleted
+ * confirmation), where there is nothing to hide about whether it was sent. Alerts on the crossing.
+ */
+export async function takeOtpEmailRoom(deps: OtpDeps): Promise<boolean> {
+  const global = await checkLimits(deps.repos, deps.config, deps.now, [
+    { name: "OTP_EMAIL_GLOBAL_HOUR", key: "all", amount: 1 },
+    { name: "OTP_EMAIL_GLOBAL_DAY", key: "all", amount: 1 },
+  ]);
+  alertOnCrossing(deps.log, global);
+  return !global.some((result) => result.exceeded);
+}
+
+/**
  * Issues a purpose-bound step-up code for a signed-in user (06 §7). Rate-limited per user
  * (08 §4); the instance-wide OTP email cap applies as for sign-in.
  */
@@ -174,12 +188,7 @@ export async function issueStepUpCode(
     { name: "STEP_UP_USER_DAY", key: user.id, amount: 1 },
   ]);
   if (limits.some((result) => result.exceeded)) return { kind: "limited" };
-  const global = await checkLimits(repos, config, now, [
-    { name: "OTP_EMAIL_GLOBAL_HOUR", key: "all", amount: 1 },
-    { name: "OTP_EMAIL_GLOBAL_DAY", key: "all", amount: 1 },
-  ]);
-  alertOnCrossing(deps.log, global);
-  const sends = !global.some((result) => result.exceeded);
+  const sends = await takeOtpEmailRoom(deps);
   const challengeId = crypto.randomUUID();
   const code = generateCode();
   await repos.otp.issue(

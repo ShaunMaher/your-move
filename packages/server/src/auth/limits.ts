@@ -76,12 +76,19 @@ export const EMAIL_DAY_CAPS = [
   "NUDGE_EMAILS_PER_DAY",
 ] as const satisfies readonly LimitName[];
 
+/** The effective allowance of each instance-wide email day cap (08 §4.2). */
+export function emailDayCapLimits(
+  config: LimitConfig,
+): { readonly name: (typeof EMAIL_DAY_CAPS)[number]; readonly limit: number }[] {
+  return EMAIL_DAY_CAPS.map((name) => ({ name, limit: limitOf(config, name) }));
+}
+
 /**
  * The most email the instance-wide caps can send in any 24 hours (08 §4.2): a sliding day window
  * sends at most its cap in each fixed UTC day, and any 24 hours overlap two of them.
  */
 export function emailWorstCasePer24h(config: LimitConfig): number {
-  return EMAIL_DAY_CAPS.reduce((sum, name) => sum + 2 * limitOf(config, name), 0);
+  return emailDayCapLimits(config).reduce((sum, cap) => sum + 2 * cap.limit, 0);
 }
 
 /** One counter to update: a limit, the key it counts under, and how much to add. */

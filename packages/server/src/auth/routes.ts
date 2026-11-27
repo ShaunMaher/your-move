@@ -47,6 +47,7 @@ import {
   type ClientBuckets,
   chargeNewAccount,
   newAccountAllowed,
+  takeOtpEmailRoom,
   verifyCode,
 } from "./otp.js";
 import { requireSession } from "./require-session.js";
@@ -404,7 +405,9 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
         createdAt: context.now,
       },
     );
-    send(c, accountDeletedEmail(email, templateContext()));
+    // The confirmation is informational: over the instance-wide OTP email caps it is skipped, and
+    // the account is deleted all the same (06 §7, 08 §4.2).
+    if (await takeOtpEmailRoom(context)) send(c, accountDeletedEmail(email, templateContext()));
     clearCookie(c);
     return c.body(null, 204);
   });

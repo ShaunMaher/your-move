@@ -92,6 +92,18 @@ describe("docker-compose.tunnel.yml (09 §4)", () => {
     expect(app.environment?.["TRUST_PROXY_PEERS"]).toBe(`${TUNNEL_ADDRESS}/32`);
   });
 
+  it("passes the outbound email budget through, empty by default so the defaults apply (08 §4.2, B2-S-2)", () => {
+    const names = [
+      "EMAIL_DAILY_QUOTA",
+      "LIMIT_OTP_EMAIL_GLOBAL_DAY",
+      "LIMIT_INVITE_EMAILS_GLOBAL_DAY",
+      "LIMIT_NUDGE_EMAILS_PER_DAY",
+    ];
+    for (const name of names) expect(app.environment?.[name]).toBe(`\${${name}:-}`);
+    const example = readFileSync(new URL("../tunnel.env.example", import.meta.url), "utf8");
+    for (const name of names) expect(example).toMatch(new RegExp(`^${name}=$`, "mu"));
+  });
+
   it("bounds both containers' logs, processes and memory (A5-S-10)", () => {
     for (const service of [app, tunnel]) {
       expect(service.logging?.driver).toBe("json-file");

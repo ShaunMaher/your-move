@@ -384,7 +384,8 @@ describe("the sweep's email nudges (03 §7)", () => {
   });
 
   it("a run that overlaps another doesn't send past the instance-wide cap: each count is checked (08 §4.2)", async () => {
-    // Another run counts a nudge between this run's read of the room and its own claim.
+    // Another run counts a nudge between this run's read of the room and its own (first) claim.
+    let overlapped = false;
     h = gameHarness(
       { LIMIT_NUDGE_EMAILS_PER_DAY: "1" },
       {
@@ -393,6 +394,8 @@ describe("the sweep's email nudges (03 §7)", () => {
           nudges: {
             ...repos.nudges,
             async claim(playerId, now, window) {
+              if (overlapped) return repos.nudges.claim(playerId, now, window);
+              overlapped = true;
               const windowStart = Math.floor(now / DAY) * DAY;
               await repos.rateLimits.hit([
                 {
@@ -410,11 +413,16 @@ describe("the sweep's email nudges (03 §7)", () => {
     );
     const { ada, bo } = await started({ ada: true, bo: true });
     h.setTime(T0 + DAY);
-    // The room read said 1; the claimed nudge's count made 2, so it is lost, not sent.
-    expect((await h.sweep()).nudges).toEqual({ sent: 0, failed: 1, skipped: 0, capped: true });
+    // The room read said 1; the claimed nudge's count made 2, so it isn't sent. It is no failed
+    // send (a Worker run with one is reported as failed), only the cap's stop.
+    expect((await h.sweep()).nudges).toEqual({ sent: 0, failed: 0, skipped: 0, capped: true });
     expect([...(await nudgesTo(ada)), ...(await nudgesTo(bo))]).toEqual([]);
     expect(counted("NUDGE_EMAILS_PER_DAY:all")).toBe(2);
     expect(alerts()).toHaveLength(1);
+    // The claim stands for a day; then the seat is due again, and once the window has room, sent.
+    h.setTime(T0 + 3 * DAY);
+    expect((await h.sweep()).nudges).toMatchObject({ sent: 1, failed: 0 });
+    expect([...(await nudgesTo(ada)), ...(await nudgesTo(bo))]).toHaveLength(1);
   });
 
   /** `bo` in `extra` more games with `ada` than the one `started` made. */

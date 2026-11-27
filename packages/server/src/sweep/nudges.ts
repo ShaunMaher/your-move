@@ -28,10 +28,7 @@ const NUDGE_INTERVAL_MS = 24 * HOUR;
 
 interface NudgeCounts {
   readonly sent: number;
-  /**
-   * Claimed, but not sent: building or sending the email failed, or (only when runs overlap) its
-   * count went over the instance-wide cap. That day's nudge is lost.
-   */
+  /** Claimed, but building or sending the email failed: that day's nudge is lost. */
   readonly failed: number;
   /**
    * Not claimed: the recipient is at their daily cap, the seat moved on, the user stopped being
@@ -42,7 +39,9 @@ interface NudgeCounts {
 
 /**
  * What one run of the step did. When the instance-wide daily cap stopped it, the rest wait
- * unclaimed (08 §4) and how many were due isn't reported: it is only the first page of them.
+ * unclaimed (08 §4) and how many were due isn't reported: it is only the first page of them; a
+ * nudge claimed by a run that overlapped another and found the cap used up is in none of the
+ * counts (03 §7).
  */
 export type NudgeReport =
   | (NudgeCounts & { readonly capped: false; readonly due: number })
@@ -144,10 +143,10 @@ export async function sendDueNudges(options: NudgeStepOptions): Promise<NudgeRep
       { name: "NUDGE_EMAILS_PER_USER_PER_DAY", key: nudge.userId, amount: 1 },
     ]);
     // The room was read once for the run; an overlapping run may have used it since. A claimed
-    // nudge whose count goes over the cap isn't sent (lost for the day like a failed send), so no
-    // fixed UTC day sends more than the cap (08 §4.2).
+    // nudge whose count goes over the cap isn't sent and the run stops as at the cap: it is no
+    // failed send, so it is in none of the counts, and the seat is due again a day after the claim.
+    // So no fixed UTC day sends more than the cap (08 §4.2).
     if (counted?.exceeded !== false) {
-      failed++;
       capped = true;
       break;
     }

@@ -2,7 +2,12 @@ import { isGameType } from "@your-move/sdk";
 import { z } from "zod";
 
 import { isSendableAddress, normaliseAddress, type NormalisedEmail } from "../accounts/email.js";
-import { EMAIL_DAY_CAPS, emailWorstCasePer24h, RATE_LIMIT_NAMES } from "../auth/limits.js";
+import {
+  EMAIL_DAY_CAPS,
+  emailDayCapLimits,
+  emailWorstCasePer24h,
+  RATE_LIMIT_NAMES,
+} from "../auth/limits.js";
 import { vapidKeyShapes } from "../push/vapid.js";
 import { DEFAULT_APP_NAME } from "./defaults.js";
 import { isEmailAddress, normaliseEmail, parseMailbox } from "./email.js";
@@ -388,13 +393,14 @@ function emailBudgetIssues(raw: RawEnv): string[] {
   }
   const worst = emailWorstCasePer24h({ limits });
   if (worst <= quota) return [];
-  const names = EMAIL_DAY_CAPS.map((name) => `LIMIT_${name}`).join(", ");
-  const source =
-    raw.EMAIL_DAILY_QUOTA === undefined ? `${raw.EMAIL_PROVIDER}'s default` : "EMAIL_DAILY_QUOTA";
+  const caps = emailDayCapLimits({ limits });
+  const values = caps.map((cap) => `LIMIT_${cap.name}=${String(cap.limit)}`).join(", ");
+  const sum = caps.map((cap) => String(cap.limit)).join(" + ");
+  const source = raw.EMAIL_DAILY_QUOTA === undefined ? `${raw.EMAIL_PROVIDER} default` : "set";
   return [
-    `${names}: twice their sum (${String(worst)}) is what they can send in some 24 hours, more ` +
-      `than the provider accepts (EMAIL_DAILY_QUOTA ${String(quota)}, ${source}); lower them, or ` +
-      "set EMAIL_DAILY_QUOTA to the provider's real limit (docs/spec/08-security.md §4.2)",
+    `${values}: they can send W = 2 × (${sum}) = ${String(worst)} in some 24 hours, more than ` +
+      `EMAIL_DAILY_QUOTA ${String(quota)} (${source}); lower them, or set EMAIL_DAILY_QUOTA to ` +
+      "the provider's real limit (docs/spec/08-security.md §4.2)",
   ];
 }
 
