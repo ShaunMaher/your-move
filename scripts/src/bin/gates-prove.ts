@@ -211,6 +211,57 @@ const proofs: Record<string, Proof> = {
     });
   },
 
+  "db:check: a statement after a breakpoint on its line, which Node runs and D1 doesn't, in a scratch copy"() {
+    return withMigrationsCopy((dir) => {
+      addMigration(
+        dir,
+        "0003_gate_fixture",
+        "CREATE INDEX `gate_fixture` ON `users` (`created_at`);--> statement-breakpoint DELETE FROM `users`;\n--> statement-breakpoint\nDROP INDEX `gate_fixture`;",
+      );
+      const result = exec("pnpm", ["db:check", "--migrations", dir]);
+      if (result.status === 0) return "db:check passed";
+      for (const expected of [
+        '0003_gate_fixture.sql has text after "--> statement-breakpoint" on line 1',
+        "0003_gate_fixture.sql reads as different statements on D1",
+      ]) {
+        if (!result.output.includes(expected)) return `db:check did not report: ${expected}`;
+      }
+      return null;
+    });
+  },
+
+  "db:check: an unterminated block comment before a breakpoint, in a scratch copy"() {
+    return withMigrationsCopy((dir) => {
+      addMigration(
+        dir,
+        "0003_gate_fixture",
+        "SELECT 1;\n/* note\n--> statement-breakpoint\nDELETE FROM `users`;\n",
+      );
+      const result = exec("pnpm", ["db:check", "--migrations", dir]);
+      if (result.status === 0) return "db:check passed";
+      return result.output.includes(
+        "0003_gate_fixture.sql has an unterminated block comment, string or quoted identifier",
+      )
+        ? null
+        : "db:check did not report the unterminated comment";
+    });
+  },
+
+  "db:check: a trigger named like one of SQLite's own, in a scratch copy"() {
+    return withMigrationsCopy((dir) => {
+      addMigration(
+        dir,
+        "0003_gate_fixture",
+        "CREATE TRIGGER sqlite1_purge AFTER INSERT ON `sessions` BEGIN DELETE FROM `sessions` WHERE 1; END;",
+      );
+      const result = exec("pnpm", ["db:check", "--migrations", dir]);
+      if (result.status === 0) return "db:check passed";
+      return result.output.includes("trigger sqlite1_purge")
+        ? null
+        : "db:check did not report the trigger";
+    });
+  },
+
   "games:verify: the installed example's engine importing React and reading the clock"() {
     const engineDir = join(ROOT_DIR, "games/example/src/engine");
     const index = join(engineDir, "index.ts");
