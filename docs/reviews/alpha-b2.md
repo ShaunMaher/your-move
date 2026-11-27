@@ -14,8 +14,8 @@ B2-S2); the owner read the last fixes and signed off.
 | B2-P-5 | Fixed. 501 sign-in requests through the real path give exactly 500 sends and identical answers. | `apps/node/src/auth-parity.test.ts` |
 | B2-P-6, B2-P2-3 | Fixed. Reflowed. | 03 §7, `docs/deploy.md` |
 | B2-S-2 | Fixed. The tunnel compose file passes the quota and the three caps through; empty means unset. | `apps/node/docker-compose.tunnel.yml`, `tunnel.env.example` |
-| B2-S-3 | Fixed. 08 §4.2 cites F-12 and states the cost of holding the sign-in cap; F-12 updated. A per-IP daily request limit is deferred. | 08 §4.2, `docs/security/findings.md` |
+| B2-S-3 | Fixed. 08 §4.2 cites F-12 and states the cost of holding the sign-in cap; F-12 updated. A per-IP daily request limit is deferred (#22). | 08 §4.2, `docs/security/findings.md` |
 | B2-S-4 | Fixed. SMTP through Google's relay shares the Workspace quota: set `EMAIL_DAILY_QUOTA`. | `docs/deploy.md`, 09 §1, 08 §4.2 |
-| B2-P2-1, B2-S2-1 | Fixed in wording. The source scan is a tripwire for the usual shapes and review covers the rest; a type-enforced check is deferred. | 08 §4.2, `apps/node/src/email-budget.test.ts` |
+| B2-P2-1, B2-S2-1 | Fixed in wording. The source scan is a tripwire for the usual shapes and review covers the rest; a type-enforced check is deferred (#22). | 08 §4.2, `apps/node/src/email-budget.test.ts` |
 | B2-P2-2 | No change. A claimed nudge over the cap shows only as capped, as designed. | — |
 | B2-S2-2 | Fixed. A failure to count the confirmation is logged by class and the deletion still answers 204. | `packages/server/src/auth/routes.ts` |
