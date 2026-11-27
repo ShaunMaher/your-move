@@ -149,6 +149,18 @@ by the shell for every game.)
   becomes theirs, the same tiles become ordinary placements in place, and the word
   check starts. When a new version of the game takes a planned tile's square, the tile goes back
   to the rack; no tile is lost or overlaps another.
+- **Dragging a tile off the board returns it** (alpha A13). A tile the player may move (this
+  turn's placed tiles, or planned tiles off turn) that is let go anywhere that is not a square of
+  the board goes back to the rack: outside the grid, over the page or the scores, off-screen, or
+  when the pointer is cancelled. It goes to the end of the rack (as "Return tile to rack" and
+  Backspace/Delete on a focused square do), unless it is let go on the rack, which keeps the
+  position it is dropped at. A blank loses its chosen letter. Over a square, a drop is unchanged
+  (moving, or snapping to the nearest empty square). Tiles from earlier turns can't be picked up,
+  and a tile dragged from the rack and let go off the board stays on the rack. While the pointer
+  is off the board the ghost is drawn as a plain rack tile with an ink ring, not as a placed or
+  planned one, to say that letting go returns it. Every return, by drag, button or key, is
+  announced in the status line ("Tile S returned to the rack."). No rule changes: it is only a
+  shorter way to do what the keyboard path (select the tile, "Return tile to rack") already does.
 - **Swap and Pass are board controls**, each a dialog on the board (swap: pick the rack tiles, with
   the reason when the bag is too small; pass: confirm). **Resign is the shell's menu** (02 §3): the
   module's `Action` has no resign, and the shell's `resign` call is not part of `BoardProps`.

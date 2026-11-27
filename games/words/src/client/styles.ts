@@ -227,6 +227,7 @@ const CSS = `
 .ym-w-ghost { position: fixed; z-index: 30; width: var(--w-rack); height: var(--w-rack);
   pointer-events: none; transform: translate(-50%, -50%); opacity: 0.9; }
 .ym-w-ghost .ym-w-tile { font-size: 1.25rem; }
+.ym-w-ghost[data-back="true"] .ym-w-tile { outline: 2px solid var(--w-ink); outline-offset: 2px; }
 .ym-w-final { margin: 0; padding: 0.5rem 0.75rem; border: 2px solid var(--w-ink); border-radius: 8px; }
 .ym-w-final h2 { margin: 0 0 0.25rem; font-size: 1.125rem; }
 .ym-w-final ul { margin: 0; padding-left: 1.25rem; }

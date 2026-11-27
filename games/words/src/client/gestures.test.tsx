@@ -153,6 +153,99 @@ describe("dragging tiles", () => {
     expect(rackNames()[0]).toBe("S, 1 point");
   });
 
+  describe("a tile dragged off the board", () => {
+    const place = (): void => {
+      table();
+      fireEvent.click(rackTile("S, 1 point"));
+      fireEvent.click(square(SR + 2, SC));
+    };
+    const lifted = (): void => {
+      grab(square(SR + 2, SC), 150, 190);
+    };
+    const placedS = (): boolean =>
+      (square(SR + 2, SC).getAttribute("aria-label") ?? "").includes("S, 1 point");
+
+    it("returns to the end of the rack when released off the board, and says so", () => {
+      place();
+      lifted();
+      move(150, 360);
+      expect(document.querySelector(".ym-w-ghost")?.getAttribute("data-back")).toBe("true");
+      release();
+      expect(placedS()).toBe(false);
+      expect(rackNames()).toContain("S, 1 point");
+      expect(screen.getByText("Tile S returned to the rack.")).toBeTruthy();
+    });
+
+    it("returns when released off-screen", () => {
+      place();
+      lifted();
+      move(-50, -50);
+      release();
+      expect(placedS()).toBe(false);
+    });
+
+    it("returns when the pointer is cancelled off the board", () => {
+      place();
+      lifted();
+      move(150, 360);
+      fireEvent.pointerCancel(window, { pointerId: 1 });
+      expect(placedS()).toBe(false);
+      expect(rackNames()).toContain("S, 1 point");
+    });
+
+    it("gives no cue over the board, and stays put when released there", () => {
+      place();
+      lifted();
+      move(150, 215);
+      expect(document.querySelector(".ym-w-ghost")?.getAttribute("data-back")).toBe("false");
+      release();
+      expect(square(SR + 3, SC).getAttribute("aria-label")).toContain("S, 1 point");
+    });
+
+    it("keeps the rack slot it is dropped on", () => {
+      place();
+      lifted();
+      move(5, RACK_TOP + 20);
+      release();
+      expect(rackNames()[0]).toBe("S, 1 point");
+    });
+
+    it("moves to an empty square, and onto an occupied one snaps to the nearest empty", () => {
+      place();
+      lifted();
+      move(at(SR + 3, SC).clientX, at(SR + 3, SC).clientY);
+      release();
+      expect(square(SR + 3, SC).getAttribute("aria-label")).toContain("S, 1 point");
+      grab(square(SR + 3, SC));
+      move(at(SR, SC).clientX, at(SR, SC).clientY);
+      release();
+      expect(square(SR, SC).getAttribute("aria-label")).toContain("A, 1 point");
+      expect(square(SR + 3, SC).getAttribute("aria-label")).not.toContain("S, 1 point");
+      expect(rackNames()).not.toContain("S, 1 point");
+    });
+
+    it("does not lift a tile from an earlier turn", () => {
+      table();
+      grab(square(SR, SC), 150, 150);
+      move(150, 360);
+      expect(document.querySelector(".ym-w-ghost")).toBeNull();
+      release();
+      expect(square(SR, SC).getAttribute("aria-label")).toContain("A, 1 point");
+    });
+
+    it("sends a blank back without its letter", () => {
+      table();
+      fireEvent.click(rackTile("Blank tile"));
+      fireEvent.click(square(SR + 2, SC));
+      fireEvent.click(screen.getByRole("button", { name: "Z" }));
+      grab(square(SR + 2, SC), 150, 190);
+      move(150, 360);
+      release();
+      expect(rackNames()).toContain("Blank tile");
+      expect(square(SR + 2, SC).getAttribute("aria-label")).toContain("empty");
+    });
+  });
+
   it("reorders the rack by dropping a tile in front of another, or at the end", () => {
     table();
     grab(rackTile("S, 1 point"));

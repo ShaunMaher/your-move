@@ -131,7 +131,15 @@ function Table(
   const [sent, setSent] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [answers, setAnswers] = useState<ReadonlyMap<string, Answer>>(new Map());
-  const [ghost, setGhost] = useState<{ tile: string; x: number; y: number } | null>(null);
+  const [ghost, setGhost] = useState<{
+    tile: string;
+    x: number;
+    y: number;
+    /** Released here, the tile goes back to the rack (a tile from the board, off the board). */
+    back: boolean;
+  } | null>(null);
+  /** What the last return of a tile to the rack announces (07 §2). */
+  const [note, setNote] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   // A new view of the game (an opponent played, a refetch): keep what the player arranged where
@@ -232,6 +240,7 @@ function Table(
   }, [canAct, playable, settled, checkKey, placements, delay]);
 
   function clearTransient(): void {
+    setNote(null);
     setSelected(null);
     setMessage(null);
   }
@@ -240,6 +249,10 @@ function Table(
     if (target.kind === "rack") arranged.current = true;
     setT((now) => move(now, rack, source, target));
     clearTransient();
+    if (source.kind === "square" && target.kind === "rack") {
+      const tile = rack[t.placed[source.key]?.id ?? -1] ?? "";
+      setNote(`${heldName(tile)} returned to the rack.`);
+    }
   }
 
   function tapRack(id: number): void {
@@ -297,6 +310,12 @@ function Table(
     return null;
   }
 
+  /** Whether a screen point is over the board's frame (a release there is never a return). */
+  function overBoard(x: number, y: number): boolean {
+    const box = frame.current?.getBoundingClientRect();
+    return box !== undefined && x >= box.left && x < box.right && y >= box.top && y < box.bottom;
+  }
+
   /** Starts a possible drag of a tile; a press that doesn't travel stays a tap. */
   function beginDrag(source: Source, tile: string, event: PointerEvent<HTMLElement>): void {
     if (!canArrange || busy || (event.pointerType === "mouse" && event.button !== 0)) return;
@@ -318,8 +337,10 @@ function Table(
       at = { x: e.clientX, y: e.clientY };
       if (!moved && distance(start, at) < DRAG_SLOP) return;
       moved = true;
-      setGhost({ tile, x: at.x, y: at.y - lift });
       const target = aim();
+      // A tile from the board let go anywhere but a square of the board goes back to the rack.
+      const back = source.kind === "square" && !overBoard(at.x, at.y - lift);
+      setGhost({ tile, x: at.x, y: at.y - lift, back });
       setDropTarget(target?.kind === "square" ? target.key : null);
       const box = frame.current?.getBoundingClientRect();
       const over = target?.kind === "square";
@@ -348,6 +369,9 @@ function Table(
       }, 0);
       const target = drop ? aim() : null;
       if (target !== null) put(source, target);
+      else if (source.kind === "square" && (!drop || !overBoard(at.x, at.y - lift))) {
+        put(source, { kind: "rack", before: null });
+      }
     };
     const onUp = (e: globalThis.PointerEvent): void => {
       finish(e, true);
@@ -450,6 +474,7 @@ function Table(
       {canArrange && (
         <>
           <div className="ym-w-status" aria-live="polite" aria-atomic="true">
+            {note !== null && <span>{note}</span>}
             <Status analysis={analysis} answer={answer} held={held} sent={sent} canAct={canAct} />
           </div>
           {message !== null && (
@@ -566,6 +591,7 @@ function Table(
       {ghost !== null && (
         <div
           className="ym-w-ghost"
+          data-back={ghost.back}
           aria-hidden="true"
           ref={(element) => {
             if (element) {
@@ -576,7 +602,7 @@ function Table(
         >
           <span
             className="ym-w-tile"
-            data-state={canArrange && !canAct ? "planned" : "placed"}
+            data-state={ghost.back ? undefined : canArrange && !canAct ? "planned" : "placed"}
             data-blank={ghost.tile === "?"}
           >
             {shown(ghost.tile)}

@@ -947,6 +947,18 @@ describe("when it isn't your turn", () => {
     );
   });
 
+  it("sends a planned tile dragged off the board back to the rack", () => {
+    setup(fresh({ turn: 1 }), { yourTurn: false });
+    fireEvent.click(rackTile("S, 1 point"));
+    fireEvent.click(square(SR, SC + 3));
+    expect(square(SR, SC + 3).getAttribute("aria-label")).toContain("Planned tile S");
+    fireEvent.pointerDown(square(SR, SC + 3), { pointerId: 1, clientX: 5, clientY: 5 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 400, clientY: 400 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(square(SR, SC + 3).getAttribute("aria-label")).toContain("empty");
+    expect(screen.getByText("Tile S returned to the rack.")).toBeTruthy();
+  });
+
   it("says it is a plan even when nobody is to act", () => {
     render(
       <Board
