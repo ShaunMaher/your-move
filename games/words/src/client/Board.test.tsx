@@ -1194,6 +1194,100 @@ describe("the no-play hint", () => {
     expect(status()).toBe(PROMPT);
   });
 
+  /**
+   * A list whose only words are CAT and CATS but whose prefixes run through every string of up
+   * to four of AEIOULY: the search over AEIOULY walks them all, over several slices, and finds
+   * nothing; a rack with S finds CATS.
+   */
+  const slow = (): Lexicon & { asked: () => number } => {
+    const letters = ["a", "e", "i", "o", "u", "l", "y"];
+    let strings = [""];
+    const all: string[] = [];
+    for (let length = 1; length <= 4; length += 1) {
+      strings = strings.flatMap((s) => letters.map((l) => s + l));
+      if (length >= 2) all.push(...strings);
+    }
+    const list = wordList([...all, "cat", "cats"]);
+    let asked = 0;
+    return {
+      has: (word) => {
+        asked += 1;
+        return word === "cat" || word === "cats";
+      },
+      follows: (prefix) => {
+        asked += 1;
+        return list.follows(prefix);
+      },
+      asked: () => asked,
+    };
+  };
+
+  /** Runs the next slice only. */
+  async function oneSlice(): Promise<void> {
+    await act(async () => {
+      await vi.advanceTimersToNextTimerAsync();
+    });
+  }
+
+  it("searches a new rack, never showing what the old one's search would have said (A14-P-3)", async () => {
+    vi.useFakeTimers();
+    const lexicon = slow();
+    const { rerenderAt } = setup(vowels(), { lexicon });
+    await oneSlice();
+    // Mid-search: a slice has run, the next is waiting, and nothing is shown yet.
+    expect(lexicon.asked()).toBeGreaterThan(0);
+    expect(vi.getTimerCount()).toBe(1);
+    expect(status()).toBe(PROMPT);
+    // The opponent plays; the new rack (with an S) can make CATS.
+    rerenderAt(4, view(fresh(), 0));
+    // The old search's next slice is gone: the one timer is the new search's first slice.
+    expect(vi.getTimerCount()).toBe(1);
+    await settle();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(status()).toBe(PROMPT);
+  });
+
+  it("searches again when the rack changes within a version (A14-P-4)", async () => {
+    vi.useFakeTimers();
+    const { rerenderAt } = setup(fresh(), { lexicon: words() });
+    await settle();
+    expect(status()).toBe(PROMPT);
+    rerenderAt(3, view(vowels(), 0));
+    await settle();
+    expect(status()).toBe(SWAP_HINT);
+  });
+
+  it("leaves no timer behind when the board goes away mid-search (A14-P-3)", async () => {
+    vi.useFakeTimers();
+    const lexicon = slow();
+    const { unmount } = setup(vowels(), { lexicon });
+    await oneSlice();
+    expect(vi.getTimerCount()).toBe(1);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("waits while a tile is being dragged, then goes on (A14-P-2)", async () => {
+    vi.useFakeTimers();
+    const lexicon = words();
+    setup(vowels(), { lexicon });
+    fireEvent.pointerDown(rackTile("A, 1 point"), {
+      pointerId: 1,
+      clientX: 10,
+      clientY: 10,
+      button: 0,
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(lexicon.asked()).toBe(0);
+    expect(status()).not.toContain("No word");
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    await settle();
+    expect(lexicon.asked()).toBeGreaterThan(0);
+    expect(status()).toBe(SWAP_HINT);
+  });
+
   it("yields to the browser between slices", async () => {
     vi.useFakeTimers();
     const endless: Lexicon = { has: () => false, follows: () => (1 << 26) - 1 };

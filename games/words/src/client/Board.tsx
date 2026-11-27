@@ -121,13 +121,6 @@ function Table(
   const canArrange = view.yourRack !== null && view.final === undefined && game.status === "active";
   const canAct = canArrange && game.yourTurn;
   const points = (tile: string): number => tilePoints(ruleset, tile);
-  const noPlay = useNoPlayHint({
-    active: canAct,
-    version: game.version,
-    ruleset,
-    view,
-    lexicon: gameWordList(props.resources, view),
-  });
 
   const [t, setT] = useState<Tentative>(() =>
     initial(rack, canArrange ? loadOrder(storageKey, rack.length) : null),
@@ -170,6 +163,14 @@ function Table(
   const dragged = useRef(false);
   const dragging = useRef(false);
   const arranged = useRef(false);
+  const noPlay = useNoPlayHint({
+    active: canAct,
+    version: game.version,
+    ruleset,
+    view,
+    lexicon: gameWordList(props.resources, view),
+    paused: dragging,
+  });
   useEffect(() => {
     preview.current = props.preview;
     live.current = { viewport, t };
