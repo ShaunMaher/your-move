@@ -44,6 +44,16 @@ loaded runner passes would leave a test that detects nothing.
   SELECT above the bound. If no quiet runner exists, the job is quarantined with an issue (11 §4),
   and the local run before hand-off is the check until it is restored.
 
+## Addendum: game creation with a typed address (alpha A17, 2026-11-27)
+
+Q3 (06 §6.1) needs `POST /api/v1/games` with a typed address to take indistinguishable time
+whether the address has an account, is suppressed or is over the inbound cap (review A17-S-7). The
+same file now times those cases with the same design and the same 3% bound, each request from a
+creator of its own. A creation takes about 2.8 ms, so one planted SELECT (about 70 µs, 2.5%) sits
+just under the bound; its power check plants **two** (+3.9% to +4.1% locally) and the bound is not
+loosened. Coders run `pnpm test:timing` before handing off changes to game creation's handling of
+typed addresses too; the file now takes about 70 s on a developer laptop.
+
 ## Consequences
 
 - One more job per pipeline, on the arm64 runner, starting only after its other arm64 work. The
