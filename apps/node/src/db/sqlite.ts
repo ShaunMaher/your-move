@@ -50,6 +50,9 @@ export function openSqlite(path: string): DatabaseSync {
   const sqlite = new DatabaseSync(path, {
     enableForeignKeyConstraints: true,
     timeout: BUSY_TIMEOUT_MS,
+    // SQLite's defensive flag (no writable_schema, no shadow-table writes), whatever Node's
+    // default is (B1-S-8).
+    defensive: true,
   });
   sqlite.exec("PRAGMA journal_mode = WAL");
   sqlite.exec("PRAGMA foreign_keys = ON");

@@ -7,9 +7,10 @@
  *   Every known migration whose hash isn't recorded is applied, in journal order; a recorded hash
  *   this build doesn't know (a newer build's migration, or an edited one) refuses the start.
  * - Pending migrations run in one transaction, so a failed one leaves the schema as it was. A
- *   migration may not begin, end or nest a transaction itself: an authorizer denies SQLite's
- *   transaction and savepoint actions while its statements run (`pnpm db:check` refuses such a
- *   migration before it is committed; M2a review P2-1).
+ *   migration may not begin, end or nest a transaction itself, use a pragma other than
+ *   `foreign_keys`, or attach or detach a database: an authorizer denies those actions while its
+ *   statements run (`pnpm db:check` refuses such a migration before it is committed; M2a review
+ *   P2-1, B1-S-3, B1-S-4).
  * - Foreign keys are off while they run (04 §Migrations): `PRAGMA foreign_keys` is a no-op inside
  *   a transaction, and with it on, the `DROP TABLE` of drizzle-kit's table rebuilds would fire
  *   every child table's `ON DELETE CASCADE` / `SET NULL`. When migrations are pending,
@@ -49,26 +50,44 @@ const foreignKeyViolations = (sqlite: DatabaseSync): number =>
   sqlite.prepare("PRAGMA foreign_key_check").all().length;
 
 /**
- * Runs one migration's statements with transaction control denied: `BEGIN`, `COMMIT`, `END`,
- * `ROLLBACK`, `SAVEPOINT` and `RELEASE` fail to prepare, however they are written.
+ * What a migration may not do, by SQLite's authorizer action (04 §Migrations): begin, end or nest
+ * a transaction (`BEGIN`, `COMMIT`, `END`, `ROLLBACK`, `SAVEPOINT`, `RELEASE`), use any pragma but
+ * `foreign_keys` (B1-S-3), or attach or detach a database (B1-S-4). The text is what the error
+ * says it did.
+ */
+function deniedAction(action: number, name: string | null): string | null {
+  if (action === constants.SQLITE_TRANSACTION || action === constants.SQLITE_SAVEPOINT) {
+    return "begins, ends or nests a transaction, which would break the one-transaction guarantee";
+  }
+  if (action === constants.SQLITE_PRAGMA && name?.toLowerCase() !== "foreign_keys") {
+    return "uses a pragma other than foreign_keys";
+  }
+  if (action === constants.SQLITE_ATTACH || action === constants.SQLITE_DETACH) {
+    return "attaches or detaches a database";
+  }
+  return null;
+}
+
+/**
+ * Runs one migration's statements under {@link deniedAction}: a denied statement fails to prepare,
+ * however it is written.
  */
 function runStatements(sqlite: DatabaseSync, statements: readonly string[], index: number): void {
-  const denied = { transactionControl: false };
-  sqlite.setAuthorizer((action) => {
-    if (action === constants.SQLITE_TRANSACTION || action === constants.SQLITE_SAVEPOINT) {
-      denied.transactionControl = true;
-      return constants.SQLITE_DENY;
-    }
-    return constants.SQLITE_OK;
+  const denied: { reason: string | null } = { reason: null };
+  sqlite.setAuthorizer((action, name) => {
+    const reason = deniedAction(action, name);
+    if (reason === null) return constants.SQLITE_OK;
+    denied.reason ??= reason;
+    return constants.SQLITE_DENY;
   });
   try {
     for (const statement of statements) {
       if (statement.trim() !== "") sqlite.exec(statement);
     }
   } catch (error) {
-    if (!denied.transactionControl) throw error;
+    if (denied.reason === null) throw error;
     throw new MigrationError(
-      `Migration ${String(index)} begins, ends or nests a transaction, which would break the one-transaction guarantee (04 §Migrations); nothing was applied.`,
+      `Migration ${String(index)} ${denied.reason} (04 §Migrations); nothing was applied.`,
       { cause: error },
     );
   } finally {

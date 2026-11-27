@@ -86,6 +86,15 @@ describe("openSqlite", () => {
     }
   });
 
+  it("opens the database defensively, so writable_schema can't rewrite the schema (B1-S-8)", () => {
+    const sqlite = openSqlite(":memory:");
+    sqlite.exec("CREATE TABLE t (x INTEGER); PRAGMA writable_schema = 1");
+    expect(() => {
+      sqlite.exec("UPDATE sqlite_schema SET sql = 'CREATE TABLE t (y)' WHERE name = 't'");
+    }).toThrow(/may not be modified/u);
+    sqlite.close();
+  });
+
   it("opens an in-memory database without touching the file system", () => {
     const sqlite = openSqlite(":memory:");
     expect(sqlite.prepare("SELECT 1 AS one").get()).toEqual({ one: 1 });
