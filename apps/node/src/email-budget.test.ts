@@ -1,9 +1,11 @@
 /**
  * The outbound email budget's guard (docs/spec/08-security.md §4.2): every email the server sends
- * counts toward one of the instance-wide day caps. A source scan of the server and both runtimes
- * finds every call that sends an email and every email template used; each must be listed here
- * with the counting it goes through, so a new send fails until it is counted and listed. The
- * behaviour of each listed path is tested where it lives (auth, invites, nudges).
+ * counts toward one of the instance-wide day caps. A tripwire, not a proof: a source scan of the
+ * server and both runtimes finds the usual shapes of a send (`email.send(`, `email?.send(`, or
+ * `.send(` on the next line) and every call of an exported email template, and each file must be
+ * listed here with the counting it goes through. A send written some other way gets past it;
+ * review covers that. The behaviour of each listed path is tested where it lives (auth, invites,
+ * nudges).
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -65,7 +67,7 @@ function found(): Record<string, { sends: number; templates: Record<string, numb
   for (const path of SCANNED.flatMap(sources)) {
     if (path === TEMPLATES) continue;
     const text = readFileSync(join(ROOT, path), "utf8");
-    const sends = text.match(/\bemail\.send\(/gu)?.length ?? 0;
+    const sends = text.match(/\bemail\??\s*\.\s*send\(/gu)?.length ?? 0;
     const templates: Record<string, number> = {};
     for (const name of templateNames) {
       const uses = text.match(new RegExp(`\\b${name}\\(`, "gu"))?.length ?? 0;

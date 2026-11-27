@@ -175,9 +175,11 @@ is sent, and is sent only if that cap (and, for the first group, the hourly one)
   be mailed and passed the inviter's caps (06 §6.6);
 - `NUDGE_EMAILS_PER_DAY` (*N*): a claimed "It's your turn" nudge (03 §7).
 
-A new kind of email MUST count toward one of them, or add a day cap of its own to the sum below. A
-source scan in the tests lists every call that sends an email, in the server and both runtimes,
-with the counting it goes through, so an uncounted send fails CI.
+A new kind of email MUST count toward one of them, or add a day cap of its own to the sum below.
+Review is what enforces this. A source scan in the tests is a tripwire for the usual shapes: every
+`email.send(` call (also `email?.send(`, or `.send(` on the next line) and every call of an
+exported email template, in the server and both runtimes, must be listed with the counting it goes
+through. A send written some other way gets past it.
 
 **Each cap lets out at most twice its figure in any 24 hours.** The caps are sliding windows over
 fixed UTC days (two adjacent days, the previous one weighted by how much of it the last 24 hours
