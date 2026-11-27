@@ -219,9 +219,10 @@ export interface CreatedGame {
  *
  * With `rematchOf`, the game is that finished game's rematch (05 `POST /api/v1/games/:id/rematch`):
  * the body carries the finished game's stored options, which are resolved again without the
- * creator's remembered options and don't change them, and the game is created only if the
- * finished game has no rematch yet, linked to it in the same batch. Null when it already had one:
- * nothing was created.
+ * creator's remembered options and don't change them; `body.seats` below the module's minimum
+ * is `REMATCH_UNAVAILABLE`; and the game is created only if the finished game has no rematch yet
+ * (or one that ended unplayed, which it replaces), linked to it in the same batch. Null when it
+ * already had a live or played one: nothing was created.
  */
 export async function createGame(
   deps: CreateDeps,
@@ -242,6 +243,11 @@ export async function createGame(
   const remembered =
     rematchOf === undefined ? lastOptionsOf(creator.settings, type.type) : undefined;
   const { options, input } = resolve(type, body.options, remembered, ctx);
+  // A rematch has a seat for each person carried over; too few for the game is its own answer
+  // (05 `REMATCH_UNAVAILABLE`), whatever the module's range says.
+  if (rematchOf !== undefined && (body.seats ?? 0) < type.latest.players(options).min) {
+    throw ApiError.of("REMATCH_UNAVAILABLE");
+  }
   const seats = seatCount(type, options, body.seats);
   const turnTimeoutDays = timeoutDays(type, options, body.turnTimeoutDays);
   const { emails, picked } = invitees(body, creator, seats);

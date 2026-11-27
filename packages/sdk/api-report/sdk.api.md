@@ -67,7 +67,6 @@ export interface GameDefinition<Options = unknown, State = unknown, Action = unk
     readonly previewSchema?: Schema<PreviewResult>;
     // (undocumented)
     readonly recordSchema: Schema<PublicRecord>;
-    // (undocumented)
     resolveOptions(input: unknown, ctx: OptionsContext): Options | GameError;
     // (undocumented)
     resources(options: Options): readonly ResourceRequest[];

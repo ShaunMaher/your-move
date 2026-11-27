@@ -11,9 +11,10 @@ import type {
   GameRecord,
   GameResourceRecord,
   ListedGame,
+  RematchRead,
   UserRecord,
 } from "../db/repositories.js";
-import { deadlineOf, type FinalViews, LOBBY_LIFETIME_MS } from "./lifecycle.js";
+import { deadlineOf, endedUnplayed, type FinalViews, lobbyExpiresAt } from "./lifecycle.js";
 import type { GameType } from "./registry.js";
 
 type EnvelopePlayer = GameEnvelope["players"][number];
@@ -190,31 +191,25 @@ export function invitationOf(
 }
 
 /**
- * A finished game's rematch as one of its players sees it (05 `rematch`): `joined` if they hold a
- * joined or seated row in it, `invited` while they hold an invitation in its open lobby, otherwise
- * `none` (declined, left, removed, dropped at its start, an invitation in a lobby that ended, or no
- * row). An `inert` invitation shows as `invited`, like any other: whether a row is inert never
- * shows, and accepting it is refused as `404`, as accepting an invitation with a block is (05).
+ * A finished game's rematch as one of its players sees it (05 `rematch`): null when it ended
+ * unplayed, an overdue lobby included (it may be replaced; the press expires it first); otherwise `joined` if they hold a joined or seated row in it,
+ * `invited` while they hold an invitation in its open lobby, and `none` otherwise (declined, left,
+ * removed, dropped at its start, an invitation in a lobby that ended, or no row). An `inert`
+ * invitation shows as `invited`, like any other: whether a row is inert never shows, and accepting
+ * it is refused as `404`, as accepting an invitation with a block is (05).
  */
-export function rematchOf(
-  rematch: {
-    readonly game: Pick<GameRecord, "id" | "status" | "createdAt">;
-    readonly players: readonly GamePlayerRecord[];
-  },
-  userId: string,
-  now: number,
-): NonNullable<GameEnvelope["rematch"]> {
-  const row = rematch.players.find((player) => player.userId === userId);
-  const state = row?.state;
-  const lobbyOpen =
-    rematch.game.status === "lobby" && now < rematch.game.createdAt + LOBBY_LIFETIME_MS;
+export function rematchOf(rematch: RematchRead, now: number): GameEnvelope["rematch"] {
+  const { game, viewerState } = rematch;
+  if (endedUnplayed(game)) return null;
+  if (game.status === "lobby" && now >= lobbyExpiresAt(game)) return null;
+  const lobbyOpen = game.status === "lobby";
   const you =
-    state === "joined" || state === "playing" || state === "out"
+    viewerState === "joined" || viewerState === "playing" || viewerState === "out"
       ? "joined"
-      : state === "invited" && lobbyOpen
+      : viewerState === "invited" && lobbyOpen
         ? "invited"
         : "none";
-  return { gameId: rematch.game.id, you };
+  return { gameId: game.id, you };
 }
 
 /** The seats in `toAct`, and whether the viewer's is one of them. */

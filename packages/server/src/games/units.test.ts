@@ -11,6 +11,7 @@ import {
   accept,
   cancel,
   decline,
+  endedUnplayed,
   expire,
   isModuleOutcome,
   isRefusal,
@@ -535,40 +536,56 @@ describe("typed addresses on open invitations (A12-S-3)", () => {
 });
 
 describe("a finished game's rematch as one of its players sees it (05 `rematch`, alpha A15)", () => {
-  const row = (userId: string | null, state: GamePlayerRecord["state"], delivery = "normal") =>
-    ({ userId, state, delivery }) as GamePlayerRecord;
-  const lobby = { id: "r", status: "lobby", createdAt: 1000 } as const;
-  const players = [
-    row("creator", "joined"),
-    row("added", "joined"),
-    row("asked", "invited"),
-    row("inert", "invited", "inert"),
-    row("gone", "declined"),
-  ];
-  const at = (userId: string, game: Pick<GameRecord, "id" | "status" | "createdAt"> = lobby) =>
-    rematchOf({ game, players }, userId, 2000).you;
+  type Status = GameRecord["status"];
+  const game = (status: Status = "lobby", actionCount = 0) =>
+    ({ id: "r", status, createdAt: 1000, actionCount }) as const;
+  const at = (
+    viewerState: GamePlayerRecord["state"] | null,
+    status: Status = "lobby",
+    now = 2000,
+  ) => rematchOf({ game: game(status), viewerState }, now)?.you;
 
   it("is joined for a joined or seated row, invited for an invitation, none otherwise", () => {
-    expect(["creator", "added", "asked", "inert", "gone", "stranger"].map((id) => at(id))).toEqual([
+    expect(
+      (["joined", "invited", "declined", "left", "removed", null] as const).map((state) =>
+        at(state),
+      ),
+    ).toEqual(["joined", "invited", "none", "none", "none", "none"]);
+    expect([at("playing", "active"), at("out", "finished"), at("dropped", "active")]).toEqual([
       "joined",
       "joined",
-      "invited",
-      // An inert invitation looks like any other: accepting it is refused (404).
-      "invited",
-      "none",
       "none",
     ]);
-    const started = { ...lobby, status: "active" } as const;
-    expect(
-      rematchOf({ game: started, players: [row("p", "playing"), row("o", "out")] }, "o", 2000),
-    ).toEqual({ gameId: "r", you: "joined" });
+    expect(rematchOf({ game: game(), viewerState: "joined" }, 2000)).toEqual({
+      gameId: "r",
+      you: "joined",
+    });
   });
 
-  it("is none for an invitation once its lobby has ended or is past its expiry", () => {
-    expect(at("asked", { ...lobby, status: "expired" })).toBe("none");
-    expect(rematchOf({ game: lobby, players }, "asked", 1000 + LOBBY_LIFETIME_MS).you).toBe("none");
-    expect(rematchOf({ game: lobby, players }, "asked", 999 + LOBBY_LIFETIME_MS).you).toBe(
-      "invited",
-    );
+  it("is null once its lobby is past its expiry: it has ended unplayed", () => {
+    expect(
+      rematchOf({ game: game(), viewerState: "invited" }, 1000 + LOBBY_LIFETIME_MS),
+    ).toBeNull();
+    expect(at("invited", "lobby", 999 + LOBBY_LIFETIME_MS)).toBe("invited");
+  });
+
+  it("is null once the rematch ended unplayed, so it may be replaced (A15-P-2)", () => {
+    for (const status of ["cancelled", "expired", "declined"] as const) {
+      expect(rematchOf({ game: game(status), viewerState: "invited" }, 2000)).toBeNull();
+      // An ending after anyone acted was played: it stays.
+      expect(rematchOf({ game: game(status, 3), viewerState: "out" }, 2000)?.you).toBe("joined");
+    }
+    expect(endedUnplayed({ status: "finished", actionCount: 0 })).toBe(false);
+    expect(endedUnplayed({ status: "lobby", actionCount: 0 })).toBe(false);
+  });
+});
+
+describe("remembered options leave version keys out (05 §Remembered options, A15-P-10)", () => {
+  it("drops top-level *Version keys and keeps everything else", () => {
+    expect(
+      rememberedInput({ rulesetId: "casual", rulesetVersion: 1, dictionaryVersion: 2, x: 1 }),
+    ).toBe('{"rulesetId":"casual","x":1}');
+    expect(rememberedInput(undefined)).toBe("{}");
+    expect(rememberedInput("raw")).toBe('"raw"');
   });
 });

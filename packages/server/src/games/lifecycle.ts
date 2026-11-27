@@ -22,6 +22,7 @@ import type {
   GameWriteSet,
   PastOpponentPair,
 } from "../db/repositories.js";
+import { UNPLAYED_ENDINGS } from "../db/repositories.js";
 import { type Draw, recorded } from "./random.js";
 
 /** A loaded game with its parsed options and, once started, its parsed state. */
@@ -419,8 +420,16 @@ function clearAddresses(players: readonly GamePlayerRecord[], except?: string) {
 export const LOBBY_LIFETIME_MS = 14 * DAY;
 
 /** When the lobby expires (02 §4). */
-function lobbyExpiresAt(game: GameRecord): number {
+export function lobbyExpiresAt(game: Pick<GameRecord, "createdAt">): number {
   return game.createdAt + LOBBY_LIFETIME_MS;
+}
+
+/**
+ * Whether a game ended without being played: cancelled, expired or declined with no action
+ * logged. A finished game's rematch that ended so may be replaced (04 `rematch_game_id`, 05).
+ */
+export function endedUnplayed(game: Pick<GameRecord, "status" | "actionCount">): boolean {
+  return (UNPLAYED_ENDINGS as readonly string[]).includes(game.status) && game.actionCount === 0;
 }
 
 /**

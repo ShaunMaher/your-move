@@ -325,6 +325,22 @@ export interface LoadedGame {
   readonly players: readonly GamePlayerRecord[];
 }
 
+/**
+ * The endings of a game that may end without being played (02 §4): one of these with no action
+ * logged ended unplayed, and as a finished game's rematch may be replaced (04 `rematch_game_id`).
+ */
+export const UNPLAYED_ENDINGS = ["cancelled", "expired", "declined"] as const;
+
+/**
+ * What a finished game's players see of its rematch (05 `rematch`): a few columns of the rematch
+ * and one user's own row state in it, if any.
+ */
+export interface RematchRead {
+  readonly game: Pick<GameRecord, "id" | "status" | "createdAt" | "actionCount">;
+  /** The user's `game_players.state` in the rematch; null when they hold no row. */
+  readonly viewerState: GamePlayerRecord["state"] | null;
+}
+
 /** Which of a user's games to list (05 `GET /api/v1/games`). */
 export interface GameListQuery {
   readonly userId: string;
@@ -380,10 +396,11 @@ export interface GameRepo {
   /**
    * Creates the rematch of a finished game (05 `POST /api/v1/games/:id/rematch`) exactly as
    * {@link create} does, and links it as that game's `rematch_game_id`, in one atomic batch that
-   * writes anything only while `finishedId` is a `finished` game with no rematch yet. True if it
-   * did; false if it wrote nothing, so of several calls racing for one finished game exactly one
-   * creates a game and the others leave no row behind. Not a transition: the finished game's
-   * `version` is unchanged.
+   * writes anything only while `finishedId` is a `finished` game whose link is NULL or names a
+   * game that ended unplayed (`cancelled`, `expired` or `declined` with `action_count = 0`), which
+   * it replaces. True if it did; false if it wrote nothing, so of several calls racing for one
+   * finished game exactly one creates a game and the others leave no row behind. Not a
+   * transition: the finished game's `version` is unchanged.
    */
   createRematch(
     finishedId: string,
@@ -393,6 +410,8 @@ export interface GameRepo {
   ): Promise<boolean>;
   /** The game row, secret columns included (the core decides what leaves the server). */
   get(id: string): Promise<GameRecord | null>;
+  /** The rematch `gameId` as `userId` sees it from the finished game; null if no such game. */
+  rematchRead(gameId: string, userId: string): Promise<RematchRead | null>;
   /** The game row and its players, read in one batch. */
   load(id: string): Promise<LoadedGame | null>;
   /** The game's `game_players` rows, ordered by seat and then as they were added. */

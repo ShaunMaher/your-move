@@ -38,12 +38,14 @@ import { background } from "../http/background.js";
 import type { AppEnv, Platform } from "../platform.js";
 import { sendAddedPushes, sendTransitionPushes } from "../push/notify.js";
 import { createGame } from "./create.js";
-import { expireOverdueLobbies, loadCurrent } from "./expiry.js";
+import { expireIfOverdue, expireOverdueLobbies, loadCurrent } from "./expiry.js";
 import {
   accept,
   cancel,
   decline,
+  endedUnplayed,
   type GameContext,
+  lobbyExpiresAt,
   isModuleOutcome,
   isRefusal,
   moduleTransition,
@@ -186,14 +188,12 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       repos.games.resources(loaded.game.id),
       repos.users.findByIds(shownUserIds(loaded.players, () => loaded.game.status === "lobby")),
       // Only a finished game shows its rematch (05 `rematch`).
-      loaded.game.status === "finished" && rematchGameId !== null
-        ? repos.games.load(rematchGameId)
+      loaded.game.status === "finished" && rematchGameId !== null && viewer.userId !== null
+        ? repos.games.rematchRead(rematchGameId, viewer.userId)
         : null,
     ]);
     return {
-      ...(rematch === null || viewer.userId === null
-        ? {}
-        : { rematch: rematchOf(rematch, viewer.userId, now()) }),
+      ...(rematch === null ? {} : { rematch: rematchOf(rematch, now()) }),
       game: loaded.game,
       players: loaded.players,
       resources: gameResources,
@@ -445,6 +445,8 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     for (let attempt = 1; ; attempt++) {
       const { loaded, viewer } = await loadMember(rematchId, user);
       if (viewer.state === "invited") {
+        // TODO(M3): a token accepting an invitation here needs the `join` scope as well as
+        // `games:create` (05 §Token scopes, 10 M3 acceptance); only sessions reach this today.
         const outcome = accept(contextOf(loaded), viewer, now());
         if (isRefusal(outcome)) throw refusal(outcome);
         try {
@@ -459,6 +461,22 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     }
   };
 
+  /**
+   * The finished game's current rematch, unless it has none or the one it names ended unplayed
+   * and may be replaced (04 `rematch_game_id`): then null.
+   */
+  const liveRematchOf = async (finishedId: string, user: UserRecord): Promise<string | null> => {
+    const rematchId = (await repos.games.get(finishedId))?.rematchGameId ?? null;
+    if (rematchId === null) return null;
+    let read = await repos.games.rematchRead(rematchId, user.id);
+    if (read?.game.status === "lobby" && now() >= lobbyExpiresAt(read.game)) {
+      // An overdue lobby has ended: expire it first, so the conditional link sees it (lazy expiry).
+      await expireIfOverdue(repos, rematchId, now());
+      read = await repos.games.rematchRead(rematchId, user.id);
+    }
+    return read === null || endedUnplayed(read.game) ? null : rematchId;
+  };
+
   app.openapi(rematchRoute, async (c) => {
     const user = userOf(c);
     onboarded(user);
@@ -469,14 +487,19 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     const { loaded, viewer } = await loadMember(id, user);
     if (loaded.game.status !== "finished") throw ApiError.of("WRONG_STATUS");
     if (viewer.seat === null) throw ApiError.of("NOT_FOUND");
-    if (loaded.game.rematchGameId !== null) {
-      return c.json({ game: await followRematch(c, loaded.game.rematchGameId, user) }, 200);
+    const existing = await liveRematchOf(id, user);
+    if (existing !== null) {
+      return c.json({ game: await followRematch(c, existing, user) }, 200);
     }
     const { game } = loaded;
-    // Every other player whose account still exists (a deleted one's row has no user), in seat
-    // order, which is the order they are listed in and so join in (02 §4).
+    // Every other player who acted and whose account still exists, in seat order, which is the
+    // order they are listed in and so join in (02 §4). A deleted account's row has no user; a seat
+    // that never acted never became anyone's past opponent (06 §6.11).
     const others = loaded.players
-      .filter((row) => row.seat !== null && row.userId !== null && row.userId !== user.id)
+      .filter(
+        (row) =>
+          row.seat !== null && row.userId !== null && row.userId !== user.id && row.actedOnce === 1,
+      )
       .sort((a, b) => (a.seat ?? 0) - (b.seat ?? 0))
       .map((row) => ({ userId: row.userId ?? "" }));
     let created;
@@ -488,7 +511,8 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
         {
           gameType: game.gameType,
           options: JSON.parse(game.options) as unknown,
-          seats: game.seats,
+          // One seat for each person carried over and the caller (05).
+          seats: others.length + 1,
           turnTimeoutDays: game.turnTimeoutDays,
           seatOrder: game.seatOrder,
           aiAssistance: game.aiAssistance,
@@ -499,13 +523,13 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     } catch (error) {
       // Another player's call may have created the rematch meanwhile: then that is the answer,
       // whatever refused this one (a limit, say).
-      const rematchId = (await repos.games.get(game.id))?.rematchGameId ?? null;
+      const rematchId = await liveRematchOf(id, user);
       if (rematchId === null) throw error;
       return c.json({ game: await followRematch(c, rematchId, user) }, 200);
     }
     if (created === null) {
       // Another player's call won the race: this one created nothing.
-      const rematchId = (await repos.games.get(game.id))?.rematchGameId ?? null;
+      const rematchId = await liveRematchOf(id, user);
       if (rematchId === null) throw new Error("a lost rematch race left no rematch");
       return c.json({ game: await followRematch(c, rematchId, user) }, 200);
     }

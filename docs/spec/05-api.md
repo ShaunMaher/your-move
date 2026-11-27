@@ -258,17 +258,18 @@ rematch" or "Go to rematch" (07 §1).
   call that lost the race to create it, whatever its own creation would have answered (a limit,
   say): the caller's envelope as it is if they hold a joined or seated row in it; or, if they hold
   an invitation in it (`normal` or `hidden`), after accepting it exactly as `POST …/accept` does
-  (an invitation in a lobby that has ended is `409 WRONG_STATUS`; a lost race is retried
-  server-side up to 3 times, and only a request that keeps losing gets `409 STALE_GAME`). A player
+  (a lobby that ends meanwhile is `409 WRONG_STATUS`; a lost race is retried server-side up to 3
+  times, and only a request that keeps losing gets `409 STALE_GAME`). A player
   who isn't a member of the rematch — they declined or left it, were removed, their invitation was
   dropped at its start, or their row is `inert` — gets `404 NOT_FOUND`: they aren't added again,
   and nothing of a game they may not see is returned (a lobby decline answers `204` for the same
   reason). They can still start a new game from the list.
 - **A rematch that never got going may be replaced.** Once the linked rematch has **ended
   unplayed** — status `cancelled`, `expired` or `declined` with no action logged (`action_count =
-  0`: a lobby that ended, or a started game that ended `declined` before anyone acted) — the
-  finished game shows `rematch: null` again, and the next call creates a new rematch exactly as
-  the first did, replacing the link (04 `rematch_game_id`). A rematch that was played (any action
+  0`: a lobby that ended, or a started game that ended `declined` before anyone acted), a lobby
+  past its expiry included (the call expires it first, 02 §4 lazy expiry) — the finished game shows
+  `rematch: null` again, and the next call creates a new rematch exactly as the first did,
+  replacing the link (04 `rematch_game_id`). A rematch that was played (any action
   logged), and one still in its lobby or active, is never replaced.
 - Linking the rematch is not a transition of the finished game: its `version` doesn't change and
   no realtime event is sent, so the other players see `rematch` on their next read; until then their

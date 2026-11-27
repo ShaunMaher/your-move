@@ -421,6 +421,7 @@ describe("the push to a past opponent added to a new game (alpha A12, 06 §6.2)"
       JSON.stringify({ seats: [final, final], public: final }),
       game.id,
     );
+    h.exec("UPDATE game_players SET acted_once = 1 WHERE game_id = ?", game.id);
     await h.drain();
     const before = (await received(boPhone)).length;
     const asked = await h.request(

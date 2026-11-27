@@ -73,6 +73,7 @@ const METHODS = {
   games: {
     create: true,
     createRematch: true,
+    rematchRead: true,
     get: true,
     load: true,
     players: true,

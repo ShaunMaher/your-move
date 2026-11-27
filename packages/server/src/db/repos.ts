@@ -19,6 +19,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 
 import {
   apiTokenRepo,
@@ -41,6 +42,7 @@ import type {
   PublicActionRecord,
   Repositories,
 } from "./repositories.js";
+import { UNPLAYED_ENDINGS } from "./repositories.js";
 import { gameActions, gamePlayers, gameResources, games, invites } from "./schema.js";
 
 /** The `game_actions` columns history may show: never `action` or `rng` (04 invariant 4). */
@@ -62,6 +64,9 @@ const IS_MEMBER = or(
 );
 
 const LIVE = inArray(games.status, ["lobby", "active"]);
+
+/** The game a finished game's rematch link names, aliased so it can be read in the same query. */
+const unplayed = alias(games, "unplayed");
 
 /**
  * Players by seat, then in the order their rows were added: the creator, then the invitees as
@@ -86,8 +91,21 @@ function gameRepo(db: Database): GameRepo {
     },
     async createRematch(finishedId, game, players, extras = {}) {
       // Every insert, and the link written last, holds only while the finished game has no
-      // rematch: a batch that loses the race inserts nothing and links nothing.
-      const open = sql`EXISTS (SELECT 1 FROM ${games} WHERE ${games.id} = ${finishedId} AND ${games.status} = 'finished' AND ${games.rematchGameId} IS NULL)`;
+      // rematch or one that ended unplayed: a batch that loses the race inserts nothing and links
+      // nothing. The linked game's ending is terminal, so it can't change under the batch.
+      const replaceable = or(
+        isNull(games.rematchGameId),
+        inArray(
+          games.rematchGameId,
+          db
+            .select({ id: unplayed.id })
+            .from(unplayed)
+            .where(
+              and(inArray(unplayed.status, [...UNPLAYED_ENDINGS]), eq(unplayed.actionCount, 0)),
+            ),
+        ),
+      );
+      const open = sql`EXISTS (SELECT 1 FROM ${games} WHERE ${games.id} = ${finishedId} AND ${games.status} = 'finished' AND ${replaceable})`;
       const statements: Statement[] = [
         guardedInsert(db, games, game, open),
         ...players.map((row) => guardedInsert(db, gamePlayers, { ...row, gameId: game.id }, open)),
@@ -100,13 +118,7 @@ function gameRepo(db: Database): GameRepo {
         db
           .update(games)
           .set({ rematchGameId: game.id })
-          .where(
-            and(
-              eq(games.id, finishedId),
-              eq(games.status, "finished"),
-              isNull(games.rematchGameId),
-            ),
-          )
+          .where(and(eq(games.id, finishedId), eq(games.status, "finished"), replaceable))
           .returning({ id: games.id }),
       ];
       const results = await runBatch(db, statements);
@@ -115,6 +127,26 @@ function gameRepo(db: Database): GameRepo {
     },
     async get(id) {
       return (await db.select().from(games).where(eq(games.id, id)).get()) ?? null;
+    },
+    async rematchRead(gameId, userId) {
+      const row = await db
+        .select({
+          id: games.id,
+          status: games.status,
+          createdAt: games.createdAt,
+          actionCount: games.actionCount,
+          viewerState: gamePlayers.state,
+        })
+        .from(games)
+        .leftJoin(
+          gamePlayers,
+          and(eq(gamePlayers.gameId, games.id), eq(gamePlayers.userId, userId)),
+        )
+        .where(eq(games.id, gameId))
+        .get();
+      if (row === undefined) return null;
+      const { viewerState, ...game } = row;
+      return { game, viewerState };
     },
     async load(id) {
       const [gameRows, playerRows] = await db.batch([
