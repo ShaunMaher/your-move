@@ -30,7 +30,7 @@ import { nodeRepositories, openSqlite } from "./db/sqlite.js";
 import { nodeDictionaries } from "./dictionaries.js";
 import type { NodeConfig } from "./node-config.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
-import { NODE_NUDGES_PER_RUN } from "./sweeper.js";
+import { NODE_CLAIMS_PER_RUN, NODE_LOBBIES_PER_RUN, NODE_NUDGES_PER_RUN } from "./sweeper.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
 /** The dictionary package's served layout (built by `pnpm build`, or the tests' global setup). */
@@ -133,6 +133,8 @@ export interface HarnessOptions {
   readonly sender?: EmailSender;
   /** The sweep's nudges per run; Node's own by default. */
   readonly nudgesPerRun?: number;
+  /** The sweep's invite claims per run; Node's own by default. */
+  readonly claimsPerRun?: number;
   /** Wraps the capturing email sender (e.g. to fail some messages and still capture the rest). */
   readonly wrapSender?: (capture: EmailSender) => EmailSender;
   /** The installed games (the generated registry); none by default. */
@@ -190,6 +192,8 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     platform,
     games,
     nudgesPerRun: options.nudgesPerRun ?? NODE_NUDGES_PER_RUN,
+    claimsPerRun: options.claimsPerRun ?? NODE_CLAIMS_PER_RUN,
+    lobbiesPerRun: NODE_LOBBIES_PER_RUN,
   });
   const background = createBackgroundTracker();
   let scheduled = 0;

@@ -918,6 +918,46 @@ describe("route-wide secrecy (04 invariant 4)", () => {
     expect((await hit(b, "GET", "/api/v1/games/:id", { id: game })).json.view).not.toBeNull();
   });
 
+  it("an email invite claimed at onboarding (alpha A17): the lobby before and after, then the game", async () => {
+    const a = await signUp(h, "Ada");
+    const stranger = await signUp(h, "Stranger");
+    // An address with no account yet: an email-invite seat, its typed address the creator's only.
+    const address = `newcomer-${crypto.randomUUID().slice(0, 8)}@example.org`;
+    const game = await created(a, { gameType: "example", invitees: [{ email: address }] });
+    await readEverything(game, [a], stranger);
+    const before = await reads(game, a);
+
+    // Onboarding with that address claims the seat; nothing the creator reads changes (02 §4).
+    const newcomer = await signUp(h, "Newcomer", address);
+    const players = [a, newcomer];
+    expect(await reads(game, a)).toEqual(before);
+    await readEverything(game, players, stranger);
+    expect((await hit(newcomer, "GET", "/api/v1/games/:id", { id: game })).json.game?.status).toBe(
+      "lobby",
+    );
+
+    // Accepting starts it; every read of the game is checked and perturbed as it is played.
+    expect((await transition(game, newcomer, "accept")).json.game?.status).toBe("active");
+    for (let step = 0; step < 3 && stored(game).status === "active"; step++) {
+      await readEverything(game, players, stranger);
+      expect(await unchangedByHiddenState(game, players)).toBe(2);
+      const now = (await hit(a, "GET", "/api/v1/games/:id", { id: game })).json;
+      const seat = now.game?.toAct[0];
+      const player = playerAt(now, seat, players);
+      const { view } = (await hit(player, "GET", "/api/v1/games/:id", { id: game })).json;
+      const card = (view as ExampleView).seats[seat ?? 0]?.hand?.[0];
+      const moved = await hit(
+        player,
+        "POST",
+        "/api/v1/games/:id/actions",
+        { id: game },
+        { expectedVersion: now.game?.version, action: { card } },
+      );
+      expect(moved.status, moved.text).toBe(200);
+    }
+    await readEverything(game, players, stranger);
+  });
+
   it("perturbation can fail: a body that showed one hidden tile would differ", async () => {
     const players = [await signUp(h, "Ada"), await signUp(h, "Bo")];
     const [a, b] = players as [Player, Player];

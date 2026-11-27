@@ -30,6 +30,7 @@ import {
   userRepo,
 } from "./auth-repos.js";
 import { type Database, runBatch, type Statement } from "./database.js";
+import { inviteRepo } from "./invite-repos.js";
 import { emailSuppressionRepo, nudgeRepo } from "./nudge-repos.js";
 import { pushSubscriptionRepo } from "./push-repos.js";
 import { guardedInsert, transitionStatements } from "./queries/transition.js";
@@ -378,6 +379,15 @@ function gameRepo(db: Database): GameRepo {
         .from(games)
         .where(LIVE);
     },
+    async allOverdueLobbies(createdBefore, limit) {
+      const rows = await db
+        .select({ id: games.id })
+        .from(games)
+        .where(and(eq(games.status, "lobby"), lte(games.createdAt, createdBefore)))
+        .orderBy(asc(games.createdAt), asc(games.id))
+        .limit(limit);
+      return rows.map((row) => row.id);
+    },
   };
 }
 
@@ -388,6 +398,7 @@ export function createRepositories(db: Database): Repositories {
     games: gameRepo(db),
     nudges: nudgeRepo(db),
     emailSuppressions: emailSuppressionRepo(db),
+    invites: inviteRepo(db),
     pushSubscriptions: pushSubscriptionRepo(db),
     otp: otpRepo(db),
     sessions: sessionRepo(db),

@@ -21,6 +21,8 @@ import {
   apiTokens,
   authEvents,
   blocks,
+  gamePlayers,
+  games,
   otpChallenges,
   pastOpponents,
   rateLimits,
@@ -178,6 +180,22 @@ export function userRepo(db: Database): UserRepo {
           updatedAt,
         })
         .where(eq(users.emailId, emailId));
+    },
+    async hasFinishedGame(userId) {
+      const row = await db
+        .select({ id: gamePlayers.id })
+        .from(gamePlayers)
+        .innerJoin(games, eq(games.id, gamePlayers.gameId))
+        .where(
+          and(
+            eq(gamePlayers.userId, userId),
+            isNotNull(gamePlayers.seat),
+            eq(games.status, "finished"),
+          ),
+        )
+        .limit(1)
+        .get();
+      return row !== undefined;
     },
     async deleteAccount(user, event) {
       // Agents go with their owner (owner_user_id cascades), and their sessions and tokens with

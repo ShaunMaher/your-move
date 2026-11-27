@@ -39,6 +39,7 @@ import type { AppEnv, Platform } from "../platform.js";
 import { sendAddedPushes, sendTransitionPushes } from "../push/notify.js";
 import { createGame } from "./create.js";
 import { expireIfOverdue, expireOverdueLobbies, loadCurrent } from "./expiry.js";
+import { sendInviteMail } from "./invite-mail.js";
 import {
   accept,
   cancel,
@@ -434,6 +435,11 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       body,
     );
     if (created === null) throw new Error("a game that isn't a rematch is always created");
+    const { invitations } = created;
+    if (invitations !== null) {
+      // One task whenever an address was typed, whatever it sends (Q3, 06 §6.3).
+      background(c, platform, () => sendInviteMail(platform, invitations));
+    }
     return c.json({ game: await afterCreate(c, user, created, false) }, 201);
   });
 

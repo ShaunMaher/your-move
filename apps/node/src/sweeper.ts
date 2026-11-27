@@ -12,6 +12,12 @@ export const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 /** Email nudges one Node sweep run sends at most (03 §7): Node has no per-run budget to fit. */
 export const NODE_NUDGES_PER_RUN = 100;
 
+/** Email-invite seats one Node sweep run claims at most (03 §8, alpha A17). */
+export const NODE_CLAIMS_PER_RUN = 100;
+
+/** Overdue lobbies one Node sweep run expires at most (03 §8, alpha A17). */
+export const NODE_LOBBIES_PER_RUN = 100;
+
 export interface Sweeper {
   /** Stops scheduling runs and settles once a run in progress has finished. */
   stop(): Promise<void>;

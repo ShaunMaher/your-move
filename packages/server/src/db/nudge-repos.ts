@@ -3,7 +3,7 @@
  * "It's your turn" email, the claim of one nudge, and the suppression list. Written once over the
  * shared schema and run by either adapter's {@link Database}.
  */
-import { and, asc, eq, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 
 import type { NormalisedEmail } from "../accounts/email.js";
 import { NUDGES_ON } from "./auth-repos.js";
@@ -155,6 +155,15 @@ export function emailSuppressionRepo(db: Database): EmailSuppressionRepo {
           set: { reason: sql`excluded.reason`, createdAt: sql`excluded.created_at` },
           setWhere: sql`${emailSuppressions.reason} = 'unsubscribed' AND excluded.reason IN ('bounced', 'complained')`,
         });
+    },
+    async suppressedAmong(emailHashes) {
+      if (emailHashes.length === 0) return [];
+      // Every reason stops invite emails (04 `email_suppressions`).
+      const rows = await db
+        .select({ emailHash: emailSuppressions.emailHash })
+        .from(emailSuppressions)
+        .where(inArray(emailSuppressions.emailHash, [...emailHashes]));
+      return rows.map((row) => row.emailHash);
     },
   };
 }

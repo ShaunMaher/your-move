@@ -94,16 +94,26 @@ async function build(env: Readonly<Record<string, unknown>>): Promise<Built> {
   };
   return {
     app: createApp({ platform, games }),
-    sweep: createSweep({ platform, games, nudgesPerRun: WORKER_NUDGES_PER_RUN }),
+    sweep: createSweep({
+      platform,
+      games,
+      nudgesPerRun: WORKER_NUDGES_PER_RUN,
+      claimsPerRun: WORKER_CLAIMS_PER_RUN,
+      lobbiesPerRun: WORKER_LOBBIES_PER_RUN,
+    }),
   };
 }
 
 /**
- * Email nudges one Cron Trigger invocation sends at most (03 §7): with 10 D1 statements per nudge
- * and up to 5 per run, 4 keep a run at 45, inside the Free plan's per-invocation query limit
- * (09 §3 has the arithmetic); re-measure at the first Workers deployment (10).
+ * What one Cron Trigger invocation does at most (03 §7, §8), inside the Free plan's
+ * per-invocation D1 query limit (09 §3 has the arithmetic): one overdue lobby expired (at most 4
+ * statements and one per typed address), one email-invite seat claimed (5) and 2 email nudges (10
+ * each, and up to 5 per run), 35 for a two-seat game; re-measure at the first Workers deployment
+ * (10).
  */
-const WORKER_NUDGES_PER_RUN = 4;
+const WORKER_NUDGES_PER_RUN = 2;
+const WORKER_CLAIMS_PER_RUN = 1;
+const WORKER_LOBBIES_PER_RUN = 1;
 
 let built: Promise<Built> | null = null;
 

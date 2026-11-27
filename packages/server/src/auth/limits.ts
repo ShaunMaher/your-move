@@ -50,6 +50,13 @@ const LIMITS = {
   // "It's your turn" email nudges sent, instance-wide and per recipient (alpha A6, 03 §7).
   NUDGE_EMAILS_PER_DAY: { limit: 200, windowMs: DAY },
   NUDGE_EMAILS_PER_USER_PER_DAY: { limit: 10, windowMs: DAY },
+  // Invite emails to email-invite seats (alpha A17, 06 §6.6): per inviter, the rate of an account
+  // younger than 7 days that hasn't completed a game, per address and instance-wide.
+  INVITE_EMAILS_INVITER_DAY: { limit: 5, windowMs: DAY },
+  INVITE_EMAILS_INVITER_30D: { limit: 20, windowMs: 30 * DAY },
+  INVITE_EMAILS_NEW_INVITER_DAY: { limit: 2, windowMs: DAY },
+  INVITE_EMAILS_TARGET_30D: { limit: 3, windowMs: 30 * DAY },
+  INVITE_EMAILS_GLOBAL_DAY: { limit: 100, windowMs: DAY },
 } as const satisfies Record<string, LimitRule>;
 
 export type LimitName = keyof typeof LIMITS;

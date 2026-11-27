@@ -57,9 +57,12 @@ export function freshEmail(): string {
   return `player${String(counter)}-${crypto.randomUUID().slice(0, 8)}@example.org`;
 }
 
-/** Signs a new user in; with a name, completes onboarding too. */
-export async function signUp(h: Harness, name: string | null = "Player"): Promise<Player> {
-  const email = freshEmail();
+/** Signs a new user in (with a fresh address unless given one); with a name, onboards too. */
+export async function signUp(
+  h: Harness,
+  name: string | null = "Player",
+  email: string = freshEmail(),
+): Promise<Player> {
   const cookie = await h.signIn(email);
   if (name !== null) {
     const response = await h.request("PATCH", "/api/v1/me", { displayName: name }, { cookie });

@@ -34,7 +34,12 @@ import { scrubSecrets } from "./env.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
 import { createNodeApp } from "./server.js";
 import { isRefusal, startup, type Started, verifyEmail, verifyPush } from "./startup.js";
-import { NODE_NUDGES_PER_RUN, startSweeper } from "./sweeper.js";
+import {
+  NODE_CLAIMS_PER_RUN,
+  NODE_LOBBIES_PER_RUN,
+  NODE_NUDGES_PER_RUN,
+  startSweeper,
+} from "./sweeper.js";
 
 function exitWith(message: string): never {
   console.error(message);
@@ -171,8 +176,17 @@ const server = serve(
   },
 );
 
-// Scheduled work (03 §8): the alpha's sweep sends due email nudges.
-const sweeper = startSweeper(createSweep({ platform, games, nudgesPerRun: NODE_NUDGES_PER_RUN }));
+// Scheduled work (03 §8): the alpha's sweep expires overdue lobbies, claims pending email-invite
+// seats and sends due email nudges.
+const sweeper = startSweeper(
+  createSweep({
+    platform,
+    games,
+    nudgesPerRun: NODE_NUDGES_PER_RUN,
+    claimsPerRun: NODE_CLAIMS_PER_RUN,
+    lobbiesPerRun: NODE_LOBBIES_PER_RUN,
+  }),
+);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {

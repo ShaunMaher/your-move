@@ -4,25 +4,34 @@ import { describe, expect, it } from "vitest";
 import { testPlatform } from "../test-support.js";
 import { createSweep } from "./sweep.js";
 
+const PER_RUN = { nudgesPerRun: 10, claimsPerRun: 10, lobbiesPerRun: 10 };
+
 describe("sweep", () => {
-  it("logs a failing step by class, reports it as null and never rejects", async () => {
-    // No database: the nudge step's first read fails.
+  it("logs each failing step by class, reports it as null, runs the rest and never rejects", async () => {
+    // No database: every step's first read fails.
     const platform = testPlatform();
-    const report = await createSweep({ platform, games: [], nudgesPerRun: 10 })();
-    expect(report).toEqual({ nudges: null });
-    expect(platform.lines).toContainEqual(
-      expect.objectContaining({
-        level: "error",
-        msg: "sweep step failed",
-        step: "nudges",
-        errorClass: "DetachedStorageError",
-      }),
-    );
+    const report = await createSweep({ platform, games: [], ...PER_RUN })();
+    expect(report).toEqual({ lobbies: null, claims: null, nudges: null });
+    for (const step of ["lobbies", "claims", "nudges"]) {
+      expect(platform.lines).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          msg: "sweep step failed",
+          step,
+          errorClass: "DetachedStorageError",
+        }),
+      );
+    }
     expect(JSON.stringify(platform.lines)).not.toContain("no database");
-    expect(platform.lines.at(-1)).toMatchObject({ msg: "sweep finished", nudgesFailedStep: true });
+    expect(platform.lines.at(-1)).toMatchObject({
+      msg: "sweep finished",
+      lobbiesFailedStep: true,
+      claimsFailedStep: true,
+      nudgesFailedStep: true,
+    });
   });
 
-  it("reports what the nudge step did", async () => {
+  it("reports what each step did", async () => {
     const platform = testPlatform();
     const repos = {
       ...platform.repos,
@@ -31,13 +40,20 @@ describe("sweep", () => {
           Promise.resolve(hits.map(() => ({ current: 0, previous: 0 }))),
       },
       nudges: { due: () => Promise.resolve([]), claim: () => Promise.resolve(false) },
+      games: { ...platform.repos.games, allOverdueLobbies: () => Promise.resolve([]) },
+      invites: { ...platform.repos.invites, pending: () => Promise.resolve([]) },
     };
-    const report = await createSweep({
-      platform: { ...platform, repos },
-      games: [],
-      nudgesPerRun: 10,
-    })();
-    expect(report).toEqual({ nudges: { due: 0, sent: 0, failed: 0, skipped: 0, capped: false } });
-    expect(platform.lines.at(-1)).toMatchObject({ msg: "sweep finished", nudgesSent: 0 });
+    const report = await createSweep({ platform: { ...platform, repos }, games: [], ...PER_RUN })();
+    expect(report).toEqual({
+      lobbies: 0,
+      claims: { claimed: 0, skipped: 0 },
+      nudges: { due: 0, sent: 0, failed: 0, skipped: 0, capped: false },
+    });
+    expect(platform.lines.at(-1)).toMatchObject({
+      msg: "sweep finished",
+      lobbiesDue: 0,
+      invitesClaimed: 0,
+      nudgesSent: 0,
+    });
   });
 });

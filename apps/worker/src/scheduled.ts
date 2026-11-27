@@ -12,8 +12,9 @@ interface Controller {
 }
 
 export async function runScheduled(controller: Controller, sweep: Sweep | null): Promise<void> {
-  const nudges = sweep === null ? null : (await sweep()).nudges;
-  if (nudges === null || nudges.failed > 0) {
+  const report = sweep === null ? null : await sweep();
+  const nudges = report?.nudges ?? null;
+  if (report?.lobbies == null || report.claims === null || nudges === null || nudges.failed > 0) {
     controller.noRetry();
     throw new Error("the sweep did not complete cleanly; its log says why");
   }
