@@ -233,11 +233,21 @@ interface GameClientModule<Options, Action, View, PreviewResult> {
     game: GameEnvelope; view: View;   // view shape per game.gameVersion
     submit(action: Action): Promise<SubmitResult>;
     preview(action: Action): Promise<PreviewResult | GameError>;   // local when possible, else server
+    resources?: BoardResources;       // the game's public resources, once the shell has loaded them
   }>;
   RulesSheet: Component<{ options: Options; gameVersion: number }>;   // may render the manifest's rules markdown (§7.2)
   HistoryItem: Component<{ record: unknown; describe: Text; gameVersion: number; names: string[] }>; // describe: the stored fallback text
 }
 ```
+
+`BoardResources` is `{ dictionary?: PublicWordList }`, where `PublicWordList` is `{ id, version,
+has(word), follows(prefix) }` (`follows` gives the letters that continue a prefix in some word, as
+a bit mask, bit 0 for `a`). The shell fills it only from a resource the envelope marks
+`distribution: "public"`, downloaded from that resource's own `downloadUrl` and checked against the
+hash in it (07 §4); a `serverOnly` list never reaches a client (08 T22). Every entry is optional:
+a board works without it and must not wait for it. The shell passes one object per game for as
+long as the game's resources stay the same, so a board may key work on its identity. The lookups
+are binary searches over the list's sorted text, as on the server (words §9.4); nothing is built.
 
 The client keeps rendering support for **every version ever released** (per-version view schemas,
 or a pure `upgradeView(version, view)` to the current shape), so finished games always display.

@@ -32,7 +32,9 @@ hangs slow to fail and would blur what the tests are measuring.
     game has its own budget (120 s, `GAME_TEST_TIMEOUT_MS`) and the short resign test 60 s
     (`RESIGN_TEST_TIMEOUT_MS`), and the rematch in `opponents.spec.ts` (alpha A12: a short game
     with a pass each, then a second game picked from the list) 90 s (`REMATCH_TEST_TIMEOUT_MS`,
-    5–6 s locally). These are margins over local measurements, not CI ones; each is re-measured
+    5–6 s locally), and the no-play hint in `no-play.spec.ts` (alpha A14: the short game's steps
+    and the word list's download and search, no moves) 60 s (`NO_PLAY_TEST_TIMEOUT_MS`, 2–3 s
+    locally). These are margins over local measurements, not CI ones; each is re-measured
     on the CI runner from the first pipeline that runs it, and then set from that.
   - CI runs one worker per job.
 - **Test kit CPU budget** (`KIT_CPU_BUDGET_MS`, 08 T25):

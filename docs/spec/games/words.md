@@ -342,8 +342,8 @@ dictionaries as a list from day one, so adding one is a data change plus a build
   additions/removals bump the version.
 - The server is authoritative. The client downloads the game's dictionary by versioned, hashed URL
   from the game envelope's `resources[].downloadUrl` (05), so it works even after the dictionary is
-  disabled for new games, caches it in the service worker, and uses it only for instant
-  validity/score previews. The catalog (§10.1), which the new-game screen uses to choose a
+  disabled for new games, caches it (07 §4), and uses it only for local, non-authoritative checks:
+  the no-play hint (§10.8) and, as a follow-up, instant validity previews. The catalog (§10.1), which the new-game screen uses to choose a
   dictionary, carries no download URL: nothing is previewed before a game exists.
 - Server lookup is a binary search directly over the sorted text. No index is built, so loading
   costs only I/O and no request pays a parse cost (Workers Free: 10 ms CPU/request). Dictionaries are
@@ -574,19 +574,19 @@ On their turn, the board tells a player whose rack has no legal play (alpha A14)
 pass instead of hunting for a word that isn't there.
 
 - **Client only, from what the viewer may see.** The search runs in the browser on the viewer's
-  view (the public board and `yourRack`) and the game's `public` word list, the same list the
-  client keeps for previews (§9.4). It never uses another seat's rack, the bag or a `serverOnly`
-  list, sends nothing, and needs no server, API or view change. Without a loaded `public` list
-  the board says nothing. **Tracked gap:** the module contract doesn't hand the list to a board
-  yet (07 §4); until it does, the board takes it as an optional `lexicon` prop that the shell
-  doesn't pass, so the app stays silent.
+  view (the public board and `yourRack`) and the game's `public` word list, which the shell hands
+  the board as `resources.dictionary` (02 §3, 07 §4) and the board uses only when its id is the
+  view's dictionary id. It never uses another seat's rack, the bag or a `serverOnly` list, sends
+  nothing, and needs no server, API or view change. Until the list is loaded, or when there is
+  none, the board says nothing.
 - **Sound, never a false "no".** The search (`moves.ts` in the engine, pure and deterministic)
   is exhaustive: anchor squares (the start square on an empty board), cross-checks for the words
   formed across the play line, a prefix walk of the sorted list, every letter for a blank, and
   the ruleset's board, rack size and opening rules (§3.1). Two-tile plays are tried everywhere
   first, then every length. A play it finds is confirmed with the engine's own placement rules
   (`analysePlay`) and the list. Its work is counted in steps (search nodes and list questions),
-  never timed; past `HINT_MAX_STEPS` (300,000, measured in `moves.benchmark.test.ts`) it gives up
+  never timed; past `HINT_MAX_STEPS` (150,000, measured in `moves.benchmark.test.ts` over the list
+  as the client holds it) it gives up
   and the board says nothing. Only a finished search that found nothing shows the hint.
 - **When it runs.** Only on the player's turn in an active game, once per game version (the answer
   is kept for that version), never while tiles are moved or dragged, and in slices of 5,000 steps
@@ -599,5 +599,7 @@ pass instead of hunting for a word that isn't there.
 - **Tests.** Rule tables; a property test on a small board where a brute-force enumerator asks
   `analysePlay` about every placement and must agree ("none" exactly when it finds nothing);
   every play found in random games under each ruleset passes `validate` with the real list; a
-  benchmark on mid- and late-game boards with 0, 1 and 2 blanks that records steps and time; and
-  Board tests for each answer.
+  benchmark on mid- and late-game boards with 0, 1 and 2 blanks that records steps and time;
+  Board tests for each answer; shell tests that the list is handed over only when public, intact
+  and loaded, as one stable object; and a Playwright check that a real game shows the hint (the
+  rack in the viewer's own copy of the view rewritten to one that forms no word).
