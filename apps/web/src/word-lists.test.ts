@@ -1,38 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { cacheWordLists, WORD_LIST_CACHE } from "./word-lists.js";
+import { fakeCacheStorage as fakeStorage, servedName as nameFor } from "./test-support.js";
+import { cacheWordLists, openWordList, WORD_LIST_CACHE } from "./word-lists.js";
 
 const TEXT = "aa\nab\nba\n";
-
-async function nameFor(text: string, id = "enable"): Promise<string> {
-  const bytes = new TextEncoder().encode(text);
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-  const hex = Array.from(digest.subarray(0, 8), (b) => b.toString(16).padStart(2, "0")).join("");
-  return `/assets/dictionaries/${id}-v1.${hex}.txt`;
-}
-
-/** An in-memory Cache Storage with insertion-ordered keys, as the real one's `keys()` is. */
-function fakeStorage() {
-  const stores = new Map<string, Map<string, Response>>();
-  return {
-    stores,
-    open: (name: string) => {
-      const store = stores.get(name) ?? new Map<string, Response>();
-      stores.set(name, store);
-      return Promise.resolve({
-        match: (path: string) => Promise.resolve(store.get(path)?.clone()),
-        put: (path: string, response: Response) => {
-          store.delete(path);
-          store.set(path, response);
-          return Promise.resolve();
-        },
-        keys: () =>
-          Promise.resolve([...store.keys()].map((path) => new Request(`http://localhost${path}`))),
-        delete: (request: Request) => Promise.resolve(store.delete(new URL(request.url).pathname)),
-      });
-    },
-  };
-}
 
 let storage: ReturnType<typeof fakeStorage>;
 let fetcher: ReturnType<typeof vi.fn>;
@@ -159,5 +130,72 @@ describe("caching a game's public word lists", () => {
       await cacheWordLists([{ ...list(url), id }]);
     }
     expect([...(storage.stores.get(WORD_LIST_CACHE)?.keys() ?? [])]).toEqual(names.slice(1));
+  });
+});
+
+describe("opening the game's word list for its board", () => {
+  it("downloads, keeps and opens a public list, then opens it from the cache", async () => {
+    const url = await nameFor(TEXT);
+    const opened = await openWordList([list(url)]);
+    expect(opened).toMatchObject({ id: "enable", version: 1 });
+    expect(opened?.has("ab")).toBe(true);
+    expect(opened?.has("bb")).toBe(false);
+    expect(opened?.follows("a")).toBe(0b11);
+    expect(storage.stores.get(WORD_LIST_CACHE)?.has(url)).toBe(true);
+    const again = await openWordList([list(url)]);
+    expect(again?.has("ba")).toBe(true);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("opens nothing that isn't public, or isn't served in the served shape", async () => {
+    const url = await nameFor(TEXT);
+    expect(await openWordList([list(url, "serverOnly")])).toBeNull();
+    expect(await openWordList([{ ...list(url), distribution: undefined }])).toBeNull();
+    expect(await openWordList([list(undefined)])).toBeNull();
+    expect(await openWordList([list(url.replace("/assets/", "/other/"))])).toBeNull();
+    expect(await openWordList([])).toBeNull();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("opens only the game's own list, never another resource after a server-only one", async () => {
+    const url = await nameFor(TEXT);
+    expect(await openWordList([list(url, "serverOnly"), { ...list(url), id: "other" }])).toBeNull();
+  });
+
+  it("opens nothing when the download fails", async () => {
+    const url = await nameFor(TEXT);
+    fetcher.mockRejectedValueOnce(new Error("offline"));
+    expect(await openWordList([list(url)])).toBeNull();
+    fetcher.mockResolvedValueOnce(new Response("gone", { status: 404 }));
+    expect(await openWordList([list(url)])).toBeNull();
+  });
+
+  it("opens nothing whose content doesn't hash to its name, downloaded or cached", async () => {
+    const url = await nameFor("different\n");
+    expect(await openWordList([list(url)])).toBeNull();
+    // An entry changed in the cache after it was stored is refused too.
+    const good = await nameFor(TEXT);
+    const cache = await storage.open(WORD_LIST_CACHE);
+    await cache.put(good, new Response("aa\nzz\n"));
+    expect(await openWordList([list(good)])).toBeNull();
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("opens nothing without Cache Storage", async () => {
+    vi.stubGlobal("caches", undefined);
+    expect(await openWordList([list(await nameFor(TEXT))])).toBeNull();
+  });
+
+  it("opens nothing that isn't a word list, and goes on after a failure", async () => {
+    const url = await nameFor("aa\nab");
+    fetcher.mockResolvedValueOnce(new Response("aa\nab"));
+    expect(await openWordList([list(url)])).toBeNull();
+    const broken = {
+      get distribution(): never {
+        throw new Error("broken resource");
+      },
+    };
+    expect(await openWordList([broken as never])).toBeNull();
+    expect(await openWordList([list(await nameFor(TEXT))])).not.toBeNull();
   });
 });

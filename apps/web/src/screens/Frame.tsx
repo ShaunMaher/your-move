@@ -31,6 +31,8 @@ interface FrameProps {
   readonly client: GameClientModule | null | "loading";
   readonly submit: BoardProps<unknown, unknown, unknown>["submit"];
   readonly preview: BoardProps<unknown, unknown, unknown>["preview"];
+  /** The game's public resources for the board (02 §3), once loaded; one object while unchanged. */
+  readonly resources: BoardProps<unknown, unknown, unknown>["resources"];
   /** Resigns; resolves to what went wrong, or `null` when it worked. */
   readonly onResign: () => Promise<string | null>;
   readonly onSessionLost: () => void;
@@ -169,7 +171,15 @@ export function Frame(props: FrameProps) {
   } else if (view === null || view === undefined) {
     board = over ? null : <p role="status">Loading the board…</p>;
   } else {
-    board = <client.Board game={game} view={view} submit={props.submit} preview={props.preview} />;
+    board = (
+      <client.Board
+        game={game}
+        view={view}
+        submit={props.submit}
+        preview={props.preview}
+        {...(props.resources === undefined ? {} : { resources: props.resources })}
+      />
+    );
     drawn = true;
   }
 

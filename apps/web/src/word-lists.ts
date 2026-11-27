@@ -8,9 +8,14 @@
  * `distribution: "public"` is downloaded, whatever else it carries: `serverOnly` lists are never
  * fetched, and a URL on a resource that doesn't say it is public is not followed.
  *
- * Nothing reads this cache yet: a board's previews still come from the server (a `resources` prop
- * on `BoardProps` would be a spec change, M3). Until then the cache only has the lists ready.
+ * The game's own list, when it is public, is then read back from the cache, checked against its
+ * hash again, and handed to the board as `resources.dictionary` (02 §3): lookups over the sorted
+ * text, as the server does them (words §9.4), with nothing built. The board uses it for the
+ * no-play hint (words §10.8); its previews still come from the server.
  */
+import { createWordList } from "@your-move/dictionary";
+import type { PublicWordList } from "@your-move/sdk/client";
+
 import type { GameEnvelope } from "./game-api.js";
 
 /** Not the shell's precache name, so the service worker's clean-up of old versions keeps it. */
@@ -18,7 +23,7 @@ export const WORD_LIST_CACHE = "dictionaries-v1";
 const KEEP = 3;
 
 /** The one shape the server serves lists at (03 §10): a same-origin path, never a full URL. */
-const SERVED = /^\/assets\/dictionaries\/[A-Za-z0-9_-]+-v\d+\.([0-9a-f]{16})\.txt$/u;
+const SERVED = /^\/assets\/dictionaries\/[A-Za-z0-9_-]+-v(\d+)\.([0-9a-f]{16})\.txt$/u;
 
 async function digestPrefix(bytes: ArrayBuffer): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
@@ -68,7 +73,7 @@ async function cacheAll(resources: GameEnvelope["resources"]): Promise<void> {
   const wanted = new Map<string, string>();
   for (const resource of resources) {
     if (resource.distribution !== "public" || resource.downloadUrl === undefined) continue;
-    const expected = SERVED.exec(resource.downloadUrl)?.[1];
+    const expected = SERVED.exec(resource.downloadUrl)?.[2];
     if (expected !== undefined) wanted.set(resource.downloadUrl, expected);
   }
   if (wanted.size === 0) return;
@@ -85,4 +90,41 @@ async function cacheAll(resources: GameEnvelope["resources"]): Promise<void> {
   } catch {
     // Best effort.
   }
+}
+
+/**
+ * The game's word list for its board (02 §3), or null: the game's dictionary resource, only when
+ * it is marked `distribution: "public"`, cached (downloaded and stored first if it isn't yet, as
+ * `cacheWordLists` does), and its content still hashes to the digest in its name. Any failure
+ * (offline, no Cache Storage, a bad download or a changed entry) is null, and the board goes on
+ * without it. Runs in turn with `cacheWordLists`.
+ */
+export function openWordList(resources: GameEnvelope["resources"]): Promise<PublicWordList | null> {
+  const run = running.then(async () => {
+    await cacheAll(resources);
+    return readList(resources);
+  });
+  running = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run.catch(() => null);
+}
+
+async function readList(resources: GameEnvelope["resources"]): Promise<PublicWordList | null> {
+  if (typeof caches === "undefined") return null;
+  // A game's resources are its word list (every resource is a dictionary, 05); only a public one
+  // ever reaches the board.
+  const [resource] = resources;
+  if (resource?.distribution !== "public" || resource.downloadUrl === undefined) return null;
+  const served = SERVED.exec(resource.downloadUrl);
+  if (served === null) return null;
+  const [, version = "", expected = ""] = served;
+  const cache = await caches.open(WORD_LIST_CACHE);
+  const response = await cache.match(resource.downloadUrl);
+  if (response === undefined) return null;
+  const bytes = await response.arrayBuffer();
+  if ((await digestPrefix(bytes)) !== expected) return null;
+  // A list that isn't one (no final newline) throws, and the caller gets null.
+  return createWordList(resource.id, Number(version), new TextDecoder().decode(bytes));
 }

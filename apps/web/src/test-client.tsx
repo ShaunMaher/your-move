@@ -9,6 +9,8 @@ import type {
 import { useState } from "react";
 
 export const submitted: unknown[] = [];
+/** The `resources` prop of every render of the board, in order. */
+export const boardResources: unknown[] = [];
 
 function OptionsForm({ catalog, value, onChange }: OptionsFormProps) {
   return (
@@ -27,12 +29,20 @@ function OptionsForm({ catalog, value, onChange }: OptionsFormProps) {
   );
 }
 
-function Board({ game, view, submit, preview }: BoardProps<unknown, unknown, unknown>) {
+function Board({ game, view, submit, preview, resources }: BoardProps<unknown, unknown, unknown>) {
   const [text, setText] = useState("");
+  boardResources.push(resources);
+  const list = resources?.dictionary;
   return (
     <section aria-label="Fake board">
       <p>
         Board v{String(game.version)}: {JSON.stringify(view)}
+      </p>
+      <p>
+        Word list:{" "}
+        {list === undefined
+          ? "none"
+          : `${list.id} v${String(list.version)}, ab ${String(list.has("ab"))}`}
       </p>
       <button
         type="button"

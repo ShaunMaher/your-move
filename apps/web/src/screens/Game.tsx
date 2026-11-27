@@ -7,8 +7,8 @@
  */
 import type { ApiClient } from "@your-move/api-client";
 import type { SubmitResult } from "@your-move/sdk";
-import type { GameClientModule } from "@your-move/sdk/client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { BoardResources, GameClientModule, PublicWordList } from "@your-move/sdk/client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { loadCatalog } from "../catalog.js";
 import {
@@ -26,7 +26,7 @@ import { rememberPushOffered, shouldOfferPush } from "../push.js";
 import { PushOffer } from "../PushOffer.js";
 import { navigate, Link } from "../router.js";
 import { useRefresh, useVisible } from "../use-refresh.js";
-import { cacheWordLists } from "../word-lists.js";
+import { openWordList } from "../word-lists.js";
 import { Frame } from "./Frame.js";
 import { Lobby, type LobbyAction } from "./Lobby.js";
 import { Page } from "./Page.js";
@@ -208,12 +208,26 @@ export function Game({
     };
   }, [api, gameType, loadClient]);
 
-  // The public word lists the game uses are cached for the module's previews (07 §3).
-  const listKey = JSON.stringify(resources ?? []);
+  // The public word lists the game uses are cached, and its own public list is handed to the
+  // board as one object for as long as the game's resources stay the same (07 §3–4, 02 §3).
+  const listKey = `${id}:${JSON.stringify(resources ?? [])}`;
+  const active = game?.status === "active";
+  const [wordList, setWordList] = useState<{ key: string; list: PublicWordList } | null>(null);
   useEffect(() => {
-    if (resources !== undefined && game?.status === "active") void cacheWordLists(resources);
+    if (resources === undefined || !active) return undefined;
+    let cancelled = false;
+    void openWordList(resources).then((list) => {
+      if (!cancelled) setWordList(list === null ? null : { key: listKey, list });
+    });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the lists' content
-  }, [listKey, game?.status]);
+  }, [listKey, active]);
+  const boardResources = useMemo<BoardResources | undefined>(
+    () => (wordList?.key === listKey ? { dictionary: wordList.list } : undefined),
+    [wordList, listKey],
+  );
 
   // Looking at a version of a game under way, in a tab that is showing, marks it read (not a
   // transition). A hidden tab has seen nothing, and a lobby has no moves to read.
@@ -364,6 +378,7 @@ export function Game({
         client={client}
         submit={submit}
         preview={preview}
+        resources={boardResources}
         onResign={() => act("resign")}
         onSessionLost={onSessionLost}
         notice={notice}

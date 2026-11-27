@@ -468,6 +468,9 @@ importers:
       '@your-move/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@your-move/dictionary':
+        specifier: workspace:*
+        version: link:../../packages/dictionary
       '@your-move/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
