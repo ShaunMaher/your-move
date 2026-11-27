@@ -182,7 +182,7 @@ Tracks invitation emails (for rate limiting, expiry and abuse handling). Stores 
 | game_id | TEXT FK → games ON DELETE CASCADE | |
 | inviter_id | TEXT FK → users ON DELETE CASCADE | |
 | email_hash | TEXT | `emailId` (HMAC, 09 §1.1) of the normalised address |
-| sent_at | INTEGER NULL | |
+| sent_at | INTEGER NULL | when the invite email was handed to the sender (06 §6.3); NULL when none was (an invitation to an onboarded user, a suppressed address, a cap) |
 | expires_at | INTEGER | = lobby expiry: 14 days from the game's `created_at` (02 §4) |
 
 ### `email_suppressions`
@@ -235,7 +235,7 @@ to sign in).
 Index on `owner_id`.
 
 ### `rate_limits`
-| key | TEXT | e.g. `otp:email:<hash>`, `otp:ip:<hash>`, `invite:user:<id>`, and the fixed keys `all` (instance-wide sends) and `silent` (requests that sent nothing; written, never read, 06 §3.2) |
+| key | TEXT | e.g. `otp:email:<hash>`, `otp:ip:<hash>`, `invite:user:<id>`, and the fixed keys `all` (instance-wide sends) and `silent` (requests, or typed addresses, that sent or counted nothing; written, never read, 06 §3.2, §6.6, §6.7) |
 | window_start | INTEGER | |
 | count | INTEGER | PK(key, window_start); swept hourly |
 

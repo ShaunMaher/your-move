@@ -348,10 +348,7 @@ and in the lobby, and the AI setting also in the game header.
   they accept or decline. Anyone else (no account, or an account that hasn't finished onboarding)
   gets an **email-invite seat**, claimed when they complete onboarding with that address (06 §6.4),
   after which it is an invitation like any other. Typing a past opponent's email also gives an
-  invitation, never an auto-join.
-  Until onboarding claims exist (06 §6.4, M4; the alpha) an email-invite seat is never claimed, so
-  only someone who has already signed in and finished onboarding can be added by address (05
-  §`POST /api/v1/games`).
+  invitation, never an auto-join. The address gets an invite email (06 §6.3; alpha A17).
 - **A join link.** The creator can create a shareable link for the open seats (06 §6.8). Anyone
   signed in and onboarded who opens it and taps Join takes an open seat. An **open seat** is one not
   held by an `invited` or `joined` row. A user who already holds an invitation in the game and joins

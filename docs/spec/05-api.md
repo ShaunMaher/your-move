@@ -212,12 +212,14 @@ rejects the merged input, the server retries once with the request input alone (
 the rest); only if that fails too is `INVALID_OPTIONS` returned, so a since-deleted upload or
 disabled ruleset in the remembered choices never breaks game creation.
 
-**Until email invites (alpha, M4).** Only an address that belongs to an onboarded account can be
-played with: its invitation works as above. An email-invite seat (no account, or an account that
-hasn't finished onboarding) is created and answered exactly the same (Q3), but nothing claims it
-until onboarding claims exist (06 §6.4, M4), so it stays unfilled until the lobby is started
-without it, cancelled or expires. Clients tell the creator that the other person must have signed
-in first.
+**Invite emails** (alpha A17). An email-invite seat's address is sent the invite email (06 §6.3)
+in the background after the response, unless it is suppressed or over an invite cap (06 §6.6);
+the seat is claimed when someone completes onboarding with that address (06 §6.4) and is then an
+invitation like any other. The message is built, the invite-email counters written and the one
+background task scheduled for **every** typed address, whatever it turns out to be, so neither the
+response nor the work before it says which addresses were mailed (Q3). Clients tell the creator
+that the person will be invited by email, or in their game list if they already play, without
+saying which (07 §1.1).
 
 ### `POST /api/v1/games/:id/rematch`
 Alpha A15. No input (an empty body or `{}`). A player of a finished game asks for a game with the

@@ -61,9 +61,14 @@ There is no admin UI in v1; operators use the Admin API and its command-line cli
    picks. The list isn't shown when it's empty or couldn't be loaded. The review step
    shows each pick as "Playing with <name>" (alpha A12). Any player who has joined a lobby and isn't its creator
    sees Decline there, the lobby decline of 02 §4, so a player added this way (who never chose to
-   join) can leave before the start. Typed addresses are shown back before Create ("Check the address:
+   join) can leave before the start. Under the address fields a note says what happens to a typed
+   address without saying whether it has an account (alpha A17): "We'll email them an invitation
+   from you, showing your name and email address. If they already play on <APP_NAME>, it waits
+   in their list of games instead. Either way, you'll see them as invited until they accept." (so
+   the inviter's address is disclosed before it is sent, 08 §5). Typed addresses are shown back
+   before Create ("Check the address:
    sam@example.org") because the app never says whether an address has an account (06 §6.1, Q3);
-   a typo just becomes an invitation nobody receives. There's also an "Add a join link for the
+   a typo sends the invitation to someone else. There's also an "Add a join link for the
    open seats" toggle (with the warning that anyone with the link can see the game and join, and
    that the game then waits for you to press Start), and a "Turn order: join order / random"
    choice.

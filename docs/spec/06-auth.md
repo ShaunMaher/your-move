@@ -285,9 +285,17 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    stays in `lobby` until all seats are joined or the creator starts it (02 §4). The invite email
    uses a fixed template, with no user-supplied free text other than display name:
    *"<Display Name> (<inviter email>) has invited you to play <game name> on <APP_NAME>."* + the turn
-   timeout + a link to `PUBLIC_URL` + short "how to add to your home screen" + one-click
-   unsubscribe ("Don't send me invites again", 05 §Email links). It isn't sent if the address is
-   suppressed or over an invite cap (§6.6); the seat is created either way.
+   timeout + how long the invitation stays open (the lobby's 14 days) + how to join (sign in at
+   `PUBLIC_URL` with this address: a link to `PUBLIC_URL` that carries nothing else, a sign-in code
+   by email, a display name, then the invitation waits in the game list) + short "how to add to
+   your home screen" + one-click unsubscribe ("Don't send me invites again", 05 §Email links:
+   purpose `invites`, the address's `emailId`, with the `List-Unsubscribe` headers). The subject is
+   *"<Display Name> invited you to play <game name> on <APP_NAME>"*. Nothing else about the game:
+   never its options, state or other players (alpha A17). It is built for **every** typed address
+   (the same work whatever the address turns out to be, §6.1) and sent via `waitUntil` after the
+   response, only for an email-invite seat whose address isn't suppressed (any reason, 04
+   `email_suppressions`) or over an invite cap (§6.6); the seat is created either way. The
+   `invites` row's `sent_at` records when it was handed to the sender, NULL when it wasn't.
 4. When a user **completes onboarding** (not merely verifies a code), every `invited`, non-`inert`
    email seat with matching `invite_email` in a `lobby` game where they hold no other row is
    claimed (guard, version check and retries in 02 §4): `user_id` set, `invite_email` kept for the
@@ -305,6 +313,13 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    sends no realtime event to other members and changes nothing the creator sees. The sweep (03 §8)
    also claims any matching seat it finds for an onboarded user, which covers a game created while
    the invitee was completing onboarding and any claim that failed.
+
+   Precisely (alpha A17): the `PATCH /api/v1/me` that completes onboarding claims before it
+   answers, so the new user's game list already shows the invitations (unread: the row keeps the
+   `last_seen_version` of -1 it was created with). A claim that fails there is logged by error
+   class and never fails onboarding; the sweep claims it later. A lobby at or past its expiry is
+   never claimed into (it is about to expire, 02 §4). A claim sends nothing: the generic
+   invitation push and the invitation email to users with nudges on (§6.2) are M4's.
 5. Lobbies expire 14 days after creation → `expired`. When an email seat reaches any terminal
    state (accepted, game expired/cancelled/started without it, removed or declined), `invite_email`
    is cleared — we don't retain addresses the creator typed (the `invites` table keeps only the
@@ -313,12 +328,18 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    - **Email invitees per creator**: 10 per day and 5 per hour (08 §4), counted for every typed
      email whatever it turns out to be, so the limit reveals nothing. Over the limit the
      whole request is `429` and nothing is created.
-   - **Invite emails** (to addresses without an account): per inviter 5 / day and 20 / 30 days;
-     accounts younger than 7 days **that have not yet completed a game** get 2 / day; per target
+   - **Invite emails** (to email-invite seats: no account, or one that hasn't finished
+     onboarding): per inviter 5 / day and 20 / 30 days;
+     accounts younger than 7 days **that have not yet completed a game** (held a seat in a game
+     that reached `finished`) get 2 / day; per target
      address 3 invite emails / 30 days across all inviters (counted in `rate_limits` keyed by the
      email HMAC, so the count survives invite deletion); instance-wide caps in 08 §4. Over these
      limits, and for suppressed addresses, the seat is still created but **no email is sent** — the
-     response doesn't change.
+     response doesn't change. An email that would be sent (an email-invite seat whose address
+     isn't suppressed) adds 1 to each of these counters, even when another of them stops it (they
+     count attempts, like the OTP caps); every other typed address adds 1 to the never-read
+     `silent` counter of each instead (§3.2), so every typed address writes the same counters and
+     schedules the same background task (alpha A17).
 7. Game creation is also limited per pair (5 / day) and per user (30 / day), so a harasser can't
    spam declines-and-recreate. A **pair** is (creator, `userId`) for a picked past opponent and
    (creator, `emailId`) for every typed address, whatever it resolves to, so these limits (and the
@@ -329,8 +350,9 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    and it expires with the lobby. The cap is counted in `rate_limits` keyed by the target's
    `emailId` (with the creator's id for the per-creator count), for **every** typed address
    whatever it resolves to, with the same lookups and writes (Q3): a past opponent's invitation
-   reads the counters without adding to them, and one already over the per-creator cap adds
-   nothing to the total. The creator sees "Invited" either way. Active game caps (05) count
+   adds nothing to the counters, and one already over the per-creator cap adds nothing to the
+   total; each adds 1 to the never-read `silent` counter instead (§3.2), so every address writes
+   the same rows (alpha A17). The creator sees "Invited" either way. Active game caps (05) count
    only games a user *created*, so other people's games can never lock a user out of creating their
    own.
 8. **Join links** (for groups, and for players who'd rather share a link in a group chat than type
