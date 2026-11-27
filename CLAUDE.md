@@ -63,9 +63,9 @@ Toolchain: `mise install` (Node, pnpm and the scanners pinned in `mise.toml` and
 - `pnpm install` · `pnpm dev:node` · `pnpm dev:worker` · `pnpm build`
 - Quality: `pnpm format` · `pnpm format:check` · `pnpm lint` · `pnpm lint:arch` ·
   `pnpm lint:unused` · `pnpm lint:licences` · `pnpm lint:vulns` · `pnpm lint:pins` ·
-  `pnpm typecheck` · `pnpm test` · `pnpm test:timing` (the statistical sign-in timing suite, about
-  25 s, on a quiet machine; `pnpm test` skips it; coders run it before handing off sign-in
-  changes, ADR 0006) ·
+  `pnpm typecheck` · `pnpm test` · `pnpm test:timing` (the statistical timing suite for sign-in and for creating a game with
+  a typed address, about 70 s, on a quiet machine; `pnpm test` skips it; coders run it before
+  handing off sign-in or invite changes, ADR 0006) ·
   `pnpm test:e2e` (after `pnpm build`) · `pnpm gates:prove` · the tunnel stack test (skipped by default; run it after
   changing `docker-compose.tunnel.yml`, `TRUST_PROXY_PEERS` or the `app-front` alias, 11 §4):
   `docker build -f apps/node/Dockerfile .` then

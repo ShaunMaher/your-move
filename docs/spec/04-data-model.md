@@ -35,7 +35,7 @@ Conventions:
 | owner_user_id | TEXT NULL FK → users ON DELETE CASCADE | set exactly when `kind = 'agent'`: the human who owns it (≤ 3 per owner) |
 | email | TEXT UNIQUE NULL | normalised; NOT NULL exactly when `kind = 'human'` (agents have no email and can't sign in) |
 | email_id | TEXT UNIQUE NULL | the address's `emailId` (09 §1.1), set exactly while `settings.emailNudges` is true — written when the user turns email nudges on, cleared when they are turned off (in Settings or by an unsubscribe) — so a `nudges` unsubscribe token, which carries only the `emailId` (05 §Email links), can find the account |
-| display_name | TEXT NULL | NULL until onboarding completed (06 §5). Wherever a name is shown (UI, push, email) and it is NULL, the fallback label "New player" is used |
+| display_name | TEXT NULL | NULL until onboarding completed (06 §5). The display-name rules (06 §5.1) are checked when a name is set; a later change to them (e.g. alpha A17's digit count) never rewrites or refuses a stored name. Wherever a name is shown (UI, push, email) and it is NULL, the fallback label "New player" is used |
 | settings | TEXT NOT NULL DEFAULT '{}' | JSON: `{ emailNudges: boolean (default false, 03 §7), whoCanAddMe: "pastOpponents" \| "nobody" (default "pastOpponents", 06 §6.2), theme: "system" \| "light" \| "dark" (default "system", 07 §5), lastGameType?: string, lastOptions?: { [gameType]: unknown }, ... }` |
 | age_attested_at | INTEGER NULL | when the user confirmed they meet `MIN_AGE` (06 §5); NULL until onboarding completed |
 | age_attested_min_age | INTEGER NULL | the `MIN_AGE` value in force when they confirmed. If the operator raises `MIN_AGE` above it, the user is **re-prompted** (06 §5): `onboarded_at` is never cleared, the sweep never deletes them, but they get `403 ONBOARDING_REQUIRED` on the gated endpoints until they confirm again |
@@ -182,7 +182,7 @@ Tracks invitation emails (for rate limiting, expiry and abuse handling). Stores 
 | game_id | TEXT FK → games ON DELETE CASCADE | |
 | inviter_id | TEXT FK → users ON DELETE CASCADE | |
 | email_hash | TEXT | `emailId` (HMAC, 09 §1.1) of the normalised address |
-| sent_at | INTEGER NULL | |
+| sent_at | INTEGER NULL | when the sender accepted the invite email, set by the background task that sends it, never before the response (06 §6.3); NULL when none was sent (an invitation to an onboarded user, a suppressed address or `hidden` seat, a cap, a failed send) |
 | expires_at | INTEGER | = lobby expiry: 14 days from the game's `created_at` (02 §4) |
 
 ### `email_suppressions`
@@ -235,7 +235,7 @@ to sign in).
 Index on `owner_id`.
 
 ### `rate_limits`
-| key | TEXT | e.g. `otp:email:<hash>`, `otp:ip:<hash>`, `invite:user:<id>`, and the fixed keys `all` (instance-wide sends) and `silent` (requests that sent nothing; written, never read, 06 §3.2) |
+| key | TEXT | e.g. `otp:email:<hash>`, `otp:ip:<hash>`, `invite:user:<id>`, and the fixed keys `all` (instance-wide sends) and `silent` (requests, or typed addresses, that sent or counted nothing; written, never read, 06 §3.2, §6.6, §6.7) |
 | window_start | INTEGER | |
 | count | INTEGER | PK(key, window_start); swept hourly |
 

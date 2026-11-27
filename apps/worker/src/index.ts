@@ -8,9 +8,7 @@ import {
   ConfigError,
   coreEmailSender,
   corePushSender,
-  createApp,
   createJsonLogger,
-  createSweep,
   GameConfigError,
   installedSchema,
   parseConfig,
@@ -23,12 +21,8 @@ import installedJson from "../../../generated/installed.json" with { type: "json
 import { installedGames as games } from "../../../generated/server-registry.js";
 import { d1Repositories } from "./d1.js";
 import { assetDictionaries } from "./dictionaries.js";
+import { type Built, workerRuntime } from "./runtime.js";
 import { runScheduled } from "./scheduled.js";
-
-interface Built {
-  readonly app: ReturnType<typeof createApp>;
-  readonly sweep: ReturnType<typeof createSweep>;
-}
 
 /** A startup problem whose message carries no configuration value (safe to log in full). */
 class StartupError extends Error {
@@ -92,18 +86,8 @@ async function build(env: Readonly<Record<string, unknown>>): Promise<Built> {
         trustedPeers: [],
       }),
   };
-  return {
-    app: createApp({ platform, games }),
-    sweep: createSweep({ platform, games, nudgesPerRun: WORKER_NUDGES_PER_RUN }),
-  };
+  return workerRuntime(platform, games);
 }
-
-/**
- * Email nudges one Cron Trigger invocation sends at most (03 §7): with 10 D1 statements per nudge
- * and up to 5 per run, 4 keep a run at 45, inside the Free plan's per-invocation query limit
- * (09 §3 has the arithmetic); re-measure at the first Workers deployment (10).
- */
-const WORKER_NUDGES_PER_RUN = 4;
 
 let built: Promise<Built> | null = null;
 

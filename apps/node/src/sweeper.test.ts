@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startSweeper, SWEEP_INTERVAL_MS } from "./sweeper.js";
 
 const REPORT: SweepReport = {
+  lobbies: 0,
+  claims: { claimed: 0, skipped: 0 },
   nudges: { due: 0, sent: 0, failed: 0, skipped: 0, capped: false },
 };
 

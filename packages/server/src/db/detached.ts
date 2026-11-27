@@ -8,6 +8,7 @@ import type {
   AuthEventRepo,
   EmailSuppressionRepo,
   GameRepo,
+  InviteRepo,
   NudgeRepo,
   OtpRepo,
   PushSubscriptionRepo,
@@ -45,6 +46,7 @@ const METHODS = {
     setEmailNudges: true,
     setTheme: true,
     disableNudgesByEmailId: true,
+    hasPastOpponent: true,
     deleteAccount: true,
   } satisfies Record<keyof UserRepo, true>,
   otp: { issue: true, live: true, attempt: true, consume: true } satisfies Record<
@@ -62,7 +64,14 @@ const METHODS = {
   authEvents: { record: true } satisfies Record<keyof AuthEventRepo, true>,
   apiTokens: { revokeAll: true } satisfies Record<keyof ApiTokenRepo, true>,
   nudges: { due: true, claim: true } satisfies Record<keyof NudgeRepo, true>,
-  emailSuppressions: { suppress: true } satisfies Record<keyof EmailSuppressionRepo, true>,
+  emailSuppressions: { suppress: true, suppressedAmong: true } satisfies Record<
+    keyof EmailSuppressionRepo,
+    true
+  >,
+  invites: { claimable: true, pending: true, claim: true, markSent: true } satisfies Record<
+    keyof InviteRepo,
+    true
+  >,
   pushSubscriptions: {
     save: true,
     remove: true,
@@ -90,6 +99,7 @@ const METHODS = {
     countLiveCreatedWithUser: true,
     applyTransition: true,
     liveGames: true,
+    allOverdueLobbies: true,
   } satisfies Record<keyof GameRepo, true>,
 } as const satisfies Record<keyof Repositories, object>;
 
@@ -111,6 +121,7 @@ export function detachedRepositories(): Repositories {
     games: detached("games", METHODS.games),
     nudges: detached("nudges", METHODS.nudges),
     emailSuppressions: detached("emailSuppressions", METHODS.emailSuppressions),
+    invites: detached("invites", METHODS.invites),
     pushSubscriptions: detached("pushSubscriptions", METHODS.pushSubscriptions),
     otp: detached("otp", METHODS.otp),
     sessions: detached("sessions", METHODS.sessions),

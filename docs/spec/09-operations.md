@@ -35,7 +35,7 @@ equal.
 | `PORT` | no | `8080` | Node only |
 | `DATABASE_PATH` | Node | `/data/app.sqlite` | An absolute file path; `:memory:` and relative paths are refused outside local-dev mode. The file is created 0600 in a 0700 directory, with its single-instance lock beside it (`<DATABASE_PATH>.lock`, 03 §5.3). An existing directory keeps its mode, and startup logs a warning if group or others have any permission on it |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | no | | Enables Turnstile on OTP request (manually or via the circuit breaker). On Cloudflare the web build also needs `TURNSTILE_ENABLED=true` for the static CSP (03 §9). |
-| `LIMIT_*` | no | see 08 §4 | Overrides for rate limits / instance-wide caps, as positive whole numbers. Each `LIMIT_<NAME>` is listed here; an unknown name refuses to start. Sign-in (M2): `LIMIT_OTP_REQUEST_EMAIL_HOUR` (5), `LIMIT_OTP_REQUEST_EMAIL_DAY` (10), `LIMIT_OTP_REQUEST_IP_HOUR` (20), `LIMIT_OTP_VERIFY_FAIL_EMAIL_HOUR` (10), `LIMIT_OTP_VERIFY_IP_HOUR` (50), `LIMIT_OTP_EMAIL_GLOBAL_HOUR` (200), `LIMIT_OTP_EMAIL_GLOBAL_DAY` (1000), `LIMIT_OTP_VERIFY_FAIL_GLOBAL_HOUR` (500), `LIMIT_NEW_ACCOUNTS_IP_DAY` (10), `LIMIT_DISPLAY_NAME_CHANGES_30D` (3), `LIMIT_STEP_UP_USER_HOUR` (5), `LIMIT_STEP_UP_USER_DAY` (10). Games (alpha A2): `LIMIT_WRITES_USER_MINUTE` (300, every game write), `LIMIT_MOVES_USER_MINUTE` (120), `LIMIT_PREVIEWS_USER_MINUTE` (300), `LIMIT_GAMES_CREATED_USER_DAY` (30), `LIMIT_GAMES_CREATED_PAIR_DAY` (5), `LIMIT_EMAIL_INVITEES_USER_HOUR` (5), `LIMIT_EMAIL_INVITEES_USER_DAY` (10), and the inbound invitation cap `LIMIT_INVITATIONS_RECEIVED_PAIR_DAY` (1, per target and creator) and `LIMIT_INVITATIONS_RECEIVED_DAY` (3, per target). Email nudges (alpha A6): `LIMIT_NUDGE_EMAILS_PER_DAY` (200, instance-wide) and `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY` (10, per recipient). IP limits scale 4× and 10× for the wider IPv6 buckets (08 §4.1). Also `LIMIT_DICT_TOTAL_BYTES` (below). Later milestones add the rest of 08 §4 |
+| `LIMIT_*` | no | see 08 §4 | Overrides for rate limits / instance-wide caps, as positive whole numbers. Each `LIMIT_<NAME>` is listed here; an unknown name refuses to start. Sign-in (M2): `LIMIT_OTP_REQUEST_EMAIL_HOUR` (5), `LIMIT_OTP_REQUEST_EMAIL_DAY` (10), `LIMIT_OTP_REQUEST_IP_HOUR` (20), `LIMIT_OTP_VERIFY_FAIL_EMAIL_HOUR` (10), `LIMIT_OTP_VERIFY_IP_HOUR` (50), `LIMIT_OTP_EMAIL_GLOBAL_HOUR` (200), `LIMIT_OTP_EMAIL_GLOBAL_DAY` (1000), `LIMIT_OTP_VERIFY_FAIL_GLOBAL_HOUR` (500), `LIMIT_NEW_ACCOUNTS_IP_DAY` (10), `LIMIT_DISPLAY_NAME_CHANGES_30D` (3), `LIMIT_STEP_UP_USER_HOUR` (5), `LIMIT_STEP_UP_USER_DAY` (10). Games (alpha A2): `LIMIT_WRITES_USER_MINUTE` (300, every game write), `LIMIT_MOVES_USER_MINUTE` (120), `LIMIT_PREVIEWS_USER_MINUTE` (300), `LIMIT_GAMES_CREATED_USER_DAY` (30), `LIMIT_GAMES_CREATED_PAIR_DAY` (5), `LIMIT_EMAIL_INVITEES_USER_HOUR` (5), `LIMIT_EMAIL_INVITEES_USER_DAY` (10), and the inbound invitation cap `LIMIT_INVITATIONS_RECEIVED_PAIR_DAY` (1, per target and creator) and `LIMIT_INVITATIONS_RECEIVED_DAY` (3, per target). Email nudges (alpha A6): `LIMIT_NUDGE_EMAILS_PER_DAY` (200, instance-wide) and `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY` (10, per recipient). Invite emails (alpha A17): `LIMIT_INVITE_EMAILS_INVITER_DAY` (5), `LIMIT_INVITE_EMAILS_INVITER_30D` (20), `LIMIT_INVITE_EMAILS_NEW_INVITER_DAY` (2, an account younger than 7 days that hasn't completed a game, 06 §6.6), `LIMIT_INVITE_EMAILS_TARGET_30D` (3, per address) and `LIMIT_INVITE_EMAILS_GLOBAL_DAY` (100, instance-wide). IP limits scale 4× and 10× for the wider IPv6 buckets (08 §4.1). Also `LIMIT_DICT_TOTAL_BYTES` (below). Later milestones add the rest of 08 §4 |
 | `ENABLED_GAMES` | no | every installed package not marked `enabled: false` in `instance.config.ts` | Comma-separated game types offered for **new** games (02 §7.3). Must name installed types only (refuse to start otherwise). Type ids match `^[a-z][a-z0-9]{1,31}$` |
 | `ADMIN_EMAILS` | no | (none) | Comma-separated addresses of admins (05 §Admin API). Matched against the normalised email of the human an admin token belongs to, on every admin request (admin access is by admin token only); an empty list disables the Admin API |
 | `ALLOW_ORPHAN_GAMES` | no | (none) | Node only: the 12-character digest the refusal to start printed for the `lobby`/`active` games of removed game types or rules versions; it accepts orphaning exactly that set (02 §7.3) and matches no other. Otherwise the server refuses to start while any exist |
@@ -198,14 +198,39 @@ that work on both runtimes, plus SMTP for Node only.
 - Worker with: Static Assets (built SPA), D1 binding `DB`, Durable Object binding `USER_CHANNEL`
   (SQLite-backed DO class, declared in migrations), Cron Trigger `*/15 * * * *`.
 - The Cron Trigger runs the sweep (03 §8). One invocation has a bounded budget of D1 queries and
-  subrequests, so the Worker sends at most 4 email nudges per invocation (Node: 100); the rest
-  wait 15 minutes for the next one. The arithmetic, counting every statement of a batch as a query
-  (the conservative reading): per run, the instance-wide cap read (2 statements), the due list (1)
-  and, when capped, the once-per-window alert counter (2) — at most 5; per nudge, the recipient's
-  cap read (2), the claim (1), counting both caps (4), the game's players (1), their users (1) and
-  the last move (1) — 10. So 4 nudges are at most 45 statements, inside the Workers Free plan's
-  per-invocation D1 query limit (50 at the time of writing; check the current Cloudflare limits),
-  and 5 would be 55, over it. Each nudge also makes one provider subrequest (the `gmail` provider
+  subrequests, so a Worker run expires at most 1 overdue lobby, claims at most 1 email-invite seat
+  and sends at most 2 email nudges (Node: 100 of each); the rest wait 15 minutes for the next one
+  (alpha A17 halved the nudges from A6's 4 to make room). The arithmetic, counting every
+  statement of a batch as a query (the conservative reading): the lobby step's list (1), and per
+  lobby its load (2) and the expiry transition (1, plus one per row with a typed address: 1 for a
+  two-seat game) — 5; the claim step's list (1), and per seat the game's load (2), the block
+  lookup (1) and the claim (1) — 5; the nudge step's instance-wide cap read (2 statements), due list
+  (1) and, when capped, the once-per-window alert counter (2) — at most 5, and per nudge the
+  recipient's cap read (2), the claim (1), counting both caps (4), the game's players (1), their
+  users (1) and the last move (1) — 10. So a run is at most 5 + 5 + 25 = 35 statements for
+  two-seat games (41 with a full eight-seat lobby), inside the Workers Free plan's per-invocation
+  D1 query limit (50 at the time of writing; check the current Cloudflare limits). A lost race
+  retries a lobby's expiry or a claim from its load, at most twice more (03 §5.2), which can add
+  up to 16 in the worst case; that needs a concurrent request on the same lobby in that moment,
+  and a run that goes over fails and is picked up by the next. **Workers residual (review
+  A17-S-6):** expiring one overdue lobby per run (96 a day) can fall behind if more lobbies than
+  that fall due in a day; lazy expiry (03 §8) still expires each one the moment anyone involved
+  comes back, and nothing accepts or starts an overdue lobby, so the backlog only delays clearing
+  typed addresses (F-16's residual); re-measure at the first Workers deployment (10).
+- **Requests that do several statements per address (alpha A17 review S-5).** Counted the same
+  conservative way (every statement of a batch, the session's refresh included):
+  - `POST /api/v1/games` with `n` typed addresses: 25 statements plus 20 per address (the caps,
+    the lookups, the per-pair counts, the inbound cap, the two tiers of invite-email caps, and the
+    seat and `invites` row in the insert), and in its background task 1 to record `sent_at` and,
+    when the instance cap stopped an email, 2 for its alert. One address (every two-seat game, so
+    every words game) is 46–48, inside the Free plan's 50; two or more addresses are over it
+    (65 for two, up to 165 for seven), and so is any create that lazily expires the creator's
+    overdue lobbies (up to 20 of them, 03 §8). Those **need the Paid plan, or re-measure at the
+    first Workers deployment** (10).
+  - The `PATCH /api/v1/me` that completes onboarding: 4 statements plus 4 per claimed seat (the
+    game's load, the block lookup, the claim), so the Worker claims at most 8 there (36) and leaves
+    the rest to the sweep; a claim that loses a race and retries adds 4 per attempt (at most 2).
+    Node claims up to 50 per request. Each nudge also makes one provider subrequest (the `gmail` provider
   one more per run for its token). A run with a failed step or a failed nudge ends the invocation
   as failed (not retried), so it shows in the trigger's history. Re-measure the per-invocation
   cost at the first Workers deployment (10).

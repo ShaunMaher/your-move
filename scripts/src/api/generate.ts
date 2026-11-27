@@ -42,6 +42,8 @@ export async function buildOpenApiDocument(): Promise<unknown> {
       dictionaries: NO_DICTIONARIES,
     },
     games: [],
+    // No database behind this app (detached repositories): nothing is ever claimed.
+    onboardingClaims: 0,
   });
   const response = await app.request("/api/v1/openapi.json");
   if (!response.ok) throw new Error(`openapi.json answered ${String(response.status)}`);

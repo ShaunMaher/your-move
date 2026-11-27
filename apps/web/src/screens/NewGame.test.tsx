@@ -99,17 +99,22 @@ describe("the new-game flow", () => {
     expect(screen.getByText('Value: {"rulesetId":"casual"}')).toBeDefined();
   });
 
-  it("says the other person must have signed in first, shows the address back, and creates the game with the options", async () => {
+  it("says what an address gets without saying whether it has an account, shows it back, and creates the game with the options", async () => {
     const { calls } = view();
     await toPlayers();
     click("Back");
     click("Next");
-    expect(screen.getByText(/must have signed in to Family Games at least once/u)).toBeDefined();
+    expect(
+      screen.getByText(
+        "We'll email them an invitation from you, showing your name and email address. If they already play on Family Games, it waits in their list of games instead. Either way, you'll see them as invited until they accept.",
+      ),
+    ).toBeDefined();
     typeEmail("  Alex@Example.org ");
     click("Review");
     expect((await screen.findByRole("listitem")).textContent).toBe(
       "Check the address: alex@example.org",
     );
+    expect(screen.getByText(/a typo would send your invitation to someone else\./u)).toBeDefined();
     click("Create game");
     await waitFor(() => {
       expect(window.location.pathname).toBe("/g/g9");

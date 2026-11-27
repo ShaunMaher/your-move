@@ -6,8 +6,9 @@
  *
  * Every valid address gets a seat and the same response, with the same reads and writes, whether
  * it belongs to an onboarded user (an invitation), to nobody or to an account that hasn't finished
- * onboarding (an email-invite seat, claimed at onboarding once email invites exist, M4). No email
- * is sent yet (M4). Per-pair counts use the typed address's `emailId`, never the user it resolves
+ * onboarding (an email-invite seat, claimed at onboarding, 06 §6.4). An email-invite seat's address
+ * is sent the invite email after the response, unless suppressed or capped (alpha A17,
+ * `invite-mail.ts`). Per-pair counts use the typed address's `emailId`, never the user it resolves
  * to (Q3). An invitation over the target's inbound cap is `hidden` (06 §6.7).
  *
  * A past opponent picked by `userId` (alpha A12) must be one the creator may pick (no block either
@@ -30,6 +31,7 @@ import type { NewGamePlayer, UserRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
 import type { Platform } from "../platform.js";
 import { expireOverdueLobbies } from "./expiry.js";
+import { type InviteMail, planInviteMail, type TypedAddress } from "./invite-mail.js";
 import { LOBBY_LIFETIME_MS } from "./lifecycle.js";
 import type { GameType } from "./registry.js";
 import type { ResourceProvider } from "./resources.js";
@@ -154,15 +156,19 @@ async function blockLookup(deps: CreateDeps, userIds: readonly string[]) {
 
 /** Stands in for "no user" in the past-opponent lookup, so it runs the same for every address. */
 const NO_USER = "";
+/** The `rate_limits` key that counts what isn't counted for real: written, never read (06 §3.2). */
+const SILENT = "silent";
 
 /**
  * The inbound invitation cap (06 §6.7, 08 T20): a user receives at most 1 invitation a day from
  * any one creator who isn't a past opponent, and 3 a day in total from such creators; over the cap
  * the invitation is `hidden`. Counted in `rate_limits` keyed by the target's `emailId` (per
  * creator: creator and `emailId`), so it is counted, with the same lookups and writes, for every
- * typed address whatever it resolves to (Q3): a past opponent's invitation reads the counters
- * without adding to them, and one already over the per-creator cap adds nothing to the total. The
- * creator's response is the same either way. Returns each address's delivery.
+ * typed address whatever it resolves to (Q3): a past opponent's invitation adds nothing to the
+ * counters, and one already over the per-creator cap adds nothing to the total; each adds 1 to the
+ * never-read `silent` key instead, so every address writes the same rows (06 §3.2: an upsert adding
+ * 0 writes nothing and is measurably quicker). The creator's response is the same either way.
+ * Returns each address's delivery.
  */
 async function inboundDelivery(
   deps: CreateDeps,
@@ -186,8 +192,8 @@ async function inboundDelivery(
     now,
     emailIds.map((hash, i) => ({
       name: "INVITATIONS_RECEIVED_PAIR_DAY",
-      key: `${creator.id}:${hash}`,
-      amount: strangers[i] === true ? 1 : 0,
+      key: strangers[i] === true ? `${creator.id}:${hash}` : SILENT,
+      amount: 1,
     })),
   );
   const total = await checkLimits(
@@ -196,8 +202,8 @@ async function inboundDelivery(
     now,
     emailIds.map((hash, i) => ({
       name: "INVITATIONS_RECEIVED_DAY",
-      key: hash,
-      amount: strangers[i] === true && perCreator[i]?.exceeded !== true ? 1 : 0,
+      key: strangers[i] === true && perCreator[i]?.exceeded !== true ? hash : SILENT,
+      amount: 1,
     })),
   );
   return emailIds.map((_hash, i) =>
@@ -207,11 +213,17 @@ async function inboundDelivery(
   );
 }
 
-/** A created game: its id and the past opponents added to it at once. */
+/** A created game: its id, the past opponents added to it at once, and its invite emails. */
 export interface CreatedGame {
   readonly gameId: string;
   /** User ids of the picked past opponents seated as `joined` (02 §4), in request order. */
   readonly added: readonly string[];
+  /**
+   * The invite emails to send after the response (06 §6.3), possibly none; null when no address
+   * was typed. Whenever it isn't null the caller schedules one background task for it, whatever
+   * it carries, so the work doesn't say which addresses are mailed (Q3).
+   */
+  readonly invitations: InviteMail | null;
 }
 
 /**
@@ -357,6 +369,25 @@ export async function createGame(
       lastSeenVersion: NEVER_SEEN,
     };
   });
+  // Each typed address with its emailId, its `invites` row and whether it may be mailed, paired
+  // once: an email-invite seat with `normal` delivery, never a user's invitation, an `inert` seat
+  // or one the inbound cap made `hidden` (06 §6.3).
+  const addresses = emails.map((email, i): TypedAddress => {
+    const emailId = emailIds[i];
+    const row = emailRows[i];
+    if (emailId === undefined || row === undefined) throw new Error("typed addresses out of step");
+    return {
+      email,
+      emailId,
+      inviteId: crypto.randomUUID(),
+      mailable: invitable[i] === null && row.delivery === "normal",
+    };
+  });
+  const mail = await planInviteMail(
+    { platform, keys },
+    { creator, gameName: type.manifest.name, addresses },
+    now,
+  );
   const gameId = crypto.randomUUID();
   const players: NewGamePlayer[] = [
     {
@@ -392,10 +423,11 @@ export async function createGame(
       resourceId: resource.id,
       version: resource.version ?? null,
     })),
-    invites: emailIds.map((hash) => ({
-      id: crypto.randomUUID(),
+    invites: addresses.map((address) => ({
+      id: address.inviteId,
       inviterId: creator.id,
-      emailHash: hash,
+      emailHash: address.emailId,
+      // Set by the background task once the sender has accepted the email (04).
       sentAt: null,
       expiresAt: now + LOBBY_LIFETIME_MS,
     })),
@@ -415,5 +447,6 @@ export async function createGame(
     added: pickedRows.flatMap((row) =>
       row.state === "joined" && row.userId != null ? [row.userId] : [],
     ),
+    invitations: emails.length === 0 ? null : mail,
   };
 }

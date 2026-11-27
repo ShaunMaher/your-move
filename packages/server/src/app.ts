@@ -40,6 +40,12 @@ export interface AppOptions {
    * WebCrypto (03 §4); only tests pass a seeded source, so a failing game can be replayed.
    */
   readonly random?: RandomFactory;
+  /**
+   * Email-invite seats the request that completes onboarding claims at most (06 §6.4); the sweep
+   * claims the rest. Each runtime sets it from its per-request budget (09 §3): Node 50, the
+   * Worker 8.
+   */
+  readonly onboardingClaims: number;
 }
 
 /** The HTTP application `createApp` returns. */
@@ -235,7 +241,11 @@ export function createApp(options: AppOptions): App {
 
   let subkeys: Promise<Subkeys> | null = null;
   const keys = (): Promise<Subkeys> => (subkeys ??= deriveSubkeys(config.appSecret));
-  registerAuthRoutes(app, { platform, keys });
+  registerAuthRoutes(app, {
+    platform,
+    keys,
+    onboardingClaims: options.onboardingClaims,
+  });
   registerUnsubscribeRoutes(app, { platform, keys });
   registerPushRoutes(app, platform);
   registerGameRoutes(app, {

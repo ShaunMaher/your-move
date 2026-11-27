@@ -1,12 +1,15 @@
 /**
  * The one `sweep()` (docs/spec/03-architecture.md §8): scheduled work, run by the Worker's Cron
- * Trigger or a Node `setInterval`. The alpha (A6) has one step, sending due email nudges; the
- * others arrive with their milestones. A failing step is logged by class and the rest still run.
+ * Trigger or a Node `setInterval`. The alpha has three steps: expiring overdue lobbies and claiming
+ * pending email-invite seats (A17), then sending due email nudges (A6); the others arrive with
+ * their milestones. A failing step is logged by class and the rest still run.
  */
 import { deriveSubkeys, type Subkeys } from "../crypto/subkeys.js";
 import { instanceGames } from "../games/instance.js";
 import type { InstalledGame } from "../games/registry.js";
 import type { Platform } from "../platform.js";
+import { type ClaimReport, claimPendingInvites } from "./claims.js";
+import { expireOverdueLobbiesStep } from "./lobbies.js";
 import { type NudgeReport, sendDueNudges } from "./nudges.js";
 
 export interface SweepOptions {
@@ -19,10 +22,17 @@ export interface SweepOptions {
    * invocation each nudge spends several of (09 §3).
    */
   readonly nudgesPerRun: number;
+  /** Email-invite seats one run claims at most (03 §8); bounded the same way (09 §3). */
+  readonly claimsPerRun: number;
+  /** Overdue lobbies one run expires at most (03 §8); bounded the same way (09 §3). */
+  readonly lobbiesPerRun: number;
 }
 
 /** What one run did; a step that failed reports null. */
 export interface SweepReport {
+  /** Overdue lobbies looked at (each expired, unless something else ended it first). */
+  readonly lobbies: number | null;
+  readonly claims: ClaimReport | null;
   readonly nudges: NudgeReport | null;
 }
 
@@ -53,11 +63,22 @@ export function createSweep(options: SweepOptions): Sweep {
 
   return async () => {
     const started = platform.now().getTime();
+    // Lobbies first, so nothing is claimed into one that is due to expire.
+    const lobbies = await step("lobbies", () =>
+      expireOverdueLobbiesStep(platform.repos, started, options.lobbiesPerRun),
+    );
+    const claims = await step("claims", () =>
+      claimPendingInvites(platform.repos, platform.now().getTime(), options.claimsPerRun),
+    );
     const nudges = await step("nudges", () =>
       sendDueNudges({ platform, registry, keys, perRun: options.nudgesPerRun }),
     );
     platform.log.info("sweep finished", {
       durationMs: platform.now().getTime() - started,
+      ...(lobbies === null ? { lobbiesFailedStep: true } : { lobbiesDue: lobbies }),
+      ...(claims === null
+        ? { claimsFailedStep: true }
+        : { invitesClaimed: claims.claimed, invitesSkipped: claims.skipped }),
       ...(nudges === null
         ? { nudgesFailedStep: true }
         : {
@@ -68,6 +89,6 @@ export function createSweep(options: SweepOptions): Sweep {
             nudgesCapped: nudges.capped,
           }),
     });
-    return { nudges };
+    return { lobbies, claims, nudges };
   };
 }

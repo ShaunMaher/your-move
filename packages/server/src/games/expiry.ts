@@ -1,9 +1,10 @@
 /**
- * Lazy lobby expiry (docs/spec/02-game-framework.md §4, 06 §6.5). Until the sweep exists (03 §8,
- * M3) nothing expires a lobby on a schedule, so every read or write of a game expires it first if
- * it is overdue, and listing or creating games first expires the user's overdue lobbies: no one
- * sees, accepts or starts a lobby past its 14 days, and its typed addresses are cleared as soon as
- * anyone involved comes back. Expiry is a transition like any other (03 §5.2).
+ * Lobby expiry (docs/spec/02-game-framework.md §4, 06 §6.5). The sweep's lobby step (03 §8, alpha
+ * A17) expires overdue lobbies on a schedule, a bounded number per run; on top of that, expiry is
+ * lazy: every read or write of a game expires it first if it is overdue, and listing or creating
+ * games first expires the user's overdue lobbies, so no one sees, accepts or starts a lobby past
+ * its 14 days whatever the sweep's backlog, and its typed addresses are cleared as soon as anyone
+ * involved comes back. Expiry is a transition like any other (03 §5.2).
  */
 import type { LoadedGame, Repositories } from "../db/repositories.js";
 import { expire, LOBBY_LIFETIME_MS } from "./lifecycle.js";

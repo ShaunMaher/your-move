@@ -47,17 +47,33 @@
  * z > 4 for power. Its pass and power bounds overlapped, and on the same laptop its power check
  * measured z = 1.77 to 5.25.
  *
+ * Game creation with one typed address (alpha A17 review S-7, the last describe below): the same
+ * design, each request from a creator of its own. Measured on the same laptop, 600 pairs, three
+ * consecutive runs on 2026-11-27 (median request about 2.8 ms): known vs unknown −0.23% to
+ * +0.52%; suppressed vs unknown −0.88% to −0.12%; hidden vs unknown −1.69% to −0.73% (the unknown
+ * address's per-address and instance counters are real rows, the hidden one's the long-lived
+ * `silent` row: an insert against an update, 06 §6.6's recorded residual); two planted SELECTs
+ * +3.88% to +4.08%. One planted SELECT is about 2.5% of a creation, under the bound, so the power
+ * check plants two (ADR 0006 addendum).
+ *
  * Because this is a measurement, it needs a quiet machine (ADR 0006). CI runs this file only in
  * its own `test:timing` job, never alongside the rest of the suite. A coder runs it locally before
- * handing off any change to the sign-in paths: about 25 s here.
+ * handing off any change to the sign-in paths or to creating a game with typed addresses: about
+ * 70 s here.
  */
 import { performance } from "node:perf_hooks";
 import { setImmediate } from "node:timers/promises";
 
-import { normaliseAddress, type Repositories } from "@your-move/server";
+import {
+  deriveSubkeys,
+  emailId as emailIdOf,
+  normaliseAddress,
+  type Repositories,
+} from "@your-move/server";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createHarness, type Harness, PROD_ENV, T0 } from "./test-harness.js";
+import { gameHarness, signUp } from "./games-support.js";
+import { createHarness, DAY, type Harness, PROD_ENV, T0 } from "./test-harness.js";
 
 /** Pairs measured per comparison: each pair is one request of each arm. */
 const PAIRS = 600;
@@ -70,6 +86,12 @@ const BOUND = 0.03;
  */
 const TIMEOUT_MS = 30_000;
 const HEAVY_TIMEOUT_MS = 75_000;
+/**
+ * Each game-creation comparison: 1,200 creations and 1,200 unmeasured sign-ups, measured at about
+ * 10 s locally (9.9–10.2 s, and 10.1 s with two planted SELECTs, 2026-11-28); about 10× that, as
+ * above. Re-measure from the first `test:timing` jobs, never retry (ADR 0004, ADR 0006).
+ */
+const CREATE_TIMEOUT_MS = 100_000;
 
 let h: Harness | null = null;
 afterEach(() => {
@@ -350,5 +372,139 @@ describe("enumeration parity: timing (06 §3.2, statistical test)", () => {
       expect(result.shift).toBeGreaterThan(BOUND);
     },
     TIMEOUT_MS,
+  );
+});
+
+/**
+ * Creating a game with one typed address (06 §6.1, §6.3, §6.6, Q3; alpha A17 review S-7): the
+ * same response, work and timing whether the address belongs to an onboarded user (an invitation,
+ * no email), to nobody (an email-invite seat that is mailed after the response), to a suppressed
+ * address, or is a seat the inbound cap makes `hidden` (neither mailed). Each measured request
+ * comes from a creator of its own, signed up unmeasured, so every request starts from the same
+ * creator state; the emails go out in the background and are settled outside the measurement.
+ */
+describe("enumeration parity: timing of creating a game with a typed address (06 §6.1)", () => {
+  /** The creators' and the instance's own caps raised out of the way of 2,400 creations. */
+  const RAISED = {
+    LIMIT_OTP_EMAIL_GLOBAL_HOUR: "1000000",
+    LIMIT_OTP_EMAIL_GLOBAL_DAY: "1000000",
+    LIMIT_NEW_ACCOUNTS_IP_DAY: "1000000",
+    LIMIT_OTP_REQUEST_IP_HOUR: "1000000",
+    LIMIT_OTP_VERIFY_IP_HOUR: "1000000",
+    LIMIT_INVITE_EMAILS_GLOBAL_DAY: "1000000",
+  };
+
+  /** Sends one creation by the creator prepared for that address. */
+  const creations =
+    (harness: Harness, cookies: Map<string, string>) => (email: string, from: string) =>
+      harness.request(
+        "POST",
+        "/api/v1/games",
+        { gameType: "words", invitees: [{ email }] },
+        { ip: from, cookie: cookies.get(email) ?? "" },
+      );
+
+  /** Gives each address a fresh, onboarded creator before its measured creation. */
+  const withCreator =
+    (cookies: Map<string, string>) =>
+    (arm: Arm): Arm => ({
+      ...arm,
+      prepare: async (harness, email, from) => {
+        await arm.prepare?.(harness, email, from);
+        cookies.set(email, (await signUp(harness, "Creator")).cookie);
+      },
+    });
+
+  const emailIdFor = async (harness: Harness, text: string): Promise<string> => {
+    const email = normaliseAddress(text);
+    if (email === null) throw new Error("bad test address");
+    return emailIdOf(await deriveSubkeys(harness.platform.config.appSecret), email);
+  };
+
+  const suppressedArm: Arm = {
+    make: async (harness, i) => {
+      const email = await unknownArm.make(harness, i);
+      harness.exec(
+        "INSERT INTO email_suppressions (email_hash, reason, created_at) VALUES (?, 'unsubscribed', ?)",
+        await emailIdFor(harness, email),
+        T0,
+      );
+      return email;
+    },
+  };
+
+  /** An address that already had its 3 invitations today: the next stranger's is `hidden`. */
+  const hiddenArm: Arm = {
+    make: async (harness, i) => {
+      const email = await unknownArm.make(harness, i);
+      harness.exec(
+        "INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, 3)",
+        `INVITATIONS_RECEIVED_DAY:${await emailIdFor(harness, email)}`,
+        Math.floor(T0 / DAY) * DAY,
+      );
+      return email;
+    },
+  };
+
+  for (const [label, arm] of [
+    ["known vs unknown", knownArm],
+    ["suppressed vs unknown", suppressedArm],
+    ["hidden vs unknown", hiddenArm],
+  ] as const) {
+    it(
+      `POST /api/v1/games with one typed address: ${label}`,
+      async () => {
+        h = gameHarness(RAISED);
+        const cookies = new Map<string, string>();
+        const creator = withCreator(cookies);
+        const result = await compare(h, creations(h, cookies), creator(arm), creator(unknownArm));
+        // The hidden arm's seat really was hidden, and the unknown arm's mailed: not vacuous.
+        if (label.startsWith("hidden")) {
+          expect(
+            h.query("SELECT count(*) AS n FROM game_players WHERE delivery = 'hidden'")[0]?.["n"],
+          ).toBe(PAIRS);
+        }
+        expect(
+          h.query("SELECT count(*) AS n FROM invites WHERE sent_at IS NOT NULL")[0]?.["n"],
+        ).toBe(PAIRS);
+        report(`create ${label}`, result);
+        expectIndistinguishable(result);
+      },
+      CREATE_TIMEOUT_MS,
+    );
+  }
+
+  it(
+    "has power: two extra indexed SELECTs on the known path are detected",
+    async () => {
+      // A creation is about 2.8 ms, so the 3% bound is about 85 µs: one planted SELECT (about
+      // 70 µs, as above) sits just under it, two above. The bound is the same as sign-in's.
+      const twoMoreSelects = (repos: Repositories): Repositories => ({
+        ...repos,
+        users: {
+          ...repos.users,
+          async findByEmail(email) {
+            const user = await repos.users.findByEmail(email);
+            if (user !== null) {
+              await repos.users.findById(user.id);
+              await repos.users.findById(user.id);
+            }
+            return user;
+          },
+        },
+      });
+      h = gameHarness(RAISED, { wrapRepos: twoMoreSelects });
+      const cookies = new Map<string, string>();
+      const creator = withCreator(cookies);
+      const result = await compare(
+        h,
+        creations(h, cookies),
+        creator(knownArm),
+        creator(unknownArm),
+      );
+      report("create with two planted SELECTs", result);
+      expect(result.shift).toBeGreaterThan(BOUND);
+    },
+    CREATE_TIMEOUT_MS,
   );
 });

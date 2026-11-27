@@ -149,3 +149,44 @@ export function nudgeEmail(to: NormalisedEmail, context: NudgeContext): EmailMes
     listUnsubscribe: context.unsubscribeUrl,
   };
 }
+
+export interface InvitationContext {
+  readonly appName: string;
+  readonly publicUrl: string;
+  /** The inviter's display name ("New player" if unset). */
+  readonly inviterName: string;
+  /** The inviter's own address: the invitee sees it (Q10, 08 §5). */
+  readonly inviterEmail: string;
+  /** The game type's display name, from its manifest. */
+  readonly gameName: string;
+  /** How many days the invitation stays open: the lobby's lifetime (02 §4). */
+  readonly openDays: number;
+  readonly unsubscribeUrl: string;
+}
+
+const days = (n: number): string => `${String(n)} ${n === 1 ? "day" : "days"}`;
+
+/**
+ * The invite email to an email-invite seat (06 §6.3, alpha A17): a fixed template whose only
+ * user-chosen text is the inviter's display name, which display-name rules restrict (06 §5.1).
+ * It says who invited the person to which game type and how to join, and nothing else about the
+ * game: never its options, state or other players. With the `invites` unsubscribe link and
+ * headers (05 §Email links).
+ */
+export function invitationEmail(to: NormalisedEmail, context: InvitationContext): EmailMessage {
+  const { appName, inviterName, gameName } = context;
+  const paragraphs: Paragraph[] = [
+    `${inviterName} (${context.inviterEmail}) has invited you to play ${gameName} on ${appName}.`,
+    // No per-move time limit until turn timeouts exist (06 §6.3; not in the alpha).
+    `The invitation stays open for ${days(context.openDays)}.`,
+    { text: "To join, sign in with this email address at", href: context.publicUrl },
+    `There's no password: ${appName} emails you a sign-in code. Then choose the name other players will see, and the invitation will be waiting in your list of games.`,
+    `On a phone you can add ${appName} to your home screen. On an iPhone, open the link in Safari, tap Share, then "Add to Home Screen". On Android, open it in Chrome and choose "Install app" or "Add to Home screen".`,
+    `If you don't know ${inviterName} or don't want to play, you can ignore this email.`,
+    { text: "Don't send me invites again:", href: context.unsubscribeUrl },
+  ];
+  return {
+    ...message(to, `${inviterName} invited you to play ${gameName} on ${appName}`, paragraphs),
+    listUnsubscribe: context.unsubscribeUrl,
+  };
+}

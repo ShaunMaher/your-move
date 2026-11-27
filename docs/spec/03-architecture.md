@@ -361,26 +361,34 @@ its status says), and its typed addresses are cleared (06 §6.5) as soon as anyo
 transition like any other (§5.2), so it bumps the game's version: a member sees the game unread,
 and a request in flight with the earlier `expectedVersion` gets `STALE_GAME`. `start` and `accept`
 also refuse a lobby at or past its expiry. Past the 20-per-request bound a list may still show
-some overdue lobbies as open until a later request expires them. The alpha's sweep (A6) has only
-the email-nudge step; once the lobby step exists it expires the lobbies no one comes back to.)
+some overdue lobbies as open until a later request expires them. The alpha's sweep has the
+email-nudge step (A6), and the invite-claim and lobby-expiry steps (A17), which expires the
+lobbies no one comes back to, so a typed address never outlives its lobby for long.)
 
 One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * * *`) or a Node
 `setInterval` (every 15 minutes, first run 15 minutes after start; a run still going when the next
 is due skips that one). A failing step is logged (by class, never its message, 09 §5) and the
-other steps still run. Every step is idempotent and uses the same transition mechanism as actions
-(except notification throttles such as `last_nudged_at`, §7):
+other steps still run. Every step is idempotent and uses the same transition mechanism as actions,
+except notification throttles such as `last_nudged_at` (§7) and invite claims, which are guarded
+row updates that check the game's version without bumping it (02 §4, §5.2):
 
 - Expire OTPs, sessions, invites, join links and rate-limit buckets.
 - Delete accounts that haven't completed onboarding 7 days after creation — only rows with
   `onboarded_at IS NULL`, never users re-prompted after a `MIN_AGE` rise (06 §5).
 - Claim any `invited`, non-`inert` email seat in a `lobby` game whose `invite_email` matches an
   onboarded user who holds no other row in that game, with the same guard as an onboarding claim
-  (catches games created during onboarding and failed claims; 02 §4, 06 §6.4).
+  (catches games created during onboarding and failed claims; 02 §4, 06 §6.4). The user must be
+  an onboarded human, not suspended or being deleted, and the lobby not yet due to expire; at
+  most a per-runtime number of seats per run, oldest lobby first (alpha A17, 09 §3). This is also
+  the catch-up for the request that completes onboarding, which claims at most a per-runtime
+  number of seats (Node 50, the Worker 8, 06 §6.4).
 - Apply per-seat turn timeouts via module `onTimeout`: overdue seats one transition at a time, in
   seat order, reloading and re-checking `toAct` and the deadline before each (02 §4).
 - Send timeout reminders (50 % and 24 h before, 02 §4; tracked in `timeout_reminders_sent`, which
   every clock restart resets to 0).
-- Expire lobbies 14 days after creation (reads and writes also expire them lazily, above).
+- Expire lobbies 14 days after creation (reads and writes also expire them lazily, above): the
+  same expiry transition, retried on `stale`, at most a per-runtime number per run, oldest first
+  (alpha A17, 09 §3).
 - Send due email nudges.
 - Purge blobs of deleted dictionaries no `lobby`/`active` game references (`game_resources`), and
   delete row-less upload blobs older than 1 h (words §9.5).

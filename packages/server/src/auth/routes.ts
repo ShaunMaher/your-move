@@ -34,6 +34,7 @@ import {
   suspendedNoticeEmail,
   type TemplateContext,
 } from "../email/templates.js";
+import { type Claimant, claimInvitations } from "../games/claim.js";
 import { background } from "../http/background.js";
 import { errorBody, type ErrorReason } from "../http/error-log.js";
 import type { AppEnv, Platform } from "../platform.js";
@@ -123,6 +124,8 @@ export interface AuthRouteOptions {
   readonly platform: Platform;
   /** HKDF subkeys of `APP_SECRET`, derived once per app. */
   readonly keys: () => Promise<Subkeys>;
+  /** Email-invite seats completing onboarding claims at most; the sweep claims the rest. */
+  readonly onboardingClaims: number;
 }
 
 export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteOptions): void {
@@ -157,6 +160,21 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
       })),
     );
     return { ipBuckets: buckets };
+  };
+
+  /**
+   * Claims the new user's email-invite seats before onboarding answers, so their game list shows
+   * the invitations (06 §6.4). A failure never fails onboarding: it is logged by class (09 §5)
+   * and the sweep claims the seats later.
+   */
+  const claimAtOnboarding = async (claimant: Claimant, at: number): Promise<void> => {
+    try {
+      await claimInvitations(repos, claimant, at, options.onboardingClaims);
+    } catch (error) {
+      platform.log.error("invite claim at onboarding failed", {
+        errorClass: error instanceof Error ? error.constructor.name : typeof error,
+      });
+    }
   };
 
   const clearCookie = (c: Context): void => {
@@ -296,13 +314,14 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
       if (!result.ok) return fail(c, 400, "BAD_REQUEST");
       const at = now();
       if (user.onboardedAt === null) {
-        // Completing onboarding (06 §5). Claiming email-invite seats joins with games (M3/M4).
+        // Completing onboarding (06 §5), which claims the address's email-invite seats (06 §6.4).
         await repos.users.update(user.id, {
           displayName: result.name,
           onboardedAt: at,
           updatedAt: at,
         });
         user = { ...user, displayName: result.name, onboardedAt: at, updatedAt: at };
+        if (user.email !== null) await claimAtOnboarding({ id: user.id, email: user.email }, at);
       } else if (result.name !== user.displayName) {
         const [limit] = await checkLimits(repos, config, at, [
           { name: "DISPLAY_NAME_CHANGES_30D", key: user.id, amount: 1 },

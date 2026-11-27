@@ -35,7 +35,10 @@ hangs slow to fail and would blur what the tests are measuring.
     finished game's Rematch button, opened by both players) 90 s (`REMATCH_TEST_TIMEOUT_MS`, 5–6 s
     locally before A15; with it 6–8 s with a warm browser, 12–15 s as a shard's first test), and
     the no-play hint in `no-play.spec.ts` (alpha A14: the short game's steps and the word list's
-    download and search, no moves) 60 s (`NO_PLAY_TEST_TIMEOUT_MS`, 2–3 s locally). These are
+    download and search, no moves) 60 s (`NO_PLAY_TEST_TIMEOUT_MS`, 2–3 s locally), and the
+    email invite in `invites.spec.ts` (alpha A17: a game for an address with no account, the
+    second person's sign-up from its invitation email, a pass each and the unsubscribe page) 60 s
+    (`INVITE_TEST_TIMEOUT_MS`, 6–10 s locally). These are
     margins over local measurements, not CI ones; each is re-measured
     on the CI runner from the first pipeline that runs it, and then set from that.
   - CI runs one worker per job.

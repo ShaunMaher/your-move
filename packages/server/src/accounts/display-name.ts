@@ -25,7 +25,13 @@ const EMOJI_JOINER =
   /\p{Extended_Pictographic}[\p{Emoji_Modifier}\u{FE0F}]?\u{200D}(?=\p{Extended_Pictographic})/gu;
 const URL_LIKE = /:\/\/|www\.|@/iu;
 const DOMAIN_LIKE = /\p{L}\.\p{L}{2,}/iu;
-const LONG_DIGIT_RUN = /\p{Nd}{7}/u;
+/**
+ * Digits anywhere in the name, separators or not, counted after NFKC folding: 7 or more are
+ * refused, so a phone number can't be spelt "555 123 4567", "5-5-5-1-2-3-4" or in circled or
+ * superscript digits either (06 §5.1, alpha A17 review S-4, S2-4).
+ */
+const DIGIT = /\p{Nd}/gu;
+const MAX_DIGITS = 6;
 const RESERVED_WORDS = ["admin", "support", "official", "staff"];
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -57,7 +63,10 @@ export function validateDisplayName(input: string, appName: string): DisplayName
     return { ok: false, reason: "combining" };
   }
   if (URL_LIKE.test(name) || DOMAIN_LIKE.test(name)) return { ok: false, reason: "link" };
-  if (LONG_DIGIT_RUN.test(name)) return { ok: false, reason: "digits" };
+  // Folded first, so circled, superscript and other compatibility digits count too (A17-S2-4).
+  if ((name.normalize("NFKC").match(DIGIT)?.length ?? 0) > MAX_DIGITS) {
+    return { ok: false, reason: "digits" };
+  }
   const lower = name.toLowerCase();
   if (
     [appName.toLowerCase(), ...RESERVED_WORDS].some((word) => word !== "" && lower.includes(word))

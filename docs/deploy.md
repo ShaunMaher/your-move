@@ -74,13 +74,23 @@ docker run --rm --read-only -p 127.0.0.1:8080:8080 \
 curl http://127.0.0.1:8080/api/health
 ```
 
-The server also runs the scheduled sweep itself, every 15 minutes (03 §8). For now its only job is
+The server also runs the scheduled sweep itself, every 15 minutes (03 §8). It expires lobbies
+nobody started within 14 days (clearing the addresses typed into them), gives an emailed invitation
+to anyone who finished signing up with that address while the game was being created, and sends
 the "It's your turn" email nudges: off by default, each person turns them on in Settings, and every
 nudge carries a one-click unsubscribe link (05 §Email links). It sends at most 100 per run, 200 a
 day across the instance (`LIMIT_NUDGE_EMAILS_PER_DAY`, so nudges can't use up the sender's daily
 quota that sign-in codes need) and 10 a day to any one person
 (`LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`); at the instance cap it stops with one
 `NUDGE_EMAILS_PER_DAY` alert in the log per day and the rest wait.
+
+Inviting an address with no account sends it an invitation email from the configured provider,
+with a one-click unsubscribe. Those emails are capped too (06 §6.6, 08 §4): per inviter 5 a day
+and 20 in 30 days (2 a day for an account under a week old with no finished game against anyone),
+where every typed address counts, existing players' included; 3 in 30 days to any one address; and
+100 a day across the instance (`LIMIT_INVITE_EMAILS_*`). Over a cap the seat is still created and
+nothing is sent, and the instance cap logs one `INVITE_EMAILS_GLOBAL_DAY` alert a day while it is
+reached.
 
 The Cloudflare Tunnel compose file is below; the Caddy one arrives in M4 (09 §4).
 

@@ -8,7 +8,8 @@
  * and API-token revocation; the alpha's framework core (A2) what one game needs: its resources and
  * invites, the game list, history, unread markers and past opponents; alpha A6 the email-nudge
  * setting, the seats due a nudge and the suppression list; alpha A8 the push subscriptions; alpha
- * A12 picking past opponents and the blocks among a game's players.
+ * A12 picking past opponents and the blocks among a game's players; alpha A17 the invite claims,
+ * the suppressions among typed addresses and the sweep's overdue lobbies.
  */
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
@@ -118,6 +119,11 @@ export interface UserRepo {
    * nothing more.
    */
   disableNudgesByEmailId(emailId: string, updatedAt: number): Promise<void>;
+  /**
+   * Whether the user has a past opponent (04 `past_opponents`: a finished game in which both
+   * acted), which lifts the new-account invite-email rate (06 §6.6).
+   */
+  hasPastOpponent(userId: string): Promise<boolean>;
   /**
    * Deletes an account that holds no game rows (04 §Account deletion steps 1, 3, 4 and 5): its
    * sessions and API tokens, its OTP challenges, blocks and past-opponent rows, the
@@ -473,6 +479,11 @@ export interface GameRepo {
   ): Promise<TransitionResult>;
   /** Every `lobby` or `active` game, for the orphan check. */
   liveGames(): Promise<LiveGameRow[]>;
+  /**
+   * Up to `limit` ids of `lobby` games created at or before `createdBefore`, whoever is in them,
+   * oldest first: the lobbies the sweep expires (03 §8).
+   */
+  allOverdueLobbies(createdBefore: number, limit: number): Promise<string[]>;
 }
 
 type SuppressionReason = InferSelectModel<typeof emailSuppressions>["reason"];
@@ -484,6 +495,59 @@ export interface EmailSuppressionRepo {
    * call changes nothing.
    */
   suppress(emailHash: string, reason: SuppressionReason, createdAt: number): Promise<void>;
+  /**
+   * Which of `emailHashes` are suppressed for invite emails: any row, whatever its reason (04).
+   * One query however many there are.
+   */
+  suppressedAmong(emailHashes: readonly string[]): Promise<string[]>;
+}
+
+/** An email-invite seat someone may claim (06 §6.4): the row and its game. */
+export interface ClaimableSeat {
+  /** The `game_players` row. */
+  readonly playerId: string;
+  readonly gameId: string;
+}
+
+/** A seat the sweep claims (03 §8): the row, its game and the onboarded user with that address. */
+interface PendingClaim extends ClaimableSeat {
+  readonly userId: string;
+  readonly email: NormalisedEmail;
+}
+
+/** One claim (02 §4 Invite claims), from the game version its checks were made against. */
+export interface InviteClaim extends ClaimableSeat {
+  readonly userId: string;
+  /** The address the seat was typed as, which must still be on the row. */
+  readonly email: NormalisedEmail;
+  /** `games.version` when the game was loaded for the block check. */
+  readonly expectedVersion: number;
+  /** A block with another row of the game (06 §6.4): the claimed row becomes `inert`. */
+  readonly inert: boolean;
+}
+
+export interface InviteRepo {
+  /**
+   * Up to `limit` email-invite seats typed as `email` that could be claimed now (06 §6.4): an
+   * `invited` row with no user and a delivery other than `inert`, in a `lobby` game created after
+   * `createdAfter` (not yet due to expire), oldest lobby first.
+   */
+  claimable(email: NormalisedEmail, createdAfter: number, limit: number): Promise<ClaimableSeat[]>;
+  /**
+   * Up to `limit` claimable seats (as {@link claimable}) whose address belongs to an onboarded
+   * human, neither suspended nor being deleted, who holds no other row in that game, oldest lobby
+   * first: what the sweep claims (03 §8).
+   */
+  pending(createdAfter: number, limit: number): Promise<PendingClaim[]>;
+  /**
+   * Claims one seat (02 §4 Invite claims): sets its `user_id` (and, for `inert`, its delivery)
+   * only while it is still an `invited`, user-less, non-`inert` row typed as `email`, no other row
+   * of the game holds the user, and the game is a `lobby` still at `expectedVersion`. Not a
+   * transition: the version is checked, never bumped. True only for the call that changed the row.
+   */
+  claim(claim: InviteClaim): Promise<boolean>;
+  /** Records that the invite emails of these `invites` rows were handed to the sender (04). */
+  markSent(inviteIds: readonly string[], at: number): Promise<void>;
 }
 
 /** A seat whose user may be sent an "It's your turn" email (03 §7). */
@@ -575,6 +639,7 @@ export interface Repositories {
   readonly games: GameRepo;
   readonly nudges: NudgeRepo;
   readonly emailSuppressions: EmailSuppressionRepo;
+  readonly invites: InviteRepo;
   readonly pushSubscriptions: PushSubscriptionRepo;
   readonly otp: OtpRepo;
   readonly sessions: SessionRepo;

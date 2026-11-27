@@ -365,8 +365,9 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
           {emails.length > 0 ? (
             <p id="players-note" className="hint">
               {recent !== null && recent.length > 0 ? "Or type an address. " : ""}
-              They must have signed in to {appName} at least once first, with this address. We
-              can&apos;t invite someone who has never signed in.
+              We&apos;ll email them an invitation from you, showing your name and email address. If
+              they already play on {appName}, it waits in their list of games instead. Either way,
+              you&apos;ll see them as invited until they accept.
             </p>
           ) : null}
           <Problem id="players-problem" message={problem} />
@@ -388,7 +389,7 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
             A {chosen.name} game for {String(seats)} players.
             {emails.length === 0
               ? " It starts as soon as you create it, unless someone you picked has asked to be invited instead."
-              : ` Check the ${emails.length === 1 ? "address" : "addresses"}: we never say whether an address has an account, so a typo just means an invitation nobody receives.`}
+              : ` Check the ${emails.length === 1 ? "address" : "addresses"}: we never say whether an address has an account, so a typo would send your invitation to someone else.`}
           </p>
           <ul className="plain">
             {picked.map((userId) => (

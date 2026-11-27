@@ -179,6 +179,15 @@ export function userRepo(db: Database): UserRepo {
         })
         .where(eq(users.emailId, emailId));
     },
+    async hasPastOpponent(userId) {
+      const row = await db
+        .select({ otherId: pastOpponents.otherId })
+        .from(pastOpponents)
+        .where(eq(pastOpponents.userId, userId))
+        .limit(1)
+        .get();
+      return row !== undefined;
+    },
     async deleteAccount(user, event) {
       // Agents go with their owner (owner_user_id cascades), and their sessions and tokens with
       // them; the user's own sessions and tokens cascade from the users row too, but are deleted
