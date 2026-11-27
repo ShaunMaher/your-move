@@ -16,6 +16,7 @@ import {
   healthRoute,
   markSeenRoute,
   previewRoute,
+  rematchRoute,
   resignGameRoute,
   startGameRoute,
   submitActionRoute,
@@ -86,6 +87,7 @@ describe("the game routes' documented errors (A2 review P-11)", () => {
     resignGameRoute,
     cancelGameRoute,
     markSeenRoute,
+    rematchRoute,
   ];
 
   it("documents 429 on every rate-limited write", () => {

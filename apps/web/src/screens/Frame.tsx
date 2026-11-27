@@ -33,6 +33,11 @@ interface FrameProps {
   readonly preview: BoardProps<unknown, unknown, unknown>["preview"];
   /** Resigns; resolves to what went wrong, or `null` when it worked. */
   readonly onResign: () => Promise<string | null>;
+  /**
+   * Opens the finished game's rematch, creating or accepting it (05); resolves to what went wrong,
+   * or `null` once it is on its way to the rematch.
+   */
+  readonly onRematch: () => Promise<string | null>;
   readonly onSessionLost: () => void;
   /** Why the screen may be out of date (offline, a failing server), or `null`. */
   readonly notice: string | null;
@@ -66,6 +71,54 @@ function PlayerChip({ player, acting }: { player: Player; acting: boolean }) {
   );
 }
 
+/** The rematch button's label for your place in it (07 §1), or null when there's none to press. */
+function rematchLabel(rematch: GameEnvelope["rematch"]): string | null {
+  if (rematch === undefined) return null;
+  if (rematch === null) return "Rematch";
+  if (rematch.you === "invited") return "Accept rematch";
+  return rematch.you === "joined" ? "Go to rematch" : null;
+}
+
+/**
+ * A finished game's rematch button (07 §1, alpha A15): Rematch, Accept rematch or Go to rematch,
+ * from the envelope's `rematch`; a refusal is shown under it.
+ */
+function RematchButton({
+  label,
+  onRematch,
+}: {
+  readonly label: string;
+  readonly onRematch: () => Promise<string | null>;
+}) {
+  const [pending, setPending] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  async function press() {
+    if (pending) return;
+    setPending(true);
+    setProblem(null);
+    const failure = await onRematch();
+    // On success the screen moves on to the rematch; the button stays busy until it does.
+    if (failure !== null) {
+      setPending(false);
+      setProblem(failure);
+    }
+  }
+  return (
+    <>
+      <button
+        type="button"
+        className="button"
+        disabled={pending}
+        aria-describedby="rematch-problem"
+        onClick={() => void press()}
+      >
+        {pending ? "Starting rematch…" : label}
+      </button>
+      <Problem id="rematch-problem" message={problem} />
+    </>
+  );
+}
+
 /**
  * The finished game's result: ranks when there are any, and how it ended. Scores are the board's
  * (its final summary has every player's), so they appear here only when no board is drawn.
@@ -73,9 +126,11 @@ function PlayerChip({ player, acting }: { player: Player; acting: boolean }) {
 function Results({
   game,
   showScores,
+  onRematch,
 }: {
   readonly game: GameEnvelope;
   readonly showScores: boolean;
+  readonly onRematch: () => Promise<string | null>;
 }) {
   const seated = game.players
     .filter((player) => player.seat !== null)
@@ -90,6 +145,7 @@ function Results({
           ? "Cancelled"
           : "Expired";
   const reason = game.status === "finished" ? endReasonText(game.endReason, game.status) : "";
+  const rematch = game.status === "finished" ? rematchLabel(game.rematch) : null;
   return (
     <section className="card stack" aria-labelledby="results-heading">
       <h2 id="results-heading">{title}</h2>
@@ -108,7 +164,8 @@ function Results({
           ))}
         </ol>
       ) : null}
-      <Link to="/" className="button">
+      {rematch === null ? null : <RematchButton label={rematch} onRematch={onRematch} />}
+      <Link to="/" className={rematch === null ? "button" : "button secondary"}>
         Back to games
       </Link>
     </section>
@@ -199,7 +256,7 @@ export function Frame(props: FrameProps) {
             {notice}
           </p>
         )}
-        {over ? <Results game={game} showScores={!drawn} /> : null}
+        {over ? <Results game={game} showScores={!drawn} onRematch={props.onRematch} /> : null}
         {over || drawn ? null : (
           <>
             <ul className="chips" aria-label="Players">

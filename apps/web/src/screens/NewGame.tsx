@@ -10,6 +10,7 @@ import type { GameClientModule } from "@your-move/sdk/client";
 import { type SyntheticEvent, useEffect, useRef, useState } from "react";
 
 import { loadCatalog } from "../catalog.js";
+import { createProblem } from "../create-problems.js";
 import { type CatalogGame, createGame, listRecentPlayers, type RecentPlayer } from "../game-api.js";
 import { GameIcon } from "../GameIcon.js";
 import { loadGameClient } from "../games.js";
@@ -35,23 +36,6 @@ type Step = "game" | "options" | "players" | "review";
 function playerRange(game: CatalogGame): string {
   const { min, max } = game.players;
   return min === max ? `${String(min)} players` : `${String(min)} to ${String(max)} players`;
-}
-
-const CREATE_PROBLEMS: Readonly<Record<string, string>> = {
-  INVALID_OPTIONS: "Those options can't be used. Go back and check them.",
-  INVALID_SEATS: "Those options don't work with this many players. Go back and check them.",
-  INVALID_SEAT_COUNT: "That number of players isn't allowed for this game.",
-  INVALID_INVITEES:
-    "Check the players: each address must be valid and different, and each person you picked must still be in your list.",
-  CANNOT_PLAY_SELF: "You can't invite yourself. Enter the other person's address.",
-  TOO_MANY_GAMES: "You have too many games waiting or in progress. Finish or cancel one first.",
-  RATE_LIMITED: "Too many attempts. Wait a little and try again.",
-  ONBOARDING_REQUIRED: "Finish setting up your account first.",
-};
-
-function createProblem(status: number, code: string): string {
-  if (status === 0) return "You seem to be offline. Check your connection and try again.";
-  return CREATE_PROBLEMS[code] ?? "Something went wrong. Please try again.";
 }
 
 export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewGameProps) {

@@ -797,6 +797,114 @@ describe("a finished game", () => {
   });
 });
 
+describe("the rematch button (07 §1, alpha A15)", () => {
+  const finished = (over = {}) =>
+    withView(
+      envelope({
+        status: "finished",
+        endReason: "out",
+        yourTurn: false,
+        toAct: [],
+        players: [player({ rank: 1 }), alex({ rank: 2 })],
+        rematch: null,
+        ...over,
+      }),
+      null,
+    );
+  const results = () => screen.findByRole("region", { name: "Final result" });
+
+  it.each([
+    [null, "Rematch"],
+    [{ gameId: "g2", you: "invited" }, "Accept rematch"],
+    [{ gameId: "g2", you: "joined" }, "Go to rematch"],
+  ] as const)(
+    "for %j reads %s, calls the endpoint and opens the rematch",
+    async (rematch, label) => {
+      const { calls } = open({
+        "GET /api/v1/games/g1": finished({ rematch }),
+        "POST /api/v1/games/g1/rematch": json(
+          { game: envelope({ id: "g2", status: "active" }) },
+          rematch === null ? 201 : 200,
+        ),
+      });
+      const card = await results();
+      // Beside "Back to games", which steps back to a secondary button.
+      expect(within(card).getByRole("link", { name: "Back to games" }).className).toBe(
+        "button secondary",
+      );
+      fireEvent.click(within(card).getByRole("button", { name: label }));
+      await waitFor(() => {
+        expect(window.location.pathname).toBe("/g/g2");
+      });
+      expect(posts(calls, "rematch")).toEqual([expect.objectContaining({ body: {} })]);
+    },
+  );
+
+  it("isn't offered when you're no longer in the rematch, or for any ending but finished", async () => {
+    open({ "GET /api/v1/games/g1": finished({ rematch: { gameId: "g2", you: "none" } }) });
+    const card = await results();
+    expect(within(card).queryByRole("button")).toBeNull();
+    expect(within(card).getByRole("link", { name: "Back to games" }).className).toBe("button");
+    cleanup();
+    open({
+      "GET /api/v1/games/g1": withView(
+        envelope({ status: "declined", endReason: "declined", yourTurn: false, toAct: [] }),
+        null,
+      ),
+    });
+    await screen.findByRole("heading", { level: 2, name: "Declined, no result" });
+    expect(screen.queryByRole("button", { name: /rematch/iu })).toBeNull();
+  });
+
+  it("is busy while the call runs, and shows a refusal under it", async () => {
+    let answer: (response: Response) => void = () => undefined;
+    open({
+      "GET /api/v1/games/g1": finished(),
+      "POST /api/v1/games/g1/rematch": () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+    });
+    const card = await results();
+    fireEvent.click(within(card).getByRole("button", { name: "Rematch" }));
+    const busy = await within(card).findByRole("button", { name: "Starting rematch…" });
+    expect(busy.hasAttribute("disabled")).toBe(true);
+    answer(problem(409, "TOO_MANY_GAMES"));
+    expect((await within(card).findByRole("alert")).textContent).toBe(
+      "You have too many games waiting or in progress. Finish or cancel one first.",
+    );
+    const again = within(card).getByRole("button", { name: "Rematch" });
+    expect(again.hasAttribute("disabled")).toBe(false);
+    expect(again.getAttribute("aria-describedby")).toBe("rematch-problem");
+    expect(window.location.pathname).toBe("/g/g1");
+  });
+
+  it.each([
+    [400, "INVALID_INVITEES", "Someone from this game can't be added any more"],
+    [400, "INVALID_OPTIONS", "This game's options can't be used any more"],
+    [404, "NOT_FOUND", "You're no longer in this rematch."],
+    [429, "RATE_LIMITED", "Too many attempts."],
+  ])("explains a %i %s", async (status, code, text) => {
+    open({
+      "GET /api/v1/games/g1": finished(),
+      "POST /api/v1/games/g1/rematch": problem(status, code),
+    });
+    fireEvent.click(within(await results()).getByRole("button", { name: "Rematch" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(text);
+  });
+
+  it("hands a lost session back", async () => {
+    const { lost } = open({
+      "GET /api/v1/games/g1": finished(),
+      "POST /api/v1/games/g1/rematch": problem(401, "UNAUTHENTICATED"),
+    });
+    fireEvent.click(within(await results()).getByRole("button", { name: "Rematch" }));
+    await waitFor(() => {
+      expect(lost).toHaveBeenCalled();
+    });
+  });
+});
+
 describe("a game that can't be shown", () => {
   it("says it isn't available to you on 404", async () => {
     open({ "GET /api/v1/games/g1": problem(404, "NOT_FOUND") });

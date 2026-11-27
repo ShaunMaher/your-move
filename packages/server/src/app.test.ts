@@ -87,6 +87,7 @@ describe("GET /api/v1/openapi.json", () => {
       "/api/v1/games/{id}/decline",
       "/api/v1/games/{id}/history",
       "/api/v1/games/{id}/preview",
+      "/api/v1/games/{id}/rematch",
       "/api/v1/games/{id}/resign",
       "/api/v1/games/{id}/seen",
       "/api/v1/games/{id}/start",
