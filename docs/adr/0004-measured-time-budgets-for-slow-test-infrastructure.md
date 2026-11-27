@@ -33,7 +33,7 @@ hangs slow to fail and would blur what the tests are measuring.
     (`RESIGN_TEST_TIMEOUT_MS`), and the rematch in `opponents.spec.ts` (alpha A12: a short game
     with a pass each, then a second game picked from the list; alpha A15: then a third from the
     finished game's Rematch button, opened by both players) 90 s (`REMATCH_TEST_TIMEOUT_MS`, 5–6 s
-    locally before A15, 12–15 s with it). These are margins over local measurements, not CI ones; each is re-measured
+    locally before A15; with it 6–8 s with a warm browser, 12–15 s as a shard's first test). These are margins over local measurements, not CI ones; each is re-measured
     on the CI runner from the first pipeline that runs it, and then set from that.
   - CI runs one worker per job.
 - **Test kit CPU budget** (`KIT_CPU_BUDGET_MS`, 08 T25):

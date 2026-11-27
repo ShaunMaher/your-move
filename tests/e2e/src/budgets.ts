@@ -58,8 +58,8 @@ export const RESIGN_TEST_TIMEOUT_MS = 60_000;
  * game test plus two moves and a second game; 90 s sits between that test's 60 s and the full
  * game's 120 s, the same to-be-measured margin as theirs. Measured locally in the pinned image
  * with a warm browser: 5.0 s (Chromium) and 6.3 s (WebKit), 2026-11-26. Alpha A15 adds a third
- * game from the finished game's Rematch button, opened by both players: 14.7 s (Chromium, the
- * shard's first test, so with a cold browser) and 11.9 s (WebKit) in the pinned image,
- * 2026-11-27, still well inside 90 s.
+ * game from the finished game's Rematch button, opened by both players: in the pinned image,
+ * 6.1 s (Chromium) and 7.7 s (WebKit) in a full run, and 14.7 s and 11.9 s as the first test of a
+ * run (a cold browser), 2026-11-27; still well inside 90 s.
  */
 export const REMATCH_TEST_TIMEOUT_MS = 90_000;
