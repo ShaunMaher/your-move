@@ -399,7 +399,8 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
       its public history.
     - **The rematch itself** is shown to every player of the finished game (`rematch`, 05), with
       only their own place in it: joined, invited, or neither. A rematch that ended unplayed
-      (cancelled, expired, or declined before anyone acted) shows as none and may be replaced;
+      (any declined ending, or cancelled or expired before any action, but never an operator's
+      cancel; 04 `rematch_game_id`) shows as no rematch (`null`) and may be replaced;
       its status is one every member of it saw, and any player could have pressed Rematch anyway. An `inert` invitation (a block
       between two picked players, which can't arise until M4, Q29) shows as invited, and accepting
       it is `404`, the same as accepting an invitation whose block is found on accept (05); it shows

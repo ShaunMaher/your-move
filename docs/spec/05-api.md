@@ -265,12 +265,13 @@ rematch" or "Go to rematch" (07 §1).
   and nothing of a game they may not see is returned (a lobby decline answers `204` for the same
   reason). They can still start a new game from the list.
 - **A rematch that never got going may be replaced.** Once the linked rematch has **ended
-  unplayed** — status `cancelled`, `expired` or `declined` with no action logged (`action_count =
-  0`: a lobby that ended, or a started game that ended `declined` before anyone acted), a lobby
-  past its expiry included (the call expires it first, 02 §4 lazy expiry) — the finished game shows
-  `rematch: null` again, and the next call creates a new rematch exactly as the first did,
-  replacing the link (04 `rematch_game_id`). A rematch that was played (any action
-  logged), and one still in its lobby or active, is never replaced.
+  unplayed** — any `declined` ending (02 §2.1 rule 9: a seat refused before its first action, whatever others did), or `cancelled` or `expired` with no action logged (`action_count = 0`) — except an operator's cancel (`end_reason = operator_cancelled`), which is never unplayed (04 `rematch_game_id`); a lobby past its expiry included (the call
+  expires it first, 02 §4 lazy expiry) — the finished game shows `rematch: null` again, and the
+  next call creates a new rematch exactly as the first did, replacing the link. A rematch still in
+  its lobby, active or finished, one cancelled or expired after an action, and one an operator
+  cancelled are never replaced. If the call's guarded insert writes nothing and no live rematch is
+  linked either (the one that beat it already ended unplayed), it tries once more; a call that
+  still finds nothing gets `409 STALE_GAME`.
 - Linking the rematch is not a transition of the finished game: its `version` doesn't change and
   no realtime event is sent, so the other players see `rematch` on their next read; until then their
   own "Rematch" press simply gets the `200`.
@@ -517,7 +518,7 @@ Framework codes (reserved; modules can't use them, 02 §2.2):
 | 401 | `UNAUTHENTICATED` |
 | 403 | `BAD_ORIGIN`, `NOT_ALLOWED`, `ONBOARDING_REQUIRED`, `AI_NOT_ALLOWED`, `INSUFFICIENT_SCOPE` (token lacks the route's scope, or the route is session only, §Token scopes), `AGENT_NOT_ALLOWED` (an AI account's token on a route agents can't use), `SUSPENDED` |
 | 404 | `NOT_FOUND` |
-| 409 | `STALE_GAME`, `GAME_NOT_ACTIVE`, `GAME_UNAVAILABLE` (orphaned game, 02 §7.3), `NOT_YOUR_TURN`, `WRONG_STATUS`, `NOT_ENOUGH_PLAYERS`, `INVALID_SEATS` (module `validateStart` failed, at create or start), `ALREADY_ACTED`, `ALREADY_JOINED`, `TOO_MANY_GAMES`, `REMATCH_UNAVAILABLE` (no one left from a finished game to rematch with, alpha A15), `TOO_MANY_DICTIONARIES`, `TOO_MANY_TOKENS`, `TOO_MANY_AGENTS` |
+| 409 | `STALE_GAME`, `GAME_NOT_ACTIVE`, `GAME_UNAVAILABLE` (orphaned game, 02 §7.3), `NOT_YOUR_TURN`, `WRONG_STATUS`, `NOT_ENOUGH_PLAYERS`, `INVALID_SEATS` (module `validateStart` failed, at create or start), `ALREADY_ACTED`, `ALREADY_JOINED`, `TOO_MANY_GAMES`, `REMATCH_UNAVAILABLE` ("Too few players from this game are left to play it again.": fewer than the game's minimum left from a finished game to rematch with, alpha A15), `TOO_MANY_DICTIONARIES`, `TOO_MANY_TOKENS`, `TOO_MANY_AGENTS` |
 | 413 / 415 | `TOO_LARGE` / `UNSUPPORTED_MEDIA_TYPE` |
 | 429 | `RATE_LIMITED` |
 | 500 | `INTERNAL` — never carries detail; the log records a request id only, never inputs or state (09 §5) |

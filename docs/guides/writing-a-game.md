@@ -141,8 +141,9 @@ support.
 **Resolved options must be a valid input** (02 §2.1 rule 10): `resolveOptions(options, ctx)` for
 options your module resolved itself must return them unchanged under the same `ctx`. A rematch
 resolves a finished game's stored options this way, so later the same choices come back at their
-current versions, or are refused with your normal error. If your options carry versions, name each
-key `<name>Version` (e.g. `rulesetVersion`), accept it in the input and **ignore** it: check its
+current versions, or are refused with your normal error. Top-level option keys ending in `Version`
+are reserved for versions: don't use that suffix for any other option. If your options carry
+versions, name each key `<name>Version` (e.g. `rulesetVersion`), accept it in the input and **ignore** it: check its
 shape (a non-negative integer, say) but **never honour** it, so no input can pin an old version;
 always resolve the current one. The kit checks the round trip for every option input, on a copy of
 the options, and fails a module that changes its input. The platform leaves `*Version` keys out of
