@@ -4,10 +4,9 @@ import type { GameEnvelope, GameError, SubmitResult } from "@your-move/sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Lexicon, PreviewResult } from "../engine/index.js";
-import { createLexicon } from "../engine/moves.js";
 import { view } from "../engine/present.js";
 import type { State } from "../engine/state.js";
-import { board, envelope, rack, ruleset, state } from "../test-support.js";
+import { board, envelope, rack, ruleset, state, wordList } from "../test-support.js";
 import "./dom-setup.js";
 import { Board } from "./Board.js";
 
@@ -44,6 +43,8 @@ interface Shell {
   resources?: GameEnvelope["resources"];
   gameVersion?: number;
   lexicon?: Lexicon;
+  /** The id the shell gives the list: the game's own by default. */
+  listId?: string;
 }
 
 function setup(s: State = fresh(), shell: Shell = {}) {
@@ -65,13 +66,26 @@ function setup(s: State = fresh(), shell: Shell = {}) {
     ...(shell.resources === undefined ? {} : { resources: shell.resources }),
     ...(shell.gameVersion === undefined ? {} : { gameVersion: shell.gameVersion }),
   });
+  // The shell's resources: one object for the whole game, as the contract asks (02 §3).
+  const list = shell.lexicon;
+  const resources =
+    list === undefined
+      ? undefined
+      : {
+          dictionary: {
+            id: shell.listId ?? "enable",
+            version: 1,
+            has: (word: string) => list.has(word),
+            follows: (prefix: string) => list.follows(prefix),
+          },
+        };
   const ui = (version: number, v = view(s, viewer)) => (
     <Board
       game={{ ...game, version }}
       view={v}
       submit={submit}
       preview={preview}
-      {...(shell.lexicon === undefined ? {} : { lexicon: shell.lexicon })}
+      {...(resources === undefined ? {} : { resources })}
     />
   );
   const result = render(ui(3));
@@ -1057,7 +1071,7 @@ describe("the no-play hint", () => {
   const PROMPT = "Place tiles to make a word.";
   /** Only CAT and CATS are words: Ann's own rack can make CATS, AEIOULY nothing. */
   const words = (): Lexicon & { asked: () => number } => {
-    const list = createLexicon(["cat", "cats"]);
+    const list = wordList(["cat", "cats"]);
     let asked = 0;
     return {
       has: (word) => {
@@ -1135,6 +1149,15 @@ describe("the no-play hint", () => {
     };
     setup(vowels(), { lexicon: broken });
     await settle();
+    expect(status()).toBe(PROMPT);
+  });
+
+  it("ignores a list that isn't the game's own", async () => {
+    vi.useFakeTimers();
+    const lexicon = words();
+    setup(vowels(), { lexicon, listId: "another" });
+    await settle();
+    expect(lexicon.asked()).toBe(0);
     expect(status()).toBe(PROMPT);
   });
 

@@ -16,7 +16,7 @@ import {
   type View,
 } from "../engine/index.js";
 
-/** Steps per slice: about half a millisecond on a laptop, a few on a slow phone (words §10.8). */
+/** Steps per slice: about a millisecond on a laptop, several on a slow phone (words §10.8). */
 const HINT_SLICE_STEPS = 5_000;
 
 const NO_PLAY_SWAP = "No word can be played with your tiles. Try swapping some.";

@@ -18,16 +18,11 @@ import {
   realWordList,
   ruleset,
   state,
+  wordList,
 } from "../test-support.js";
 import { analysePlay, type Board, type BoardTile } from "./board.js";
 import { wordsV1 as words } from "./definition.js";
-import {
-  createLexicon,
-  hasAnyPlay,
-  searchPlays,
-  type Lexicon,
-  type SearchOutcome,
-} from "./moves.js";
+import { hasAnyPlay, searchPlays, type Lexicon, type SearchOutcome } from "./moves.js";
 import { validate } from "./rules.js";
 import { RULESETS } from "./rulesets/index.js";
 import type { Ruleset } from "./rulesets/schema.js";
@@ -41,12 +36,7 @@ const LETTERS = Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i)
 
 /** A lexicon over these words (space-separated, any order). */
 function lexicon(list: string): Lexicon {
-  return createLexicon(
-    list
-      .split(/\s+/u)
-      .filter((word) => word !== "")
-      .sort(),
-  );
+  return wordList(list.split(/\s+/u).filter((word) => word !== ""));
 }
 
 function search(
@@ -70,34 +60,6 @@ function legal(
   const analysis = analysePlay(rules, grid, tiles, play);
   return !isGameError(analysis) && analysis.words.every((w) => list.has(w.word));
 }
-
-describe("createLexicon", () => {
-  const list = lexicon("at ate bat bath baths cat zzz");
-
-  it("finds exactly the words in the list", () => {
-    for (const word of ["at", "ate", "bat", "baths", "zzz"]) expect(list.has(word)).toBe(true);
-    for (const word of ["", "a", "ba", "bats", "catz", "zz", "zzzz"])
-      expect(list.has(word)).toBe(false);
-  });
-
-  it("names the letters that can follow a prefix, a word itself or not", () => {
-    const named = (mask: number): string =>
-      LETTERS.filter((_, i) => (mask & (1 << i)) !== 0).join("");
-    expect(named(list.follows(""))).toBe("abcz");
-    expect(named(list.follows("at"))).toBe("e");
-    expect(named(list.follows("bat"))).toBe("h");
-    expect(named(list.follows("bath"))).toBe("s");
-    expect(named(list.follows("baths"))).toBe("");
-    expect(named(list.follows("z"))).toBe("z");
-    expect(named(list.follows("q"))).toBe("");
-  });
-
-  it("handles an empty list", () => {
-    const empty = createLexicon([]);
-    expect(empty.has("at")).toBe(false);
-    expect(empty.follows("")).toBe(0);
-  });
-});
 
 /** A table row: a board, a rack, a word list, and whether some play exists. */
 interface Row {
@@ -417,7 +379,7 @@ function smallList(all: readonly string[], rng: RandomSource): Lexicon {
   const picked = new Set<string>();
   const count = 60 + rng.nextInt(140);
   while (picked.size < count) picked.add(pool[rng.nextInt(pool.length)] ?? "");
-  return createLexicon([...picked].sort());
+  return wordList(picked);
 }
 
 /** A random rack: mostly the list's letters, some others, now and then a blank. */
@@ -485,7 +447,7 @@ describe.each([...RULESETS.keys()])("random games under the %s ruleset", (id) =>
   let list: Lexicon;
   beforeAll(async () => {
     res = (await realDictionary()).resources;
-    list = createLexicon(await realWordList());
+    list = wordList(await realWordList());
   });
 
   it("returns only plays the engine's validate accepts (40 games)", () => {

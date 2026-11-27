@@ -10,7 +10,7 @@
  * alone (07 §3). Nothing here is authoritative: the server validates every play.
  */
 import { isGameError, shuffle, type GameError } from "@your-move/sdk";
-import { formatText, type BoardProps } from "@your-move/sdk/client";
+import { formatText, type BoardProps, type PublicWordList } from "@your-move/sdk/client";
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactElement } from "react";
 
 import {
@@ -19,7 +19,6 @@ import {
   findRuleset,
   tilePoints,
   type Action,
-  type Lexicon,
   type PreviewResult,
   type Ruleset,
   type View,
@@ -60,13 +59,7 @@ import {
 import { errorText, plural, seatNames, shown } from "./text.js";
 import { Unsupported } from "./Unsupported.js";
 
-/**
- * The contract's props, plus the game's `public` word list for the no-play hint (words §10.8):
- * the same object for as long as the list is the same, since a new one starts the search again.
- * The contract has no channel for the list yet (07 §4), so the shell doesn't pass it and the hint
- * stays silent in the app until one is specified.
- */
-type Props = BoardProps<Action, View, PreviewResult> & { readonly lexicon?: Lexicon | null };
+type Props = BoardProps<Action, View, PreviewResult>;
 
 const NO_TILES: readonly string[] = [];
 const PREVIEW_DELAY_MS = 250;
@@ -133,7 +126,7 @@ function Table(
     version: game.version,
     ruleset,
     view,
-    lexicon: props.lexicon ?? null,
+    lexicon: gameWordList(props.resources, view),
   });
 
   const [t, setT] = useState<Tentative>(() =>
@@ -607,6 +600,15 @@ function Table(
       )}
     </section>
   );
+}
+
+/**
+ * The public word list the shell loaded for the board (02 §3), if it is this game's own list
+ * (words §10.8): the shell hands over only public lists, and the id must match the view's.
+ */
+function gameWordList(resources: Props["resources"], view: View): PublicWordList | null {
+  const list = resources?.dictionary;
+  return list?.id === view.dictionary.id ? list : null;
 }
 
 /** Off turn, what the status line says about the tiles on the board. */

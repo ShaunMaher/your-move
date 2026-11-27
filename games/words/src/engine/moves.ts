@@ -22,7 +22,10 @@ import { analysePlay, isBoardEmpty, type Board } from "./board.js";
 import { BLANK, type Ruleset } from "./rulesets/schema.js";
 import type { Placement } from "./schemas.js";
 
-/** A sorted word list the search can walk like a tree of prefixes. */
+/**
+ * A word list the search can walk like a tree of prefixes: a public list as the shell hands it to
+ * the board (`BoardResources["dictionary"]`, 02 §3), a binary search over its sorted text.
+ */
 export interface Lexicon {
   /** Whether `word` is in the list. */
   has(word: string): boolean;
@@ -33,55 +36,16 @@ export interface Lexicon {
 /**
  * The step limit the board's hint uses (words §10.8), from the measurements in
  * `moves.benchmark.test.ts`: on realistic boards a rack with a play finds one in a few thousand
- * steps, and proving there is none fits inside the limit with no blank or one blank. The whole
- * limit is about 30 ms on a desktop machine, so a few hundred milliseconds of sliced work on a
- * slow phone. A rack with two blanks and no play may run past it: the answer is `unknown`, and
- * the board says nothing.
+ * steps, and proving there is none fits inside the limit with no blank, and usually with one. The
+ * whole limit is about 36 ms on a desktop machine, so a few hundred milliseconds of sliced work on
+ * a slow phone. A rack with blanks and no play may run past it: the answer is `unknown`, and the
+ * board says nothing.
  */
-export const HINT_MAX_STEPS = 300_000;
+export const HINT_MAX_STEPS = 150_000;
 
 const A = 97;
 const LETTER_COUNT = 26;
 const ALL_LETTERS = (1 << LETTER_COUNT) - 1;
-/** The first character after `z`: `prefix + AFTER_Z` sorts after every word starting `prefix`. */
-const AFTER_Z = "{";
-
-/**
- * A `Lexicon` over a sorted list of lower-case `a`–`z` words (a built word list's lines, words
- * §9.1). Both questions are binary searches over the list; nothing else is built.
- */
-export function createLexicon(words: readonly string[]): Lexicon {
-  /** The index of the first word that is not before `key`. */
-  const lowerBound = (key: string): number => {
-    let [low, high] = [0, words.length];
-    while (low < high) {
-      const middle = (low + high) >>> 1;
-      if (at(words, middle) < key) low = middle + 1;
-      else high = middle;
-    }
-    return low;
-  };
-  return {
-    has: (word) => words[lowerBound(word)] === word,
-    follows: (prefix) => {
-      let mask = 0;
-      // Each letter that follows is found by one search, which then skips every word under it.
-      for (let i = lowerBound(prefix); i < words.length;) {
-        const word = at(words, i);
-        if (!word.startsWith(prefix)) break;
-        if (word.length === prefix.length) {
-          i += 1;
-          continue;
-        }
-        const letter = word.charCodeAt(prefix.length) - A;
-        mask |= 1 << letter;
-        i = lowerBound(prefix + String.fromCharCode(A + letter) + AFTER_Z);
-      }
-      return mask;
-    },
-  };
-}
-
 /** What the search found: a play (the first it met), proof there is none, or no answer. */
 export type SearchOutcome =
   | { readonly kind: "some"; readonly play: readonly Placement[] }

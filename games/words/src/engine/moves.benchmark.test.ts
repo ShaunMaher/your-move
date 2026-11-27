@@ -7,24 +7,26 @@
  * "none" case. Steps are deterministic, so the test checks them; time is only measured.
  *
  * Measured on a development laptop (2026-11-27, Node 26, AMD Ryzen 7 PRO 7840HS), 9–10 games per
- * ruleset, 18 boards each:
+ * ruleset, 18 boards each, with the list as the client holds it: one sorted string searched in
+ * place (`createWordList`, words §9.4), nothing built.
  *
  * | Case                                    | Answer      | Max steps | Max time |
  * |-----------------------------------------|-------------|-----------|----------|
- * | the player's rack, no blank             | some        |     2,100 |   2.1 ms |
- * | the player's rack, one blank            | some        |     2,700 |   1.9 ms |
- * | the player's rack, two blanks           | some        |     3,100 |   1.7 ms |
- * | awkward racks                           | some / none |     4,100 |   0.8 ms |
- * | full walk, no blank (no word accepted)  | none        |    32,000 |   3.7 ms |
- * | full walk, one blank                    | none        |   242,000 |    25 ms |
- * | full walk, two blanks                   | none        |   803,000 |    74 ms |
+ * | the player's rack, no blank             | some        |     2,100 |   2.6 ms |
+ * | the player's rack, one blank            | some        |     2,700 |   3.2 ms |
+ * | the player's rack, two blanks           | some        |     3,100 |   7.2 ms |
+ * | awkward racks                           | some / none |     4,100 |   2.5 ms |
+ * | full walk, no blank (no word accepted)  | none        |    32,000 |   7.6 ms |
+ * | full walk, one blank (median 65,000)    | none        |   242,000 |    60 ms |
+ * | full walk, two blanks (median 316,000)  | none        |   803,000 |   195 ms |
  *
- * About 0.1 µs a step here; a slow phone is assumed 5–10× slower, so the limit (300,000 steps) is
- * about 30 ms here and a few hundred milliseconds there, in slices. The "full walk" rows search
- * with a word list that accepts no word, so nothing is found and every prefix the rack can make
- * on squares without cross-words is tried: a stand-in for proving "none" on a busy board. With no
- * blank or one blank it fits under the limit on every board here; with two it doesn't, and the
- * hint stays silent (`unknown`), which is the sound answer. Trying two-tile plays everywhere
+ * About 0.24 µs a step here (an array of the words was 0.09 µs, but costs several megabytes more
+ * on a phone); a slow phone is assumed 5–10× slower, so the limit (150,000 steps) is about 36 ms
+ * here and a few hundred milliseconds there, in slices. The "full walk" rows search with a word
+ * list that accepts no word, so nothing is found and every prefix the rack can make on squares
+ * without cross-words is tried: a stand-in for proving "none" on a busy board. With no blank it
+ * always fits under the limit; with one blank it usually does; with two it mostly doesn't, and
+ * the hint stays silent (`unknown`), which is the sound answer. Trying two-tile plays everywhere
  * before longer ones (`SHORT_PLAY`) is what keeps "some" small: depth-first alone took up to
  * 44,000 steps with two blanks. Re-measure when the search or the list changes; never raise the
  * limit so far that a slow phone works for more than a few hundred milliseconds in total.
@@ -33,10 +35,10 @@ import type { Resources } from "@your-move/sdk";
 import { seededRandom } from "@your-move/testkit";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { options, realDictionary, realWordList } from "../test-support.js";
+import { options, realDictionary, realWordList, wordList } from "../test-support.js";
 import type { Board } from "./board.js";
 import { wordsV1 as words } from "./definition.js";
-import { createLexicon, HINT_MAX_STEPS, searchPlays, type Lexicon } from "./moves.js";
+import { HINT_MAX_STEPS, searchPlays, type Lexicon } from "./moves.js";
 import { RULESETS, latestRuleset } from "./rulesets/index.js";
 import type { State } from "./state.js";
 
@@ -106,7 +108,7 @@ describe.each([...RULESETS.keys()])("the no-play search under the %s ruleset", (
   let states: State[];
   beforeAll(async () => {
     res = (await realDictionary()).resources;
-    lexicon = createLexicon(await realWordList());
+    lexicon = wordList(await realWordList());
     states = boards(id, res);
   });
 
