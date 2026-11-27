@@ -85,13 +85,20 @@ run(COMMAND, () => {
   // 2. Structure: committed migrations against a generation from empty.
   withScratch((fresh) => {
     generate(fresh);
-    const differences = compareSchemas(describeMigrations(migrations), describeMigrations(fresh));
-    problems.push(
-      ...differences.map(
-        (difference) =>
-          `the committed migrations build a different schema from schema.ts: ${difference}`,
-      ),
-    );
+    try {
+      const differences = compareSchemas(describeMigrations(migrations), describeMigrations(fresh));
+      problems.push(
+        ...differences.map(
+          (difference) =>
+            `the committed migrations build a different schema from schema.ts: ${difference}`,
+        ),
+      );
+    } catch (error) {
+      // Reported with the text problems above rather than instead of them.
+      problems.push(
+        `the committed migrations can't be compared with schema.ts: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   });
 
   // 3. Regeneration over the committed folder.

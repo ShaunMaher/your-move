@@ -171,7 +171,17 @@ describe("compareSchemas over migration folders (P2-2)", () => {
     );
   });
 
-  it("opens its databases defensively, so writable_schema can't rewrite the schema (B1-S-8)", () => {
+  it.each([
+    "CREATE TEMP TRIGGER `purge` AFTER INSERT ON main.`sessions` BEGIN DELETE FROM main.`sessions` WHERE 1; END;",
+    "CREATE TABLE temp.`sessions` (`id` text);\n--> statement-breakpoint\nCREATE INDEX temp.`s_id` ON `sessions` (`id`);",
+  ])("refuses migrations that leave temporary objects (B1-S2-1): %j", (sql) => {
+    addMigration(sql);
+    expect(() => describeMigrations(copy)).toThrow(
+      /^the migrations create temporary objects \((?:trigger purge|index s_id, table sessions)\)/u,
+    );
+  });
+
+  it("pins defensive mode, whatever Node's default: writable_schema can't rewrite the schema (B1-S-8)", () => {
     addMigration(
       "PRAGMA writable_schema = 1;\n--> statement-breakpoint\nUPDATE sqlite_schema SET sql = 'CREATE TABLE x (y)' WHERE name = 'admin_audit';",
     );

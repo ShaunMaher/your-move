@@ -47,8 +47,19 @@ const omit = (row: Row, key: string): Row =>
 
 const json = (value: unknown): string => JSON.stringify(value);
 
-/** What SQLite reports about every table, index, view and trigger in `sqlite`. */
+/**
+ * What SQLite reports about every table, index, view and trigger in `sqlite`. Throws when the
+ * connection's `temp` schema holds anything: a temporary object lives on in the connection that
+ * migrated, outside the schema compared here (B1-S2-1).
+ */
 function describeSchema(sqlite: DatabaseSync): SchemaDescription {
+  const temporary = rows(sqlite, "SELECT type, name FROM sqlite_temp_schema ORDER BY type, name");
+  if (temporary.length > 0) {
+    const names = temporary.map((object) => `${String(object["type"])} ${String(object["name"])}`);
+    throw new Error(
+      `the migrations create temporary objects (${names.join(", ")}), which no migration may (04 §Migrations)`,
+    );
+  }
   const facts = new Map<string, string>();
   const objects = rows(
     sqlite,

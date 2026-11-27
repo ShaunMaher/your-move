@@ -142,9 +142,12 @@ describe("lintMigration (issue #13 R-2, B1-S-1: both readings must agree)", () =
     );
   });
 
-  it("refuses two statements a breakpoint separates without a `;`", () => {
-    const sql = "CREATE TABLE a (x text)\n--> statement-breakpoint\nCREATE TABLE b (y text);";
-    expect(lintMigration("0003_x.sql", sql)).toEqual(exactly(DISAGREE));
+  it("refuses two statements a breakpoint separates without a `;`, naming where they part", () => {
+    const sql =
+      "SELECT 1;\nCREATE TABLE a (x text)\n--> statement-breakpoint\nCREATE TABLE b (y text);";
+    expect(lintMigration("0003_x.sql", sql)).toEqual([
+      '0003_x.sql reads as different statements on D1 (the whole file) and on Node (cut at each "--> statement-breakpoint"), from statement 2: "CREATE TABLE a (x text) CREATE TABLE b (y text)" on D1, "CREATE TABLE a (x text)" on Node. The usual cause is a missing ";" before a breakpoint (04 §Migrations)',
+    ]);
   });
 
   it.each([
@@ -232,10 +235,42 @@ describe("lintMigration (R-3, B1-S-7: characters and line endings)", () => {
     expect(lintMigration("0003_x.sql", sql)).toEqual(
       expect.arrayContaining([
         expect.stringContaining(
-          `0003_x.sql has ${where}: a migration is printable ASCII`,
+          `0003_x.sql has ${where}: a migration contains only printable ASCII, tabs and line endings, so write the text in ASCII; for a non-ASCII literal use char(…)`,
         ) as unknown,
       ]),
     );
+  });
+});
+
+describe("lintMigration (B1-S2-1: temporary objects)", () => {
+  it.each([
+    "CREATE TEMP TRIGGER `purge` AFTER INSERT ON main.`sessions` BEGIN DELETE FROM main.`sessions` WHERE 1; END;",
+    "CREATE TEMPORARY TABLE `sessions` (`id` text);",
+    "create temp view v as select 1;",
+    "CREATE TABLE temp.x (y text);",
+    "CREATE TRIGGER temp.purge AFTER INSERT ON main.sessions BEGIN DELETE FROM main.sessions; END;",
+    'CREATE INDEX "temp" . `i` ON `x` (`y`);',
+    "CREATE INDEX `temp`.i ON x (y);",
+    "CREATE VIEW [temp].v AS SELECT 1;",
+    "CREATE TRIGGER t AFTER INSERT ON a BEGIN INSERT INTO TEMP.log VALUES (1); END;",
+  ])("refuses %j, review line or not", (sql) => {
+    for (const text of [
+      sql,
+      `-- migration-reviewed: nothing else lives on this connection\n${sql}`,
+    ]) {
+      expect(lintMigration("0003_x.sql", text)).toEqual(
+        exactly("0003_x.sql creates or names a temporary object"),
+      );
+    }
+  });
+
+  it("leaves names that only contain the word alone", () => {
+    expect(
+      lintMigration(
+        "0003_x.sql",
+        "CREATE TABLE `temperature` (`attempts` integer, `temp_c` real);\nCREATE INDEX `temp_i` ON `temperature` (`temp_c`);",
+      ),
+    ).toEqual([]);
   });
 });
 
