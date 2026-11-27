@@ -31,7 +31,7 @@ import {
 import { type Database, runBatch, type Statement } from "./database.js";
 import { emailSuppressionRepo, nudgeRepo } from "./nudge-repos.js";
 import { pushSubscriptionRepo } from "./push-repos.js";
-import { transitionStatements } from "./queries/transition.js";
+import { guardedInsert, transitionStatements } from "./queries/transition.js";
 import type {
   GameRepo,
   GameWriteSet,
@@ -83,6 +83,35 @@ function gameRepo(db: Database): GameRepo {
         ),
       ];
       await runBatch(db, statements);
+    },
+    async createRematch(finishedId, game, players, extras = {}) {
+      // Every insert, and the link written last, holds only while the finished game has no
+      // rematch: a batch that loses the race inserts nothing and links nothing.
+      const open = sql`EXISTS (SELECT 1 FROM ${games} WHERE ${games.id} = ${finishedId} AND ${games.status} = 'finished' AND ${games.rematchGameId} IS NULL)`;
+      const statements: Statement[] = [
+        guardedInsert(db, games, game, open),
+        ...players.map((row) => guardedInsert(db, gamePlayers, { ...row, gameId: game.id }, open)),
+        ...(extras.resources ?? []).map((resource) =>
+          guardedInsert(db, gameResources, { ...resource, gameId: game.id }, open),
+        ),
+        ...(extras.invites ?? []).map((invite) =>
+          guardedInsert(db, invites, { ...invite, gameId: game.id }, open),
+        ),
+        db
+          .update(games)
+          .set({ rematchGameId: game.id })
+          .where(
+            and(
+              eq(games.id, finishedId),
+              eq(games.status, "finished"),
+              isNull(games.rematchGameId),
+            ),
+          )
+          .returning({ id: games.id }),
+      ];
+      const results = await runBatch(db, statements);
+      const linked = results.at(-1);
+      return Array.isArray(linked) && linked.length === 1;
     },
     async get(id) {
       return (await db.select().from(games).where(eq(games.id, id)).get()) ?? null;

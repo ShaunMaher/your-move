@@ -15,6 +15,13 @@
       "when": 1795600873843,
       "tag": "0001_users_email_id",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795773411479,
+      "tag": "0002_games_rematch",
+      "breakpoints": true
     }
   ]
 }

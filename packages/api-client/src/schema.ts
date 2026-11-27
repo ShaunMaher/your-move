@@ -256,6 +256,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/games/{id}/rematch": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rematch a finished game
+     * @description A player of a `finished` game asks for its rematch: the same game type, options (resolved again), seat count, turn timeout, seat order and AI setting, with every other player of the game whose account still exists picked by `userId`, created exactly as `POST /api/v1/games` would (`201`, you are the creator). A finished game has at most one rematch: once it exists every player's call answers `200` with it, accepting your invitation in it if you hold one. Anyone who wasn't a player of the game, or isn't a member of its rematch any more, gets `404`. Takes no input: an empty body or `{}`.
+     */
+    post: operations["rematchGame"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/players/recent": {
     parameters: {
       query?: never;
@@ -690,6 +710,11 @@ export interface components {
           userId: string;
           displayName: string;
         }[];
+        rematch?: {
+          gameId: string;
+          /** @enum {string} */
+          you: "joined" | "invited" | "none";
+        } | null;
         createdAt: number;
         lastActionAt: number | null;
       };
@@ -846,6 +871,11 @@ export interface components {
           userId: string;
           displayName: string;
         }[];
+        rematch?: {
+          gameId: string;
+          /** @enum {string} */
+          you: "joined" | "invited" | "none";
+        } | null;
         createdAt: number;
         lastActionAt: number | null;
       };
@@ -934,6 +964,11 @@ export interface components {
           userId: string;
           displayName: string;
         }[];
+        rematch?: {
+          gameId: string;
+          /** @enum {string} */
+          you: "joined" | "invited" | "none";
+        } | null;
         createdAt: number;
         lastActionAt: number | null;
       };
@@ -2114,6 +2149,123 @@ export interface operations {
         };
       };
       /** @description Too many games or email invitees (`RATE_LIMITED`); nothing is created. */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  rematchGame: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["EmptyObject"];
+      };
+    };
+    responses: {
+      /** @description The game's existing rematch (with your invitation accepted, if you held one). */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CreatedGame"];
+        };
+      };
+      /** @description The rematch, created now. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CreatedGame"];
+        };
+      };
+      /** @description As `POST /api/v1/games`: `UNKNOWN_GAME`, `INVALID_OPTIONS` (the stored options no longer resolve; `detail: { code, detail? }` with the module's code), `INVALID_SEAT_COUNT`, `INVALID_INVITEES` (another player can't be picked) or `BAD_REQUEST`. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN`, `ONBOARDING_REQUIRED` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, you weren't a player of it, or you're no longer a member of its rematch (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `WRONG_STATUS` (the game isn't `finished`, or the rematch's lobby has ended), `STALE_GAME` (accepting kept losing races; try again), `INVALID_SEATS` (`detail: { code, detail? }`), `TOO_MANY_GAMES` or `GAME_UNAVAILABLE`. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many games or game writes (`RATE_LIMITED`); nothing is created. */
       429: {
         headers: {
           [name: string]: unknown;

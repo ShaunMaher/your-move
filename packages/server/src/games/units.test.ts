@@ -19,6 +19,7 @@ import {
   start,
   startAtCreation,
 } from "./lifecycle.js";
+import { rematchOf } from "./present.js";
 import { cryptoRandom, recorded } from "./random.js";
 import { createGameRegistry, GameConfigError } from "./registry.js";
 import {
@@ -530,5 +531,44 @@ describe("typed addresses on open invitations (A12-S-3)", () => {
     }
     // Not vacuous: accepts, declines and endings did clear addresses.
     expect(checked).toBeGreaterThan(4);
+  });
+});
+
+describe("a finished game's rematch as one of its players sees it (05 `rematch`, alpha A15)", () => {
+  const row = (userId: string | null, state: GamePlayerRecord["state"], delivery = "normal") =>
+    ({ userId, state, delivery }) as GamePlayerRecord;
+  const lobby = { id: "r", status: "lobby", createdAt: 1000 } as const;
+  const players = [
+    row("creator", "joined"),
+    row("added", "joined"),
+    row("asked", "invited"),
+    row("inert", "invited", "inert"),
+    row("gone", "declined"),
+  ];
+  const at = (userId: string, game: Pick<GameRecord, "id" | "status" | "createdAt"> = lobby) =>
+    rematchOf({ game, players }, userId, 2000).you;
+
+  it("is joined for a joined or seated row, invited for an invitation, none otherwise", () => {
+    expect(["creator", "added", "asked", "inert", "gone", "stranger"].map((id) => at(id))).toEqual([
+      "joined",
+      "joined",
+      "invited",
+      // An inert invitation looks like any other: accepting it is refused (404).
+      "invited",
+      "none",
+      "none",
+    ]);
+    const started = { ...lobby, status: "active" } as const;
+    expect(
+      rematchOf({ game: started, players: [row("p", "playing"), row("o", "out")] }, "o", 2000),
+    ).toEqual({ gameId: "r", you: "joined" });
+  });
+
+  it("is none for an invitation once its lobby has ended or is past its expiry", () => {
+    expect(at("asked", { ...lobby, status: "expired" })).toBe("none");
+    expect(rematchOf({ game: lobby, players }, "asked", 1000 + LOBBY_LIFETIME_MS).you).toBe("none");
+    expect(rematchOf({ game: lobby, players }, "asked", 999 + LOBBY_LIFETIME_MS).you).toBe(
+      "invited",
+    );
   });
 });

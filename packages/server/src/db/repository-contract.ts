@@ -814,6 +814,138 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
       });
     });
 
+    describe("rematches (05 `POST /api/v1/games/:id/rematch`, alpha A15)", () => {
+      const human = async () => {
+        const id = crypto.randomUUID();
+        await repos.users.create({ id, email: address(id), createdAt: T0, updatedAt: T0 });
+        return id;
+      };
+
+      /** A finished game, and a rematch of it ready to insert: its row, players and extras. */
+      async function finishedAndRematch() {
+        const finished = newGame({ status: "finished", startedAt: T0, endedAt: T0 + 1 });
+        await repos.games.create(finished, [player({ seat: 0, state: "out" })]);
+        return { finishedId: finished.id, ...rematchOf(await human()) };
+      }
+
+      function rematchOf(creator: string) {
+        const game = newGame({ createdBy: creator, createdAt: T0 + 2 });
+        const players = [player({ userId: creator, joinedVia: "creator" }), player()];
+        const extras = {
+          resources: [{ kind: "dictionary", resourceId: "enable", version: 1 }],
+          invites: [
+            { id: crypto.randomUUID(), inviterId: creator, emailHash: "h", expiresAt: T0 + 9 },
+          ],
+        };
+        return { game, players, extras };
+      }
+
+      /** Everything a created game wrote: its row, players, resources and invites. */
+      async function written(gameId: string) {
+        return {
+          game: await repos.games.get(gameId),
+          players: (await repos.games.players(gameId)).length,
+          resources: (await repos.games.resources(gameId)).length,
+          invites: (await target.sql("SELECT id FROM invites WHERE game_id = ?", gameId)).length,
+        };
+      }
+
+      const linkOf = async (gameId: string) => (await repos.games.get(gameId))?.rematchGameId;
+
+      it("creates the rematch with everything it has and links it, without a transition", async () => {
+        const { finishedId, game, players, extras } = await finishedAndRematch();
+        const before = await repos.games.get(finishedId);
+        expect(await repos.games.createRematch(finishedId, game, players, extras)).toBe(true);
+        const rows = await written(game.id);
+        expect(rows.game).toMatchObject({ ...game, version: 0, rematchGameId: null });
+        expect(rows).toMatchObject({ players: 2, resources: 1, invites: 1 });
+        // Only the link changed: the finished game's version and write token are as they were.
+        expect(await repos.games.get(finishedId)).toEqual({ ...before, rematchGameId: game.id });
+      });
+
+      it("creates nothing once the game has a rematch, or isn't finished, or doesn't exist", async () => {
+        const { finishedId, game, players, extras } = await finishedAndRematch();
+        expect(await repos.games.createRematch(finishedId, game, players, extras)).toBe(true);
+        const second = rematchOf(await human());
+        expect(
+          await repos.games.createRematch(finishedId, second.game, second.players, second.extras),
+        ).toBe(false);
+        expect(await written(second.game.id)).toEqual({
+          game: null,
+          players: 0,
+          resources: 0,
+          invites: 0,
+        });
+        expect(await linkOf(finishedId)).toBe(game.id);
+
+        const active = newGame({ status: "active", startedAt: T0 });
+        await repos.games.create(active, []);
+        for (const id of [active.id, crypto.randomUUID()]) {
+          const other = rematchOf(await human());
+          expect(await repos.games.createRematch(id, other.game, other.players, other.extras)).toBe(
+            false,
+          );
+          expect((await written(other.game.id)).game).toBeNull();
+        }
+        expect(await linkOf(active.id)).toBeNull();
+      });
+
+      it("creates nothing and links nothing when one of its rows is refused", async () => {
+        const { finishedId, game } = await finishedAndRematch();
+        const user = await human();
+        await expect(
+          repos.games.createRematch(finishedId, game, [
+            player({ userId: user }),
+            player({ userId: user }),
+          ]),
+        ).rejects.toThrow();
+        expect((await written(game.id)).game).toBeNull();
+        expect(await linkOf(finishedId)).toBeNull();
+      });
+
+      it("refuses a game as the rematch of a second game: a rematch belongs to one game", async () => {
+        const { finishedId, game, players } = await finishedAndRematch();
+        expect(await repos.games.createRematch(finishedId, game, players)).toBe(true);
+        const other = await finishedAndRematch();
+        // The unique index on `rematch_game_id`: the same game id can't be linked twice.
+        // (Wrapped: an adapter's `sql` may throw before it returns a promise.)
+        await expect(
+          (async () =>
+            target.sql(
+              "UPDATE games SET rematch_game_id = ? WHERE id = ?",
+              game.id,
+              other.finishedId,
+            ))(),
+        ).rejects.toThrow();
+        expect(await linkOf(other.finishedId)).toBeNull();
+      });
+
+      // On Node the calls interleave only at await points (one connection); on D1 they are real
+      // concurrent requests. Either way the conditional link decides the race.
+      it("of rematches started together for one game, exactly one is created, and no row of the others is left", async () => {
+        for (let round = 0; round < 5; round++) {
+          const finished = newGame({ status: "finished", startedAt: T0, endedAt: T0 + 1 });
+          await repos.games.create(finished, []);
+          const contenders = await Promise.all(
+            [0, 1, 2, 3].map(async () => rematchOf(await human())),
+          );
+          const results = await Promise.all(
+            contenders.map(({ game, players, extras }) =>
+              repos.games.createRematch(finished.id, game, players, extras),
+            ),
+          );
+          expect(results.filter((result) => result)).toHaveLength(1);
+          const winner = contenders[results.indexOf(true)];
+          expect(await linkOf(finished.id)).toBe(winner?.game.id);
+          for (const contender of contenders) {
+            const rows = await written(contender.game.id);
+            if (contender === winner) expect(rows.players).toBe(2);
+            else expect(rows).toEqual({ game: null, players: 0, resources: 0, invites: 0 });
+          }
+        }
+      });
+    });
+
     describe("write_token transitions (03 §5.2)", () => {
       it("applies a transition and every dependent write", async () => {
         const ids = await activeGame(repos);

@@ -206,22 +206,27 @@ export interface AddedToGame {
   readonly creator: Pick<UserRecord, "id" | "displayName">;
   /** The added users' ids. */
   readonly added: readonly string[];
+  /** The game is a finished game's rematch (05): the push says so. */
+  readonly rematch?: boolean;
 }
 
 /**
- * The "added you" push (06 §6.2, 03 §7, T18): it names the creator and nothing else they chose.
- * A game that started at creation adds "Your turn." for a recipient whose seat is to act, in place
- * of the start's own push, so one notification says both.
+ * The "added you" push (06 §6.2, 03 §7, T18): it names the creator and nothing else they chose;
+ * for a rematch (05) it says "<creator> wants a rematch." instead. A game that started at creation
+ * adds "Your turn." for a recipient whose seat is to act, in place of the start's own push, so one
+ * notification says both.
  */
 export function addedMessage(
   gameId: string,
   creatorName: string,
   yourTurn: boolean,
   appName: string,
+  rematch = false,
 ): PushMessage {
+  const what = rematch ? "wants a rematch." : "added you to a game.";
   return {
     title: appName,
-    body: cut(`${creatorName} added you to a game.${yourTurn ? " Your turn." : ""}`),
+    body: cut(`${creatorName} ${what}${yourTurn ? " Your turn." : ""}`),
     url: `/g/${encodeURIComponent(gameId)}`,
     tag: `game-${gameId}`,
   };
@@ -262,7 +267,13 @@ export async function sendAddedPushes(platform: Platform, event: AddedToGame): P
     return new Map(
       recipients.map((userId) => [
         userId,
-        addedMessage(event.gameId, creatorName, toAct.has(userId), platform.config.appName),
+        addedMessage(
+          event.gameId,
+          creatorName,
+          toAct.has(userId),
+          platform.config.appName,
+          event.rematch === true,
+        ),
       ]),
     );
   });

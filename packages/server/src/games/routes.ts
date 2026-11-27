@@ -21,6 +21,7 @@ import {
   markSeenRoute,
   previewRoute,
   recentPlayersRoute,
+  rematchRoute,
   resignGameRoute,
   rulesRoute,
   startGameRoute,
@@ -59,6 +60,7 @@ import {
   memberRow,
   plainText,
   type PresentInput,
+  rematchOf,
   shownUserIds,
   summaryOf,
   turnOf,
@@ -78,6 +80,8 @@ const RECENT_PLAYERS = 50;
 /** `GET /api/v1/games` keeps finished games 90 days and other endings 7 days (05). */
 const FINISHED_LISTED_MS = 90 * DAY;
 const ENDED_LISTED_MS = 7 * DAY;
+/** Accepting an invitation in a rematch retries a lost race this often (03 §5.2). */
+const REMATCH_ACCEPT_ATTEMPTS = 3;
 
 export interface GameRouteOptions {
   readonly platform: Platform;
@@ -135,6 +139,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     cancelGameRoute,
     markSeenRoute,
     recentPlayersRoute,
+    rematchRoute,
   ]) {
     // Registered for the method only, so the public rules route under /games/types is unaffected.
     app.on(route.method.toUpperCase(), honoPath(route.path), session);
@@ -176,11 +181,19 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     loaded: LoadedGame,
     viewer: GamePlayerRecord,
   ): Promise<PresentInput> => {
-    const [gameResources, users] = await Promise.all([
+    const { rematchGameId } = loaded.game;
+    const [gameResources, users, rematch] = await Promise.all([
       repos.games.resources(loaded.game.id),
       repos.users.findByIds(shownUserIds(loaded.players, () => loaded.game.status === "lobby")),
+      // Only a finished game shows its rematch (05 `rematch`).
+      loaded.game.status === "finished" && rematchGameId !== null
+        ? repos.games.load(rematchGameId)
+        : null,
     ]);
     return {
+      ...(rematch === null || viewer.userId === null
+        ? {}
+        : { rematch: rematchOf(rematch, viewer.userId, now()) }),
       game: loaded.game,
       players: loaded.players,
       resources: gameResources,
@@ -377,17 +390,17 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
 
   // Creating and listing ------------------------------------------------------------------------
 
-  app.openapi(createGameRoute, async (c) => {
-    const user = userOf(c);
-    onboarded(user);
-    await limit(user, "WRITES_USER_MINUTE");
-    const body = c.req.valid("json");
-    const { gameId, added } = await createGame(
-      { platform, resources, keys: await options.keys() },
-      user,
-      registry.get(body.gameType),
-      body,
-    );
+  /**
+   * What follows creating a game (05 Created): the start at creation when every seat was filled
+   * by past opponents added at once, and their "added you" push. Returns the creator's envelope.
+   */
+  const afterCreate = async (
+    c: Context<AppEnv>,
+    user: UserRecord,
+    created: { readonly gameId: string; readonly added: readonly string[] },
+    rematch: boolean,
+  ) => {
+    const { gameId, added } = created;
     if (added.length > 0) {
       try {
         await startIfFull(gameId, user);
@@ -399,11 +412,104 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
         });
       }
       if (platform.push.enabled) {
-        background(c, platform, () => sendAddedPushes(platform, { gameId, creator: user, added }));
+        background(c, platform, () =>
+          sendAddedPushes(platform, { gameId, creator: user, added, rematch }),
+        );
       }
     }
-    const { game } = await gameWithView(gameId, user);
-    return c.json({ game }, 201);
+    return (await gameWithView(gameId, user)).game;
+  };
+
+  app.openapi(createGameRoute, async (c) => {
+    const user = userOf(c);
+    onboarded(user);
+    await limit(user, "WRITES_USER_MINUTE");
+    const body = c.req.valid("json");
+    const created = await createGame(
+      { platform, resources, keys: await options.keys() },
+      user,
+      registry.get(body.gameType),
+      body,
+    );
+    if (created === null) throw new Error("a game that isn't a rematch is always created");
+    return c.json({ game: await afterCreate(c, user, created, false) }, 201);
+  });
+
+  /**
+   * Answers a player's rematch call once the finished game has its rematch (05): a member who has
+   * joined it gets it as it is; one holding an open invitation in it accepts that invitation, as
+   * `POST /accept` would (retried on `stale`, so the caller never has to, 03 §5.2); anyone else
+   * (declined, left, removed, dropped, an `inert` row, or no row) gets `404`.
+   */
+  const followRematch = async (c: Context<AppEnv>, rematchId: string, user: UserRecord) => {
+    for (let attempt = 1; ; attempt++) {
+      const { loaded, viewer } = await loadMember(rematchId, user);
+      if (viewer.state === "invited") {
+        const outcome = accept(contextOf(loaded), viewer, now());
+        if (isRefusal(outcome)) throw refusal(outcome);
+        try {
+          await commit(c, loaded, outcome, viewer, null);
+        } catch (error) {
+          const lost = error instanceof ApiError && error.code === "STALE_GAME";
+          if (!lost || attempt >= REMATCH_ACCEPT_ATTEMPTS) throw error;
+          continue;
+        }
+      }
+      return (await gameWithView(rematchId, user)).game;
+    }
+  };
+
+  app.openapi(rematchRoute, async (c) => {
+    const user = userOf(c);
+    onboarded(user);
+    await limit(user, "WRITES_USER_MINUTE");
+    const { id } = c.req.valid("param");
+    // A finished game's members are exactly its players (04 §Membership): everyone else is `404`,
+    // as for any game they can't see.
+    const { loaded, viewer } = await loadMember(id, user);
+    if (loaded.game.status !== "finished") throw ApiError.of("WRONG_STATUS");
+    if (viewer.seat === null) throw ApiError.of("NOT_FOUND");
+    if (loaded.game.rematchGameId !== null) {
+      return c.json({ game: await followRematch(c, loaded.game.rematchGameId, user) }, 200);
+    }
+    const { game } = loaded;
+    // Every other player whose account still exists (a deleted one's row has no user), in seat
+    // order, which is the order they are listed in and so join in (02 §4).
+    const others = loaded.players
+      .filter((row) => row.seat !== null && row.userId !== null && row.userId !== user.id)
+      .sort((a, b) => (a.seat ?? 0) - (b.seat ?? 0))
+      .map((row) => ({ userId: row.userId ?? "" }));
+    let created;
+    try {
+      created = await createGame(
+        { platform, resources, keys: await options.keys() },
+        user,
+        registry.get(game.gameType),
+        {
+          gameType: game.gameType,
+          options: JSON.parse(game.options) as unknown,
+          seats: game.seats,
+          turnTimeoutDays: game.turnTimeoutDays,
+          seatOrder: game.seatOrder,
+          aiAssistance: game.aiAssistance,
+          invitees: others,
+        },
+        game.id,
+      );
+    } catch (error) {
+      // Another player's call may have created the rematch meanwhile: then that is the answer,
+      // whatever refused this one (a limit, say).
+      const rematchId = (await repos.games.get(game.id))?.rematchGameId ?? null;
+      if (rematchId === null) throw error;
+      return c.json({ game: await followRematch(c, rematchId, user) }, 200);
+    }
+    if (created === null) {
+      // Another player's call won the race: this one created nothing.
+      const rematchId = (await repos.games.get(game.id))?.rematchGameId ?? null;
+      if (rematchId === null) throw new Error("a lost rematch race left no rematch");
+      return c.json({ game: await followRematch(c, rematchId, user) }, 200);
+    }
+    return c.json({ game: await afterCreate(c, user, created, true) }, 201);
   });
 
   app.openapi(recentPlayersRoute, async (c) => {

@@ -11,6 +11,7 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import { gameEnvelopeSchema, listSummarySchema, textSchema } from "@your-move/sdk";
 
+import { EmptyObjectSchema } from "./auth.js";
 import { ErrorResponseSchema } from "./errors.js";
 import { API_V1 } from "./routes.js";
 
@@ -238,6 +239,36 @@ export const createGameRoute = createRoute({
       403: "`BAD_ORIGIN`, `ONBOARDING_REQUIRED` or `SUSPENDED`.",
       409: "`INVALID_SEATS` (the module's `validateStart`, `detail: { code, detail? }`) or `TOO_MANY_GAMES`.",
       429: "Too many games or email invitees (`RATE_LIMITED`); nothing is created.",
+    }),
+  },
+});
+
+// Rematch -------------------------------------------------------------------------------------
+
+export const rematchRoute = createRoute({
+  operationId: "rematchGame",
+  "x-scope": "games:create",
+  security: SESSION,
+  method: "post",
+  path: `${API_V1}/games/{id}/rematch`,
+  tags: ["Games"],
+  summary: "Rematch a finished game",
+  description:
+    "A player of a `finished` game asks for its rematch: the same game type, options (resolved again), seat count, turn timeout, seat order and AI setting, with every other player of the game whose account still exists picked by `userId`, created exactly as `POST /api/v1/games` would (`201`, you are the creator). A finished game has at most one rematch: once it exists every player's call answers `200` with it, accepting your invitation in it if you hold one. Anyone who wasn't a player of the game, or isn't a member of its rematch any more, gets `404`. Takes no input: an empty body or `{}`.",
+  request: { params: GameId, body: { required: false, content: json(EmptyObjectSchema) } },
+  responses: {
+    200: {
+      description: "The game's existing rematch (with your invitation accepted, if you held one).",
+      content: json(CreatedGameSchema),
+    },
+    201: { description: "The rematch, created now.", content: json(CreatedGameSchema) },
+    ...errors({
+      ...COMMON_ERRORS,
+      400: "As `POST /api/v1/games`: `UNKNOWN_GAME`, `INVALID_OPTIONS` (the stored options no longer resolve; `detail: { code, detail? }` with the module's code), `INVALID_SEAT_COUNT`, `INVALID_INVITEES` (another player can't be picked) or `BAD_REQUEST`.",
+      403: "`BAD_ORIGIN`, `ONBOARDING_REQUIRED` or `SUSPENDED`.",
+      404: "No such game, you weren't a player of it, or you're no longer a member of its rematch (`NOT_FOUND`).",
+      409: "`WRONG_STATUS` (the game isn't `finished`, or the rematch's lobby has ended), `STALE_GAME` (accepting kept losing races; try again), `INVALID_SEATS` (`detail: { code, detail? }`), `TOO_MANY_GAMES` or `GAME_UNAVAILABLE`.",
+      429: "Too many games or game writes (`RATE_LIMITED`); nothing is created.",
     }),
   },
 });

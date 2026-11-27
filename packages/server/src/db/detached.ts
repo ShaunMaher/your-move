@@ -72,6 +72,7 @@ const METHODS = {
   } satisfies Record<keyof PushSubscriptionRepo, true>,
   games: {
     create: true,
+    createRematch: true,
     get: true,
     load: true,
     players: true,

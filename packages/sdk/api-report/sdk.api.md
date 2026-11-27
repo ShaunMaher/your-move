@@ -154,13 +154,13 @@ export const gameEnvelopeSchema: z.ZodObject<{
         aiOwnerName: z.ZodOptional<z.ZodString>;
         invitedAs: z.ZodOptional<z.ZodString>;
         state: z.ZodEnum<{
-            out: "out";
             declined: "declined";
             invited: "invited";
             joined: "joined";
             left: "left";
             removed: "removed";
             playing: "playing";
+            out: "out";
         }>;
         outReason: z.ZodOptional<z.ZodEnum<{
             declined: "declined";
@@ -189,6 +189,14 @@ export const gameEnvelopeSchema: z.ZodObject<{
     canAddPlayers: z.ZodOptional<z.ZodArray<z.ZodObject<{
         userId: z.ZodString;
         displayName: z.ZodString;
+    }, z.core.$strip>>>;
+    rematch: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        gameId: z.ZodString;
+        you: z.ZodEnum<{
+            invited: "invited";
+            joined: "joined";
+            none: "none";
+        }>;
     }, z.core.$strip>>>;
     createdAt: z.ZodNumber;
     lastActionAt: z.ZodNullable<z.ZodNumber>;
@@ -238,13 +246,13 @@ export const gamePlayerSchema: z.ZodObject<{
     aiOwnerName: z.ZodOptional<z.ZodString>;
     invitedAs: z.ZodOptional<z.ZodString>;
     state: z.ZodEnum<{
-        out: "out";
         declined: "declined";
         invited: "invited";
         joined: "joined";
         left: "left";
         removed: "removed";
         playing: "playing";
+        out: "out";
     }>;
     outReason: z.ZodOptional<z.ZodEnum<{
         declined: "declined";
@@ -495,13 +503,13 @@ export const submitResultSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             aiOwnerName: z.ZodOptional<z.ZodString>;
             invitedAs: z.ZodOptional<z.ZodString>;
             state: z.ZodEnum<{
-                out: "out";
                 declined: "declined";
                 invited: "invited";
                 joined: "joined";
                 left: "left";
                 removed: "removed";
                 playing: "playing";
+                out: "out";
             }>;
             outReason: z.ZodOptional<z.ZodEnum<{
                 declined: "declined";
@@ -530,6 +538,14 @@ export const submitResultSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         canAddPlayers: z.ZodOptional<z.ZodArray<z.ZodObject<{
             userId: z.ZodString;
             displayName: z.ZodString;
+        }, z.core.$strip>>>;
+        rematch: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            gameId: z.ZodString;
+            you: z.ZodEnum<{
+                invited: "invited";
+                joined: "joined";
+                none: "none";
+            }>;
         }, z.core.$strip>>>;
         createdAt: z.ZodNumber;
         lastActionAt: z.ZodNullable<z.ZodNumber>;

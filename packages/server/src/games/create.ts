@@ -214,13 +214,22 @@ export interface CreatedGame {
   readonly added: readonly string[];
 }
 
-/** Creates the game. Throws {@link ApiError} for every refusal. */
+/**
+ * Creates the game. Throws {@link ApiError} for every refusal.
+ *
+ * With `rematchOf`, the game is that finished game's rematch (05 `POST /api/v1/games/:id/rematch`):
+ * the body carries the finished game's stored options, which are resolved again without the
+ * creator's remembered options and don't change them, and the game is created only if the
+ * finished game has no rematch yet, linked to it in the same batch. Null when it already had one:
+ * nothing was created.
+ */
 export async function createGame(
   deps: CreateDeps,
   creator: UserRecord,
   type: GameType | undefined,
   body: CreateGameBody,
-): Promise<CreatedGame> {
+  rematchOf?: string,
+): Promise<CreatedGame | null> {
   const { platform, resources, keys } = deps;
   const { repos, config } = platform;
   if (type?.enabled !== true) throw ApiError.of("UNKNOWN_GAME");
@@ -229,7 +238,9 @@ export async function createGame(
     config: type.config,
     resources: resources.listForUser("dictionary", creator.id),
   };
-  const remembered = lastOptionsOf(creator.settings, type.type);
+  // A rematch repeats a game's resolved options: nothing of the creator's last choices is merged.
+  const remembered =
+    rematchOf === undefined ? lastOptionsOf(creator.settings, type.type) : undefined;
   const { options, input } = resolve(type, body.options, remembered, ctx);
   const seats = seatCount(type, options, body.seats);
   const turnTimeoutDays = timeoutDays(type, options, body.turnTimeoutDays);
@@ -352,45 +363,47 @@ export async function createGame(
     ...pickedRows,
     ...emailRows,
   ];
-  await repos.games.create(
-    {
-      id: gameId,
-      gameType: type.type,
-      gameVersion: type.latest.version,
-      options: JSON.stringify(options),
-      status: "lobby",
-      createdBy: creator.id,
-      seats,
-      turnTimeoutDays,
-      seatOrder: body.seatOrder ?? "join",
-      // Off whenever a seat is open or two people play (02 §4), which is every game until AI
-      // accounts exist (M3); the creator may still allow it.
-      aiAssistance,
-      lastActionAt: now,
-      createdAt: now,
-      updatedAt: now,
-    },
-    players,
-    {
-      resources: requested.map((resource) => ({
-        kind: resource.kind,
-        resourceId: resource.id,
-        version: resource.version ?? null,
-      })),
-      invites: emailIds.map((hash) => ({
-        id: crypto.randomUUID(),
-        inviterId: creator.id,
-        emailHash: hash,
-        sentAt: null,
-        expiresAt: now + LOBBY_LIFETIME_MS,
-      })),
-    },
-  );
-  await repos.users.rememberGameOptions(creator.id, {
+  const game = {
+    id: gameId,
     gameType: type.type,
-    input: rememberedInput(input),
+    gameVersion: type.latest.version,
+    options: JSON.stringify(options),
+    status: "lobby" as const,
+    createdBy: creator.id,
+    seats,
+    turnTimeoutDays,
+    seatOrder: body.seatOrder ?? "join",
+    // Off whenever a seat is open or two people play (02 §4), which is every game until AI
+    // accounts exist (M3); the creator may still allow it.
+    aiAssistance,
+    lastActionAt: now,
+    createdAt: now,
     updatedAt: now,
-  });
+  };
+  const extras = {
+    resources: requested.map((resource) => ({
+      kind: resource.kind,
+      resourceId: resource.id,
+      version: resource.version ?? null,
+    })),
+    invites: emailIds.map((hash) => ({
+      id: crypto.randomUUID(),
+      inviterId: creator.id,
+      emailHash: hash,
+      sentAt: null,
+      expiresAt: now + LOBBY_LIFETIME_MS,
+    })),
+  };
+  if (rematchOf === undefined) {
+    await repos.games.create(game, players, extras);
+    await repos.users.rememberGameOptions(creator.id, {
+      gameType: type.type,
+      input: rememberedInput(input),
+      updatedAt: now,
+    });
+  } else if (!(await repos.games.createRematch(rematchOf, game, players, extras))) {
+    return null;
+  }
   return {
     gameId,
     added: pickedRows.flatMap((row) =>

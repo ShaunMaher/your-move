@@ -129,6 +129,10 @@ export const gameEnvelopeSchema = z.object({
   yourInvitation: z.enum(["normal", "hidden"]).nullable(),
   joinLink: z.object({ active: z.boolean(), expiresAt: timestamp.nullable() }).optional(),
   canAddPlayers: z.array(z.object({ userId: z.string(), displayName: z.string() })).optional(),
+  rematch: z
+    .object({ gameId: z.string(), you: z.enum(["joined", "invited", "none"]) })
+    .nullable()
+    .optional(),
   createdAt: timestamp,
   lastActionAt: timestamp.nullable(),
 });

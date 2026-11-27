@@ -240,10 +240,13 @@ export type GameResourceRecord = Omit<InferSelectModel<typeof gameResources>, "g
 /** A logged transition without its secret columns (`action`, `rng`): what history may show. */
 export type PublicActionRecord = Omit<GameActionRecord, "action" | "rng">;
 
-/** A new game row; `version`, `write_token` and `action_count` start at their defaults. */
+/**
+ * A new game row; `version`, `write_token` and `action_count` start at their defaults, and
+ * `rematch_game_id` is NULL until a rematch of the game is created ({@link GameRepo.createRematch}).
+ */
 export type NewGame = Omit<
   InferInsertModel<typeof games>,
-  "version" | "writeToken" | "actionCount"
+  "version" | "writeToken" | "actionCount" | "rematchGameId"
 >;
 /** A new `game_players` row of a known game. */
 export type NewGamePlayer = Omit<InferInsertModel<typeof gamePlayers>, "gameId">;
@@ -374,6 +377,20 @@ export interface GameListRow {
 export interface GameRepo {
   /** Inserts a new game, its first `game_players` rows, resources and invites atomically. */
   create(game: NewGame, players: readonly NewGamePlayer[], extras?: NewGameExtras): Promise<void>;
+  /**
+   * Creates the rematch of a finished game (05 `POST /api/v1/games/:id/rematch`) exactly as
+   * {@link create} does, and links it as that game's `rematch_game_id`, in one atomic batch that
+   * writes anything only while `finishedId` is a `finished` game with no rematch yet. True if it
+   * did; false if it wrote nothing, so of several calls racing for one finished game exactly one
+   * creates a game and the others leave no row behind. Not a transition: the finished game's
+   * `version` is unchanged.
+   */
+  createRematch(
+    finishedId: string,
+    game: NewGame,
+    players: readonly NewGamePlayer[],
+    extras?: NewGameExtras,
+  ): Promise<boolean>;
   /** The game row, secret columns included (the core decides what leaves the server). */
   get(id: string): Promise<GameRecord | null>;
   /** The game row and its players, read in one batch. */
