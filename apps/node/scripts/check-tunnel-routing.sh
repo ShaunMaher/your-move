@@ -8,13 +8,16 @@
 #      is refused with 400 (the mistake the alias exists to prevent);
 #   3. a request from the Docker host (its gateway address on `front`) is refused with 400.
 #
-# Check 3 is sent from a container on the host network, which is the namespace that holds the
-# `front` gateway address on both rootful and rootless engines (rootless keeps its container
-# networks inside rootlesskit's namespace, where the host's own shell cannot reach them).
+# Check 3 is sent from the host with curl. Rootless Docker keeps its container networks inside
+# rootlesskit's network namespace, which the host's own shell cannot reach, so there the same curl
+# runs through `nsenter -U --preserve-credentials -n -t <pid>`, the pid being rootlesskit's child
+# (`$XDG_RUNTIME_DIR/dockerd-rootless/child_pid`). A `--network host` container is no substitute: on
+# rootless it sees the real host's interfaces. Nothing is skipped: if the namespace cannot be
+# entered, check 3 fails.
 #
 # Assumptions: paths without spaces (the commands are word-split); a Linux host with a native
-# Docker engine (the host-network container reaches the `front` gateway address directly, which
-# Docker Desktop's VM does not allow); a status of `000` means the request could not connect at all, and
+# Docker engine (the host check reaches the `front` gateway address directly, which Docker
+# Desktop's VM does not allow); a status of `000` means the request could not connect at all, and
 # is never a pass.
 #
 # Usage: COMPOSE="docker compose -f apps/node/docker-compose.tunnel.yml --env-file <file>" \
@@ -70,7 +73,41 @@ check() {
 from_tunnel() { send_from "container:$tunnel_container" "$1"; }
 check "cloudflared -> http://app-front:8080 (the tunnel's route)" 2xx "$(from_tunnel http://app-front:8080)"
 check "cloudflared -> http://app:8080 (its egress address: must be refused)" 400 "$(from_tunnel http://app:8080)"
-# A connection that fails prints nothing; it is reported as 000, which is never a pass.
-host_status="$(send_from host "http://$APP_FRONT_ADDRESS:8080" 2>/dev/null || true)"
-check "a host-network container (the Docker host) -> http://$APP_FRONT_ADDRESS:8080 (front gateway)" 400 "${host_status:-000}"
+
+# NSENTER_BIN is test-only: a single word naming the nsenter binary (default `nsenter`).
+NSENTER_BIN="${NSENTER_BIN:-nsenter}"
+
+# Succeeds when the engine lists the exact security option `name=rootless` (not a substring of
+# another entry, such as a seccomp profile path).
+is_rootless() {
+  docker info --format '{{range .SecurityOptions}}{{println .}}{{end}}' 2>/dev/null | grep -qx 'name=rootless'
+}
+
+# Prints the status of the request to the app's `front` address, sent by `curl` run with the given
+# command prefix (none on the host); prints 000 when it cannot connect.
+host_request() {
+  local status
+  status="$("$@" curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 \
+    --request POST --header 'content-type: application/json' --header "origin: $PUBLIC_URL" \
+    --header 'cf-connecting-ip: 203.0.113.7' --data "$BODY" \
+    "http://$APP_FRONT_ADDRESS:8080$PATH_UNDER_TEST" 2>/dev/null || true)"
+  echo "${status:-000}"
+}
+
+description="the Docker host (front gateway) -> the app"
+if is_rootless; then
+  description="$description (via rootlesskit's namespace)"
+  pid_file="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/dockerd-rootless/child_pid"
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+    # An nsenter that cannot enter the namespace makes curl never run: that prints 000.
+    check "$description" 400 "$(host_request "$NSENTER_BIN" -U --preserve-credentials -n -t "$pid")"
+  else
+    echo "FAIL $description -> 000 (wanted 400): $pid_file is missing or not a pid;" \
+      "enter the namespace by hand: nsenter -U --preserve-credentials -n -t <rootlesskit child pid> curl ..."
+    failed=1
+  fi
+else
+  check "$description" 400 "$(host_request)"
+fi
 exit "$failed"
