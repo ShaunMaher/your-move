@@ -86,6 +86,12 @@ const BOUND = 0.03;
  */
 const TIMEOUT_MS = 30_000;
 const HEAVY_TIMEOUT_MS = 75_000;
+/**
+ * Each game-creation comparison: 1,200 creations and 1,200 unmeasured sign-ups, measured at about
+ * 10 s locally (9.9–10.2 s, and 10.1 s with two planted SELECTs, 2026-11-28); about 10× that, as
+ * above. Re-measure from the first `test:timing` jobs, never retry (ADR 0004, ADR 0006).
+ */
+const CREATE_TIMEOUT_MS = 100_000;
 
 let h: Harness | null = null;
 afterEach(() => {
@@ -464,7 +470,7 @@ describe("enumeration parity: timing of creating a game with a typed address (06
         report(`create ${label}`, result);
         expectIndistinguishable(result);
       },
-      HEAVY_TIMEOUT_MS,
+      CREATE_TIMEOUT_MS,
     );
   }
 
@@ -499,6 +505,6 @@ describe("enumeration parity: timing of creating a game with a typed address (06
       report("create with two planted SELECTs", result);
       expect(result.shift).toBeGreaterThan(BOUND);
     },
-    HEAVY_TIMEOUT_MS,
+    CREATE_TIMEOUT_MS,
   );
 });

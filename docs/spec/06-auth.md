@@ -356,7 +356,11 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
         and passed the inviter's caps; every other address adds 1 to the never-read `silent`
         counter of each instead (§3.2), so addresses that would never be mailed can't spend another
         address's or the instance's budget;
-     3. the email is sent only when every cap passed.
+     3. the email is sent only when every cap passed, and never once the instance-wide cap has
+        been crossed in the current fixed UTC day: from its crossing (marked when its alert is
+        logged) to the end of that day nothing is sent, whatever the sliding estimate says
+        later, so an instance held at the cap answers a probe at most about once a day
+        (review A17-S2-1; the residual is accepted risk F-20).
 
      Every typed address therefore writes the same number of counters and schedules the same
      background task. Known residual (review A17-P-13): for a mailed address the per-target row
