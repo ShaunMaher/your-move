@@ -879,7 +879,7 @@ describe("the rematch button (07 §1, alpha A15)", () => {
     const { calls } = open({
       "GET /api/v1/games/g1": () => finished({ rematch: shown }),
       "POST /api/v1/games/g1/rematch": () => {
-        // Another player's rematch was made and then left by this player meanwhile.
+        // Meanwhile another player made a rematch, and this player left it.
         shown = { gameId: "g2", you: "none" };
         return problem(404, "NOT_FOUND");
       },
@@ -926,11 +926,7 @@ describe("the rematch button (07 §1, alpha A15)", () => {
       "INVALID_OPTIONS",
       "This game's options aren't available to you. Start a new game instead.",
     ],
-    [
-      409,
-      "REMATCH_UNAVAILABLE",
-      "There's no one left from this game to play with. Start a new game instead.",
-    ],
+    [409, "REMATCH_UNAVAILABLE", "Too few players from this game are left to play it again."],
     [404, "NOT_FOUND", "You're no longer in this rematch."],
     [429, "RATE_LIMITED", "Too many attempts."],
   ])("explains a %i %s", async (status, code, text) => {

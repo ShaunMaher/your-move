@@ -27,7 +27,7 @@ const MESSAGES: Partial<Record<ErrorCode, string>> = {
   INVALID_SEATS: "This game can't be played with that many players.",
   ALREADY_ACTED: "You've already played in this game.",
   TOO_MANY_GAMES: "You have too many games in progress.",
-  REMATCH_UNAVAILABLE: "There's no one left from this game to play with.",
+  REMATCH_UNAVAILABLE: "Too few players from this game are left to play it again.",
   RATE_LIMITED: "Too many requests. Please wait and try again.",
 };
 

@@ -326,17 +326,25 @@ export interface LoadedGame {
 }
 
 /**
- * The endings of a game that may end without being played (02 §4): one of these with no action
- * logged ended unplayed, and as a finished game's rematch may be replaced (04 `rematch_game_id`).
+ * How a game ended unplayed, so that as a finished game's rematch it may be replaced (04
+ * `rematch_game_id`): every `declined` ending (02 §2.1 rule 9: a seat refused before acting), and
+ * a `cancelled` or `expired` one with no action logged, except an operator's cancel.
  */
-export const UNPLAYED_ENDINGS = ["cancelled", "expired", "declined"] as const;
+export const UNPLAYED = {
+  /** Unplayed whatever was logged. */
+  always: "declined",
+  /** Unplayed only with `action_count = 0`. */
+  ifNoAction: ["cancelled", "expired"],
+  /** The `end_reason` of an operator's cancel, which is never unplayed (02 §4). */
+  operatorCancel: "operator_cancelled",
+} as const;
 
 /**
  * What a finished game's players see of its rematch (05 `rematch`): a few columns of the rematch
  * and one user's own row state in it, if any.
  */
 export interface RematchRead {
-  readonly game: Pick<GameRecord, "id" | "status" | "createdAt" | "actionCount">;
+  readonly game: Pick<GameRecord, "id" | "status" | "createdAt" | "actionCount" | "endReason">;
   /** The user's `game_players.state` in the rematch; null when they hold no row. */
   readonly viewerState: GamePlayerRecord["state"] | null;
 }
@@ -397,8 +405,7 @@ export interface GameRepo {
    * Creates the rematch of a finished game (05 `POST /api/v1/games/:id/rematch`) exactly as
    * {@link create} does, and links it as that game's `rematch_game_id`, in one atomic batch that
    * writes anything only while `finishedId` is a `finished` game whose link is NULL or names a
-   * game that ended unplayed (`cancelled`, `expired` or `declined` with `action_count = 0`), which
-   * it replaces. True if it did; false if it wrote nothing, so of several calls racing for one
+   * game that ended unplayed ({@link UNPLAYED}), which it replaces. True if it did; false if it wrote nothing, so of several calls racing for one
    * finished game exactly one creates a game and the others leave no row behind. Not a
    * transition: the finished game's `version` is unchanged.
    */

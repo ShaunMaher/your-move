@@ -267,7 +267,7 @@ export interface paths {
     put?: never;
     /**
      * Rematch a finished game
-     * @description A player of a `finished` game asks for its rematch: the same game type, options (resolved again), turn timeout, seat order and AI setting, with every other player who acted in it and whose account still exists picked by `userId`, one seat each (`409 REMATCH_UNAVAILABLE` if that is fewer than the game's minimum), created exactly as `POST /api/v1/games` would (`201`, you are the creator). A finished game has one rematch at a time: while it is live or was played, every player's call answers `200` with it, accepting your invitation in it if you hold one; one that ended unplayed (cancelled, expired, or declined before anyone acted) is replaced by the next call. Anyone who wasn't a player of the game, or isn't a member of its rematch any more, gets `404`. Takes no input: an empty body or `{}`.
+     * @description A player of a `finished` game asks for its rematch: the same game type, options (resolved again), turn timeout, seat order and AI setting, with every other player who acted in it and whose account still exists picked by `userId`, one seat each (`409 REMATCH_UNAVAILABLE` if that is fewer than the game's minimum), created exactly as `POST /api/v1/games` would (`201`, you are the creator). A finished game has one rematch at a time: while it is live or was played, every player's call answers `200` with it, accepting your invitation in it if you hold one; one that ended unplayed (any declined ending, or cancelled or expired before any action, never an operator's cancel) is replaced by the next call. Anyone who wasn't a player of the game, or isn't a member of its rematch any more, gets `404`. Takes no input: an empty body or `{}`.
      */
     post: operations["rematchGame"];
     delete?: never;
@@ -2238,7 +2238,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description `WRONG_STATUS` (the game isn't `finished`, or the rematch's lobby ended meanwhile), `REMATCH_UNAVAILABLE` (too few players left for the game), `STALE_GAME` (accepting kept losing races; try again), `INVALID_SEATS` (`detail: { code, detail? }`), `TOO_MANY_GAMES` or `GAME_UNAVAILABLE`. */
+      /** @description `WRONG_STATUS` (the game isn't `finished`, or the rematch's lobby ended meanwhile), `REMATCH_UNAVAILABLE` (too few players left for the game), `STALE_GAME` (accepting or creating it kept losing races; try again), `INVALID_SEATS` (`detail: { code, detail? }`), `TOO_MANY_GAMES` or `GAME_UNAVAILABLE`. */
       409: {
         headers: {
           [name: string]: unknown;

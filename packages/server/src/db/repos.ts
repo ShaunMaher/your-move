@@ -42,7 +42,7 @@ import type {
   PublicActionRecord,
   Repositories,
 } from "./repositories.js";
-import { UNPLAYED_ENDINGS } from "./repositories.js";
+import { UNPLAYED } from "./repositories.js";
 import { gameActions, gamePlayers, gameResources, games, invites } from "./schema.js";
 
 /** The `game_actions` columns history may show: never `action` or `rng` (04 invariant 4). */
@@ -101,7 +101,14 @@ function gameRepo(db: Database): GameRepo {
             .select({ id: unplayed.id })
             .from(unplayed)
             .where(
-              and(inArray(unplayed.status, [...UNPLAYED_ENDINGS]), eq(unplayed.actionCount, 0)),
+              or(
+                eq(unplayed.status, UNPLAYED.always),
+                and(
+                  inArray(unplayed.status, [...UNPLAYED.ifNoAction]),
+                  eq(unplayed.actionCount, 0),
+                  or(isNull(unplayed.endReason), ne(unplayed.endReason, UNPLAYED.operatorCancel)),
+                ),
+              ),
             ),
         ),
       );
@@ -135,6 +142,7 @@ function gameRepo(db: Database): GameRepo {
           status: games.status,
           createdAt: games.createdAt,
           actionCount: games.actionCount,
+          endReason: games.endReason,
           viewerState: gamePlayers.state,
         })
         .from(games)

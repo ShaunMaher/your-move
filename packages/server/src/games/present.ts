@@ -191,12 +191,15 @@ export function invitationOf(
 }
 
 /**
- * A finished game's rematch as one of its players sees it (05 `rematch`): null when it ended
- * unplayed, an overdue lobby included (it may be replaced; the press expires it first); otherwise `joined` if they hold a joined or seated row in it,
- * `invited` while they hold an invitation in its open lobby, and `none` otherwise (declined, left,
- * removed, dropped at its start, an invitation in a lobby that ended, or no row). An `inert`
- * invitation shows as `invited`, like any other: whether a row is inert never shows, and accepting
- * it is refused as `404`, as accepting an invitation with a block is (05).
+ * A finished game's rematch as one of its players sees it (05 `rematch`):
+ * - `null` when it ended unplayed ({@link endedUnplayed}) or is a lobby past its expiry: it may be
+ *   replaced, and the press expires an overdue lobby first;
+ * - otherwise `joined` if they hold a joined or seated row in it, `invited` while they hold an
+ *   invitation in its open lobby, and `none` otherwise (declined, left, removed, dropped at its
+ *   start, or no row).
+ *
+ * An `inert` invitation shows as `invited`, like any other: whether a row is inert never shows,
+ * and accepting it is refused as `404`, as accepting an invitation with a block is (05).
  */
 export function rematchOf(rematch: RematchRead, now: number): GameEnvelope["rematch"] {
   const { game, viewerState } = rematch;

@@ -953,10 +953,22 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         return game.id;
       }
 
-      it("replaces a rematch that ended unplayed: cancelled, expired, or declined before anyone acted", async () => {
-        for (const status of ["cancelled", "expired", "declined"] as const) {
+      it("replaces a rematch that ended unplayed: cancelled or expired with no action, or any declined ending", async () => {
+        const cases: [Partial<NewGame>, number][] = [
+          [{ status: "cancelled", endReason: "cancelled" }, 0],
+          [{ status: "expired", endReason: "expired" }, 0],
+          [{ status: "declined", endReason: "declined" }, 0],
+          // A three-seat game, or a timeout path, that ended declined after one action: the
+          // decliner refused before acting (02 §2.1 rule 9), so it never got going (A15-R2-1).
+          [{ status: "declined", endReason: "declined", startedAt: T0 }, 1],
+        ];
+        for (const [overrides, actions] of cases) {
+          const status = overrides.status;
           const { finishedId } = await finishedAndRematch();
-          const old = await linked(finishedId, { status });
+          const old = await linked(finishedId, overrides);
+          if (actions > 0) {
+            await target.sql("UPDATE games SET action_count = ? WHERE id = ?", actions, old);
+          }
           const next = rematchOf(await human());
           expect(
             await repos.games.createRematch(finishedId, next.game, next.players, next.extras),
@@ -968,19 +980,23 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         }
       });
 
-      it("never replaces a rematch that is live or was played", async () => {
-        const cases: Partial<NewGame>[] = [
-          { status: "lobby" },
-          { status: "active", startedAt: T0 },
-          { status: "finished", startedAt: T0, endedAt: T0 + 1 },
-          // Ended after someone acted: played, so it stays.
-          { status: "declined", startedAt: T0 },
-          { status: "cancelled", startedAt: T0 },
+      it("never replaces a rematch that is live, was played, or an operator cancelled", async () => {
+        const cases: [Partial<NewGame>, number][] = [
+          [{ status: "lobby" }, 0],
+          [{ status: "active", startedAt: T0 }, 0],
+          [{ status: "finished", startedAt: T0, endedAt: T0 + 1 }, 0],
+          // Cancelled or expired after someone acted: played, so it stays.
+          [{ status: "cancelled", endReason: "cancelled", startedAt: T0 }, 2],
+          [{ status: "expired", endReason: "expired" }, 2],
+          // An operator's cancel is never unplayed, moves or not (A15-S2-1).
+          [{ status: "cancelled", endReason: "operator_cancelled", startedAt: T0 }, 0],
         ];
-        for (const [i, overrides] of cases.entries()) {
+        for (const [overrides, actions] of cases) {
           const { finishedId } = await finishedAndRematch();
           const old = await linked(finishedId, overrides);
-          if (i >= 3) await target.sql("UPDATE games SET action_count = 2 WHERE id = ?", old);
+          if (actions > 0) {
+            await target.sql("UPDATE games SET action_count = ? WHERE id = ?", actions, old);
+          }
           const next = rematchOf(await human());
           expect(
             await repos.games.createRematch(finishedId, next.game, next.players, next.extras),
@@ -1031,7 +1047,7 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
           player({ userId: other, state: "invited", joinedAt: null }),
         ]);
         expect(await repos.games.rematchRead(game.id, other)).toEqual({
-          game: { id: game.id, status: "lobby", createdAt: T0, actionCount: 0 },
+          game: { id: game.id, status: "lobby", createdAt: T0, actionCount: 0, endReason: null },
           viewerState: "invited",
         });
         expect((await repos.games.rematchRead(game.id, creator))?.viewerState).toBe("joined");

@@ -21,7 +21,7 @@ import {
   signUp,
   transition,
 } from "./games-support.js";
-import { DAY, type Harness } from "./test-harness.js";
+import { DAY, type Harness, MINUTE } from "./test-harness.js";
 
 let h: Harness;
 beforeEach(() => {
@@ -559,21 +559,84 @@ describe("a rematch that never got going may be replaced (A15-P-2, 04 `rematch_g
     expect(linkOf(game.id)).toBe(again.body.game.id);
   });
 
-  it("never replaces one that was played, even if it then ended declined", async () => {
+  it("replaces one that ended declined even after a move: someone refused it (A15-R2-1)", async () => {
     const [a, b] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
     const game = await finished([a, b]);
     const first = (await rematch(a, game.id)).body.game;
     expect(first.status).toBe("active");
-    // Ada plays her first card; Bo declines before his: the frozen `declined` ending, played.
+    // Ada plays her first card, then Bo declines before playing his: the game ends `declined`
+    // with one action logged, and every declined ending is unplayed (02 §2.1 rule 9).
     const { view } = await getGame(h, a, first.id);
     const card = (view as ExampleView).seats[0]?.hand?.[0];
     expect((await act(h, a, first.id, { card })).status).toBe(200);
     expect((await transition(h, b, first.id, "decline")).body.game.status).toBe("declined");
+    expect((await getGame(h, b, game.id)).game.rematch).toBeNull();
+    const again = await rematch(b, game.id);
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    expect(linkOf(game.id)).toBe(again.body.game.id);
+  });
+
+  it("never replaces one an operator cancelled (A15-S2-1)", async () => {
+    const [a, b] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
+    const game = await finished([a, b]);
+    const first = (await rematch(a, game.id)).body.game;
+    // An operator's cancel of the active rematch (02 §4; the Admin API is M3's): written by hand.
+    h.exec(
+      "UPDATE games SET status = 'cancelled', end_reason = 'operator_cancelled', ended_at = ? WHERE id = ?",
+      h.platform.now().getTime(),
+      first.id,
+    );
     expect((await getGame(h, b, game.id)).game.rematch).toEqual({
       gameId: first.id,
       you: "joined",
     });
     const again = await rematch(b, game.id);
     expect([again.status, again.body.game.id]).toEqual([200, first.id]);
+  });
+
+  it("stops press, decline, press… at the daily pair limit (A15-S2-2)", async () => {
+    h.close();
+    h = gameHarness({ LIMIT_GAMES_CREATED_PAIR_DAY: "2" });
+    const [a, b] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
+    const game = await finished([a, b]);
+    h.exec("UPDATE users SET settings = ? WHERE id = ?", '{"whoCanAddMe":"nobody"}', b.id);
+    for (let round = 0; round < 2; round++) {
+      const made = await rematch(a, game.id);
+      expect(made.status, JSON.stringify(made.body)).toBe(201);
+      expect((await transition(h, b, made.body.game.id, "decline")).status).toBe(204);
+    }
+    const count = gameCount();
+    const limited = await rematch(a, game.id);
+    expect([limited.status, code(limited.body)]).toEqual([429, "RATE_LIMITED"]);
+    expect(gameCount()).toBe(count);
+  });
+});
+
+describe("a rematch whose guarded insert keeps losing (A15-R2-2)", () => {
+  it("tries once more, then answers STALE_GAME, never a server fault", async () => {
+    const [a, b] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
+    const game = await finished([a, b]);
+    const games = h.platform.repos.games;
+    const real = games.createRematch.bind(games);
+    let calls = 0;
+    // As if every insert lost to a rematch that ended unplayed before this call could read it.
+    games.createRematch = () => {
+      calls += 1;
+      return Promise.resolve(false);
+    };
+    const stale = await rematch(a, game.id);
+    expect([stale.status, code(stale.body)]).toEqual([409, "STALE_GAME"]);
+    expect(calls).toBe(2);
+    // Losing once is retried: the second try creates it.
+    calls = 0;
+    games.createRematch = (...args) => {
+      calls += 1;
+      return calls === 1 ? Promise.resolve(false) : real(...args);
+    };
+    h.advance(MINUTE);
+    const made = await rematch(a, game.id);
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    expect(calls).toBe(2);
+    expect(linkOf(game.id)).toBe(made.body.game.id);
   });
 });

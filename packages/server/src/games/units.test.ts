@@ -537,8 +537,8 @@ describe("typed addresses on open invitations (A12-S-3)", () => {
 
 describe("a finished game's rematch as one of its players sees it (05 `rematch`, alpha A15)", () => {
   type Status = GameRecord["status"];
-  const game = (status: Status = "lobby", actionCount = 0) =>
-    ({ id: "r", status, createdAt: 1000, actionCount }) as const;
+  const game = (status: Status = "lobby", actionCount = 0, endReason: string | null = null) =>
+    ({ id: "r", status, createdAt: 1000, actionCount, endReason }) as const;
   const at = (
     viewerState: GamePlayerRecord["state"] | null,
     status: Status = "lobby",
@@ -569,14 +569,20 @@ describe("a finished game's rematch as one of its players sees it (05 `rematch`,
     expect(at("invited", "lobby", 999 + LOBBY_LIFETIME_MS)).toBe("invited");
   });
 
-  it("is null once the rematch ended unplayed, so it may be replaced (A15-P-2)", () => {
+  it("is null once the rematch ended unplayed, so it may be replaced (A15-P-2, R2-1, S2-1)", () => {
     for (const status of ["cancelled", "expired", "declined"] as const) {
       expect(rematchOf({ game: game(status), viewerState: "invited" }, 2000)).toBeNull();
-      // An ending after anyone acted was played: it stays.
-      expect(rematchOf({ game: game(status, 3), viewerState: "out" }, 2000)?.you).toBe("joined");
     }
-    expect(endedUnplayed({ status: "finished", actionCount: 0 })).toBe(false);
-    expect(endedUnplayed({ status: "lobby", actionCount: 0 })).toBe(false);
+    // Every declined ending is a seat refusing before it acted (02 §2.1 rule 9), even after
+    // others played.
+    expect(endedUnplayed(game("declined", 3, "declined"))).toBe(true);
+    // A cancel or expiry after moves was played, and an operator's cancel is never unplayed.
+    expect(rematchOf({ game: game("cancelled", 3), viewerState: "out" }, 2000)?.you).toBe("joined");
+    expect(endedUnplayed(game("expired", 1))).toBe(false);
+    expect(endedUnplayed(game("cancelled", 0, "operator_cancelled"))).toBe(false);
+    expect(endedUnplayed(game("cancelled", 0, "cancelled"))).toBe(true);
+    expect(endedUnplayed(game("finished"))).toBe(false);
+    expect(endedUnplayed(game("lobby"))).toBe(false);
   });
 });
 

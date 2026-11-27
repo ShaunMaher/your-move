@@ -84,6 +84,8 @@ const FINISHED_LISTED_MS = 90 * DAY;
 const ENDED_LISTED_MS = 7 * DAY;
 /** Accepting an invitation in a rematch retries a lost race this often (03 §5.2). */
 const REMATCH_ACCEPT_ATTEMPTS = 3;
+/** Creating a rematch whose guarded insert lost, with no live rematch to show, is tried twice. */
+const REMATCH_CREATE_ATTEMPTS = 2;
 
 export interface GameRouteOptions {
   readonly platform: Platform;
@@ -502,38 +504,43 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       )
       .sort((a, b) => (a.seat ?? 0) - (b.seat ?? 0))
       .map((row) => ({ userId: row.userId ?? "" }));
-    let created;
-    try {
-      created = await createGame(
-        { platform, resources, keys: await options.keys() },
-        user,
-        registry.get(game.gameType),
-        {
-          gameType: game.gameType,
-          options: JSON.parse(game.options) as unknown,
-          // One seat for each person carried over and the caller (05).
-          seats: others.length + 1,
-          turnTimeoutDays: game.turnTimeoutDays,
-          seatOrder: game.seatOrder,
-          aiAssistance: game.aiAssistance,
-          invitees: others,
-        },
-        game.id,
-      );
-    } catch (error) {
-      // Another player's call may have created the rematch meanwhile: then that is the answer,
-      // whatever refused this one (a limit, say).
+    const body = {
+      gameType: game.gameType,
+      options: JSON.parse(game.options) as unknown,
+      // One seat for each person carried over and the caller (05).
+      seats: others.length + 1,
+      turnTimeoutDays: game.turnTimeoutDays,
+      seatOrder: game.seatOrder,
+      aiAssistance: game.aiAssistance,
+      invitees: others,
+    };
+    for (let attempt = 1; ; attempt++) {
+      let created;
+      try {
+        created = await createGame(
+          { platform, resources, keys: await options.keys() },
+          user,
+          registry.get(game.gameType),
+          body,
+          game.id,
+        );
+      } catch (error) {
+        // Another player's call may have created the rematch meanwhile: then that is the answer,
+        // whatever refused this one (a limit, say).
+        const rematchId = await liveRematchOf(id, user);
+        if (rematchId === null) throw error;
+        return c.json({ game: await followRematch(c, rematchId, user) }, 200);
+      }
+      if (created !== null) {
+        return c.json({ game: await afterCreate(c, user, created, true) }, 201);
+      }
+      // The guarded insert wrote nothing: another call linked a rematch meanwhile, which is the
+      // answer. If that one has already ended unplayed too, try once more; a call that keeps
+      // losing is stale, never a server fault (A15-R2-2).
       const rematchId = await liveRematchOf(id, user);
-      if (rematchId === null) throw error;
-      return c.json({ game: await followRematch(c, rematchId, user) }, 200);
+      if (rematchId !== null) return c.json({ game: await followRematch(c, rematchId, user) }, 200);
+      if (attempt >= REMATCH_CREATE_ATTEMPTS) throw ApiError.of("STALE_GAME");
     }
-    if (created === null) {
-      // Another player's call won the race: this one created nothing.
-      const rematchId = await liveRematchOf(id, user);
-      if (rematchId === null) throw new Error("a lost rematch race left no rematch");
-      return c.json({ game: await followRematch(c, rematchId, user) }, 200);
-    }
-    return c.json({ game: await afterCreate(c, user, created, true) }, 201);
   });
 
   app.openapi(recentPlayersRoute, async (c) => {

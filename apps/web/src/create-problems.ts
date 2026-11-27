@@ -35,7 +35,7 @@ const REMATCH_PROBLEMS: Readonly<Record<string, string>> = {
   INVALID_INVITEES:
     "Someone from this game can't be added any more. Start a new game with the people you can play.",
   UNKNOWN_GAME: "This game isn't available any more.",
-  REMATCH_UNAVAILABLE: "There's no one left from this game to play with. Start a new game instead.",
+  REMATCH_UNAVAILABLE: "Too few players from this game are left to play it again.",
   NOT_FOUND: "You're no longer in this rematch.",
   WRONG_STATUS: "The rematch has already ended.",
   STALE_GAME: "The rematch changed while you were joining it. Try again.",
