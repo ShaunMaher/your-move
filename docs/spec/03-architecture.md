@@ -179,7 +179,11 @@ action, join, accept, remove, start, resign, decline, leave, cancel, expiry, tim
 its state, `delivery <> 'inert'`, the claimant holding no other row in the game, and the game
 `version` being unchanged since it was loaded — checked but deliberately not bumped, 02 §4. The
 email-nudge throttle `game_players.last_nudged_at` is not game state either: one conditional
-update of that row, re-checking everything that made the nudge due, with no version bump, §7.)
+update of that row, re-checking everything that made the nudge due, with no version bump, §7. A
+finished game's rematch link `games.rematch_game_id` is not game state either: it is written in
+the batch that inserts the rematch, by one conditional update guarded on the game being `finished`
+and the link being NULL or naming a game that ended unplayed, with every insert of the batch
+guarded the same way and no version bump, 04, 05 `POST /api/v1/games/:id/rematch`.)
 
 1. Load game state + version.
 2. Compute the new state with the game module (pure), with recorded randomness and pre-loaded
@@ -216,7 +220,9 @@ database matches the winner's state exactly, on both drivers; same for move-vs-d
 remove-vs-join, an accept or join that triggers an automatic start, join-vs-join for the last open
 seat, and the invite-claim races (02 §4): claim-vs-start, claim-vs-remove, claim-vs-cancel, and
 **create-vs-onboarding** (a game created while the invitee completes onboarding is claimed by the
-sweep, 06 §6.4).
+sweep, 06 §6.4), and **rematch-vs-rematch** (several rematches of one finished game created
+together, and replacements of one that ended unplayed: exactly one is created, and the others
+leave no row, alpha A15).
 
 Clients send `expectedVersion` with every client-initiated transition, which doubles as
 double-submit protection. Transitions the server starts itself (join, sweep, account deletion)

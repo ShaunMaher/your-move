@@ -194,8 +194,11 @@ Enforced by the generic test kit (§6) where possible:
     `POST /api/v1/games/:id/rematch`) resolves a finished game's stored options this way, so under a
     later `ctx` or a newer module the same choices resolve at their current versions (or are
     refused with the module's normal error, e.g. a ruleset the operator has since disabled), never
-    copied unchecked. A module whose options carry versions accepts those keys and ignores them
-    (words §10.1).
+    copied unchecked. Version keys of resolved options are named `<name>Version` (e.g.
+    `rulesetVersion`); a module whose options carry them **accepts and ignores** them in its input
+    (validating only their shape, e.g. a non-negative integer) and **never honours** them: an input
+    can't pin an old version, so every game gets the current ones (words §10.1). The framework
+    leaves them out of remembered options (05 §Remembered options).
 
 ### 2.2 Reserved error codes
 

@@ -386,15 +386,21 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
       created or counted; only the per-user write limit every write counts applies. It never says
       whether a rematch exists.
     - **A player whose fellow player has since blocked them, or is suspended or being deleted, or
-      who never became their past opponent** (declined that game before acting, or joined by link
-      and wasn't added): `400 INVALID_INVITEES`, before any limit is counted — exactly what picking
-      that person in `POST /api/v1/games` answers, for every one of those reasons alike. It reveals
-      nothing new: the same person has already left the caller's "People you've played" list
-      (`GET /api/v1/players/recent`), for the same set of reasons.
-    - **A player whose fellow player's account was deleted**: that seat is skipped and left open, and
-      the finished game already shows "Deleted player"; nothing new either.
+      joined by link and was never added**: `400 INVALID_INVITEES`, before any limit is counted —
+      exactly what picking that person in `POST /api/v1/games` answers, for every one of those
+      reasons alike. It reveals nothing new: the same person has already left (or never joined) the
+      caller's "People you've played" list (`GET /api/v1/players/recent`), for the same set of
+      reasons.
+    - **A player whose fellow player's account was deleted, or who never acted in that game**
+      (declined, or resigned or timed out before a first action): that person isn't carried over,
+      and the rematch has one seat fewer. When too few people remain for the game, the answer is
+      `409 REMATCH_UNAVAILABLE`, before any limit is counted. Both depend only on what every player
+      of the finished game already sees: "Deleted player" on its finished screen, and who acted in
+      its public history.
     - **The rematch itself** is shown to every player of the finished game (`rematch`, 05), with
-      only their own place in it: joined, invited, or neither. An `inert` invitation (a block
+      only their own place in it: joined, invited, or neither. A rematch that ended unplayed
+      (cancelled, expired, or declined before anyone acted) shows as none and may be replaced;
+      its status is one every member of it saw, and any player could have pressed Rematch anyway. An `inert` invitation (a block
       between two picked players, which can't arise until M4, Q29) shows as invited, and accepting
       it is `404`, the same as accepting an invitation whose block is found on accept (05); it shows
       the player that a rematch was made, which they'd also learn from the other players.
