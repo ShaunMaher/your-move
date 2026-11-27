@@ -16,9 +16,15 @@ export interface BoardProps<Action, View, PreviewResult> {
     readonly game: GameEnvelope;
     // Warning: (ae-forgotten-export) The symbol "GameError" needs to be exported by the entry point client.d.ts
     readonly preview: (action: Action) => Promise<PreviewResult | GameError>;
+    readonly resources?: BoardResources;
     // Warning: (ae-forgotten-export) The symbol "SubmitResult" needs to be exported by the entry point client.d.ts
     readonly submit: (action: Action) => Promise<SubmitResult>;
     readonly view: View;
+}
+
+// @public
+export interface BoardResources {
+    readonly dictionary?: PublicWordList;
 }
 
 // Warning: (ae-forgotten-export) The symbol "Text_2" needs to be exported by the entry point client.d.ts
@@ -57,6 +63,14 @@ export interface OptionsFormProps {
     // (undocumented)
     readonly onChange: (input: unknown) => void;
     readonly value: unknown;
+}
+
+// @public
+export interface PublicWordList {
+    follows(prefix: string): number;
+    has(word: string): boolean;
+    readonly id: string;
+    readonly version: number;
 }
 
 // @public

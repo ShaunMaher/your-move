@@ -12,6 +12,35 @@ import type { GameError, Text } from "./contract.js";
 import { formatText } from "./text.js";
 
 /**
+ * A public word list as the shell hands it to a board (02 §3, words §9.4): lookups over the list's
+ * sorted text, which the shell downloaded from the game's own resource and checked against the
+ * hash in its URL. Only a resource marked `distribution: "public"` is ever handed over.
+ *
+ * @public
+ */
+export interface PublicWordList {
+  /** The dictionary's id, as in the game's options and view. */
+  readonly id: string;
+  /** The version of the list's current build (words §9.4: informational). */
+  readonly version: number;
+  /** Whether `word` is in the list. */
+  has(word: string): boolean;
+  /** The letters that follow `prefix` in some word of the list, as a bit mask: bit 0 is `a`. */
+  follows(prefix: string): number;
+}
+
+/**
+ * Public resources of the game, loaded by the shell for its board (02 §3). Every entry is
+ * optional: a board works without them. Nothing in here is secret.
+ *
+ * @public
+ */
+export interface BoardResources {
+  /** The game's word list, only when it is public and the shell has it loaded. */
+  readonly dictionary?: PublicWordList;
+}
+
+/**
  * Props of a client module's board (02 §3).
  *
  * @public
@@ -24,6 +53,11 @@ export interface BoardProps<Action, View, PreviewResult> {
   readonly submit: (action: Action) => Promise<SubmitResult>;
   /** A non-authoritative preview: local when possible, else from the server. */
   readonly preview: (action: Action) => Promise<PreviewResult | GameError>;
+  /**
+   * The game's public resources once the shell has loaded them; absent until then, and always
+   * when there are none. The same object for as long as they don't change.
+   */
+  readonly resources?: BoardResources;
 }
 
 /**
