@@ -87,15 +87,15 @@ describe("caching a game's public word lists", () => {
     const own = ["a", "b", "c", "d"];
     const urls: string[] = [];
     for (const id of own) {
-      fetcher.mockResolvedValueOnce(new Response(`${id}\n`));
-      urls.push(await nameFor(`${id}\n`, id));
+      fetcher.mockResolvedValueOnce(new Response(`${id}${id}\n`));
+      urls.push(await nameFor(`${id}${id}\n`, id));
     }
     // A game that itself uses four lists keeps all four while it is open.
     await openWordList(own.map((id, i) => ({ ...list(urls[i]), id })));
     expect(cached()).toEqual(urls);
     // Another game's list then pushes out the oldest of those, not itself.
-    fetcher.mockResolvedValueOnce(new Response("e\n"));
-    const other = await nameFor("e\n", "e");
+    fetcher.mockResolvedValueOnce(new Response("ee\n"));
+    const other = await nameFor("ee\n", "e");
     await openWordList([{ ...list(other), id: "e" }]);
     expect(cached()).toEqual([urls[2], urls[3], other]);
   });
@@ -113,7 +113,7 @@ describe("caching a game's public word lists", () => {
   });
 
   it("runs overlapping calls one after another, so they can't trim the same listing twice", async () => {
-    const texts = ["p\n", "q\n", "r\n", "s\n", "t\n"];
+    const texts = ["pp\n", "qq\n", "rr\n", "ss\n", "tt\n"];
     const urls = await Promise.all(texts.map((text, i) => nameFor(text, `l${String(i)}`)));
     vi.stubGlobal("fetch", (path: string) =>
       Promise.resolve(new Response(texts[urls.indexOf(path)] ?? "")),
@@ -209,9 +209,40 @@ describe("opening the game's word list for its board", () => {
     ["a character outside a–z, which could make a lookup misbehave (A14-S-1)", "aa\naé\n"],
     ["a character above z (A14-S-1)", "a{\n"],
     ["words out of order", "ab\naa\n"],
-  ])("opens nothing that isn't a word list: %s", async (_name, text) => {
+  ])("opens and keeps nothing that isn't a word list: %s (A14-S2-1)", async (_name, text) => {
     const url = await nameFor(text);
     fetcher.mockResolvedValueOnce(new Response(text));
     expect(await openWordList([list(url)])).toBeNull();
+    // Never stored, so it isn't read back from the cache on the next open.
+    expect(cached()).toEqual([]);
+  });
+
+  it("deletes a cached entry that isn't a word list, and downloads it again (A14-S2-1)", async () => {
+    const text = "ab\naa\n";
+    const url = await nameFor(text);
+    const cache = await storage.open(WORD_LIST_CACHE);
+    await cache.put(url, new Response(text));
+    fetcher.mockResolvedValueOnce(new Response(text));
+    expect(await openWordList([list(url)])).toBeNull();
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(cached()).toEqual([]);
+  });
+
+  it("keeps the three most recently used lists open, dropping the least recently used (A14-R2-3)", async () => {
+    const texts = ["aa\n", "bb\n", "cc\n", "dd\n"];
+    const urls = await Promise.all(texts.map((text, i) => nameFor(text, `l${String(i)}`)));
+    vi.stubGlobal("fetch", (path: string) =>
+      Promise.resolve(new Response(texts[urls.indexOf(path)] ?? "")),
+    );
+    const openOne = (i: number) => openWordList([{ ...list(urls[i]), id: `l${String(i)}` }]);
+    const [a, b] = [await openOne(0), await openOne(1)];
+    await openOne(2);
+    // Using A again makes B the least recently used, so the fourth list drops B, not A.
+    expect(await openOne(0)).toBe(a);
+    await openOne(3);
+    expect(await openOne(0)).toBe(a);
+    const reopened = await openOne(1);
+    expect(reopened).not.toBeNull();
+    expect(reopened).not.toBe(b);
   });
 });

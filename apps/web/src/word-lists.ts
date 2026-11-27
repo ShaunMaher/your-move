@@ -9,12 +9,12 @@
  * fetched, and a URL on a resource that doesn't say it is public is not followed.
  *
  * The game's own list, when it is public, is opened for the board as `resources.dictionary`
- * (02 §3): its bytes are hashed once (as they are downloaded, or as they are read back from the
- * cache, where an entry that no longer matches is deleted and downloaded again once), checked to
- * be a word list (lower-case `a`–`z` words, sorted), and given lookups over the sorted text, as
- * the server does them (words §9.4), with nothing built. An opened list is kept for the page's
- * life by its URL, which names its content, so another game with the same list gets the same
- * object. The board uses it for the no-play hint (words §10.8); its previews still come from the
+ * (02 §3): its bytes are hashed and checked to be a word list (lower-case `a`–`z` words, sorted)
+ * once, as they are downloaded (and only then stored) or as they are read back from the cache,
+ * where an entry that fails is deleted and downloaded again once; then it gets lookups over the
+ * sorted text, as the server does them (words §9.4), with nothing built. An opened list is kept
+ * by its URL, which names its content, so another game with the same list gets the same object;
+ * the three most recently used are kept. The board uses it for the no-play hint (words §10.8); its previews still come from the
  * server.
  */
 import { checkWordList, createWordList } from "@your-move/dictionary";
@@ -39,7 +39,7 @@ interface Served {
   readonly expected: string;
 }
 
-/** The lists opened so far in this page, by path, the most recent last; at most `KEEP`. */
+/** The lists opened so far in this page, by path, the most recently used last; at most `KEEP`. */
 const opened = new Map<string, PublicWordList>();
 
 async function digestPrefix(bytes: ArrayBuffer): Promise<string> {
@@ -81,38 +81,50 @@ async function keepRecent(cache: Cache, protectedPaths: ReadonlySet<string>): Pr
   }
 }
 
-/** Downloads a list and stores it if its content hashes to its name: its bytes, or null. */
-async function download(cache: Cache, list: Served): Promise<ArrayBuffer | null> {
+/**
+ * The list's text if its bytes hash to its name and it is a word list in the built format
+ * (lower-case `a`–`z` words, sorted, one per line), else null.
+ */
+async function intact(bytes: ArrayBuffer, list: Served): Promise<string | null> {
+  if ((await digestPrefix(bytes)) !== list.expected) return null;
+  const text = new TextDecoder().decode(bytes);
+  return checkWordList(text).ok ? text : null;
+}
+
+/** Downloads a list and stores it only if it is intact: its text, or null. */
+async function download(cache: Cache, list: Served): Promise<string | null> {
   const response = await fetch(list.path, { credentials: "omit", redirect: "error" });
   if (!response.ok) return null;
   const bytes = await response.arrayBuffer();
-  if ((await digestPrefix(bytes)) !== list.expected) return null;
+  const text = await intact(bytes, list);
+  if (text === null) return null;
   await cache.put(list.path, new Response(bytes, { headers: { "Content-Type": "text/plain" } }));
-  return bytes;
+  return text;
 }
 
 /**
- * A cached list's bytes if they still hash to its name, else null; an entry that doesn't is
- * deleted, so the caller downloads it again.
+ * A cached list's text if it is still intact, else null; an entry that isn't is deleted, so the
+ * caller downloads it again and no bad entry is read twice.
  */
-async function cachedBytes(cache: Cache, list: Served): Promise<ArrayBuffer | null> {
+async function cachedText(cache: Cache, list: Served): Promise<string | null> {
   const response = await cache.match(list.path);
   if (response === undefined) return null;
-  const bytes = await response.arrayBuffer();
-  if ((await digestPrefix(bytes)) === list.expected) return bytes;
-  await cache.delete(list.path);
-  return null;
+  const text = await intact(await response.arrayBuffer(), list);
+  if (text === null) await cache.delete(list.path);
+  return text;
 }
 
-/** Opens a list for the board (hashing its bytes once), or null if it can't be had intact. */
+/** Opens a list for the board (hashing and checking it once), or null if it isn't intact. */
 async function open(cache: Cache, list: Served): Promise<PublicWordList | null> {
   const known = opened.get(list.path);
-  if (known !== undefined) return known;
-  const bytes = (await cachedBytes(cache, list)) ?? (await download(cache, list));
-  if (bytes === null) return null;
-  const text = new TextDecoder().decode(bytes);
-  // Only a word list in the built format: lower-case `a`–`z` words, sorted, one per line.
-  if (!checkWordList(text).ok) return null;
+  if (known !== undefined) {
+    // Most recently used goes last, so the least recently used is the one dropped.
+    opened.delete(list.path);
+    opened.set(list.path, known);
+    return known;
+  }
+  const text = (await cachedText(cache, list)) ?? (await download(cache, list));
+  if (text === null) return null;
   const words = createWordList(list.id, list.version, text);
   opened.set(list.path, words);
   for (const path of opened.keys()) {
@@ -122,7 +134,7 @@ async function open(cache: Cache, list: Served): Promise<PublicWordList | null> 
   return words;
 }
 
-/** Makes sure a list is cached (downloading it if it isn't); its bytes are hashed only then. */
+/** Makes sure a list is cached (downloading it if it isn't); it is hashed and checked only then. */
 async function ensure(cache: Cache, list: Served): Promise<void> {
   if ((await cache.match(list.path)) === undefined) await download(cache, list);
 }
