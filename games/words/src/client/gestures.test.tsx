@@ -84,14 +84,22 @@ const frame = (): HTMLElement => {
   return found;
 };
 const grid = (): HTMLElement => document.querySelector<HTMLElement>(".ym-w-grid")!;
+/** The click a browser sends after a drag is ignored until the next tick. */
+const afterDrag = (): Promise<void> =>
+  act(async () => {
+    await new Promise((done) => setTimeout(done, 0));
+  });
 const rackTile = (name: string): HTMLElement => screen.getByRole("button", { name });
 const rackNames = (): (string | null)[] =>
   [...document.querySelectorAll("[data-rack-id]")].map((tile) => tile.getAttribute("aria-label"));
+/** Where the last pointermove was: a release happens there, as a real pointer's does. */
+let lastAt = { clientX: 0, clientY: 0 };
 const move = (clientX: number, clientY: number, pointerId = 1): void => {
+  if (pointerId === 1) lastAt = { clientX, clientY };
   fireEvent.pointerMove(window, { pointerId, clientX, clientY });
 };
 const release = (pointerId = 1): void => {
-  fireEvent.pointerUp(window, { pointerId });
+  fireEvent.pointerUp(window, { pointerId, ...lastAt });
 };
 const grab = (element: HTMLElement, x = 5, y = RACK_TOP + 5, extra = {}): void => {
   fireEvent.pointerDown(element, { pointerId: 1, clientX: x, clientY: y, button: 0, ...extra });
@@ -182,6 +190,109 @@ describe("dragging tiles", () => {
       move(-50, -50);
       release();
       expect(placedS()).toBe(false);
+    });
+
+    it("announces two returns of the same tile in a row, each time", async () => {
+      place();
+      const announced: string[] = [];
+      const watch = new MutationObserver(() => undefined);
+      watch.observe(document.querySelector(".ym-w-status") as Node, {
+        childList: true,
+        subtree: true,
+      });
+      const collect = (): void => {
+        for (const r of watch.takeRecords())
+          for (const n of r.addedNodes) announced.push(n.textContent ?? "");
+      };
+      lifted();
+      move(150, 360);
+      release();
+      collect();
+      await afterDrag();
+      fireEvent.click(rackTile("S, 1 point"));
+      fireEvent.click(square(SR + 2, SC));
+      lifted();
+      move(150, 360);
+      release();
+      collect();
+      watch.disconnect();
+      expect(announced.filter((text) => text === "Tile S returned to the rack.")).toHaveLength(2);
+    });
+
+    it("decides by the release point: the frame's last pixel is the board, the next is not", () => {
+      place();
+      lifted();
+      move(FRAME - 1, 215);
+      release();
+      expect(placedS()).toBe(false);
+      expect(square(SR + 3, SC + 7).getAttribute("aria-label")).toContain("S, 1 point");
+      grab(square(SR + 3, SC + 7), 290, 215);
+      move(FRAME, 215);
+      expect(document.querySelector(".ym-w-ghost")?.getAttribute("data-back")).toBe("true");
+      release();
+      expect(rackNames()).toContain("S, 1 point");
+    });
+
+    it("treats y = -1 as off the board", () => {
+      place();
+      lifted();
+      move(150, -1);
+      release();
+      expect(rackNames()).toContain("S, 1 point");
+    });
+
+    it("decides by where the pointer is released, not where it last moved", () => {
+      place();
+      lifted();
+      move(150, 215);
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 150, clientY: 360 });
+      expect(rackNames()).toContain("S, 1 point");
+    });
+
+    it("leaves the tile on its square when the pointer is cancelled over the board", () => {
+      place();
+      lifted();
+      move(150, 215);
+      fireEvent.pointerCancel(window, { pointerId: 1 });
+      expect(placedS()).toBe(true);
+      expect(rackNames()).not.toContain("S, 1 point");
+    });
+
+    it("snaps a tile dropped on another placed tile to the nearest empty square, its own included", () => {
+      place();
+      fireEvent.click(rackTile("X, 8 points"));
+      fireEvent.click(square(SR + 3, SC));
+      grab(square(SR + 2, SC), 150, 190);
+      move(at(SR + 3, SC).clientX, at(SR + 3, SC).clientY);
+      release();
+      expect(square(SR + 3, SC).getAttribute("aria-label")).toContain("X, 8 points");
+      expect(placedS()).toBe(true);
+    });
+
+    it("ignores a second pointer while one drag is live", () => {
+      place();
+      lifted();
+      move(150, 360);
+      move(150, 215, 2);
+      release(2);
+      expect(document.querySelector(".ym-w-ghost")?.getAttribute("data-back")).toBe("true");
+      expect(placedS()).toBe(true);
+      release();
+      expect(placedS()).toBe(false);
+    });
+
+    it("asks for a returned blank's letter again when it is placed again", async () => {
+      table();
+      fireEvent.click(rackTile("Blank tile"));
+      fireEvent.click(square(SR + 2, SC));
+      fireEvent.click(screen.getByRole("button", { name: "Z" }));
+      grab(square(SR + 2, SC), 150, 190);
+      move(150, 360);
+      release();
+      await afterDrag();
+      fireEvent.click(rackTile("Blank tile"));
+      fireEvent.click(square(SR + 2, SC));
+      expect(screen.getByRole("dialog", { name: "Choose a letter for the blank" })).toBeTruthy();
     });
 
     it("returns when the pointer is cancelled off the board", () => {

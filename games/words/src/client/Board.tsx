@@ -139,7 +139,7 @@ function Table(
     back: boolean;
   } | null>(null);
   /** What the last return of a tile to the rack announces (07 §2). */
-  const [note, setNote] = useState<string | null>(null);
+  const [note, setNote] = useState<{ text: string; n: number } | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   // A new view of the game (an opponent played, a refetch): keep what the player arranged where
@@ -166,13 +166,13 @@ function Table(
   const frame = useRef<HTMLDivElement>(null);
   const rackBox = useRef<HTMLDivElement>(null);
   const preview = useRef(props.preview);
-  const live = useRef({ viewport, t });
+  const live = useRef({ viewport, t, rack });
   const dragged = useRef(false);
   const dragging = useRef(false);
   const arranged = useRef(false);
   useEffect(() => {
     preview.current = props.preview;
-    live.current = { viewport, t };
+    live.current = { viewport, t, rack };
   });
 
   // The saved order is written only after the player reorders, and only while the game is on; a
@@ -246,12 +246,17 @@ function Table(
   }
 
   function put(source: Source, target: Target): void {
+    const now = live.current;
+    // A tile that is no longer on that square (a new version of the game took it) isn't moved.
+    const held = source.kind === "square" ? now.t.placed[source.key] : undefined;
+    if (source.kind === "square" && held === undefined) return;
     if (target.kind === "rack") arranged.current = true;
-    setT((now) => move(now, rack, source, target));
+    setT((before) => move(before, now.rack, source, target));
     clearTransient();
-    if (source.kind === "square" && target.kind === "rack") {
-      const tile = rack[t.placed[source.key]?.id ?? -1] ?? "";
-      setNote(`${heldName(tile)} returned to the rack.`);
+    if (held !== undefined && target.kind === "rack") {
+      const text = `${heldName(now.rack[held.id] ?? "")} returned to the rack.`;
+      // A new key each time, so the same words twice in a row are announced twice.
+      setNote((last) => ({ text, n: (last?.n ?? 0) + 1 }));
     }
   }
 
@@ -327,6 +332,7 @@ function Table(
     let moved = false;
     let hover: ReturnType<typeof setTimeout> | null = null;
     let at = start;
+    let back = false;
     const stopHover = (): void => {
       if (hover !== null) clearTimeout(hover);
       hover = null;
@@ -339,7 +345,7 @@ function Table(
       moved = true;
       const target = aim();
       // A tile from the board let go anywhere but a square of the board goes back to the rack.
-      const back = source.kind === "square" && !overBoard(at.x, at.y - lift);
+      back = source.kind === "square" && !overBoard(at.x, at.y - lift);
       setGhost({ tile, x: at.x, y: at.y - lift, back });
       setDropTarget(target?.kind === "square" ? target.key : null);
       const box = frame.current?.getBoundingClientRect();
@@ -367,9 +373,15 @@ function Table(
       setTimeout(() => {
         dragged.current = false;
       }, 0);
-      const target = drop ? aim() : null;
+      if (!drop) {
+        // A cancelled drag puts nothing down; a tile that was off the board still goes to the rack.
+        if (back) put(source, { kind: "rack", before: null });
+        return;
+      }
+      at = { x: e.clientX, y: e.clientY };
+      const target = aim();
       if (target !== null) put(source, target);
-      else if (source.kind === "square" && (!drop || !overBoard(at.x, at.y - lift))) {
+      else if (source.kind === "square" && !overBoard(at.x, at.y - lift)) {
         put(source, { kind: "rack", before: null });
       }
     };
@@ -474,7 +486,7 @@ function Table(
       {canArrange && (
         <>
           <div className="ym-w-status" aria-live="polite" aria-atomic="true">
-            {note !== null && <span>{note}</span>}
+            {note !== null && <span key={note.n}>{note.text}</span>}
             <Status analysis={analysis} answer={answer} held={held} sent={sent} canAct={canAct} />
           </div>
           {message !== null && (

@@ -254,10 +254,12 @@ test("a game can be resigned straight after it starts", async ({ page: ann, frie
   const racked = await waiting.locator("[data-rack-id]").count();
   await waiting.mouse.move(placedBox.x + placedBox.width / 2, placedBox.y + placedBox.height / 2);
   await waiting.mouse.down();
+  // (2, 2) is the page's top-left corner, above the board whatever the layout.
   await waiting.mouse.move(2, 2, { steps: 5 });
   await expect(waiting.locator('.ym-w-ghost[data-back="true"]')).toHaveCount(1);
   await waiting.mouse.up();
   await expect(waiting.locator('.ym-w-tile[data-state="planned"]')).toHaveCount(0);
+  await expect(waiting.locator("[data-square]").nth(112)).toHaveAccessibleName(/empty/u);
   await expect(waiting.locator("[data-rack-id]")).toHaveCount(racked + 1);
   await waiting.locator("[data-rack-id]").first().click();
   await waiting.locator("[data-square]").nth(112).click();

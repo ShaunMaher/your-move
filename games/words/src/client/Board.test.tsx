@@ -947,16 +947,22 @@ describe("when it isn't your turn", () => {
     );
   });
 
-  it("sends a planned tile dragged off the board back to the rack", () => {
-    setup(fresh({ turn: 1 }), { yourTurn: false });
+  it("sends a planned tile dragged off the board back to the rack (every rectangle is empty here, so any drop is off the board), and sends nothing", () => {
+    vi.useFakeTimers();
+    const { preview, submit } = setup(fresh({ turn: 1 }), { yourTurn: false });
     fireEvent.click(rackTile("S, 1 point"));
     fireEvent.click(square(SR, SC + 3));
     expect(square(SR, SC + 3).getAttribute("aria-label")).toContain("Planned tile S");
     fireEvent.pointerDown(square(SR, SC + 3), { pointerId: 1, clientX: 5, clientY: 5 });
     fireEvent.pointerMove(window, { pointerId: 1, clientX: 400, clientY: 400 });
-    fireEvent.pointerUp(window, { pointerId: 1 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 400, clientY: 400 });
     expect(square(SR, SC + 3).getAttribute("aria-label")).toContain("empty");
     expect(screen.getByText("Tile S returned to the rack.")).toBeTruthy();
+    act(() => {
+      vi.advanceTimersByTime(PREVIEW_MS * 4);
+    });
+    expect(preview).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it("says it is a plan even when nobody is to act", () => {
