@@ -137,6 +137,46 @@ describe("the proxy driver (M2a review S-7)", () => {
     sqlite.close();
   });
 
+  it.each([
+    ["COMMIT", 1],
+    ["ROLLBACK", 0],
+  ])(
+    "refuses %s closing the adapter's own transaction, so the rest of the batch doesn't run (issue #13 S-3)",
+    (statement, kept) => {
+      // The backstop behind the text check: called here without it.
+      const sqlite = openSqlite(":memory:");
+      sqlite.exec("CREATE TABLE t (x INTEGER)");
+      const batch = ["INSERT INTO t VALUES (1)", statement, "INSERT INTO t VALUES (2)"];
+      expect(() => {
+        inTransaction(sqlite, () => {
+          for (const each of batch) testing.runLeavingNoTransaction(sqlite, each, [], "run");
+        });
+      }).toThrow(TransactionControlError);
+      expect(sqlite.isTransaction).toBe(false);
+      // What the closing statement committed stays; nothing after it ran.
+      expect(sqlite.prepare("SELECT count(*) AS n FROM t").get()).toEqual({ n: kept });
+      sqlite.close();
+    },
+  );
+
+  it("keeps the error of a statement that failed and rolled its transaction back", () => {
+    const sqlite = openSqlite(":memory:");
+    sqlite.exec("CREATE TABLE t (x INTEGER)");
+    sqlite.exec(
+      "CREATE TRIGGER t_refuse BEFORE INSERT ON t WHEN new.x = 2 BEGIN SELECT RAISE(ROLLBACK, 'refused'); END",
+    );
+    // SQLite's own error, not TransactionControlError.
+    expect(() => {
+      inTransaction(sqlite, () => {
+        testing.runLeavingNoTransaction(sqlite, "INSERT INTO t VALUES (1)", [], "run");
+        testing.runLeavingNoTransaction(sqlite, "INSERT INTO t VALUES (2)", [], "run");
+      });
+    }).toThrow("refused");
+    expect(sqlite.isTransaction).toBe(false);
+    expect(sqlite.prepare("SELECT count(*) AS n FROM t").get()).toEqual({ n: 0 });
+    sqlite.close();
+  });
+
   it("still runs ordinary statements that start with a comment", async () => {
     const sqlite = openSqlite(":memory:");
     const db = testing.nodeDatabase(sqlite);
