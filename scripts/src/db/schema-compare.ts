@@ -52,7 +52,10 @@ function describeSchema(sqlite: DatabaseSync): SchemaDescription {
   const facts = new Map<string, string>();
   const objects = rows(
     sqlite,
-    "SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' OR type = 'index' ORDER BY type, name",
+    // Every object, SQLite's own included: SQLite refuses a user object whose name starts with
+    // `sqlite_` (in any case), so a filter could only hide something (B1-S-2), and comparing its
+    // own tables costs nothing (`sqlite_sequence` even shows AUTOINCREMENT, `sqlite_stat1` ANALYZE).
+    "SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY type, name",
   );
   for (const object of objects) {
     const name = String(object["name"]);
@@ -213,26 +216,22 @@ export function describeTableClauses(sql: string): SchemaDescription {
     } else if (isWord(first, "foreign")) {
       const columns = isPunctuation(named[2], "(") ? named.slice(3, closingParen(named, 2)) : [];
       const at = named.findIndex((token) => isWord(token, "references"));
+      const parent = at === -1 ? undefined : named[at + 1]?.text;
       const deferrable = deferrability(named);
-      if (deferrable !== undefined) {
+      // A key without a parent table isn't SQL SQLite stores (B1-P-3).
+      if (deferrable !== undefined && parent !== undefined) {
         const from = columns
           .filter((token) => !isPunctuation(token, ","))
           .map((token) => token.text)
           .join(", ");
-        facts.set(
-          `foreign key (${from}) → ${String(named[at + 1]?.text)}: deferrable`,
-          json(deferrable),
-        );
+        facts.set(`foreign key (${from}) → ${parent}: deferrable`, json(deferrable));
       }
     } else if (!isWord(first, "primary", "unique") && first !== undefined) {
       const { clauses, references } = columnClauses(part);
       if (clauses.length > 0) facts.set(`column ${first.text}: clauses`, json(clauses));
       const deferrable = deferrability(part);
-      if (deferrable !== undefined) {
-        facts.set(
-          `foreign key (${first.text}) → ${String(references)}: deferrable`,
-          json(deferrable),
-        );
+      if (deferrable !== undefined && references !== undefined) {
+        facts.set(`foreign key (${first.text}) → ${references}: deferrable`, json(deferrable));
       }
     }
   }
@@ -259,7 +258,7 @@ export function compareSchemas(
 
 /** Describes the schema `folder`'s migrations build in a fresh in-memory database. */
 export function describeMigrations(folder: string): SchemaDescription {
-  const sqlite = new DatabaseSync(":memory:");
+  const sqlite = new DatabaseSync(":memory:", { defensive: true });
   try {
     applyMigrationFolder(sqlite, folder);
     return describeSchema(sqlite);

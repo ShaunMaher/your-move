@@ -145,6 +145,39 @@ describe("compareSchemas over migration folders (P2-2)", () => {
     );
   });
 
+  it.each(["sqlite1_purge", "sqliteXpurge", "SQLITE1_purge"])(
+    "reports a trigger named %s, which only looks like one of SQLite's own (B1-S-2)",
+    (name) => {
+      addMigration(
+        `CREATE TRIGGER ${name} AFTER INSERT ON \`sessions\` BEGIN DELETE FROM \`sessions\` WHERE 1; END;`,
+      );
+      expect(differences()).toEqual([
+        expect.stringMatching(
+          new RegExp(`^trigger ${name} .* is not in schema\\.ts$`, "u"),
+        ) as unknown,
+      ]);
+    },
+  );
+
+  it("compares SQLite's own tables too, so AUTOINCREMENT shows as sqlite_sequence", () => {
+    edit(
+      "`id` text PRIMARY KEY NOT NULL,\n\t`actor_key`",
+      "`id` integer PRIMARY KEY AUTOINCREMENT,\n\t`actor_key`",
+    );
+    expect(differences()).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("table sqlite_sequence (exists) is not in schema.ts") as unknown,
+      ]),
+    );
+  });
+
+  it("opens its databases defensively, so writable_schema can't rewrite the schema (B1-S-8)", () => {
+    addMigration(
+      "PRAGMA writable_schema = 1;\n--> statement-breakpoint\nUPDATE sqlite_schema SET sql = 'CREATE TABLE x (y)' WHERE name = 'admin_audit';",
+    );
+    expect(() => describeMigrations(copy)).toThrow(/may not be modified/u);
+  });
+
   it("reports a table, index or trigger schema.ts doesn't have, and one it lacks", () => {
     addMigration(
       [
@@ -214,6 +247,10 @@ describe("describeTableClauses (issue #13 S-1)", () => {
     expect(
       clauses("CREATE TABLE t (a, b, FOREIGN KEY (a, b) REFERENCES p (x, y) DEFERRABLE)"),
     ).toEqual({ "foreign key (a, b) → p: deferrable": JSON.stringify("deferrable") });
+  });
+
+  it("makes no foreign-key fact without a parent table (B1-P-3)", () => {
+    expect(clauses("CREATE TABLE t (a text DEFERRABLE, FOREIGN KEY (a) DEFERRABLE)")).toEqual({});
   });
 
   it("keeps SQL without a column list whole", () => {
