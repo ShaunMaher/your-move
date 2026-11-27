@@ -5,9 +5,9 @@
  * `preview`, and renders only what the view contains. Resigning is the shell's menu.
  *
  * Previews: the score and the placement rules come from the engine's view-level analysis, at
- * once, offline. Whether the words are in the dictionary comes from the shell's `preview` (local
- * when the shell has the list, else the server), debounced; until it answers, the score shows
- * alone (07 §3). Nothing here is authoritative: the server validates every play.
+ * once, offline. Whether the words are in the dictionary comes from the engine run here on the
+ * game's own public list when the shell has handed it over (words §10.5), else from the shell's
+ * `preview` (the server), debounced; until that answers, the score shows alone (07 §3). Nothing here is authoritative: the server validates every play.
  */
 import { isGameError, shuffle, type GameError } from "@your-move/sdk";
 import { formatText, type BoardProps, type PublicWordList } from "@your-move/sdk/client";
@@ -17,8 +17,10 @@ import {
   analyseViewPlay,
   engines,
   findRuleset,
+  previewViewPlay,
   tilePoints,
   type Action,
+  type Placement,
   type PreviewResult,
   type Ruleset,
   type View,
@@ -171,12 +173,13 @@ function Table(
   const dragged = useRef(false);
   const dragging = useRef(false);
   const arranged = useRef(false);
+  const wordList = gameWordList(props.resources, view);
   const noPlay = useNoPlayHint({
     active: canAct,
     version: game.version,
     ruleset,
     view,
-    lexicon: gameWordList(props.resources, view),
+    lexicon: wordList,
     paused: dragging,
   });
   useEffect(() => {
@@ -207,7 +210,13 @@ function Table(
   const playable = analysis !== null && !isGameError(analysis);
   // An answer holds for one version of the game and one set of tiles.
   const checkKey = `${String(game.version)}:${JSON.stringify(placements)}`;
-  const answer = answers.get(checkKey) ?? null;
+  // With the game's own public list the check is local, instant and free; on any doubt, the server.
+  const local = useMemo(
+    () => (playable && wordList !== null ? localAnswer(view, placements, wordList) : null),
+    [playable, view, placements, wordList],
+  );
+  // Off turn only a local answer shows: nothing is asked of the server for a plan (07 §2).
+  const answer = local ?? (canAct ? (answers.get(checkKey) ?? null) : null);
   const settled = answer !== null && answer !== "unchecked";
   const refused = isRefusal(answer) ? answer : null;
   // A server-only list is checked over the network: ask less often.
@@ -216,7 +225,7 @@ function Table(
     : PREVIEW_DELAY_MS;
 
   useEffect(() => {
-    if (!canAct || !playable || settled) return;
+    if (!canAct || !playable || settled || local !== null) return;
     const timer = setTimeout(() => {
       const remember = (result: Answer): void => {
         setAnswers((now) => {
@@ -246,7 +255,7 @@ function Table(
     return () => {
       clearTimeout(timer);
     };
-  }, [canAct, playable, settled, checkKey, placements, delay]);
+  }, [canAct, playable, settled, local, checkKey, placements, delay]);
 
   function clearTransient(): void {
     setNote(null);
@@ -651,6 +660,22 @@ function gameWordList(resources: Props["resources"], view: View): PublicWordList
   return list?.id === view.dictionary.id ? list : null;
 }
 
+/**
+ * The engine's own preview computed here from the view and the game's public list (words §10.5),
+ * or null when it can't be trusted: a list that throws leaves the question to the server.
+ */
+function localAnswer(
+  view: View,
+  placements: readonly Placement[],
+  list: PublicWordList,
+): Answer | null {
+  try {
+    return previewViewPlay(view, placements, (word) => list.has(word));
+  } catch {
+    return null;
+  }
+}
+
 /** Off turn, what the status line says about the tiles on the board. */
 const PLANNING = "Not your turn yet. Tiles you place now are only a plan.";
 
@@ -685,8 +710,8 @@ function Status(props: {
   // Selecting a tile (by tap or by keyboard) is announced, with what to do next.
   const holding = held === null ? null : <span>{held} selected. Choose a square.</span>;
   if (props.sent) return <span>Sent. Waiting for the board to update.</span>;
-  // Off turn the tiles are a plan: the local score and the placement rules show, the word list
-  // isn't asked (07 §2), and the line says so.
+  // Off turn the tiles are a plan: the local score and the placement rules show, and the words
+  // only when the board has the list (07 §2); nothing is asked of the server. The line says so.
   const plan = props.canAct ? null : <span className="ym-w-meta">{PLANNING}</span>;
   if (analysis === null) {
     if (!props.canAct) {
@@ -709,11 +734,8 @@ function Status(props: {
     );
   }
   const words = analysis.words.map((w) => `${w.word.toUpperCase()} ${String(w.score)}`).join(", ");
-  // An answer from before the turn passed is not shown while the tiles are only a plan.
-  const current = props.canAct ? answer : null;
-  const result =
-    current !== null && current !== "unchecked" && !isGameError(current) ? current : null;
-  const refusal = isRefusal(current) ? current : null;
+  const result = answer !== null && answer !== "unchecked" && !isGameError(answer) ? answer : null;
+  const refusal = isRefusal(answer) ? answer : null;
   return (
     <>
       {holding}

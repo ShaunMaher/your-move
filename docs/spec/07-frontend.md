@@ -143,9 +143,11 @@ by the shell for every game.)
   opacity), named "Planned tile E, 1 point, not your turn, not played", and the status line says
   "Not your turn yet. Tiles you place now are only a plan." The local engine analysis still
   shows, so a planner sees what the plan would score and why tiles can't go where they are (the
-  score and words, or the placement rule's text), but the word list isn't checked: no "Checking
-  the words…" or word-list answer, no `preview` request and nothing else sent, and Play, Swap and
-  Pass stay disabled. Recall, Shuffle and moving the tiles work as usual. When the turn
+  score and words, or the placement rule's text). When the board has the game's public word list
+  (§3), the plan's words are also checked against it, exactly as on the player's turn ("All words
+  are in the word list." or the words that aren't), because it costs nothing and helps planning;
+  with no list they aren't checked. Either way there is no "Checking the words…", no `preview`
+  request and nothing else sent, and Play, Swap and Pass stay disabled. Recall, Shuffle and moving the tiles work as usual. When the turn
   becomes theirs, the same tiles become ordinary placements in place, and the word
   check starts. When a new version of the game takes a planned tile's square, the tile goes back
   to the rack; no tile is lost or overlaps another.
@@ -190,9 +192,13 @@ dictionaries the client computes placement and score locally and gets word valid
 debounced preview endpoint (05). Until validity is known (either way),
 previews show score only. The module itself never downloads a list: holding and caching the list
 for public dictionaries is the shell's job. The shell hands the game's public list to the board as
-`resources.dictionary` (02 §3), and the board uses it for the no-play hint (words §10.8); word
-validity in previews still comes from the shell's `preview`, which asks the server. Answering
-previews from the list locally is a follow-up that can build on the same `resources` entry.
+`resources.dictionary` (02 §3), and the board uses it for the no-play hint (words §10.8) and for
+previews (alpha A16): when the list's id is the game's own dictionary's, the board computes the
+whole preview locally with the engine's own code, the same score, words, bingo and error codes in
+the same check order as the server's `preview` (words §10.5), instantly and with no request. When
+there is no list, the id differs, or the local computation fails, the board asks the shell's
+`preview` (the server) as before; a local answer is never shown that the server could contradict,
+and Play still goes through `submit`, where the server is authoritative.
 
 ## 4. PWA requirements
 
@@ -286,8 +292,8 @@ previews from the list locally is a follow-up that can build on the same `resour
     three most recently used are kept. It is held as the list's sorted text (about one byte a character, 1.7 MB for
     the built-in list) with binary-search lookups and nothing built. A failed download, a digest
     that doesn't match, a text that isn't a word list, no Cache Storage, or a list that isn't
-    public hands nothing over, and the board goes on without it. Previews still answer
-    from the server; answering them from the list locally is a follow-up.
+    public hands nothing over, and the board goes on without it. Without it previews
+    answer from the server; with it the board previews locally (§3).
   - **Alpha refresh rates** (no realtime yet, 10 Alpha), only in a visible tab and also on focus
     and when the tab becomes visible: an open game polls every 5 s while it waits on someone else
     (a lobby, or another player's turn); the game list polls every 15 s whether or not anything

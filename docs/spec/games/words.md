@@ -343,7 +343,7 @@ dictionaries as a list from day one, so adding one is a data change plus a build
 - The server is authoritative. The client downloads the game's dictionary by versioned, hashed URL
   from the game envelope's `resources[].downloadUrl` (05), so it works even after the dictionary is
   disabled for new games, caches it (07 §4), and uses it only for local, non-authoritative checks:
-  the no-play hint (§10.8) and, as a follow-up, instant validity previews. The catalog (§10.1), which the new-game screen uses to choose a
+  the no-play hint (§10.8) and instant validity previews (§10.5). The catalog (§10.1), which the new-game screen uses to choose a
   dictionary, carries no download URL: nothing is previewed before a game exists.
 - Server lookup is a binary search directly over the sorted text. No index is built, so loading
   costs only I/O and no request pays a parse cost (Workers Free: 10 ms CPU/request). Dictionaries are
@@ -528,8 +528,12 @@ and the kit requires their different records to show up in a view (02 §6.3).
 
 `preview(state, seat, { type: "play", ... })` → `{ score, words: [{ word, score }], bingo }` or a
 `GameError`, with the same check order as `validate`. The client computes previews locally when the
-game's dictionary is `public` and loaded; otherwise it calls the server preview endpoint (05),
-debounced (§9.5).
+game's dictionary is `public` and loaded: the board runs the engine's own preview code on the
+viewer's view (`previewViewPlay`, the same `analysePlay` and the same word check as `validate`,
+`has()` backed by the handed-over list), so the result equals the server's for the same
+placements, error codes and order included. If there is no list, its id isn't the game's
+dictionary, or the local computation throws, it calls the server preview endpoint (05), debounced
+(§9.5). Submitting a play is always checked by the server.
 
 ### 10.6 Resign, timeout, result
 

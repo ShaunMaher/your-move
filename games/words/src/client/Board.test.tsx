@@ -1105,6 +1105,112 @@ describe("a finished game", () => {
   });
 });
 
+describe("the local preview", () => {
+  const PLAN_TEXT = "Not your turn yet. Tiles you place now are only a plan.";
+  const cats = (): Lexicon => wordList(["cat", "cats"]);
+  const waitOut = (): void => {
+    act(() => {
+      vi.advanceTimersByTime(PREVIEW_MS * 4);
+    });
+  };
+
+  it("checks the words at once from the game's own list, and asks the server nothing", () => {
+    vi.useFakeTimers();
+    const { preview } = setup(fresh(), { lexicon: cats() });
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.getByText("+6")).toBeTruthy();
+    expect(screen.getByText("All words are in the word list.")).toBeTruthy();
+    expect(screen.queryByText("Checking the words…")).toBeNull();
+    waitOut();
+    expect(preview).not.toHaveBeenCalled();
+    expect(button("Play").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("refuses the words the list lacks at once, with the engine's own text, and disables Play", () => {
+    vi.useFakeTimers();
+    const { preview } = setup(fresh(), { lexicon: wordList(["cat"]) });
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.getByText("Not in the word list: CATS.")).toBeTruthy();
+    expect(button("Play").hasAttribute("disabled")).toBe(true);
+    waitOut();
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("sends the play through submit, which the server decides", () => {
+    const { submit, preview } = setup(fresh(), { lexicon: cats() });
+    place("S, 1 point", SR, SC + 2);
+    fireEvent.click(button("Play"));
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("asks the server when there is no list", () => {
+    vi.useFakeTimers();
+    const { preview } = setup(fresh());
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.getByText("Checking the words…")).toBeTruthy();
+    waitOut();
+    expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks the server when the list isn't the game's own", () => {
+    vi.useFakeTimers();
+    const { preview } = setup(fresh(), { lexicon: cats(), listId: "another" });
+    place("S, 1 point", SR, SC + 2);
+    waitOut();
+    expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks the server when the list throws", () => {
+    vi.useFakeTimers();
+    const broken: Lexicon = {
+      has: () => {
+        throw new Error("broken");
+      },
+      follows: () => 0,
+    };
+    const { preview } = setup(fresh(), { lexicon: broken });
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.getByText("Checking the words…")).toBeTruthy();
+    waitOut();
+    expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a planned play's words off turn from the list, with no request", () => {
+    vi.useFakeTimers();
+    const { preview, submit } = setup(fresh({ turn: 1 }), {
+      yourTurn: false,
+      lexicon: cats(),
+    });
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.getByText("+6")).toBeTruthy();
+    expect(screen.getByText("All words are in the word list.")).toBeTruthy();
+    expect(screen.getByText(PLAN_TEXT)).toBeTruthy();
+    waitOut();
+    expect(preview).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    expect(button("Play").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("shows a planned word the list lacks, off turn, without disabling anything new", () => {
+    vi.useFakeTimers();
+    const { preview } = setup(fresh({ turn: 1 }), { yourTurn: false, lexicon: wordList(["cat"]) });
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.getByText("Not in the word list: CATS.")).toBeTruthy();
+    waitOut();
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing and checks nothing off turn without a list", () => {
+    vi.useFakeTimers();
+    const { preview } = setup(fresh({ turn: 1 }), { yourTurn: false });
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.queryByText("All words are in the word list.")).toBeNull();
+    waitOut();
+    expect(preview).not.toHaveBeenCalled();
+  });
+});
+
 describe("the no-play hint", () => {
   const SWAP_HINT = "No word can be played with your tiles. Try swapping some.";
   const PASS_HINT = "No word can be played with your tiles. You can pass.";
