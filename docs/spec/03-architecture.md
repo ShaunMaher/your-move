@@ -336,13 +336,14 @@ filesystems are unsupported for the database anyway).
   `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`. The run reads the room left under each without counting;
   a nudge over either waits unclaimed for a later run (at the instance-wide cap the run stops),
   only claimed nudges are counted, and the instance-wide cap is alerted once per fixed window,
-  through a counter of its own. The room is read once per run, so a run also checks the
-  instance-wide count each claimed nudge adds: one that goes over the cap (only possible when two
-  runs overlap) isn't sent and is lost for that day like a failed send, and the run stops there, so
-  no fixed UTC day sends more than the cap (08 §4.2). Then `last_nudged_at` is claimed with one conditional update that
+  through a counter of its own. Then `last_nudged_at` is claimed with one conditional update that
   re-checks everything above — the seat, the game being `active` and the user's eligibility —
   **before** the email is sent (so two sweeps can't both send, an unsubscribe or a move in
-  between stops it, and a failed send isn't retried that day). It is a notification throttle, not game state: it is
+  between stops it, and a failed send isn't retried that day), and the claimed nudge is counted.
+  The room is read once per run, so the run also checks the instance-wide count each claimed nudge
+  adds: one that goes over the cap (only possible when two runs overlap) isn't sent, the run stops
+  there as at the cap, and that seat is due again once `NUDGE_INTERVAL_MS` (24 h) has passed since
+  the claim, so no fixed UTC day sends more than the cap (08 §4.2). It is a notification throttle, not game state: it is
   not a transition (§5.2) and doesn't bump `version`. The email is a fixed template: the game
   type's name, the other seated players' display names ("New player" for a name that isn't set,
   "Deleted player" for a deleted account, 02 §5, 04), the last public `describe` text (names filled in, "You" for the

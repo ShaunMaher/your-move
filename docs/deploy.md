@@ -181,8 +181,12 @@ Gmail allows a paid Workspace user 2,000 messages in any 24 hours (500 on a tria
 instance's email caps (sign-in codes 500 a day, invite emails 100, nudges 150) can each send up to
 twice their figure in the 24 hours around midnight UTC, so together at most 1,500, and the server
 refuses to start if `LIMIT_*` overrides could take that past `EMAIL_DAILY_QUOTA` (2,000 for
-`gmail`; set it to 500 on a trial, and lower the caps to fit). Use the sender user for this
-instance only. Move to a transactional provider before the instance grows beyond friends and
+`gmail`). On a trial set `EMAIL_DAILY_QUOTA=500` and lower the caps to fit, e.g.
+`LIMIT_OTP_EMAIL_GLOBAL_DAY=150`, `LIMIT_INVITE_EMAILS_GLOBAL_DAY=50` and
+`LIMIT_NUDGE_EMAILS_PER_DAY=50` (2 × 250 = 500); the tunnel compose file passes these four
+through from its env file, empty meaning the defaults. Use the sender user for this instance only.
+The `smtp` provider pointed at Google's SMTP relay with the same Workspace user shares its quota
+but has no default one, so set `EMAIL_DAILY_QUOTA` there too. Move to a transactional provider before the instance grows beyond friends and
 family.
 
 ## Web Push

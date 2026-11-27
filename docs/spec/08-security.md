@@ -84,7 +84,7 @@ generated `_headers` file for static assets (03 §9). One shared definition gene
 | OTP request per IP (bucketed, §4.1) | 20 / h | `429` |
 | OTP verify fails per email | 10 / h | `429` (temporary lockout) |
 | OTP verify per IP | 50 / h | `429` |
-| **OTP emails instance-wide** (sign-in and step-up codes, and the suspended notice) | 200 / h, 500 / day (sized in §4.2) | silent; alert; auto-Turnstile if configured |
+| **OTP emails instance-wide** (sign-in codes or suspended notices, step-up codes, account-deleted confirmations; exactly as §4.2) | 200 / h, 500 / day (sized in §4.2) | silent; alert; auto-Turnstile if configured |
 | **Failed verifies instance-wide** | 500 / h | alert; auto-Turnstile if configured |
 | Email invitees per user (every typed address, whatever it turns out to be) | 10 / day, 5 / h | `429`, nothing created |
 | Game creation per pair / per user (a pair is creator + `userId`, or creator + `emailId` for a typed address, 06 §6.7) | 5 / day / 30 / day | `429` |
@@ -162,10 +162,22 @@ whatever notification the operator uses.
 
 ### 4.2 Outbound email budget
 
-Every email the server sends counts toward exactly one of three instance-wide day caps: sign-in and
-step-up codes and the suspended notice toward `OTP_EMAIL_GLOBAL_DAY` (*C*), invite emails toward
-`INVITE_EMAILS_GLOBAL_DAY` (*I*), "It's your turn" nudges toward `NUDGE_EMAILS_PER_DAY` (*N*). A
-new kind of email MUST count toward one of them, or add a day cap of its own to the sum below.
+Every email the server sends counts toward exactly one of three instance-wide day caps, before it
+is sent, and is sent only if that cap (and, for the first group, the hourly one) has room:
+
+- `OTP_EMAIL_GLOBAL_DAY` (*C*), with `OTP_EMAIL_GLOBAL_HOUR`: the sign-in code, or for a suspended
+  account the suspended notice, of an `/otp/request` that may send (one that passed the per-email
+  and new-accounts limits; the others count under a key nothing reads, 06 §3.2); a step-up code,
+  once the per-user step-up limits passed (over the caps the challenge is still created, never
+  emailed, and the answer is the same `202`); and the account-deleted confirmation, after the
+  account is deleted (over the caps it is skipped and the deletion stands, 06 §7);
+- `INVITE_EMAILS_GLOBAL_DAY` (*I*): an invite email, counted for real only for an address that may
+  be mailed and passed the inviter's caps (06 §6.6);
+- `NUDGE_EMAILS_PER_DAY` (*N*): a claimed "It's your turn" nudge (03 §7).
+
+A new kind of email MUST count toward one of them, or add a day cap of its own to the sum below. A
+source scan in the tests lists every call that sends an email, in the server and both runtimes,
+with the counting it goes through, so an uncounted send fails CI.
 
 **Each cap lets out at most twice its figure in any 24 hours.** The caps are sliding windows over
 fixed UTC days (two adjacent days, the previous one weighted by how much of it the last 24 hours
@@ -193,20 +205,27 @@ a day (09 §2): a margin of 500, a quarter of the quota. The margin absorbs:
 - Google's limits being approximate and subject to change without notice, and lower for some
   accounts (a Workspace trial allows 500 a day: set `EMAIL_DAILY_QUOTA`, below).
 
-Nothing else sends from the sender user: it is dedicated to one instance and never used
+Nothing else uses the sender user's quota: it is dedicated to one instance and never used
 interactively (09 §2), and a message Gmail refuses with `401` is retried once only after it was
-refused.
+refused. An operator who points `smtp` at Google's SMTP relay with the same Workspace user shares
+that user's quota, and sets `EMAIL_DAILY_QUOTA` for it.
 
 **Sign-in comes first.** Each kind keeps its own cap rather than drawing on one shared budget, so
 invites and nudges at their worst can't use up the room sign-in codes have, and because *W* stays
 under the quota the provider never refuses a code for quota. Sign-in has two thirds of the budget.
-Draining the sign-in cap itself is a denial of service on sign-in, which T2's controls address
-(per-email and per-IP limits, auto-Turnstile once it is built), not this budget.
+Draining the sign-in cap itself is a denial of service on sign-in, accepted as F-12 until
+Turnstile is enforced (M4), and not something this budget prevents. It is cheap: requests to
+distinct addresses pass the per-email limits, so only the per-IP limit stands in the way, 20 an
+hour per IPv4 address (480 a day) and 80 an hour per IPv6 /56 (§4.1); about two IPv4 addresses, or
+one IPv6 /56, keep sign-in codes shut at 500 a day, and refused requests still count, so the cap
+stays shut while they keep asking. The budget bounds what raising the cap may cost: no higher than
+`EMAIL_DAILY_QUOTA` allows.
 
 **Startup check.** `EMAIL_DAILY_QUOTA` (09 §1) is the provider's limit on messages in any 24 hours:
 2,000 by default for `gmail`, unset for the other providers. When it is known, the configuration is
 refused unless *W* ≤ `EMAIL_DAILY_QUOTA`, so raising one of the three caps means lowering another
-or stating a larger quota; the error names the three `LIMIT_*` variables, *W* and the quota. With no
+or stating a larger quota; the error lists each cap as `NAME=value`, *W* with its sum, and the quota
+and where it came from (set, or the provider's default). With no
 quota known (another provider and `EMAIL_DAILY_QUOTA` unset) nothing is checked; operators of other
 providers set it to their plan's daily limit.
 
