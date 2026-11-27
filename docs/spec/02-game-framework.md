@@ -241,12 +241,15 @@ interface GameClientModule<Options, Action, View, PreviewResult> {
 ```
 
 `BoardResources` is `{ dictionary?: PublicWordList }`, where `PublicWordList` is `{ id, version,
-has(word), follows(prefix) }` (`follows` gives the letters that continue a prefix in some word, as
-a bit mask, bit 0 for `a`). The shell fills it only from a resource the envelope marks
+has(word), follows(prefix) }` (`follows` gives the letters `a`–`z` that continue a prefix in some
+word, as a bit mask, bit 0 for `a`). Lists hold lower-case `a`–`z` words only: the shell hands over
+only a list that passes the word-list check (words §9.1), and a board given a list it can't use,
+such as one with any other letter, treats it as no list. The shell fills it only from a resource the envelope marks
 `distribution: "public"`, downloaded from that resource's own `downloadUrl` and checked against the
 hash in it (07 §4); a `serverOnly` list never reaches a client (08 T22). Every entry is optional:
-a board works without it and must not wait for it. The shell passes one object per game for as
-long as the game's resources stay the same, so a board may key work on its identity. The lookups
+a board works without it and must not wait for it. The shell passes the same object for as long
+as the game's resources stay the same (and games with the same list share it), so a board may
+key work on its identity. The lookups
 are binary searches over the list's sorted text, as on the server (words §9.4); nothing is built.
 
 The client keeps rendering support for **every version ever released** (per-version view schemas,

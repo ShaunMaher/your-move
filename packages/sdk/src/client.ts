@@ -16,6 +16,10 @@ import { formatText } from "./text.js";
  * sorted text, which the shell downloaded from the game's own resource and checked against the
  * hash in its URL. Only a resource marked `distribution: "public"` is ever handed over.
  *
+ * Words are lower-case `a`–`z` only: the shell hands over only a list that passes the word-list
+ * check, and `follows` answers only `a`–`z`. A board given a list it can't use, such as one with
+ * any other letter, must treat it as no list.
+ *
  * @public
  */
 export interface PublicWordList {
@@ -25,7 +29,7 @@ export interface PublicWordList {
   readonly version: number;
   /** Whether `word` is in the list. */
   has(word: string): boolean;
-  /** The letters that follow `prefix` in some word of the list, as a bit mask: bit 0 is `a`. */
+  /** The letters `a`–`z` that follow `prefix` in some word of the list, as a bit mask: bit 0 is `a`. */
   follows(prefix: string): number;
 }
 
@@ -55,7 +59,8 @@ export interface BoardProps<Action, View, PreviewResult> {
   readonly preview: (action: Action) => Promise<PreviewResult | GameError>;
   /**
    * The game's public resources once the shell has loaded them; absent until then, and always
-   * when there are none. The same object for as long as they don't change.
+   * when there are none. The same object for as long as they don't change; games with the same
+   * list get the same list object.
    */
   readonly resources?: BoardResources;
 }

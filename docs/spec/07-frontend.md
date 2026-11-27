@@ -262,13 +262,17 @@ previews from the list locally is a follow-up that can build on the same `resour
     credentials and refusing redirects), stores it only if its content hashes to the digest in its
     own file name, and the worker's clean-up of old shell caches leaves it alone. A resource
     without `distribution: "public"` is never fetched, whatever else it carries. Downloads run one
-    at a time. The game's own list, when it is public, is then read back from this cache (after
-    downloading and storing it the same way if it isn't there yet), its content checked against
-    the digest in its name again, and handed to the board as `resources.dictionary` (02 §3): one
-    object per game while its resources stay the same, held as the list's sorted text (about one
-    byte a character, 1.7 MB for the built-in list) with binary-search lookups and nothing built.
-    A failed download or read, a digest that doesn't match, no Cache Storage, or a list that
-    isn't public hands nothing over, and the board goes on without it. Previews still answer
+    at a time. The game's own list (its one resource of kind `dictionary`; with none or several,
+    nothing), when it is public, is then opened for the board as `resources.dictionary` (02 §3).
+    Its bytes are hashed once: as they are downloaded, or as they are read back from this cache,
+    where an entry that no longer matches its digest is deleted and downloaded again once. The
+    text must pass the word-list check (lower-case `a`–`z` words, sorted; about 30 ms on a laptop
+    for the built-in list, once per list and page). The opened list is kept for the page's life by
+    its URL, which names its content, so every game with that list gets the same object; at most
+    three are kept. It is held as the list's sorted text (about one byte a character, 1.7 MB for
+    the built-in list) with binary-search lookups and nothing built. A failed download, a digest
+    that doesn't match, a text that isn't a word list, no Cache Storage, or a list that isn't
+    public hands nothing over, and the board goes on without it. Previews still answer
     from the server; answering them from the list locally is a follow-up.
   - **Alpha refresh rates** (no realtime yet, 10 Alpha), only in a visible tab and also on focus
     and when the tab becomes visible: an open game polls every 5 s while it waits on someone else

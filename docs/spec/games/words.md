@@ -576,7 +576,9 @@ pass instead of hunting for a word that isn't there.
 - **Client only, from what the viewer may see.** The search runs in the browser on the viewer's
   view (the public board and `yourRack`) and the game's `public` word list, which the shell hands
   the board as `resources.dictionary` (02 §3, 07 §4) and the board uses only when its id is the
-  view's dictionary id. It never uses another seat's rack, the bag or a `serverOnly` list, sends
+  view's dictionary id. Words are lower-case `a`–`z` only (§9.1), which is all `follows`
+  answers; the shell hands over only a list that passes the word-list check, and a board must
+  treat any other as no list. It never uses another seat's rack, the bag or a `serverOnly` list, sends
   nothing, and needs no server, API or view change. Until the list is loaded, or when there is
   none, the board says nothing.
 - **Sound, never a false "no".** The search (`moves.ts` in the engine, pure and deterministic)
@@ -586,11 +588,20 @@ pass instead of hunting for a word that isn't there.
   first, then every length. A play it finds is confirmed with the engine's own placement rules
   (`analysePlay`) and the list. Its work is counted in steps (search nodes and list questions),
   never timed; past `HINT_MAX_STEPS` (150,000, measured in `moves.benchmark.test.ts` over the list
-  as the client holds it) it gives up
-  and the board says nothing. Only a finished search that found nothing shows the hint.
-- **When it runs.** Only on the player's turn in an active game, once per game version (the answer
-  is kept for that version), never while tiles are moved or dragged, and in slices of 5,000 steps
-  that yield to the browser between them. Off turn nothing runs.
+  as the client holds it) it gives up and the board says nothing. Only a finished search that
+  found nothing shows the hint. The search keeps its place on an explicit stack, so a slice stops
+  within `MAX_STEPS_PER_ACTION` (3) steps of its budget wherever it is, never only between
+  anchors.
+- **When it runs.** Only on the player's turn in an active game, once per game version and rack
+  (the answer is kept for them), in slices of 5,000 steps that yield to the browser between them.
+  While a tile is being dragged no slice runs; the search waits and goes on after the drop. A new
+  version or rack stops the search under way, and nothing it would have said is shown. Off turn
+  nothing runs.
+- **In every game, for every player** (A14-S-4). The hint is not an AI assist and is on whatever
+  the game's `aiAssistance` (02 §9.3): every player gets the same hint, and it is derived only
+  from public data (the board, the bag count, the public list) and the viewer's own rack, which
+  that player could search by hand. It never shows a play: the client keeps only whether a play
+  exists, never the play the search found. The rules text says so.
 - **What it says.** In the status line, in place of "Place tiles to make a word." while no tiles
   are on the board: "No word can be played with your tiles. Try swapping some." when the bag holds
   at least `swapMinBag` tiles (§3.2), else "No word can be played with your tiles. You can pass."
@@ -599,7 +610,9 @@ pass instead of hunting for a word that isn't there.
 - **Tests.** Rule tables; a property test on a small board where a brute-force enumerator asks
   `analysePlay` about every placement and must agree ("none" exactly when it finds nothing);
   every play found in random games under each ruleset passes `validate` with the real list; a
-  benchmark on mid- and late-game boards with 0, 1 and 2 blanks that records steps and time;
-  Board tests for each answer; shell tests that the list is handed over only when public, intact
-  and loaded, as one stable object; and a Playwright check that a real game shows the hint (the
+  benchmark on mid- and late-game boards with 0, 1 and 2 blanks that checks steps and records
+  time (as test annotations, never asserted); a test that no slice overshoots its budget by more
+  than one action; Board tests for each answer, a drag, a new version or rack mid-search and an
+  unmount mid-search; shell tests that the list is handed over only when public, intact, a word
+  list and loaded, as one object per list; and a Playwright check that a real game shows the hint (the
   rack in the viewer's own copy of the view rewritten to one that forms no word).
