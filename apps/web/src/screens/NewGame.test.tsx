@@ -1,9 +1,10 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { GameClientModule } from "@your-move/sdk/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { forgetCatalog } from "../catalog.js";
 import { loadGameClient } from "../games.js";
+import { forgetJoinLink, peekJoinLink } from "../join-link-handoff.js";
 import { fakeClient } from "../test-client.js";
 import {
   CATALOG,
@@ -231,7 +232,7 @@ describe("people you've played (alpha A12, 07 §1.1)", () => {
     const { calls } = withRecent(json(RECENT));
     await toPlayers();
     const group = screen.getByRole("group", { name: "People you've played" });
-    const boxes = screen.getAllByRole("checkbox");
+    const boxes = within(group).getAllByRole("checkbox");
     expect(boxes.map((box) => box.closest("label")?.textContent)).toEqual([
       `Bob, ${lastPlayed(2)}`,
       `Cy, ${lastPlayed(1)}`,
@@ -334,7 +335,7 @@ describe("people you've played (alpha A12, 07 §1.1)", () => {
     forgetCatalog();
     withRecent(problem(500, "INTERNAL"));
     await toPlayers();
-    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /last played/u })).toBeNull();
     expect(screen.getByLabelText("Their email address")).toBeDefined();
   });
 
@@ -417,5 +418,72 @@ describe("the notifications offer after creating a game (03 §7, alpha A8)", () 
       expect(window.location.pathname).toBe("/g/g9");
     });
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("a join link for the open seats (alpha A18, 07 §1.1)", () => {
+  const URL_MADE = "https://play.example.org/join#AbCdEfGhIjKlMnOpQrSt_-";
+
+  it("warns what a link does, lets the address stay empty, and hands the URL to the lobby only", async () => {
+    const { calls } = view(json({ ...created, joinLinkUrl: URL_MADE }, 201));
+    await toPlayers();
+    click("Review");
+    expect(screen.getByRole("alert").textContent).toContain("Enter an email address");
+    const toggle = screen.getByRole("checkbox", { name: "Add a join link for the open seats" });
+    expect(screen.getByText(/Anyone with the link can see the game and join it/u)).toBeDefined();
+    expect(screen.getByText(/waits for you to press Start/u)).toBeDefined();
+    fireEvent.click(toggle);
+    click("Review");
+    expect(await screen.findByText(/You'll get a join link for the open seats/u)).toBeDefined();
+    expect(screen.queryByText(/starts as soon as you create it/u)).toBeNull();
+    click("Create game");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/g/g9");
+    });
+    expect(calls.find((call) => call.method === "POST")?.body).toEqual({
+      gameType: "words",
+      options: CATALOG_GAME.defaults,
+      seats: 2,
+      invitees: [],
+      joinLink: true,
+    });
+    expect(peekJoinLink("g9")).toBe(URL_MADE);
+    expect(window.location.href).not.toContain("AbCdEf");
+    expect(JSON.stringify(window.sessionStorage)).not.toContain("AbCdEf");
+    expect(JSON.stringify(window.localStorage)).not.toContain("AbCdEf");
+    forgetJoinLink("g9");
+  });
+
+  it("still invites an address typed alongside the link, and checks it", async () => {
+    const { calls } = view(json({ ...created, joinLinkUrl: URL_MADE }, 201));
+    await toPlayers();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Add a join link for the open seats" }));
+    typeEmail("not an address");
+    click("Review");
+    expect(screen.getByRole("alert").textContent).toContain("leave a field empty");
+    typeEmail("alex@example.org");
+    click("Review");
+    click("Create game");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/g/g9");
+    });
+    expect(calls.find((call) => call.method === "POST")?.body).toMatchObject({
+      invitees: [{ email: "alex@example.org" }],
+      joinLink: true,
+    });
+    forgetJoinLink("g9");
+  });
+
+  it("sends no joinLink unless asked", async () => {
+    const { calls } = view();
+    await toPlayers();
+    typeEmail("alex@example.org");
+    click("Review");
+    click("Create game");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/g/g9");
+    });
+    expect(calls.find((call) => call.method === "POST")?.body).not.toHaveProperty("joinLink");
+    expect(peekJoinLink("g9")).toBeNull();
   });
 });

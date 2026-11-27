@@ -4,6 +4,7 @@
  * becomes visible (the session may have been ended from another device).
  */
 import { forgetCatalog } from "./catalog.js";
+import { clearJoinToken } from "./join-token.js";
 import { dropPushSubscription } from "./push.js";
 import { clearReturnPath } from "./return-path.js";
 
@@ -33,11 +34,12 @@ export function clearGameState(): void {
 
 /**
  * Everything the client keeps about the person, cleared whenever their session ends in this tab:
- * the return path, per-game state and this device's push subscription (06 §4; the server deleted
- * its copy with the session).
+ * the return path, a join link on its way (06 §6.8), per-game state and this device's push
+ * subscription (06 §4; the server deleted its copy with the session).
  */
 export function clearClientState(): void {
   clearReturnPath();
+  clearJoinToken();
   clearGameState();
   dropPushSubscription();
 }

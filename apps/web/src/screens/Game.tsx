@@ -14,22 +14,27 @@ import { loadCatalog } from "../catalog.js";
 import { rematchProblem } from "../create-problems.js";
 import {
   adapt,
+  createJoinLink,
   type GameEnvelope,
   type GameWithView,
   getGame,
   markSeen,
   previewAction,
   rematchGame,
+  removeSeat,
+  revokeJoinLink,
   submitAction,
   transition,
 } from "../game-api.js";
 import { loadGameClient } from "../games.js";
+import { forgetJoinLink, peekJoinLink } from "../join-link-handoff.js";
 import { rememberPushOffered, shouldOfferPush } from "../push.js";
 import { PushOffer } from "../PushOffer.js";
 import { navigate, Link } from "../router.js";
 import { useRefresh, useVisible } from "../use-refresh.js";
 import { openWordList } from "../word-lists.js";
 import { Frame } from "./Frame.js";
+import type { MadeLink } from "./JoinLinkPanel.js";
 import { Lobby, type LobbyAction } from "./Lobby.js";
 import { Page } from "./Page.js";
 
@@ -53,6 +58,16 @@ const LOBBY_PROBLEMS: Readonly<Record<string, string>> = {
   INVALID_SEATS: "The game can't start with these players and options.",
   NOT_ALLOWED: "You can't do that in this game.",
   ONBOARDING_REQUIRED: "Finish setting up your account first.",
+};
+
+const REMOVE_PROBLEMS: Readonly<Record<string, string>> = {
+  ...LOBBY_PROBLEMS,
+  NOT_FOUND: "That player is no longer in the lobby.",
+};
+
+const LINK_PROBLEMS: Readonly<Record<string, string>> = {
+  ...LOBBY_PROBLEMS,
+  RATE_LIMITED: "You've made too many join links today. Try again tomorrow.",
 };
 
 const RESIGN_PROBLEMS: Readonly<Record<string, string>> = {
@@ -114,6 +129,11 @@ export function Game({
     readonly module: GameClientModule | null;
   } | null>(null);
   const [names, setNames] = useState<ReadonlyMap<string, string>>(new Map());
+  /** A join link made with the game, shown once in its lobby (07 §1.1 step 5). */
+  const [freshLink] = useState(() => peekJoinLink(id));
+  useEffect(() => {
+    forgetJoinLink(id);
+  }, [id]);
   const fetching = useRef(false);
   /** A refetch asked for while one was in flight: one more runs when it ends. */
   const again = useRef(false);
@@ -303,6 +323,41 @@ export function Game({
     [api, id, game, apply, refetch, onSessionLost, pushKey],
   );
 
+  /** The creator removes a seat (05 `remove-seat`). */
+  const remove = useCallback(
+    async (playerId: string): Promise<string | null> => {
+      if (game === null) return null;
+      const result = await removeSeat(api, id, game.version, playerId);
+      if (result.ok) {
+        apply(result.data);
+        return null;
+      }
+      if (result.status === 401) onSessionLost();
+      // A missing row, or a game that moved on: show what is there now.
+      if (result.status === 404 || MOVED_ON.has(result.code)) void refetch(true);
+      return failureText(result.status, result.code, REMOVE_PROBLEMS);
+    },
+    [api, id, game, apply, refetch, onSessionLost],
+  );
+
+  /** The creator makes or rotates the join link; its URL is shown once (06 §6.8). */
+  const makeLink = useCallback(async (): Promise<MadeLink> => {
+    const result = await createJoinLink(api, id);
+    // The link doesn't change the game's version: refetch so its state shows.
+    void refetch(true);
+    if (result.ok) return { url: result.data.url };
+    if (result.status === 401) onSessionLost();
+    return { problem: failureText(result.status, result.code, LINK_PROBLEMS) };
+  }, [api, id, refetch, onSessionLost]);
+
+  const revokeLink = useCallback(async (): Promise<string | null> => {
+    const result = await revokeJoinLink(api, id);
+    void refetch(true);
+    if (result.ok) return null;
+    if (result.status === 401) onSessionLost();
+    return failureText(result.status, result.code, LOBBY_PROBLEMS);
+  }, [api, id, refetch, onSessionLost]);
+
   /** Opens the finished game's rematch, creating or accepting it first (05, 07 §1). */
   const rematch = useCallback(async (): Promise<string | null> => {
     const result = await rematchGame(api, id);
@@ -376,6 +431,10 @@ export function Game({
           gameName={gameName}
           game={load.game}
           onAction={act}
+          onRemove={remove}
+          onCreateLink={makeLink}
+          onRevokeLink={revokeLink}
+          freshLink={freshLink}
           notice={notice}
         />
         {offer}

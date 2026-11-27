@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { forgetCatalog } from "../catalog.js";
+import { handOffJoinLink } from "../join-link-handoff.js";
 import { boardResources, fakeClient, submitted } from "../test-client.js";
 import {
   CATALOG,
@@ -87,6 +88,146 @@ const click = (name: string | RegExp) => {
 };
 const posts = (calls: { method: string; path: string; body: unknown }[], suffix: string) =>
   calls.filter((call) => call.method === "POST" && call.path === `/api/v1/games/g1/${suffix}`);
+
+describe("the creator's join link and Remove (alpha A18, 07 §1)", () => {
+  const URL_SHOWN = "https://play.example.org/join#AbCdEfGhIjKlMnOpQrSt_-";
+  const linked = (active: boolean) =>
+    lobby({
+      joinLink: active
+        ? { active: true, expiresAt: Date.UTC(2026, 11, 5) }
+        : { active: false, expiresAt: null },
+      players: [
+        player({ seat: null, state: "joined", playerId: "p-sam" }),
+        alex({ seat: null, state: "joined", playerId: "p-alex" }),
+      ],
+    });
+  const panel = () => screen.getByRole("region", { name: "Join link" });
+
+  it("makes a link and shows it once with Copy, never fetching it again", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    let made = false;
+    const { calls } = open({
+      "GET /api/v1/games/g1": () => json({ game: linked(made), view: null }),
+      "POST /api/v1/games/g1/join-link": () => {
+        made = true;
+        return json({ url: URL_SHOWN, expiresAt: Date.UTC(2026, 11, 5) });
+      },
+    });
+    await screen.findByText("There's no join link for this game.");
+    expect(within(panel()).getByText(/Share it only with people you know/u)).toBeDefined();
+    fireEvent.click(within(panel()).getByRole("button", { name: "Make a join link" }));
+    const field = await screen.findByLabelText(/Share this link/u);
+    expect((field as HTMLInputElement).value).toBe(URL_SHOWN);
+    expect(await screen.findByText(/^Link active until/u)).toBeDefined();
+    fireEvent.click(within(panel()).getByRole("button", { name: "Copy link" }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(URL_SHOWN);
+    });
+    expect(await within(panel()).findByText("Link copied.")).toBeDefined();
+    fireEvent.click(within(panel()).getByRole("button", { name: "Done" }));
+    expect(screen.queryByLabelText(/Share this link/u)).toBeNull();
+    expect(screen.getByRole("button", { name: "Make a new link" })).toBeDefined();
+    expect(posts(calls, "join-link")).toHaveLength(1);
+    // The URL is in no answer the screen reads afterwards: only the one that made it.
+    expect(window.location.href).not.toContain("AbCdEf");
+  });
+
+  it("shows a link made with the game once, in its lobby", async () => {
+    handOffJoinLink("g1", URL_SHOWN);
+    open({ "GET /api/v1/games/g1": json({ game: linked(true), view: null }) });
+    const field = await screen.findByLabelText(/Share this link/u);
+    expect((field as HTMLInputElement).value).toBe(URL_SHOWN);
+    cleanup();
+    open({ "GET /api/v1/games/g1": json({ game: linked(true), view: null }) });
+    await screen.findByText(/^Link active until/u);
+    expect(screen.queryByLabelText(/Share this link/u)).toBeNull();
+  });
+
+  it("turns the link off", async () => {
+    let active = true;
+    const { calls } = open({
+      "GET /api/v1/games/g1": () => json({ game: linked(active), view: null }),
+      "DELETE /api/v1/games/g1/join-link": () => {
+        active = false;
+        return new Response(null, { status: 204 });
+      },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Turn the link off" }));
+    expect(await screen.findByText("There's no join link for this game.")).toBeDefined();
+    expect(calls.filter((call) => call.method === "DELETE")).toHaveLength(1);
+  });
+
+  it("says when too many links were made today", async () => {
+    open({
+      "GET /api/v1/games/g1": json({ game: linked(false), view: null }),
+      "POST /api/v1/games/g1/join-link": problem(429, "RATE_LIMITED"),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Make a join link" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("too many join links");
+  });
+
+  it("isn't shown to anyone but the creator", async () => {
+    open({
+      "GET /api/v1/games/g1": json({
+        game: lobby({
+          players: [
+            player({ seat: null, state: "joined", isYou: false, displayName: "Ada" }),
+            alex({ seat: null, state: "joined", isYou: true, isCreator: false }),
+          ],
+        }),
+        view: null,
+      }),
+    });
+    await screen.findByRole("heading", { level: 1, name: "Words lobby" });
+    expect(screen.queryByRole("region", { name: "Join link" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Remove/u })).toBeNull();
+  });
+
+  it("removes a seat after asking, with the version it saw", async () => {
+    const { calls } = open({
+      "GET /api/v1/games/g1": json({ game: linked(true), view: null }),
+      "POST /api/v1/games/g1/remove-seat": withView(
+        lobby({
+          version: 4,
+          players: [
+            player({ seat: null, state: "joined", playerId: "p-sam" }),
+            alex({ seat: null, state: "removed", playerId: "p-alex" }),
+          ],
+        }),
+        null,
+      ),
+    });
+    expect(screen.queryByRole("button", { name: "Remove You" })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Remove Alex" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove Alex?" });
+    expect(dialog.textContent).toContain("can't come back through it");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(posts(calls, "remove-seat")[0]?.body).toEqual({
+      expectedVersion: 3,
+      playerId: "p-alex",
+    });
+    expect(await screen.findByText("Removed")).toBeDefined();
+  });
+
+  it("says a seat already gone is gone, and refetches", async () => {
+    const { calls } = open({
+      "GET /api/v1/games/g1": json({ game: linked(true), view: null }),
+      "POST /api/v1/games/g1/remove-seat": problem(404, "NOT_FOUND"),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Remove Alex" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Remove" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("no longer in the lobby");
+    await waitFor(() => {
+      expect(
+        calls.filter((call) => call.method === "GET" && call.path === "/api/v1/games/g1"),
+      ).toHaveLength(2);
+    });
+  });
+});
 
 describe("the lobby", () => {
   it("shows the players with their states, the address the creator typed, and what they can do", async () => {

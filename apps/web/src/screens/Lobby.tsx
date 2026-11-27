@@ -1,7 +1,8 @@
 /**
  * A game waiting for its players (07 §1, 02 §4): who is invited and who has joined, Accept or
  * Decline for an invitation, Decline for a player already in (a past opponent added them without
- * asking, alpha A12), Start or Cancel for the creator.
+ * asking, alpha A12, or they joined through the link), and for the creator Start, Cancel, Remove
+ * per seat and the join-link controls (alpha A18).
  */
 import { useState } from "react";
 
@@ -9,6 +10,7 @@ import { Dialog } from "../Dialog.js";
 import type { GameEnvelope, Player } from "../game-api.js";
 import { seatLabel } from "../game-text.js";
 import { Link } from "../router.js";
+import { JoinLinkPanel, type MadeLink } from "./JoinLinkPanel.js";
 import { Page } from "./Page.js";
 import { Problem } from "./Problem.js";
 
@@ -20,6 +22,12 @@ interface LobbyProps {
   readonly gameName: string;
   readonly game: GameEnvelope;
   readonly onAction: (action: LobbyAction) => Promise<string | null>;
+  /** The creator removes a seat (05 `remove-seat`); what went wrong, or null. */
+  readonly onRemove: (playerId: string) => Promise<string | null>;
+  readonly onCreateLink: () => Promise<MadeLink>;
+  readonly onRevokeLink: () => Promise<string | null>;
+  /** A join link made at creation, to show once (06 §6.8). */
+  readonly freshLink: string | null;
   /** Why the screen may be out of date, or `null`. */
   readonly notice: string | null;
 }
@@ -40,10 +48,31 @@ function whoText(player: Player): string {
   return player.displayName ?? player.invitedAs ?? "Invited player";
 }
 
-export function Lobby({ appName, gameName, game, onAction, notice }: LobbyProps) {
-  const [pending, setPending] = useState<LobbyAction | null>(null);
+/** A row the creator may remove: someone else's that holds a seat (05 `remove-seat`). */
+function removable(player: Player): player is Player & { playerId: string } {
+  return (
+    player.playerId !== undefined &&
+    !player.isCreator &&
+    (player.state === "invited" || player.state === "joined")
+  );
+}
+
+export function Lobby({
+  appName,
+  gameName,
+  game,
+  onAction,
+  onRemove,
+  onCreateLink,
+  onRevokeLink,
+  freshLink,
+  notice,
+}: LobbyProps) {
+  const [pending, setPending] = useState<LobbyAction | "remove" | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  /** The seat whose removal is being confirmed. */
+  const [removing, setRemoving] = useState<(Player & { playerId: string }) | null>(null);
   const you = game.players.find((player) => player.isYou);
   const isCreator = you?.isCreator === true;
   const invited = game.yourInvitation !== null;
@@ -62,9 +91,21 @@ export function Lobby({ appName, gameName, game, onAction, notice }: LobbyProps)
     setConfirmCancel(false);
   }
 
+  async function remove(playerId: string) {
+    if (pending !== null) return;
+    setPending("remove");
+    setProblem(null);
+    const failure = await onRemove(playerId);
+    setPending(null);
+    setProblem(failure);
+    setRemoving(null);
+  }
+
   const status = isCreator
     ? joined < 2
-      ? "Waiting for the other players to accept."
+      ? game.joinLink?.active === true
+        ? "Waiting for players to join."
+        : "Waiting for the other players to accept."
       : "Everyone is here. Start when you're ready."
     : invited
       ? `${creator === undefined ? "Someone" : seatLabel(creator)} invited you to play.`
@@ -85,7 +126,22 @@ export function Lobby({ appName, gameName, game, onAction, notice }: LobbyProps)
                 {whoText(player)}
                 {player.isCreator ? <span className="hint"> (creator)</span> : null}
               </span>
-              <span className="badge quiet">{STATE_TEXT[player.state]}</span>
+              <span className="row">
+                <span className="badge quiet">{STATE_TEXT[player.state]}</span>
+                {isCreator && removable(player) ? (
+                  <button
+                    type="button"
+                    className="button secondary"
+                    disabled={pending !== null}
+                    aria-label={`Remove ${whoText(player)}`}
+                    onClick={() => {
+                      setRemoving(player);
+                    }}
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </span>
             </li>
           ))}
         </ul>
@@ -96,6 +152,15 @@ export function Lobby({ appName, gameName, game, onAction, notice }: LobbyProps)
           </dl>
         )}
       </section>
+      {isCreator ? (
+        <JoinLinkPanel
+          link={game.joinLink}
+          fresh={freshLink}
+          onCreate={onCreateLink}
+          onRevoke={onRevokeLink}
+          onProblem={setProblem}
+        />
+      ) : null}
       <Problem id="lobby-problem" message={problem} />
       <div className="row">
         {invited ? (
@@ -151,6 +216,40 @@ export function Lobby({ appName, gameName, game, onAction, notice }: LobbyProps)
           </>
         ) : null}
       </div>
+      {removing !== null ? (
+        <Dialog
+          title={`Remove ${whoText(removing)}?`}
+          dismissible={pending === null}
+          onClose={() => {
+            setRemoving(null);
+          }}
+        >
+          <p>
+            They won&apos;t be in this game. If they joined through the join link, they can&apos;t
+            come back through it; a new link would let them.
+          </p>
+          <div className="row">
+            <button
+              type="button"
+              className="button danger"
+              disabled={pending !== null}
+              onClick={() => void remove(removing.playerId)}
+            >
+              Remove
+            </button>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={pending !== null}
+              onClick={() => {
+                setRemoving(null);
+              }}
+            >
+              Keep them
+            </button>
+          </div>
+        </Dialog>
+      ) : null}
       {confirmCancel ? (
         <Dialog
           title="Cancel this game?"

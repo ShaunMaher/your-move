@@ -16,6 +16,7 @@ export type Player = GameEnvelope["players"][number];
 export type HistoryItem = Schema<"HistoryItem">;
 export type CreateGameRequest = Schema<"CreateGameRequest">;
 export type RecentPlayer = Schema<"RecentPlayers">["players"][number];
+export type JoinPreview = Schema<"JoinPreview">["game"];
 
 /**
  * A game and the viewer's view, with the envelope as the SDK types it (what a board is given). The
@@ -105,6 +106,31 @@ export const createGame = (api: ApiClient, body: CreateGameRequest) =>
  */
 export const rematchGame = (api: ApiClient, id: string) =>
   settle(api.POST("/api/v1/games/{id}/rematch", { params: { path: { id } }, body: {} }));
+
+/** The creator makes or rotates the lobby's join link: its URL, shown only now (05). */
+export const createJoinLink = (api: ApiClient, id: string) =>
+  settle(api.POST("/api/v1/games/{id}/join-link", { params: { path: { id } }, body: {} }));
+
+/** The creator revokes the lobby's join link (05). */
+export const revokeJoinLink = (api: ApiClient, id: string) =>
+  settle(api.DELETE("/api/v1/games/{id}/join-link", { params: { path: { id } } }));
+
+/** The creator removes a lobby seat (05 `POST /api/v1/games/:id/remove-seat`). */
+export const removeSeat = (api: ApiClient, id: string, expectedVersion: number, playerId: string) =>
+  settle(
+    api.POST("/api/v1/games/{id}/remove-seat", {
+      params: { path: { id } },
+      body: { expectedVersion, playerId },
+    }),
+  );
+
+/** What a join link is for (05 `POST /api/v1/join/lookup`); joins nothing. */
+export const lookUpJoinLink = (api: ApiClient, token: string) =>
+  settle(api.POST("/api/v1/join/lookup", { body: { token } }));
+
+/** Takes a seat through a join link, or accepts your invitation in its game (05). */
+export const joinGame = (api: ApiClient, token: string) =>
+  settle(api.POST("/api/v1/join", { body: { token } }));
 
 /** Your past opponents, to pick for a new game (05 `GET /api/v1/players/recent`). */
 export const listRecentPlayers = (api: ApiClient) => settle(api.GET("/api/v1/players/recent"));

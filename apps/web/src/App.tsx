@@ -15,6 +15,7 @@ import { navigate, usePath } from "./router.js";
 import { Game } from "./screens/Game.js";
 import { Home } from "./screens/Home.js";
 import { Install } from "./screens/Install.js";
+import { Join } from "./screens/Join.js";
 import { NewGame } from "./screens/NewGame.js";
 import { Settings } from "./screens/Settings.js";
 import { SignIn } from "./screens/SignIn.js";
@@ -267,6 +268,9 @@ export function App({ api }: AppProps) {
         onSessionLost={sessionLost}
       />
     );
+  } else if (place === "/join") {
+    // A join link's landing page; signed out, the sign-in screens come first and return here.
+    screen = <Join api={api} appName={boot.config.appName} onSessionLost={sessionLost} />;
   } else if (place === "/install") {
     screen = <Install appName={boot.config.appName} />;
   } else if (place === "/settings") {
