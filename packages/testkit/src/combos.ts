@@ -9,7 +9,7 @@ import {
   type OptionsContext,
 } from "@your-move/sdk";
 
-import { canonical, sameJson } from "./canonical.js";
+import { canonical } from "./canonical.js";
 import { errorName, type Combo, type Reporter } from "./report.js";
 import type { KitOptions } from "./types.js";
 
@@ -78,9 +78,12 @@ export function resolveCombos(
       continue;
     }
     try {
-      // A rematch resolves a game's stored options again (02 §2.1 rule 10).
-      const again = def.resolveOptions(options, ctx);
-      if (!sameJson(again, options)) {
+      // A rematch resolves a game's stored options again (02 §2.1 rule 10). The module gets a
+      // copy, and the result is compared with a snapshot taken before the call, so a module that
+      // changes its input can't pass by changing the options it is compared with (A15-P-5).
+      const before = canonical(options);
+      const again = def.resolveOptions(structuredClone(options), ctx);
+      if (canonical(again) !== before) {
         report.fail(
           "schema",
           `resolveOptions doesn't return its own options unchanged for ${canonical(input)} (02 §2.1 rule 10)`,

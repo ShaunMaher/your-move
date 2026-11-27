@@ -78,17 +78,15 @@ export function checkConfig(config: ModuleConfig, catalog: ResourceCatalog): Ok 
   return OK;
 }
 
+/** The input keys a creator chooses with. */
+const INPUT_KEYS: ReadonlySet<string> = new Set(["rulesetId", "dictionaryId"]);
+
 /**
- * The input keys: the choices, plus the versions resolved options carry, accepted and ignored so
- * that resolved options resolve again to the same choices at their current versions (a rematch,
- * 02 §2.1 rule 10).
+ * The versions resolved options carry: accepted so that resolved options resolve again to the
+ * same choices (a rematch, 02 §2.1 rule 10), checked to be non-negative integers, and otherwise
+ * ignored. Never honoured: no input can pin an old version.
  */
-const INPUT_KEYS: ReadonlySet<string> = new Set([
-  "rulesetId",
-  "rulesetVersion",
-  "dictionaryId",
-  "dictionaryVersion",
-]);
+const VERSION_KEYS: ReadonlySet<string> = new Set(["rulesetVersion", "dictionaryVersion"]);
 
 /** The unknown keys `UNKNOWN_OPTION` may name in its detail (words §10.3). */
 const SAFE_KEY = /^[A-Za-z0-9_]{1,64}$/u;
@@ -106,7 +104,13 @@ export function resolveOptions(input: unknown, ctx: OptionsContext): Options | G
     return { code: ERROR_CODES.optionsNotObject };
   }
   const fields = new Map<string, unknown>(Object.entries(given as Record<string, unknown>));
-  for (const key of fields.keys()) {
+  for (const [key, value] of fields) {
+    if (VERSION_KEYS.has(key)) {
+      if (value !== undefined && !(Number.isSafeInteger(value) && (value as number) >= 0)) {
+        return { code: ERROR_CODES.invalidOption, detail: { option: key } };
+      }
+      continue;
+    }
     if (!INPUT_KEYS.has(key)) {
       // The key is echoed only if it looks like an option name, never arbitrary input.
       return SAFE_KEY.test(key)

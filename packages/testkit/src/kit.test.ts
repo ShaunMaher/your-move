@@ -129,6 +129,23 @@ describe("runKit's static checks", () => {
       /doesn't return its own options unchanged for \{\} \(02 §2\.1 rule 10\)/u,
     ],
     [
+      // Changes its input to match what it returns: passes only if the kit compares the options
+      // it held before the call (A15-P-5).
+      "resolveOptions changes its input",
+      {
+        resolveOptions: (input: unknown) => {
+          if (typeof input === "object" && input !== null && "resolved" in input) {
+            const changed = input as { resolved: number };
+            changed.resolved += 1;
+            return { resolved: changed.resolved };
+          }
+          return { resolved: 1 };
+        },
+        optionsSchema: z.object({ resolved: z.number() }),
+      },
+      /doesn't return its own options unchanged/u,
+    ],
+    [
       "resolveOptions throws",
       {
         resolveOptions: () => {

@@ -119,6 +119,20 @@ describe("resolveOptions (words §10.1)", () => {
     // A stale version in the input is ignored: a rematch gets the current versions.
     const stale = { ...resolved("casual"), rulesetVersion: 0, dictionaryVersion: 1 };
     expect(words.resolveOptions(stale, ctx())).toEqual(resolved("casual"));
+    // A version is never honoured, but its shape is checked (A15-S-2).
+    for (const bad of [-1, 1.5, "2", null, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(words.resolveOptions({ rulesetVersion: bad }, ctx())).toEqual({
+        code: "INVALID_OPTION",
+        detail: { option: "rulesetVersion" },
+      });
+      expect(words.resolveOptions({ dictionaryVersion: bad }, ctx())).toEqual({
+        code: "INVALID_OPTION",
+        detail: { option: "dictionaryVersion" },
+      });
+    }
+    expect(words.resolveOptions({ rulesetVersion: 99, dictionaryVersion: 0 }, ctx())).toEqual(
+      resolved("classic"),
+    );
     // Its choices are checked as any input's are.
     expect(words.resolveOptions(resolved("casual"), ctx({ ENABLED_RULESETS: "classic" }))).toEqual({
       code: "UNKNOWN_RULESET",
