@@ -289,6 +289,58 @@ describe("migrate", () => {
       sqlite.close();
     });
 
+    it.each([
+      ["PRAGMA writable_schema = 1;", "uses a pragma other than foreign_keys"],
+      ["EXPLAIN PRAGMA writable_schema = 1;", "uses a pragma other than foreign_keys"],
+      ['PRAGMA main."legacy_alter_table" = ON;', "uses a pragma other than foreign_keys"],
+      ["PRAGMA defer_foreign_keys = 1;", "uses a pragma other than foreign_keys"],
+      ["ATTACH DATABASE ':memory:' AS aux;", "attaches or detaches a database"],
+      ["DETACH DATABASE aux;", "attaches or detaches a database"],
+      [
+        "CREATE TEMP TRIGGER `purge` AFTER INSERT ON main.`sessions` BEGIN DELETE FROM main.`sessions` WHERE 1; END;",
+        "creates a temporary table, index, trigger or view",
+      ],
+      // SQLite authorizes a temporary table's or view's schema row before its CREATE_TEMP_* action.
+      ["CREATE TEMPORARY TABLE `sessions` (`id` text);", "creates an object in the temp schema"],
+      ["CREATE TABLE temp.`x` (`y` text);", "creates an object in the temp schema"],
+      ["CREATE TEMP VIEW `v` AS SELECT 1;", "creates an object in the temp schema"],
+      ["CREATE VIEW temp.`v` AS SELECT 1;", "creates an object in the temp schema"],
+      [
+        "CREATE TRIGGER temp.`purge` AFTER INSERT ON main.`sessions` BEGIN DELETE FROM main.`sessions` WHERE 1; END;",
+        "creates an object in the temp schema",
+      ],
+    ])("refuses %j and applies nothing (B1-S-3, B1-S-4, B1-S2-1)", (statement, reason) => {
+      const sqlite = openSqlite(join(dir, "app.sqlite"));
+      const folder = withExtraMigration(
+        `CREATE TABLE \`extra\` (\`id\` text);\n--> statement-breakpoint\n${statement}`,
+        1000,
+      );
+      expect(() => migrate(sqlite, folder)).toThrow(
+        new RegExp(`Migration ${String(KNOWN)} ${reason}`, "u"),
+      );
+      expect(
+        sqlite
+          .prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name IN ('users', 'extra')")
+          .get(),
+      ).toEqual({ n: 0 });
+      expect(sqlite.prepare("SELECT count(*) AS n FROM sqlite_temp_schema").get()).toEqual({
+        n: 0,
+      });
+      // The authorizer is gone again: the connection may use pragmas.
+      expect(sqlite.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "wal" });
+      sqlite.close();
+    });
+
+    it("allows PRAGMA foreign_keys, which is a no-op inside the migration's transaction", () => {
+      const sqlite = openSqlite(join(dir, "app.sqlite"));
+      const folder = withExtraMigration(
+        "PRAGMA foreign_keys=OFF;--> statement-breakpoint\nCREATE TABLE `extra` (`id` text);--> statement-breakpoint\nPRAGMA foreign_keys=ON;",
+        1000,
+      );
+      expect(migrate(sqlite, folder)).toEqual({ applied: KNOWN + 1, known: KNOWN + 1 });
+      sqlite.close();
+    });
+
     it("allows a trigger's BEGIN … END body", () => {
       const sqlite = openSqlite(join(dir, "app.sqlite"));
       const folder = withExtraMigration(

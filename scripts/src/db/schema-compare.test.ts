@@ -5,10 +5,13 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { compareSchemas, describeMigrations } from "./schema-compare.js";
+import { compareSchemas, describeMigrations, describeTableClauses } from "./schema-compare.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
 const INIT = "0000_init.sql";
+
+const ADMIN_AUDIT_END =
+  "FOREIGN KEY (`actor_user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE set null\n);";
 
 let copy: string;
 
@@ -93,11 +96,96 @@ describe("compareSchemas over migration folders (P2-2)", () => {
       ],
       "index admin_audit_created_at",
     ],
+    [
+      "a column's COLLATE",
+      ["`action` text NOT NULL,", "`action` text NOT NULL COLLATE NOCASE,"],
+      "table admin_audit: column action: clauses",
+    ],
+    [
+      "a column's CHECK",
+      ["`action` text NOT NULL,", "`action` text NOT NULL CHECK (length(`action`) > 0),"],
+      "table admin_audit: column action: clauses",
+    ],
+    [
+      "a table's CHECK",
+      [ADMIN_AUDIT_END, `CHECK (\`created_at\` > 0),\n\t${ADMIN_AUDIT_END}`],
+      "table admin_audit: checks",
+    ],
+    [
+      "a generated column",
+      ["`detail` text,", "`detail` text GENERATED ALWAYS AS (`action`) VIRTUAL,"],
+      "table admin_audit: column detail",
+    ],
+    [
+      "STRICT",
+      [ADMIN_AUDIT_END, ADMIN_AUDIT_END.replace(");", ") STRICT;")],
+      "table admin_audit: options",
+    ],
+    [
+      "WITHOUT ROWID",
+      [ADMIN_AUDIT_END, ADMIN_AUDIT_END.replace(");", ") WITHOUT ROWID;")],
+      "table admin_audit: options",
+    ],
+    [
+      "a foreign key's DEFERRABLE",
+      [ADMIN_AUDIT_END, ADMIN_AUDIT_END.replace("\n);", " DEFERRABLE INITIALLY DEFERRED\n);")],
+      "table admin_audit: foreign key (actor_user_id) → users: deferrable",
+    ],
   ])("reports a hand edit to %s", (_name, [from, to], fact) => {
     edit(from ?? "", to ?? "");
     expect(differences()).toEqual(
       expect.arrayContaining([expect.stringContaining(fact) as unknown]),
     );
+  });
+
+  it("tells a generated column from a stored one by table_xinfo's hidden", () => {
+    edit("`detail` text,", "`detail` text GENERATED ALWAYS AS (`action`) STORED,");
+    expect(describeMigrations(copy).get("table admin_audit: column detail")).toContain(
+      '"hidden":3',
+    );
+  });
+
+  it.each(["sqlite1_purge", "sqliteXpurge", "SQLITE1_purge"])(
+    "reports a trigger named %s, which only looks like one of SQLite's own (B1-S-2)",
+    (name) => {
+      addMigration(
+        `CREATE TRIGGER ${name} AFTER INSERT ON \`sessions\` BEGIN DELETE FROM \`sessions\` WHERE 1; END;`,
+      );
+      expect(differences()).toEqual([
+        expect.stringMatching(
+          new RegExp(`^trigger ${name} .* is not in schema\\.ts$`, "u"),
+        ) as unknown,
+      ]);
+    },
+  );
+
+  it("compares SQLite's own tables too, so AUTOINCREMENT shows as sqlite_sequence", () => {
+    edit(
+      "`id` text PRIMARY KEY NOT NULL,\n\t`actor_key`",
+      "`id` integer PRIMARY KEY AUTOINCREMENT,\n\t`actor_key`",
+    );
+    expect(differences()).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("table sqlite_sequence (exists) is not in schema.ts") as unknown,
+      ]),
+    );
+  });
+
+  it.each([
+    "CREATE TEMP TRIGGER `purge` AFTER INSERT ON main.`sessions` BEGIN DELETE FROM main.`sessions` WHERE 1; END;",
+    "CREATE TABLE temp.`sessions` (`id` text);\n--> statement-breakpoint\nCREATE INDEX temp.`s_id` ON `sessions` (`id`);",
+  ])("refuses migrations that leave temporary objects (B1-S2-1): %j", (sql) => {
+    addMigration(sql);
+    expect(() => describeMigrations(copy)).toThrow(
+      /^the migrations create temporary objects \((?:trigger purge|index s_id, table sessions)\)/u,
+    );
+  });
+
+  it("pins defensive mode, whatever Node's default: writable_schema can't rewrite the schema (B1-S-8)", () => {
+    addMigration(
+      "PRAGMA writable_schema = 1;\n--> statement-breakpoint\nUPDATE sqlite_schema SET sql = 'CREATE TABLE x (y)' WHERE name = 'admin_audit';",
+    );
+    expect(() => describeMigrations(copy)).toThrow(/may not be modified/u);
   });
 
   it("reports a table, index or trigger schema.ts doesn't have, and one it lacks", () => {
@@ -116,5 +204,69 @@ describe("compareSchemas over migration folders (P2-2)", () => {
         expect.stringMatching(/^index admin_audit_created_at: sql is missing/u) as unknown,
       ]),
     );
+  });
+});
+
+describe("describeTableClauses (issue #13 S-1)", () => {
+  const clauses = (sql: string): Record<string, string> =>
+    Object.fromEntries(describeTableClauses(sql));
+
+  it("finds no clauses in drizzle-kit's plain tables", () => {
+    expect(
+      clauses(
+        "CREATE TABLE `t` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`n` integer DEFAULT (CAST(1 AS integer)),\n\t`p` text,\n\tFOREIGN KEY (`p`) REFERENCES `t`(`id`) ON UPDATE no action ON DELETE cascade\n)",
+      ),
+    ).toEqual({});
+  });
+
+  it("reads each column's COLLATE, CHECK and generated expression, and the table's CHECKs", () => {
+    expect(
+      clauses(
+        "CREATE TABLE t (a text COLLATE NOCASE CHECK (a <> 'x'), b text AS (a || 'y') STORED, c int, CONSTRAINT c_positive CHECK (c > 0), CHECK (c < 9))",
+      ),
+    ).toEqual({
+      "column a: clauses": JSON.stringify(["check ( a < > 'x' )", "collate nocase"]),
+      "column b: clauses": JSON.stringify(["as ( a | | 'y' ) stored"]),
+      checks: JSON.stringify(["check ( c < 9 )", "check ( c > 0 )"]),
+    });
+  });
+
+  it("ignores comments, quoting, case and spacing, but not a literal's text", () => {
+    const plain = "CREATE TABLE t (a text COLLATE nocase CHECK(a<>'X'))";
+    const noisy =
+      'create table "T" ( "A" TEXT collate NOCASE /* c */ check ( `a` <> \'X\' ) -- d\n)';
+    expect(clauses(noisy)).toEqual(clauses(plain));
+    expect(clauses(plain.replace("'X'", "'x'"))).not.toEqual(clauses(plain));
+    expect(clauses("CREATE TABLE t (b AS (a + 1))")).not.toEqual(
+      clauses("CREATE TABLE t (b AS (a + 2))"),
+    );
+  });
+
+  it("keys a foreign key's DEFERRABLE alike whether it is inline or table-level", () => {
+    const inline = clauses(
+      "CREATE TABLE t (p text REFERENCES games(id) NOT DEFERRABLE INITIALLY IMMEDIATE)",
+    );
+    expect(inline).toEqual({
+      "foreign key (p) → games: deferrable": JSON.stringify("not deferrable initially immediate"),
+    });
+    expect(
+      clauses(
+        "CREATE TABLE t (p text, FOREIGN KEY (`p`) REFERENCES `games`(`id`) NOT DEFERRABLE INITIALLY IMMEDIATE)",
+      ),
+    ).toEqual(inline);
+    expect(
+      clauses("CREATE TABLE t (a, b, FOREIGN KEY (a, b) REFERENCES p (x, y) DEFERRABLE)"),
+    ).toEqual({ "foreign key (a, b) → p: deferrable": JSON.stringify("deferrable") });
+  });
+
+  it("makes no foreign-key fact without a parent table (B1-P-3)", () => {
+    expect(clauses("CREATE TABLE t (a text DEFERRABLE, FOREIGN KEY (a) DEFERRABLE)")).toEqual({});
+  });
+
+  it("keeps SQL without a column list whole", () => {
+    expect(clauses("CREATE VIRTUAL TABLE t USING fts5(a, b)")).toEqual({
+      sql: JSON.stringify("create virtual table t using fts5 ( a , b )"),
+    });
+    expect(Object.keys(clauses("CREATE TABLE t AS SELECT (1) AS a"))).toEqual(["sql"]);
   });
 });

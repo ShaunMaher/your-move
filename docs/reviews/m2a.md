@@ -65,3 +65,48 @@ with sign-in in M2b and isn't covered here.
 | P2-6 | Fixed. ADR 0005 is dated 2026-11-24, the v0.9.13 entry's date. | `docs/adr/0005-node-sqlite-storage-and-migration-rules.md` |
 | P2-7 | Fixed. The e2e teardown deletes `E2E_DATA_DIR` only when it is a direct child named `join(tmpdir(), "your-move-e2e-")*`, and warns otherwise. | `tests/e2e/src/global-teardown.ts` |
 | P2-8 | Fixed. A test seeds orphans {A, B} and shows {A}'s digest is refused and the printed {A, B} digest is accepted. | `apps/node/src/storage.test.ts` |
+
+## Round 3 (issue #13's comments)
+
+The follow-ups from MR !13's security (S-) and picky (R-) reviews, posted on issue #13, on branch
+`alpha-b1-migrations`. S2-3 from round 2 landed with sign-in in M2b: `users.findByEmail` takes a
+`NormalisedEmail`, and so does `users.create` through `NewUser.email`
+(`packages/server/src/db/repositories.ts`). Every new check passes on the shipped migrations
+0000–0002, none of which was edited.
+
+| ID | Outcome | Where |
+|---|---|---|
+| S-1 / R-1 | Fixed. `pnpm db:check` also compares every table's `table_list` entry (`STRICT`, `WITHOUT ROWID`) and `table_xinfo` (`hidden` marks a generated column), and reads from each table's SQL the clauses no pragma reports, normalised for comments, quoting, case and spacing: each column's `COLLATE`, `CHECK` and generated expression, the table's `CHECK` constraints, and each foreign key's `DEFERRABLE` clause, keyed by its columns and parent table so drizzle-kit's inline `REFERENCES` (from `ALTER TABLE … ADD`) and a table-level `FOREIGN KEY` compare alike. 04 now lists what is still reviewer-only: constraint names, `ON CONFLICT` clauses, `AUTOINCREMENT` and a primary key's `ASC`/`DESC`. Tests: a hand edit of each clause in a copy of `0000_init.sql` is reported, and the clause reader's normalisation; `gates:prove` shows a hand-added `COLLATE` fails `db:check`. | `scripts/src/db/schema-compare.ts`, `scripts/src/db/sql.ts`, `scripts/src/bin/gates-prove.ts`, 04 §Migrations |
+| S-2 | Fixed. A migration containing `ALTER TABLE … DROP [COLUMN]` needs a `-- migration-reviewed:` line, with its own message. 04 says drizzle-kit writes it when its rename prompt is answered "create" for a renamed column. `gates:prove` shows an unreviewed one (a column added and dropped, so no schema difference) fails `db:check`. | `scripts/src/db/migrations.ts`, `scripts/src/bin/gates-prove.ts`, 04 §Migrations |
+| S-3 / R-4 | Fixed. The driver's backstop also throws when a statement closes the transaction it ran in, so a batch stops there instead of running its other statements in autocommit. A statement that failed and took its transaction with it (SQLite's own rollback, such as `RAISE(ROLLBACK)`) keeps its own error. Tests cover `COMMIT` and `ROLLBACK` mid-batch and the `RAISE(ROLLBACK)` case. | `apps/node/src/db/sqlite.ts`, 03 §4 |
+| R-2 | Fixed. A migration is linted in both readings: whole, as SQLite and wrangler read it on D1 (the breakpoint is a comment), and cut at every `--> statement-breakpoint` as Drizzle's migrator cuts it on Node, even inside a literal or a comment. A statement either reading finds is checked, and a review line must be a `--` comment in both. Tests: the trigger without `;` before `COMMIT`, statements a breakpoint lets out of a comment or literal, and a review line that is a comment on Node only. | `scripts/src/db/sql.ts`, `scripts/src/db/migrations.ts`, 04 §Migrations |
+| R-3 | Fixed. A line comment no longer keeps a CRLF's `\r`, so a review line in a CRLF file counts. Tests for the lexer and the lint. | `scripts/src/db/sql.ts` |
+
+### Round 3's own review (B1-)
+
+| ID | Outcome | Where |
+|---|---|---|
+| B1-S-1 | Fixed. The two readings must agree. `pnpm db:check` refuses a migration that has text after a `--> statement-breakpoint` on its line, leaves a block comment, string or quoted identifier unterminated (whole or in any piece between breakpoints), or reads as a different statement list whole and cut at its breakpoints. Both of the reviewer's bypasses are reproduced as tests: a statement after the breakpoint on its line, and an unterminated `/*` before a breakpoint. Each has a `gates:prove` case. | `scripts/src/db/migrations.ts`, `scripts/src/db/sql.ts`, `scripts/src/bin/gates-prove.ts`, 04 §Migrations |
+| B1-S-2 | Fixed. The schema comparison no longer filters on `NOT LIKE 'sqlite_%'`, where `_` is a wildcard and the match ignores case. It compares every object, SQLite's own included. SQLite refuses user objects whose names start with `sqlite_` in any case (checked), so a filter could only hide something. Tests: triggers named `sqlite1_purge`, `sqliteXpurge` and `SQLITE1_purge` are reported, and so is `sqlite_sequence` after a hand-added `AUTOINCREMENT`. There is also a `gates:prove` case. | `scripts/src/db/schema-compare.ts`, 04 §Migrations |
+| B1-S-3 | Fixed. The lint refuses every pragma but `foreign_keys`, with or without a review line, including behind `EXPLAIN [QUERY PLAN]`. Node's migration authorizer denies `SQLITE_PRAGMA` for any other name. | `scripts/src/db/migrations.ts`, `apps/node/src/db/migrate.ts`, 04 §Migrations |
+| B1-S-4 | Fixed. The lint refuses `ATTACH`, `DETACH` and `VACUUM`. The authorizer denies `SQLITE_ATTACH` and `SQLITE_DETACH`. `VACUUM` already fails inside the migration transaction. | same |
+| B1-S-5 | Deferred to issue #20: a preventive authorizer on the runtime connection. Accepted risk F-21. | `docs/security/findings.md` |
+| B1-S-6 | Deferred to issue #21: one review marker per destructive statement. Accepted risk F-22. | `docs/security/findings.md` |
+| B1-S-7 | Fixed. A migration may contain only printable ASCII, tabs and LF or CRLF line endings. A CR on its own is refused, and so is any byte that isn't UTF-8, which decodes to U+FFFD. The message names the code point and the line. 0000–0002 pass. | `scripts/src/db/migrations.ts`, 04 §Migrations |
+| B1-S-8 | Fixed. `defensive: true` is passed explicitly in `openSqlite` and in the schema comparison's databases. The tests show that `writable_schema` can't rewrite the schema. Node's default is already defensive, so the tests pin the behaviour, not the flag. | `apps/node/src/db/sqlite.ts`, `scripts/src/db/schema-compare.ts`, 03 §5.3 |
+| B1-P-1 | Rebutted. The owner numbers spec versions when stacking branches. | — |
+| B1-P-2 | Fixed. 04's reviewer-only list names a foreign key's `MATCH` clause, which SQLite parses and ignores. | 04 §Migrations |
+| B1-P-3 | Fixed. A foreign-key clause fact without a parent table is skipped in both branches, so there is no "→ undefined". Tested. | `scripts/src/db/schema-compare.ts` |
+| B1-P-4, B1-P-5 | No change, as the reviewer said. | — |
+
+### Round 3's own review, round 2 (B1-S2-, B1-P2-)
+
+| ID | Outcome | Where |
+|---|---|---|
+| B1-S2-1 | Fixed four ways. (1) Node applies the migrations on a connection of its own, which it closes before the server's connection opens, so nothing a migration leaves on its connection reaches the server. The single-instance lock is still taken first and released on every failure path, and the orphan check still runs on the server's connection after migrating. An in-memory database (local development and tests) is migrated on its one connection. (2) The migration authorizer denies the `CREATE_TEMP_*` actions and any insert into the `temp` schema. Without the keyword, `CREATE TABLE temp.x` and `CREATE TRIGGER temp.t … ON main.x` are authorized as ordinary CREATEs, but each inserts its row into `temp.sqlite_temp_master`. Reads and updates of `temp` stay allowed, because ALTER TABLE … RENAME reads and rewrites `sqlite_temp_master` even when it is empty. (3) The schema comparison fails when either database's `temp` schema isn't empty. `db:check` now reports a comparison that can't run beside the text problems, not in place of them. (4) The lint refuses `TEMP`, `TEMPORARY` and a `temp.` qualifier, review line or not. The reviewer's `ttrig`, `shadow` and `temp` folders all fail `db:check`, and Node refuses them. A test fails without each of the four, and there is a `gates:prove` case. | `apps/node/src/storage.ts`, `apps/node/src/db/migrate.ts`, `scripts/src/db/schema-compare.ts`, `scripts/src/db/migrations.ts`, `scripts/src/bin/db-check.ts`, `scripts/src/bin/gates-prove.ts`, 03 §5.3, 04 §Migrations |
+| B1-S2-2 | Fixed. B1-S-5 and B1-S-6 cite issues #20 and #21 and are accepted risks F-21 and F-22. | `docs/security/findings.md` |
+| B1-P2-1 | Fixed. Both defensive-mode tests say they pin the behaviour, whatever Node's default. | `apps/node/src/db/sqlite.test.ts`, `scripts/src/db/schema-compare.test.ts` |
+| B1-P2-2 | Fixed. The non-ASCII message says to write the text in ASCII and to build a non-ASCII literal with `char(…)`. 04 says the same. | `scripts/src/db/migrations.ts`, 04 §Migrations |
+| B1-P2-3 | Fixed. The readings-differ message names the first differing statement, by number and as each reading sees it, and gives a missing `;` before a breakpoint as the usual cause. | `scripts/src/db/migrations.ts` |
+| B1-P2-4 | Fixed. 03 §5.3 now says "set explicitly, whatever Node's default". | 03 §5.3 |
+| B1-P2-5 | Fixed. The schema-compare bullet is re-wrapped, and the ASCII rule reads "doesn't contain only printable ASCII, tab and line endings". | 04 §Migrations |
