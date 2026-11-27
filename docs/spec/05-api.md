@@ -111,6 +111,7 @@ GameEnvelope = {
   yourInvitation: "normal" | "hidden" | null, // you hold an `invited` seat in a `lobby` (accept/decline); null once the lobby ended; hidden ones never badge
   joinLink?: { active: boolean, expiresAt: number | null },  // creator only, lobby only; the URL is shown only on create/rotate
   canAddPlayers?: { userId, displayName }[], // creator only, finished games: link joiners who acted and aren't yet past opponents — blocked ones are still listed so the prompt reveals nothing; add-player is a no-op for them (02 §4)
+  rematch?: { gameId: string, you: "joined" | "invited" | "none" } | null, // finished games only (whose only viewers are their players), null until one exists: the game's rematch (POST …/rematch) and your place in it — a joined or seated row, an invitation in its still-open lobby (an `inert` one looks the same), or neither (alpha A15)
   createdAt, lastActionAt
 }
 GameSummary = { id, gameType, status, endReason, aiAssistance, yourTurn, yourInvitation /* as in the envelope */, players (as in the envelope),
@@ -216,6 +217,48 @@ hasn't finished onboarding) is created and answered exactly the same (Q3), but n
 until onboarding claims exist (06 §6.4, M4), so it stays unfilled until the lobby is started
 without it, cancelled or expires. Clients tell the creator that the other person must have signed
 in first.
+
+### `POST /api/v1/games/:id/rematch`
+Alpha A15. No input (an empty body or `{}`). A player of a finished game asks for a game with the
+same setup and the same people; the other players see it on the finished screen as "Accept
+rematch" or "Go to rematch" (07 §1).
+
+- **Who.** Only a player who held a seat in the game, and only once it is `finished`. Anyone else
+  gets `404 NOT_FOUND` from the same membership check, with the same reads, as
+  `GET /api/v1/games/:id` gives a non-member (04 §Membership): a finished game's only members are
+  its seated players. A member of a game in any other status (`lobby`, `active`, or ended
+  `declined`, `cancelled` or `expired`) gets `409 WRONG_STATUS`.
+- **The first call creates it** through exactly the path of `POST /api/v1/games`, with the caller as
+  creator, as if they had sent: the finished game's `gameType`; its stored `options` as the option
+  input, resolved again by the module's current version against the caller's own resources (02
+  §2.1 rule 10), so options that no longer resolve (a ruleset the operator has since disabled, a
+  word list that was deleted or is another player's upload) are `400 INVALID_OPTIONS` with the
+  module's code; its `seats` (the seated count), `turnTimeoutDays`, `seatOrder` and
+  `aiAssistance`; and as `invitees`, `{ userId }` for every other seated player whose account still
+  exists, listed in their old seat order. A deleted account's row has no user (04 §Account
+  deletion) and is skipped; its seat stays open. Every rule of that path applies unchanged: the
+  past-opponent and block checks (`400 INVALID_INVITEES` if any of them can't be picked, the same
+  answer for every reason, e.g. someone who declined that game before acting, a link joiner never
+  added, someone suspended or being deleted, or a block either way), `whoCanAddMe`, the live-game
+  caps and daily limits (`409 TOO_MANY_GAMES`, `429 RATE_LIMITED`), `validateStart`, the start at
+  creation and the "added you" push (worded "<creator> wants a rematch.", 03 §7). Seats follow the
+  normal rules (02 §4): in `join` order the caller sits first and the others as listed; nothing
+  copies who sat where. Two differences only: the caller's remembered options are neither merged
+  in nor updated (they chose nothing), and the insert is the conditional one of 04
+  `rematch_game_id`. `201 { game }`, as Created.
+- **A finished game has at most one rematch.** Every later call by one of its players answers
+  `200 { game }` with that rematch, and so does a call that lost the race to create it, whatever its
+  own creation would have answered (a limit, say): the caller's envelope as it is if they hold a
+  joined or seated row in it; or, if they hold an invitation in it (`normal` or `hidden`), after
+  accepting it exactly as `POST …/accept` does (an invitation in a lobby that has ended is
+  `409 WRONG_STATUS`; a lost race is retried server-side, and only a request that keeps losing gets
+  `409 STALE_GAME`). A player who isn't a member of the rematch — they declined or left it, were
+  removed, their invitation was dropped at its start, or their row is `inert` — gets `404
+  NOT_FOUND`: they aren't added again, and nothing of a game they may not see is returned (a lobby
+  decline answers `204` for the same reason). They can still start a new game from the list.
+- Linking the rematch is not a transition of the finished game: its `version` doesn't change and
+  no realtime event is sent, so the other players see `rematch` on their next read; until then their
+  own "Rematch" press simply gets the `200`.
 
 ### `GET /api/v1/games/:id`
 `200 { game: GameEnvelope, view: <module View> | null }`. `view` is `view(state, yourSeat)` while
@@ -397,7 +440,7 @@ token gets `403 INSUFFICIENT_SCOPE`. "Agent" says whether an AI account's token 
 | `/__dev/*` (e.g. `/__dev/emails`) | public, **dev only**: registered only when `isLocalDev(config)` (06 §4), never in a production-config build (the enumeration test runs on production config and asserts they're absent) | — |
 | `GET /api/v1/me`, `GET /api/v1/games`, `GET /api/v1/games/:id`, `GET /api/v1/games/:id/history`, `GET /api/v1/catalog`, `POST /api/v1/games/:id/preview` | session or `read` | yes |
 | `POST /api/v1/games/:id/actions`, `…/resign`, `…/seen`, and `…/decline` by a `playing` seat before its first action | session or `play` (for seats the token's user already holds) | yes |
-| `POST /api/v1/games`, `…/start`, `…/cancel`, `…/remove-seat`, `…/join-link` (POST/DELETE), `…/add-player`, `GET /api/v1/players/recent` | session or `games:create` (tokens: no email invitees) | no |
+| `POST /api/v1/games`, `…/start`, `…/cancel`, `…/remove-seat`, `…/join-link` (POST/DELETE), `…/add-player`, `…/rematch`, `GET /api/v1/players/recent` | session or `games:create` (tokens: no email invitees; a `…/rematch` that would accept an invitation also needs `join`) | no |
 | `POST /api/v1/join/lookup`, `POST /api/v1/join`, `…/accept`, `…/leave`, and `…/decline` of a lobby invitation or lobby seat | session or `join` | no |
 | `PATCH /api/v1/me`, `POST /api/v1/me/under-age`, `/api/v1/me/delete/otp`, `DELETE /api/v1/me`, `/api/v1/me/sessions*`, `/api/v1/me/tokens*`, `/api/v1/me/step-up/otp`, `/api/v1/me/agents*`, `/api/v1/auth/logout*`, `/api/v1/blocks*`, `/api/v1/push/*`, `/api/v1/dictionaries*` | session | no |
 | `GET /api/v1/ws` | session (cookie) only; bearer tokens are rejected | no |

@@ -301,7 +301,8 @@ filesystems are unsupported for the database anyway).
 - **The auto-join push (alpha A12).** When a past opponent picked from the list is added at once
   (06 §6.2), the create request schedules, in the background like a transition's pushes, one push
   to each added player and never to the creator: `body` is "<creator> added you to a game." (the
-  creator's display name, "New player" without one), followed by " Your turn." when the game
+  creator's display name, "New player" without one), or "<creator> wants a rematch." when the game
+  is a finished game's rematch (05 `POST /api/v1/games/:id/rematch`, alpha A15), followed by " Your turn." when the game
   started at creation and the added player's seat is to act; `url`, `tag`, the TTL, the 240-code-
   point cut, the per-request cap of 40 and the live-session rule are as above. The start at
   creation sends no "your turn" push of its own: the auto-join push says it, so an added player

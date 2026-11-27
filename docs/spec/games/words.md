@@ -435,7 +435,7 @@ The page never links to unofficial copies.
 ### 10.1 Options, players, resources, catalog
 
 ```ts
-Input   = { rulesetId?: string; dictionaryId?: string }
+Input   = { rulesetId?: string; dictionaryId?: string; rulesetVersion?: unknown; dictionaryVersion?: unknown /* accepted and ignored */ }
 Options = { rulesetId: string; rulesetVersion: number; dictionaryId: string; dictionaryVersion: number }
 ```
 
@@ -448,7 +448,8 @@ Options = { rulesetId: string; rulesetVersion: number; dictionaryId: string; dic
   a dictionary not in `ctx.resources` (unknown, disabled, deleted, or someone else's upload) →
   `UNKNOWN_DICTIONARY`; incompatible pair (language/alphabet from the resource metadata) →
   `INCOMPATIBLE_DICTIONARY` (§9.3). Resolves the latest ruleset version and the dictionary's
-  current version.
+  current version, whatever versions the input names: resolved options are a valid input and
+  resolve to themselves while nothing has changed (02 §2.1 rule 10, a rematch).
 - `catalog(ctx)`: enabled rulesets (id, version, name, description, key numbers, premium preview),
   the dictionaries in `ctx.resources` with their compatibility per ruleset, and the defaults.
 - `players(options)` = `{ min: ruleset.minPlayers, max: ruleset.maxPlayers }` (2/2 in the MVP).

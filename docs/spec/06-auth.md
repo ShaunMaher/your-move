@@ -375,6 +375,34 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
     declined or left (05 §Blocks). You can block anyone who is a past opponent or who holds or held a
     row in a game with you, including from the invitation screen.
 
+11. **Rematch** (alpha A15, 05 `POST /api/v1/games/:id/rematch`). Any player of a `finished` game
+    may ask for its rematch; it is created as if they had picked every other player of that game by
+    `userId` in `POST /api/v1/games`, so every rule above applies to it unchanged (the past-opponent
+    and block checks of §6.1, `whoCanAddMe` of §6.2, the limits of §6.7) and nothing is checked
+    differently. Everyone involved already shared that game and knows who else played, so no
+    address is ever involved and no address-to-account link can arise. What each caller can observe:
+    - **Not a player of the game** (never seated, or a stranger guessing ids): `404 NOT_FOUND`, the
+      same code, body and reads as `GET /api/v1/games/:id` gives a non-member, before anything is
+      created or counted; only the per-user write limit every write counts applies. It never says
+      whether a rematch exists.
+    - **A player whose fellow player has since blocked them, or is suspended or being deleted, or
+      who never became their past opponent** (declined that game before acting, or joined by link
+      and wasn't added): `400 INVALID_INVITEES`, before any limit is counted — exactly what picking
+      that person in `POST /api/v1/games` answers, for every one of those reasons alike. It reveals
+      nothing new: the same person has already left the caller's "People you've played" list
+      (`GET /api/v1/players/recent`), for the same set of reasons.
+    - **A player whose fellow player's account was deleted**: that seat is skipped and left open, and
+      the finished game already shows "Deleted player"; nothing new either.
+    - **The rematch itself** is shown to every player of the finished game (`rematch`, 05), with
+      only their own place in it: joined, invited, or neither. An `inert` invitation (a block
+      between two picked players, which can't arise until M4, Q29) shows as invited, and accepting
+      it is `404`, the same as accepting an invitation whose block is found on accept (05); it shows
+      the player that a rematch was made, which they'd also learn from the other players.
+    - Status codes, error codes, caps and their timing class are those of `POST /api/v1/games` (and
+      of `POST …/accept` for the accept), whatever the other players' states. Two simultaneous
+      presses yield one game; the loser's own daily creation counters were already counted (its
+      own limits only, bounded by the write limit), an accepted cost.
+
 Privacy note: with Q3 resolved, signed-in users can no longer learn whether an address has an
 account from anything the server does on its own: responses, timing, limits, the lobby display,
 removals, claims and hidden or inert delivery all look the same. The remaining signals need a real

@@ -88,6 +88,7 @@ At most 3 *live* challenges per (email, purpose); issuing a 4th burns the oldest
 | last_action_at | INTEGER NOT NULL | initialised to `created_at`; ordering |
 | end_reason | TEXT NULL | module `result().endReason`, or framework reasons `declined` / `cancelled` / `operator_cancelled` / `expired` |
 | created_at, updated_at, started_at, ended_at | INTEGER | |
+| rematch_game_id | TEXT NULL UNIQUE FK → games | a `finished` game's one rematch (05 `POST /api/v1/games/:id/rematch`, alpha A15): written in the same batch that inserts the rematch, by a conditional update that holds only while the game is `finished` with this column NULL, and every insert of that batch holds only while the update can (so a batch that loses the race writes nothing). Never changed once set; not a transition (the game's `version` is unchanged). Shown only to the game's players, as the envelope's `rematch` (05) |
 
 ### `game_players`
 | Column | Type | Notes |
@@ -298,6 +299,9 @@ The schema (`schema.ts`) also makes these choices, which the tables above leave 
   `rate_limits(window_start)`, `api_tokens(created_by)`, `admin_audit` (`created_at`,
   `actor_user_id`), `auth_events` (`user_id`, `created_at`).
 - **`auth_events.user_id`** is a foreign key with `ON DELETE SET NULL` (account deletion step 4).
+- **`games.rematch_game_id`** is a foreign key with no `ON DELETE` action: games are never deleted,
+  and drizzle-kit's `ALTER TABLE … ADD` drops an action, which `pnpm db:check` would then report
+  against a fresh generation (alpha A15).
 
 ## Migrations
 

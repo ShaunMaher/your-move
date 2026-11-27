@@ -189,6 +189,13 @@ Enforced by the generic test kit (§6) where possible:
    its first action (§4): the module removes the seat exactly as for a resignation, but its record
    and `describe` text say the player *declined* (e.g. [{seat:2}, " declined the game"]), never
    "resigned", and nothing in the record presents it as a loss.
+10. **Resolved options are an input** (alpha A15): `resolveOptions(options, ctx)` for options it
+    resolved itself returns them unchanged under the same `ctx`. A rematch (05
+    `POST /api/v1/games/:id/rematch`) resolves a finished game's stored options this way, so under a
+    later `ctx` or a newer module the same choices resolve at their current versions (or are
+    refused with the module's normal error, e.g. a ruleset the operator has since disabled), never
+    copied unchecked. A module whose options carry versions accepts those keys and ignores them
+    (words §10.1).
 
 ### 2.2 Reserved error codes
 
@@ -498,7 +505,8 @@ optional `test.context()` gives what `resolveOptions`, `catalog` and `checkConfi
 plays exactly these hooks, so a game that needs a dictionary supplies one through them.
 
 1. **Schema conformance**: every option, view, record, preview and catalog matches its schema;
-   every error code is in `errorCodes` and none is reserved (§2.2). An exception from any module
+   every error code is in `errorCodes` and none is reserved (§2.2); the options resolved from each
+   option input resolve again to themselves (§2.1 rule 10). An exception from any module
    function, a transition's included, fails here (§2.1 rule 3).
 2. **Replay**: as in §5, with an empty resource provider (§2.1 rule 6).
 3. **Secrecy (perturbation)**: at sampled points of every game, for each seat `v` **and for the
