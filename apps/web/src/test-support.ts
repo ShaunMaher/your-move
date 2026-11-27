@@ -265,7 +265,10 @@ export function fakeCacheStorage() {
         },
         keys: () =>
           Promise.resolve([...store.keys()].map((path) => new Request(`http://localhost${path}`))),
-        delete: (request: Request) => Promise.resolve(store.delete(new URL(request.url).pathname)),
+        delete: (request: Request | string) =>
+          Promise.resolve(
+            store.delete(typeof request === "string" ? request : new URL(request.url).pathname),
+          ),
       });
     }),
   };

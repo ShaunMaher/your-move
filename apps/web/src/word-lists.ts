@@ -8,15 +8,21 @@
  * `distribution: "public"` is downloaded, whatever else it carries: `serverOnly` lists are never
  * fetched, and a URL on a resource that doesn't say it is public is not followed.
  *
- * The game's own list, when it is public, is then read back from the cache, checked against its
- * hash again, and handed to the board as `resources.dictionary` (02 §3): lookups over the sorted
- * text, as the server does them (words §9.4), with nothing built. The board uses it for the
- * no-play hint (words §10.8); its previews still come from the server.
+ * The game's own list, when it is public, is opened for the board as `resources.dictionary`
+ * (02 §3): its bytes are hashed once (as they are downloaded, or as they are read back from the
+ * cache, where an entry that no longer matches is deleted and downloaded again once), checked to
+ * be a word list (lower-case `a`–`z` words, sorted), and given lookups over the sorted text, as
+ * the server does them (words §9.4), with nothing built. An opened list is kept for the page's
+ * life by its URL, which names its content, so another game with the same list gets the same
+ * object. The board uses it for the no-play hint (words §10.8); its previews still come from the
+ * server.
  */
-import { createWordList } from "@your-move/dictionary";
+import { checkWordList, createWordList } from "@your-move/dictionary";
 import type { PublicWordList } from "@your-move/sdk/client";
 
 import type { GameEnvelope } from "./game-api.js";
+
+type Resource = GameEnvelope["resources"][number];
 
 /** Not the shell's precache name, so the service worker's clean-up of old versions keeps it. */
 export const WORD_LIST_CACHE = "dictionaries-v1";
@@ -25,9 +31,42 @@ const KEEP = 3;
 /** The one shape the server serves lists at (03 §10): a same-origin path, never a full URL. */
 const SERVED = /^\/assets\/dictionaries\/[A-Za-z0-9_-]+-v(\d+)\.([0-9a-f]{16})\.txt$/u;
 
+/** A public list the server serves: where, its version, and the start of its content's hash. */
+interface Served {
+  readonly path: string;
+  readonly id: string;
+  readonly version: number;
+  readonly expected: string;
+}
+
+/** The lists opened so far in this page, by path, the most recent last; at most `KEEP`. */
+const opened = new Map<string, PublicWordList>();
+
 async function digestPrefix(bytes: ArrayBuffer): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   return Array.from(digest.subarray(0, 8), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** The resource as a served public list, or null: never a list that doesn't say it is public. */
+function served(resource: Resource): Served | null {
+  if (resource.distribution !== "public" || resource.downloadUrl === undefined) return null;
+  const match = SERVED.exec(resource.downloadUrl);
+  if (match === null) return null;
+  const [, version = "", expected = ""] = match;
+  return { path: resource.downloadUrl, id: resource.id, version: Number(version), expected };
+}
+
+/**
+ * The game's word list: its one resource of kind `dictionary`. With none, or more than one, the
+ * shell can't tell which list the game plays with, and hands over nothing.
+ */
+function gameList(resources: GameEnvelope["resources"]): Resource | null {
+  // Only dictionaries exist today (05); a later kind must never be taken for a word list.
+  const lists = resources.filter((resource) => {
+    const kind: string = resource.kind;
+    return kind === "dictionary";
+  });
+  return lists.length === 1 ? (lists[0] ?? null) : null;
 }
 
 /** Drops the oldest lists beyond `KEEP`, never one of `protectedPaths`. */
@@ -42,89 +81,84 @@ async function keepRecent(cache: Cache, protectedPaths: ReadonlySet<string>): Pr
   }
 }
 
-/** Downloads and caches one list; resolves to whether it is now in the cache. */
-async function ensure(cache: Cache, path: string, expected: string): Promise<boolean> {
-  if ((await cache.match(path)) !== undefined) return true;
-  const response = await fetch(path, { credentials: "omit", redirect: "error" });
-  if (!response.ok) return false;
+/** Downloads a list and stores it if its content hashes to its name: its bytes, or null. */
+async function download(cache: Cache, list: Served): Promise<ArrayBuffer | null> {
+  const response = await fetch(list.path, { credentials: "omit", redirect: "error" });
+  if (!response.ok) return null;
   const bytes = await response.arrayBuffer();
-  if ((await digestPrefix(bytes)) !== expected) return false;
-  await cache.put(path, new Response(bytes, { headers: { "Content-Type": "text/plain" } }));
-  return true;
+  if ((await digestPrefix(bytes)) !== list.expected) return null;
+  await cache.put(list.path, new Response(bytes, { headers: { "Content-Type": "text/plain" } }));
+  return bytes;
+}
+
+/**
+ * A cached list's bytes if they still hash to its name, else null; an entry that doesn't is
+ * deleted, so the caller downloads it again.
+ */
+async function cachedBytes(cache: Cache, list: Served): Promise<ArrayBuffer | null> {
+  const response = await cache.match(list.path);
+  if (response === undefined) return null;
+  const bytes = await response.arrayBuffer();
+  if ((await digestPrefix(bytes)) === list.expected) return bytes;
+  await cache.delete(list.path);
+  return null;
+}
+
+/** Opens a list for the board (hashing its bytes once), or null if it can't be had intact. */
+async function open(cache: Cache, list: Served): Promise<PublicWordList | null> {
+  const known = opened.get(list.path);
+  if (known !== undefined) return known;
+  const bytes = (await cachedBytes(cache, list)) ?? (await download(cache, list));
+  if (bytes === null) return null;
+  const text = new TextDecoder().decode(bytes);
+  // Only a word list in the built format: lower-case `a`–`z` words, sorted, one per line.
+  if (!checkWordList(text).ok) return null;
+  const words = createWordList(list.id, list.version, text);
+  opened.set(list.path, words);
+  for (const path of opened.keys()) {
+    if (opened.size <= KEEP) break;
+    opened.delete(path);
+  }
+  return words;
+}
+
+/** Makes sure a list is cached (downloading it if it isn't); its bytes are hashed only then. */
+async function ensure(cache: Cache, list: Served): Promise<void> {
+  if ((await cache.match(list.path)) === undefined) await download(cache, list);
 }
 
 /** One run at a time: two overlapping runs would both trim the same listing. */
-let running: Promise<void> = Promise.resolve();
+let running: Promise<unknown> = Promise.resolve();
 
 /**
- * Makes sure the public word lists of a game are cached. Best effort: a failure (offline, no Cache
- * Storage, a bad download) changes nothing the player sees, because previews then come from the
- * server (02 §3). Calls are run one after another.
- */
-export function cacheWordLists(resources: GameEnvelope["resources"]): Promise<void> {
-  const run = running.then(() => cacheAll(resources));
-  // The chain never rejects: one failed run must not stop the next from starting.
-  running = run.catch(() => undefined);
-  return run;
-}
-
-async function cacheAll(resources: GameEnvelope["resources"]): Promise<void> {
-  if (typeof caches === "undefined") return;
-  const wanted = new Map<string, string>();
-  for (const resource of resources) {
-    if (resource.distribution !== "public" || resource.downloadUrl === undefined) continue;
-    const expected = SERVED.exec(resource.downloadUrl)?.[2];
-    if (expected !== undefined) wanted.set(resource.downloadUrl, expected);
-  }
-  if (wanted.size === 0) return;
-  try {
-    const cache = await caches.open(WORD_LIST_CACHE);
-    for (const [path, expected] of wanted) {
-      try {
-        await ensure(cache, path, expected);
-      } catch {
-        // Best effort: the next list is still tried.
-      }
-    }
-    await keepRecent(cache, new Set(wanted.keys()));
-  } catch {
-    // Best effort.
-  }
-}
-
-/**
- * The game's word list for its board (02 §3), or null: the game's dictionary resource, only when
- * it is marked `distribution: "public"`, cached (downloaded and stored first if it isn't yet, as
- * `cacheWordLists` does), and its content still hashes to the digest in its name. Any failure
- * (offline, no Cache Storage, a bad download or a changed entry) is null, and the board goes on
- * without it. Runs in turn with `cacheWordLists`.
+ * Caches the game's public word lists and opens its own list for its board (02 §3), or null:
+ * when it isn't public, can't be downloaded, doesn't hash to its name (a cached entry that
+ * doesn't is downloaded again once), isn't a word list, or there is no Cache Storage. Best
+ * effort: a failure changes nothing the player sees but the hint (words §10.8). Calls run one
+ * after another.
  */
 export function openWordList(resources: GameEnvelope["resources"]): Promise<PublicWordList | null> {
-  const run = running.then(async () => {
-    await cacheAll(resources);
-    return readList(resources);
-  });
-  running = run.then(
-    () => undefined,
-    () => undefined,
-  );
+  const run = running.then(() => openAll(resources));
+  // The chain never rejects: one failed run must not stop the next from starting.
+  running = run.catch(() => undefined);
   return run.catch(() => null);
 }
 
-async function readList(resources: GameEnvelope["resources"]): Promise<PublicWordList | null> {
+async function openAll(resources: GameEnvelope["resources"]): Promise<PublicWordList | null> {
   if (typeof caches === "undefined") return null;
-  // A game's resources are its word list (every resource is a dictionary, 05); only a public one
-  // ever reaches the board.
-  const [resource] = resources;
-  if (resource?.distribution !== "public" || resource.downloadUrl === undefined) return null;
-  const served = SERVED.exec(resource.downloadUrl);
-  if (served === null) return null;
-  const [, version = "", expected = ""] = served;
+  const own = gameList(resources);
+  const lists = resources.map(served).filter((list) => list !== null);
+  if (lists.length === 0) return null;
   const cache = await caches.open(WORD_LIST_CACHE);
-  const response = await cache.match(resource.downloadUrl);
-  if (response === undefined) return null;
-  const bytes = await response.arrayBuffer();
-  if ((await digestPrefix(bytes)) !== expected) return null;
-  // A list that isn't one (no final newline) throws, and the caller gets null.
-  return createWordList(resource.id, Number(version), new TextDecoder().decode(bytes));
+  let words: PublicWordList | null = null;
+  for (const list of lists) {
+    try {
+      if (list.path === own?.downloadUrl) words = await open(cache, list);
+      else await ensure(cache, list);
+    } catch {
+      // Best effort: the next list is still tried.
+    }
+  }
+  await keepRecent(cache, new Set(lists.map((list) => list.path)));
+  return words;
 }

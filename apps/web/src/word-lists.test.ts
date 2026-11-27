@@ -1,21 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fakeCacheStorage as fakeStorage, servedName as nameFor } from "./test-support.js";
-import { cacheWordLists, openWordList, WORD_LIST_CACHE } from "./word-lists.js";
+import { fakeCacheStorage, servedName as nameFor } from "./test-support.js";
 
 const TEXT = "aa\nab\nba\n";
+const WORD_LIST_CACHE = "dictionaries-v1";
 
-let storage: ReturnType<typeof fakeStorage>;
+let storage: ReturnType<typeof fakeCacheStorage>;
 let fetcher: ReturnType<typeof vi.fn>;
+let openWordList: typeof import("./word-lists.js").openWordList;
 
-beforeEach(() => {
-  storage = fakeStorage();
+beforeEach(async () => {
+  storage = fakeCacheStorage();
   vi.stubGlobal("caches", storage);
   fetcher = vi.fn(() => Promise.resolve(new Response(TEXT)));
   vi.stubGlobal("fetch", fetcher);
+  // A fresh module each time: the lists it has opened are kept for the page's life.
+  vi.resetModules();
+  ({ openWordList } = await import("./word-lists.js"));
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const list = (
@@ -28,27 +33,28 @@ const list = (
   distribution,
   ...(downloadUrl === undefined ? {} : { downloadUrl }),
 });
+const cached = () => [...(storage.stores.get(WORD_LIST_CACHE)?.keys() ?? [])];
 
 describe("caching a game's public word lists", () => {
   it("downloads a list once, without credentials, and keeps it", async () => {
     const url = await nameFor(TEXT);
-    await cacheWordLists([list(url)]);
+    await openWordList([list(url)]);
     expect(fetcher).toHaveBeenCalledWith(url, { credentials: "omit", redirect: "error" });
-    expect(storage.stores.get(WORD_LIST_CACHE)?.has(url)).toBe(true);
-    await cacheWordLists([list(url)]);
+    expect(cached()).toEqual([url]);
+    await openWordList([list(url)]);
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
   it("keeps a list only if its content hashes to the digest in its own name", async () => {
     const url = await nameFor("different\n");
-    await cacheWordLists([list(url)]);
+    expect(await openWordList([list(url)])).toBeNull();
     expect(fetcher).toHaveBeenCalledOnce();
-    expect(storage.stores.get(WORD_LIST_CACHE)?.size ?? 0).toBe(0);
+    expect(cached()).toEqual([]);
   });
 
   it("never fetches a server-only list, a list without a URL, or a URL of another shape", async () => {
     const url = await nameFor(TEXT);
-    await cacheWordLists([
+    for (const resource of [
       list(url, "serverOnly"),
       // A URL on a resource that doesn't say it is public is not followed.
       { ...list(url), distribution: undefined },
@@ -56,22 +62,24 @@ describe("caching a game's public word lists", () => {
       list("https://evil.example/assets/dictionaries/enable-v1.0123456789abcdef.txt"),
       list("/assets/dictionaries/../../api/v1/me"),
       list("/assets/other/enable-v1.0123456789abcdef.txt"),
-    ]);
+    ]) {
+      expect(await openWordList([resource])).toBeNull();
+    }
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("keeps nothing and says nothing when the download fails", async () => {
-    fetcher.mockRejectedValueOnce(new Error("offline"));
+  it("keeps nothing and opens nothing when the download fails", async () => {
     const url = await nameFor(TEXT);
-    await expect(cacheWordLists([list(url)])).resolves.toBeUndefined();
+    fetcher.mockRejectedValueOnce(new Error("offline"));
+    expect(await openWordList([list(url)])).toBeNull();
     fetcher.mockResolvedValueOnce(new Response("gone", { status: 404 }));
-    await expect(cacheWordLists([list(url)])).resolves.toBeUndefined();
-    expect(storage.stores.get(WORD_LIST_CACHE)?.size ?? 0).toBe(0);
+    expect(await openWordList([list(url)])).toBeNull();
+    expect(cached()).toEqual([]);
   });
 
   it("does nothing when there is no Cache Storage", async () => {
     vi.stubGlobal("caches", undefined);
-    await cacheWordLists([list(await nameFor(TEXT))]);
+    expect(await openWordList([list(await nameFor(TEXT))])).toBeNull();
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -83,41 +91,13 @@ describe("caching a game's public word lists", () => {
       urls.push(await nameFor(`${id}\n`, id));
     }
     // A game that itself uses four lists keeps all four while it is open.
-    await cacheWordLists(own.map((id, i) => ({ ...list(urls[i]), id })));
-    expect([...(storage.stores.get(WORD_LIST_CACHE)?.keys() ?? [])]).toEqual(urls);
+    await openWordList(own.map((id, i) => ({ ...list(urls[i]), id })));
+    expect(cached()).toEqual(urls);
     // Another game's list then pushes out the oldest of those, not itself.
     fetcher.mockResolvedValueOnce(new Response("e\n"));
     const other = await nameFor("e\n", "e");
-    await cacheWordLists([{ ...list(other), id: "e" }]);
-    expect([...(storage.stores.get(WORD_LIST_CACHE)?.keys() ?? [])]).toEqual([
-      urls[2],
-      urls[3],
-      other,
-    ]);
-  });
-
-  it("runs overlapping calls one after another, so they can't trim the same listing twice", async () => {
-    const texts = ["p\n", "q\n", "r\n", "s\n", "t\n"];
-    const urls = await Promise.all(texts.map((text, i) => nameFor(text, `l${String(i)}`)));
-    vi.stubGlobal("fetch", (path: string) =>
-      Promise.resolve(new Response(texts[urls.indexOf(path)] ?? "")),
-    );
-    await Promise.all(
-      urls.map((url, i) => cacheWordLists([{ ...list(url), id: `l${String(i)}` }])),
-    );
-    expect([...(storage.stores.get(WORD_LIST_CACHE)?.keys() ?? [])]).toEqual(urls.slice(2));
-  });
-
-  it("still runs the next call after one that failed outright", async () => {
-    const url = await nameFor(TEXT);
-    const broken = {
-      get distribution(): never {
-        throw new Error("broken resource");
-      },
-    };
-    await expect(cacheWordLists([broken as never])).rejects.toThrow("broken resource");
-    await cacheWordLists([list(url)]);
-    expect(storage.stores.get(WORD_LIST_CACHE)?.has(url)).toBe(true);
+    await openWordList([{ ...list(other), id: "e" }]);
+    expect(cached()).toEqual([urls[2], urls[3], other]);
   });
 
   it("keeps the three most recently added lists", async () => {
@@ -127,75 +107,111 @@ describe("caching a game's public word lists", () => {
       fetcher.mockResolvedValueOnce(new Response(text));
       const url = await nameFor(text, id);
       names.push(url);
-      await cacheWordLists([{ ...list(url), id }]);
+      await openWordList([{ ...list(url), id }]);
     }
-    expect([...(storage.stores.get(WORD_LIST_CACHE)?.keys() ?? [])]).toEqual(names.slice(1));
+    expect(cached()).toEqual(names.slice(1));
   });
-});
 
-describe("opening the game's word list for its board", () => {
-  it("downloads, keeps and opens a public list, then opens it from the cache", async () => {
+  it("runs overlapping calls one after another, so they can't trim the same listing twice", async () => {
+    const texts = ["p\n", "q\n", "r\n", "s\n", "t\n"];
+    const urls = await Promise.all(texts.map((text, i) => nameFor(text, `l${String(i)}`)));
+    vi.stubGlobal("fetch", (path: string) =>
+      Promise.resolve(new Response(texts[urls.indexOf(path)] ?? "")),
+    );
+    await Promise.all(urls.map((url, i) => openWordList([{ ...list(url), id: `l${String(i)}` }])));
+    expect(cached()).toEqual(urls.slice(2));
+  });
+
+  it("still runs the next call after one that failed outright", async () => {
     const url = await nameFor(TEXT);
-    const opened = await openWordList([list(url)]);
-    expect(opened).toMatchObject({ id: "enable", version: 1 });
-    expect(opened?.has("ab")).toBe(true);
-    expect(opened?.has("bb")).toBe(false);
-    expect(opened?.follows("a")).toBe(0b11);
-    expect(storage.stores.get(WORD_LIST_CACHE)?.has(url)).toBe(true);
-    const again = await openWordList([list(url)]);
-    expect(again?.has("ba")).toBe(true);
-    expect(fetcher).toHaveBeenCalledOnce();
-  });
-
-  it("opens nothing that isn't public, or isn't served in the served shape", async () => {
-    const url = await nameFor(TEXT);
-    expect(await openWordList([list(url, "serverOnly")])).toBeNull();
-    expect(await openWordList([{ ...list(url), distribution: undefined }])).toBeNull();
-    expect(await openWordList([list(undefined)])).toBeNull();
-    expect(await openWordList([list(url.replace("/assets/", "/other/"))])).toBeNull();
-    expect(await openWordList([])).toBeNull();
-    expect(fetcher).not.toHaveBeenCalled();
-  });
-
-  it("opens only the game's own list, never another resource after a server-only one", async () => {
-    const url = await nameFor(TEXT);
-    expect(await openWordList([list(url, "serverOnly"), { ...list(url), id: "other" }])).toBeNull();
-  });
-
-  it("opens nothing when the download fails", async () => {
-    const url = await nameFor(TEXT);
-    fetcher.mockRejectedValueOnce(new Error("offline"));
-    expect(await openWordList([list(url)])).toBeNull();
-    fetcher.mockResolvedValueOnce(new Response("gone", { status: 404 }));
-    expect(await openWordList([list(url)])).toBeNull();
-  });
-
-  it("opens nothing whose content doesn't hash to its name, downloaded or cached", async () => {
-    const url = await nameFor("different\n");
-    expect(await openWordList([list(url)])).toBeNull();
-    // An entry changed in the cache after it was stored is refused too.
-    const good = await nameFor(TEXT);
-    const cache = await storage.open(WORD_LIST_CACHE);
-    await cache.put(good, new Response("aa\nzz\n"));
-    expect(await openWordList([list(good)])).toBeNull();
-    expect(fetcher).toHaveBeenCalledOnce();
-  });
-
-  it("opens nothing without Cache Storage", async () => {
-    vi.stubGlobal("caches", undefined);
-    expect(await openWordList([list(await nameFor(TEXT))])).toBeNull();
-  });
-
-  it("opens nothing that isn't a word list, and goes on after a failure", async () => {
-    const url = await nameFor("aa\nab");
-    fetcher.mockResolvedValueOnce(new Response("aa\nab"));
-    expect(await openWordList([list(url)])).toBeNull();
     const broken = {
       get distribution(): never {
         throw new Error("broken resource");
       },
     };
     expect(await openWordList([broken as never])).toBeNull();
-    expect(await openWordList([list(await nameFor(TEXT))])).not.toBeNull();
+    expect(await openWordList([list(url)])).not.toBeNull();
+    expect(cached()).toEqual([url]);
+  });
+});
+
+describe("opening the game's word list for its board", () => {
+  it("opens a public list with the server's lookups", async () => {
+    const url = await nameFor(TEXT);
+    const opened = await openWordList([list(url)]);
+    expect(opened).toMatchObject({ id: "enable", version: 1 });
+    expect(opened?.has("ab")).toBe(true);
+    expect(opened?.has("bb")).toBe(false);
+    expect(opened?.follows("a")).toBe(0b11);
+  });
+
+  it("hashes a list once and gives every game with it the same object (A14-P-7)", async () => {
+    const digest = vi.spyOn(crypto.subtle, "digest");
+    const url = await nameFor(TEXT);
+    const hashedToName = digest.mock.calls.length;
+    const first = await openWordList([list(url)]);
+    const again = await openWordList([{ ...list(url), name: "Another game's copy" }]);
+    expect(again).toBe(first);
+    expect(digest.mock.calls.length - hashedToName).toBe(1);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("opens a list from the cache in a new page, hashing it once there", async () => {
+    const url = await nameFor(TEXT);
+    await openWordList([list(url)]);
+    vi.resetModules();
+    const fresh = await import("./word-lists.js");
+    const digest = vi.spyOn(crypto.subtle, "digest");
+    expect((await fresh.openWordList([list(url)]))?.has("ba")).toBe(true);
+    expect(digest).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("downloads a cached entry that no longer matches its name again, once (A14-S-3)", async () => {
+    const url = await nameFor(TEXT);
+    const cache = await storage.open(WORD_LIST_CACHE);
+    await cache.put(url, new Response("aa\nzz\n"));
+    expect((await openWordList([list(url)]))?.has("ba")).toBe(true);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(await (await cache.match(url))?.text()).toBe(TEXT);
+    // A download that doesn't match either: nothing opened, nothing kept.
+    await cache.put(url, new Response("aa\nzz\n"));
+    vi.resetModules();
+    const fresh = await import("./word-lists.js");
+    fetcher.mockResolvedValueOnce(new Response("aa\nzz\n"));
+    expect(await fresh.openWordList([list(url)])).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(cached()).toEqual([]);
+  });
+
+  it("opens nothing that isn't public, even after a public list", async () => {
+    const url = await nameFor(TEXT);
+    expect(await openWordList([list(url, "serverOnly")])).toBeNull();
+    expect(await openWordList([])).toBeNull();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("picks the game's list by kind, and opens nothing when it can't tell which (A14-S-5)", async () => {
+    const url = await nameFor(TEXT);
+    const other = await nameFor("zz\n", "other");
+    vi.stubGlobal("fetch", (path: string) =>
+      Promise.resolve(new Response(path === other ? "zz\n" : TEXT)),
+    );
+    // A resource of another kind first is never taken for the word list.
+    const notAList = { ...list(other), kind: "image" } as unknown as ReturnType<typeof list>;
+    expect((await openWordList([notAList, list(url)]))?.has("ab")).toBe(true);
+    // Two word lists: which one the game plays with isn't the shell's to guess.
+    expect(await openWordList([list(url), { ...list(other), id: "other" }])).toBeNull();
+  });
+
+  it.each([
+    ["no final newline", "aa\nab"],
+    ["a character outside a–z, which could make a lookup misbehave (A14-S-1)", "aa\naé\n"],
+    ["a character above z (A14-S-1)", "a{\n"],
+    ["words out of order", "ab\naa\n"],
+  ])("opens nothing that isn't a word list: %s", async (_name, text) => {
+    const url = await nameFor(text);
+    fetcher.mockResolvedValueOnce(new Response(text));
+    expect(await openWordList([list(url)])).toBeNull();
   });
 });

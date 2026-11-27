@@ -989,21 +989,22 @@ describe("the word list for the board (02 §3)", () => {
     expect(boardResources.every((seen) => seen === undefined)).toBe(true);
   });
 
+  // Each test below has a list of its own: the shell keeps the lists it opened for the page's
+  // life, by URL, and a URL names its content.
   it("hands over nothing when the download fails", async () => {
     const { storage } = serve(new Error("offline"));
-    open({ "GET /api/v1/games/g1": withView(gameWith(await servedName(TEXT))) });
+    open({ "GET /api/v1/games/g1": withView(gameWith(await servedName("aa\nbb\n"))) });
     await screen.findByRole("region", { name: "Fake board" });
-    // Once to store it (which fails), once to read it back (which finds nothing).
-    await settle(() => storage.open.mock.calls.length, 2);
+    await settle(() => storage.open.mock.calls.length, 1);
     expect(screen.getByText(NONE)).toBeDefined();
     expect(storage.stores.get(WORD_LIST_CACHE)?.size ?? 0).toBe(0);
   });
 
   it("hands over nothing whose content doesn't match the hash in its name", async () => {
     const { storage } = serve("aa\nzz\n");
-    open({ "GET /api/v1/games/g1": withView(gameWith(await servedName(TEXT))) });
+    open({ "GET /api/v1/games/g1": withView(gameWith(await servedName("aa\ncc\n"))) });
     await screen.findByRole("region", { name: "Fake board" });
-    await settle(() => storage.open.mock.calls.length, 2);
+    await settle(() => storage.open.mock.calls.length, 1);
     expect(screen.getByText(NONE)).toBeDefined();
     expect(boardResources.every((seen) => seen === undefined)).toBe(true);
   });
