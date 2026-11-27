@@ -958,6 +958,29 @@ describe("route-wide secrecy (04 invariant 4)", () => {
     await readEverything(game, players, stranger);
   });
 
+  it("an email invite claimed in a three-seat lobby: another joined member reads the same before and after (review A17-S-10)", async () => {
+    const [a, b] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
+    const stranger = await signUp(h, "Stranger");
+    const address = `newcomer-${crypto.randomUUID().slice(0, 8)}@example.org`;
+    const game = await created(a, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: b.email }, { email: address }],
+    });
+    expect((await transition(game, b, "accept")).json.game?.status).toBe("lobby");
+    const before = { a: await reads(game, a), b: await reads(game, b) };
+
+    const newcomer = await signUp(h, "Newcomer", address);
+    expect(await reads(game, a)).toEqual(before.a);
+    expect(await reads(game, b)).toEqual(before.b);
+    await readEverything(game, [a, b, newcomer], stranger);
+
+    // Accepting fills the last seat and starts the game; every read is checked and perturbed.
+    expect((await transition(game, newcomer, "accept")).json.game?.status).toBe("active");
+    await readEverything(game, [a, b, newcomer], stranger);
+    expect(await unchangedByHiddenState(game, [a, b, newcomer])).toBe(3);
+  });
+
   it("perturbation can fail: a body that showed one hidden tile would differ", async () => {
     const players = [await signUp(h, "Ada"), await signUp(h, "Bo")];
     const [a, b] = players as [Player, Player];

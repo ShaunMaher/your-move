@@ -15,6 +15,12 @@ import {
 
 const DICTIONARIES_PREFIX = "/assets/dictionaries/";
 
+/**
+ * Email-invite seats the request completing onboarding claims at most on Node (06 §6.4, 09 §3):
+ * Node has no per-request query budget, so this only bounds one request; the sweep claims the rest.
+ */
+export const NODE_ONBOARDING_CLAIMS = 50;
+
 export interface NodeAppOptions {
   readonly platform: Platform;
   readonly games: readonly InstalledGame[];
@@ -28,7 +34,11 @@ export interface NodeAppOptions {
 }
 
 export function createNodeApp(options: NodeAppOptions): App {
-  const app = createApp({ platform: options.platform, games: options.games });
+  const app = createApp({
+    platform: options.platform,
+    games: options.games,
+    onboardingClaims: NODE_ONBOARDING_CLAIMS,
+  });
   // Server paths (/api/*, /__dev/*, /manifest.webmanifest) are answered by createApp and never
   // reach the handlers below.
   app.use("*", async (c, next) => {

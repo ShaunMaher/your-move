@@ -470,10 +470,11 @@ on a version conflict.
 **Invite claims are not game transitions.** Claiming an email-invite seat (06 §6.4) is a
 row-level update of that one `game_players` row, guarded by `state = 'invited' AND user_id IS NULL
 AND delivery <> 'inert'`, by **no other row in this game holding the claimant's user id**, by the
-game being in `lobby`, and by `games.version` still equalling the version loaded for the block and
-cap checks (checked, **not** bumped; on a mismatch the claim reloads and retries, up to 3 times). An
-`inert` row is never claimed and its `delivery` is never recomputed. The inbound-cap count (06 §6.7)
-is taken atomically in the same write. A claim doesn't bump the game `version`, sends no realtime
+game being in `lobby`, and by `games.version` still equalling the version loaded for the block
+check (checked, **not** bumped; on a mismatch the claim reloads and retries, up to 3 times). An
+`inert` row is never claimed and its `delivery` is never recomputed. No inbound-cap count is
+taken at a claim: the row keeps the `delivery` the cap gave it when the game was created, where it
+was counted for every typed address (06 §6.4, §6.7). A claim doesn't bump the game `version`, sends no realtime
 event to other members, and changes nothing the creator or other members can see (the row still
 shows the typed address or "Invited"); only the claimant's own game list updates. A concurrent
 start, remove, join, accept or cancel simply makes the guard fail.

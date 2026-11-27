@@ -30,6 +30,7 @@ import { nodeRepositories, openSqlite } from "./db/sqlite.js";
 import { nodeDictionaries } from "./dictionaries.js";
 import type { NodeConfig } from "./node-config.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
+import { NODE_ONBOARDING_CLAIMS } from "./server.js";
 import { NODE_CLAIMS_PER_RUN, NODE_LOBBIES_PER_RUN, NODE_NUDGES_PER_RUN } from "./sweeper.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
@@ -135,6 +136,10 @@ export interface HarnessOptions {
   readonly nudgesPerRun?: number;
   /** The sweep's invite claims per run; Node's own by default. */
   readonly claimsPerRun?: number;
+  /** The sweep's lobby expiries per run; Node's own by default. */
+  readonly lobbiesPerRun?: number;
+  /** Seats completing onboarding claims; Node's own by default. */
+  readonly onboardingClaims?: number;
   /** Wraps the capturing email sender (e.g. to fail some messages and still capture the rest). */
   readonly wrapSender?: (capture: EmailSender) => EmailSender;
   /** The installed games (the generated registry); none by default. */
@@ -186,6 +191,7 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
   const app = createApp({
     platform,
     games,
+    onboardingClaims: options.onboardingClaims ?? NODE_ONBOARDING_CLAIMS,
     ...(options.random === undefined ? {} : { random: options.random }),
   });
   const sweep = createSweep({
@@ -193,7 +199,7 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     games,
     nudgesPerRun: options.nudgesPerRun ?? NODE_NUDGES_PER_RUN,
     claimsPerRun: options.claimsPerRun ?? NODE_CLAIMS_PER_RUN,
-    lobbiesPerRun: NODE_LOBBIES_PER_RUN,
+    lobbiesPerRun: options.lobbiesPerRun ?? NODE_LOBBIES_PER_RUN,
   });
   const background = createBackgroundTracker();
   let scheduled = 0;

@@ -93,7 +93,7 @@ async function build(env: Readonly<Record<string, unknown>>): Promise<Built> {
       }),
   };
   return {
-    app: createApp({ platform, games }),
+    app: createApp({ platform, games, onboardingClaims: WORKER_ONBOARDING_CLAIMS }),
     sweep: createSweep({
       platform,
       games,
@@ -114,6 +114,11 @@ async function build(env: Readonly<Record<string, unknown>>): Promise<Built> {
 const WORKER_NUDGES_PER_RUN = 2;
 const WORKER_CLAIMS_PER_RUN = 1;
 const WORKER_LOBBIES_PER_RUN = 1;
+/**
+ * Email-invite seats completing onboarding claims at most on the Worker (06 §6.4): 4 statements
+ * each, so 8 keep the request near 40 (09 §3); the sweep claims the rest.
+ */
+const WORKER_ONBOARDING_CLAIMS = 8;
 
 let built: Promise<Built> | null = null;
 

@@ -16,8 +16,6 @@ import { LOBBY_LIFETIME_MS, lobbyExpiresAt } from "./lifecycle.js";
 
 /** A claim reloads and retries this often when the game's version moved meanwhile (02 §4). */
 const ATTEMPTS = 3;
-/** At most this many seats are claimed at onboarding; the sweep claims any others. */
-const ONBOARDING_CLAIMS = 50;
 
 /** Who claims: an onboarded human and the address they completed onboarding with. */
 export interface Claimant {
@@ -72,17 +70,18 @@ export async function claimSeat(
   return false;
 }
 
-/** Claims every seat typed as the claimant's address (06 §6.4); returns how many it claimed. */
+/**
+ * Claims the seats typed as the claimant's address (06 §6.4), at most `limit` of them, oldest
+ * lobby first (the runtime's per-request budget, 09 §3); the sweep claims any others. Returns how
+ * many it claimed.
+ */
 export async function claimInvitations(
   repos: Repositories,
   claimant: Claimant,
   now: number,
+  limit: number,
 ): Promise<number> {
-  const seats = await repos.invites.claimable(
-    claimant.email,
-    now - LOBBY_LIFETIME_MS,
-    ONBOARDING_CLAIMS,
-  );
+  const seats = await repos.invites.claimable(claimant.email, now - LOBBY_LIFETIME_MS, limit);
   let claimed = 0;
   for (const seat of seats) {
     if (await claimSeat(repos, seat, claimant, now)) claimed++;

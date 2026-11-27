@@ -40,7 +40,16 @@ export interface AppOptions {
    * WebCrypto (03 §4); only tests pass a seeded source, so a failing game can be replayed.
    */
   readonly random?: RandomFactory;
+  /**
+   * Email-invite seats the request that completes onboarding claims at most (06 §6.4); the sweep
+   * claims the rest. The runtime's per-request budget bounds it (09 §3): Node 50, the Worker 8,
+   * which is also the default.
+   */
+  readonly onboardingClaims?: number;
 }
+
+/** {@link AppOptions.onboardingClaims} when a runtime gives none: the Worker's budget. */
+const DEFAULT_ONBOARDING_CLAIMS = 8;
 
 /** The HTTP application `createApp` returns. */
 export type App = OpenAPIHono<AppEnv>;
@@ -235,7 +244,11 @@ export function createApp(options: AppOptions): App {
 
   let subkeys: Promise<Subkeys> | null = null;
   const keys = (): Promise<Subkeys> => (subkeys ??= deriveSubkeys(config.appSecret));
-  registerAuthRoutes(app, { platform, keys });
+  registerAuthRoutes(app, {
+    platform,
+    keys,
+    onboardingClaims: options.onboardingClaims ?? DEFAULT_ONBOARDING_CLAIMS,
+  });
   registerUnsubscribeRoutes(app, { platform, keys });
   registerPushRoutes(app, platform);
   registerGameRoutes(app, {

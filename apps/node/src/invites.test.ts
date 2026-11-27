@@ -746,6 +746,58 @@ describe("claims (06 §6.4)", () => {
   });
 });
 
+describe("per-request and per-run bounds (06 §6.4, 03 §8, 09 §3)", () => {
+  it("onboarding claims at most its cap of seats, oldest lobby first; the sweep claims the rest", async () => {
+    h = gameHarness({}, { onboardingClaims: 2 });
+    const address = freshEmail();
+    const games: string[] = [];
+    for (const name of ["Ada", "Bo", "Cy"]) {
+      games.push((await invite(await seasoned(name), address)).game.id);
+      h.advance(DAY);
+    }
+    const dee = await signUp(h, "Dee", address);
+    expect(games.map((id) => playerRow(id, "user_id"))).toEqual([dee.id, dee.id, null]);
+    expect((await h.sweep()).claims).toEqual({ claimed: 1, skipped: 0 });
+    expect(playerRow(games[2] ?? "", "user_id")).toBe(dee.id);
+  });
+
+  it("the sweep claims at most claimsPerRun seats a run, oldest lobby first, the backlog over runs", async () => {
+    h = gameHarness({}, { claimsPerRun: 2 });
+    const halfway = await signUp(h, null);
+    const games: string[] = [];
+    for (const name of ["Ada", "Bo", "Cy"]) {
+      games.push((await invite(await seasoned(name), halfway.email)).game.id);
+      h.advance(DAY);
+    }
+    // Onboarded without the request that claims (as if it raced the creations).
+    h.exec(
+      "UPDATE users SET onboarded_at = ?, display_name = 'Hal' WHERE id = ?",
+      now(),
+      halfway.id,
+    );
+    expect((await h.sweep()).claims).toEqual({ claimed: 2, skipped: 0 });
+    expect(games.map((id) => playerRow(id, "user_id"))).toEqual([halfway.id, halfway.id, null]);
+    expect((await h.sweep()).claims).toEqual({ claimed: 1, skipped: 0 });
+    expect(playerRow(games[2] ?? "", "user_id")).toBe(halfway.id);
+  });
+
+  it("the sweep expires at most lobbiesPerRun lobbies a run, oldest first, the backlog over runs", async () => {
+    h = gameHarness({}, { lobbiesPerRun: 2 });
+    const games: string[] = [];
+    for (const name of ["Ada", "Bo", "Cy"]) {
+      games.push((await invite(await seasoned(name), freshEmail())).game.id);
+      h.advance(HOUR);
+    }
+    h.advance(14 * DAY);
+    const statuses = () =>
+      games.map((id) => h.query("SELECT status FROM games WHERE id = ?", id)[0]?.["status"]);
+    expect((await h.sweep()).lobbies).toBe(2);
+    expect(statuses()).toEqual(["expired", "expired", "lobby"]);
+    expect((await h.sweep()).lobbies).toBe(1);
+    expect(statuses()).toEqual(["expired", "expired", "expired"]);
+  });
+});
+
 describe("lobby expiry by the sweep (03 §8, 06 §6.5)", () => {
   it("expires a lobby nobody comes back to and clears its typed address", async () => {
     h = gameHarness();

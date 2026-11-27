@@ -321,7 +321,10 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
 
    Precisely (alpha A17): the `PATCH /api/v1/me` that completes onboarding claims before it
    answers, so the new user's game list already shows the invitations (unread: the row keeps the
-   `last_seen_version` of -1 it was created with). A claim that fails there is logged by error
+   `last_seen_version` of -1 it was created with). It claims at most a per-runtime number of seats,
+   oldest lobby first (Node 50, the Worker 8, sized by the Worker's per-request query budget,
+   09 §3; review A17-S-5); the sweep's claim step claims any beyond that on its next runs (03 §8),
+   so an address with more seats than the cap gets the rest within a sweep or a few. A claim that fails there is logged by error
    class and never fails onboarding; the sweep claims it later. A lobby at or past its expiry is
    never claimed into (it is about to expire, 02 §4). A claim sends nothing: the generic
    invitation push and the invitation email to users with nudges on (§6.2) are M4's.

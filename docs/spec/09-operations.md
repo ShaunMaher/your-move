@@ -212,7 +212,25 @@ that work on both runtimes, plus SMTP for Node only.
   D1 query limit (50 at the time of writing; check the current Cloudflare limits). A lost race
   retries a lobby's expiry or a claim from its load, at most twice more (03 §5.2), which can add
   up to 16 in the worst case; that needs a concurrent request on the same lobby in that moment,
-  and a run that goes over fails and is picked up by the next. Each nudge also makes one provider subrequest (the `gmail` provider
+  and a run that goes over fails and is picked up by the next. **Workers residual (review
+  A17-S-6):** expiring one overdue lobby per run (96 a day) can fall behind if more lobbies than
+  that fall due in a day; lazy expiry (03 §8) still expires each one the moment anyone involved
+  comes back, and nothing accepts or starts an overdue lobby, so the backlog only delays clearing
+  typed addresses (F-16's residual); re-measure at the first Workers deployment (10).
+- **Requests that do several statements per address (alpha A17 review S-5).** Counted the same
+  conservative way (every statement of a batch, the session's refresh included):
+  - `POST /api/v1/games` with `n` typed addresses: 25 statements plus 20 per address (the caps,
+    the lookups, the per-pair counts, the inbound cap, the two tiers of invite-email caps, and the
+    seat and `invites` row in the insert), and in its background task 1 to record `sent_at` and,
+    when the instance cap stopped an email, 2 for its alert. One address (every two-seat game, so
+    every words game) is 46–48, inside the Free plan's 50; two or more addresses are over it
+    (65 for two, up to 165 for seven), and so is any create that lazily expires the creator's
+    overdue lobbies (up to 20 of them, 03 §8). Those **need the Paid plan, or re-measure at the
+    first Workers deployment** (10).
+  - The `PATCH /api/v1/me` that completes onboarding: 4 statements plus 4 per claimed seat (the
+    game's load, the block lookup, the claim), so the Worker claims at most 8 there (36) and leaves
+    the rest to the sweep; a claim that loses a race and retries adds 4 per attempt (at most 2).
+    Node claims up to 50 per request. Each nudge also makes one provider subrequest (the `gmail` provider
   one more per run for its token). A run with a failed step or a failed nudge ends the invocation
   as failed (not retried), so it shows in the trigger's history. Re-measure the per-invocation
   cost at the first Workers deployment (10).

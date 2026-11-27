@@ -368,8 +368,9 @@ lobbies no one comes back to, so a typed address never outlives its lobby for lo
 One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * * *`) or a Node
 `setInterval` (every 15 minutes, first run 15 minutes after start; a run still going when the next
 is due skips that one). A failing step is logged (by class, never its message, 09 §5) and the
-other steps still run. Every step is idempotent and uses the same transition mechanism as actions
-(except notification throttles such as `last_nudged_at`, §7):
+other steps still run. Every step is idempotent and uses the same transition mechanism as actions,
+except notification throttles such as `last_nudged_at` (§7) and invite claims, which are guarded
+row updates that check the game's version without bumping it (02 §4, §5.2):
 
 - Expire OTPs, sessions, invites, join links and rate-limit buckets.
 - Delete accounts that haven't completed onboarding 7 days after creation — only rows with
@@ -378,7 +379,9 @@ other steps still run. Every step is idempotent and uses the same transition mec
   onboarded user who holds no other row in that game, with the same guard as an onboarding claim
   (catches games created during onboarding and failed claims; 02 §4, 06 §6.4). The user must be
   an onboarded human, not suspended or being deleted, and the lobby not yet due to expire; at
-  most a per-runtime number of seats per run, oldest lobby first (alpha A17, 09 §3).
+  most a per-runtime number of seats per run, oldest lobby first (alpha A17, 09 §3). This is also
+  the catch-up for the request that completes onboarding, which claims at most a per-runtime
+  number of seats (Node 50, the Worker 8, 06 §6.4).
 - Apply per-seat turn timeouts via module `onTimeout`: overdue seats one transition at a time, in
   seat order, reloading and re-checking `toAct` and the deadline before each (02 §4).
 - Send timeout reminders (50 % and 24 h before, 02 §4; tracked in `timeout_reminders_sent`, which

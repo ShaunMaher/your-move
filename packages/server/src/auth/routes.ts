@@ -124,6 +124,8 @@ export interface AuthRouteOptions {
   readonly platform: Platform;
   /** HKDF subkeys of `APP_SECRET`, derived once per app. */
   readonly keys: () => Promise<Subkeys>;
+  /** Email-invite seats completing onboarding claims at most; the sweep claims the rest. */
+  readonly onboardingClaims: number;
 }
 
 export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteOptions): void {
@@ -167,7 +169,7 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
    */
   const claimAtOnboarding = async (claimant: Claimant, at: number): Promise<void> => {
     try {
-      await claimInvitations(repos, claimant, at);
+      await claimInvitations(repos, claimant, at, options.onboardingClaims);
     } catch (error) {
       platform.log.error("invite claim at onboarding failed", {
         errorClass: error instanceof Error ? error.constructor.name : typeof error,
