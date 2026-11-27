@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { checkJournal, journalSchema, lintMigration } from "./migrations.js";
-import { lexSql } from "./sql.js";
+import { lexSql, migrationReadings } from "./sql.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
 
@@ -94,6 +94,73 @@ describe("lintMigration (P-1: table rebuilds cascade on D1)", () => {
   });
 });
 
+describe("lintMigration (issue #13 S-2: dropped columns)", () => {
+  it.each([
+    ["drizzle-kit's DROP COLUMN", "ALTER TABLE `users` DROP COLUMN `email`;"],
+    ["DROP without COLUMN", "alter table users drop email;"],
+    ["comments and line breaks", "ALTER/**/TABLE `users`\nDROP -- x\nCOLUMN `email`;"],
+    ["a breakpoint before it", "SELECT 1;--> statement-breakpoint\nALTER TABLE users DROP email;"],
+  ])("refuses %s without a review line", (_name, sql) => {
+    expect(lintMigration("0003_x.sql", sql)).toEqual([
+      expect.stringContaining("0003_x.sql drops a column, and its data with it") as unknown,
+    ]);
+  });
+
+  it("accepts a reviewed one, and an ADD", () => {
+    const reviewed = "-- migration-reviewed: email was never written on any instance\n";
+    expect(lintMigration("0003_x.sql", `${reviewed}ALTER TABLE users DROP COLUMN email;`)).toEqual(
+      [],
+    );
+    expect(lintMigration("0003_x.sql", "ALTER TABLE `users` ADD `email_id` text;")).toEqual([]);
+  });
+
+  it("reports each unreviewed hazard once", () => {
+    expect(
+      lintMigration("0003_x.sql", "DROP TABLE a;\nALTER TABLE b DROP c;\nALTER TABLE d DROP e;"),
+    ).toEqual([
+      expect.stringContaining("drops a table") as unknown,
+      expect.stringContaining("drops a column") as unknown,
+    ]);
+  });
+});
+
+describe("lintMigration (issue #13 R-2, R-3: both readings and CRLF)", () => {
+  it("ends a statement at a breakpoint, as Node's migrator does", () => {
+    // A trigger with no `;` after its END: SQLite would read COMMIT as part of it, Node doesn't.
+    const sql =
+      "CREATE TRIGGER t AFTER INSERT ON a BEGIN SELECT 1; END\n--> statement-breakpoint\nCOMMIT;";
+    expect(lintMigration("0003_x.sql", sql)).toEqual([
+      expect.stringContaining("begins, ends or nests a transaction") as unknown,
+    ]);
+  });
+
+  it("sees a statement a breakpoint lets out of a comment or a literal on Node", () => {
+    for (const sql of [
+      "/* --> statement-breakpoint\nDROP TABLE users; /* */",
+      "SELECT '--> statement-breakpoint\nDROP TABLE users; --';",
+    ]) {
+      expect(lintMigration("0003_x.sql", sql), sql).toEqual([
+        expect.stringContaining("drops a table") as unknown,
+      ]);
+    }
+  });
+
+  it("takes a review line only when it is a comment in both readings", () => {
+    // On Node the breakpoint turns the line into a `--` comment; on D1 it is inside /* … */.
+    const sql =
+      "/* --> statement-breakpoint\n-- migration-reviewed: users has no children yet */\nDROP TABLE users;";
+    expect(lintMigration("0003_x.sql", sql)).toEqual([
+      expect.stringContaining("drops a table") as unknown,
+    ]);
+  });
+
+  it("accepts a review line in a CRLF file", () => {
+    const sql =
+      "-- migration-reviewed: users has no children yet\r\nDROP TABLE `users`;\r\n--> statement-breakpoint\r\nSELECT 1;\r\n";
+    expect(lintMigration("0003_x.sql", sql)).toEqual([]);
+  });
+});
+
 describe("lintMigration (P2-1: no transaction control)", () => {
   it.each([
     "BEGIN;",
@@ -140,6 +207,10 @@ describe("lexSql", () => {
     });
   });
 
+  it("leaves a CRLF line ending out of a line comment", () => {
+    expect(lexSql("-- a\r\nSELECT 1; -- b\r").comments).toEqual(["-- a", "-- b"]);
+  });
+
   it("keeps quoted text whole, doubled quotes included, and runs unterminated ones to the end", () => {
     expect(lexSql("SELECT 'it''s; -- not a comment';").statements).toEqual([
       "SELECT 'it''s; -- not a comment'",
@@ -149,5 +220,13 @@ describe("lexSql", () => {
       "SELECT 'open; ...",
     ]);
     expect(lexSql("SELECT 1 /* open").comments).toEqual(["/* open"]);
+  });
+});
+
+describe("migrationReadings", () => {
+  it("reads the file whole and cut at every breakpoint", () => {
+    const [whole, cut] = migrationReadings("SELECT '--> statement-breakpoint'; SELECT 2;");
+    expect(whole?.statements).toEqual(["SELECT '--> statement-breakpoint'", "SELECT 2"]);
+    expect(cut?.statements).toEqual(["SELECT '", "'; SELECT 2;"]);
   });
 });

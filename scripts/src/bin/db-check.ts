@@ -3,8 +3,8 @@
  * committed migrations (or the folder `--migrations` names, which `gates:prove` uses for its
  * scratch copies):
  *
- * 1. the journal and each migration's text (scripts/src/db/migrations.ts): the rebuild rule and
- *    no transaction control;
+ * 1. the journal and each migration's text (scripts/src/db/migrations.ts): the rebuild and
+ *    dropped-column rules and no transaction control;
  * 2. structure (scripts/src/db/schema-compare.ts): the schema the migrations build must equal the
  *    schema built by a fresh drizzle-kit generation from `schema.ts` into an empty folder, so a
  *    hand edit to a committed `.sql` fails;
