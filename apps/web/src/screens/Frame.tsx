@@ -71,23 +71,30 @@ function PlayerChip({ player, acting }: { player: Player; acting: boolean }) {
   );
 }
 
-/** The rematch button's label for your place in it (07 §1), or null when there's none to press. */
-function rematchLabel(rematch: GameEnvelope["rematch"]): string | null {
+/** The rematch button's label, and what it says while busy, for your place in it (07 §1). */
+interface RematchLabel {
+  readonly idle: string;
+  readonly busy: string;
+}
+
+/** The rematch button for your place in it (07 §1), or null when there's none to press. */
+function rematchLabel(rematch: GameEnvelope["rematch"]): RematchLabel | null {
   if (rematch === undefined) return null;
-  if (rematch === null) return "Rematch";
-  if (rematch.you === "invited") return "Accept rematch";
-  return rematch.you === "joined" ? "Go to rematch" : null;
+  if (rematch === null) return { idle: "Rematch", busy: "Starting rematch…" };
+  if (rematch.you === "invited") return { idle: "Accept rematch", busy: "Joining rematch…" };
+  return rematch.you === "joined" ? { idle: "Go to rematch", busy: "Opening rematch…" } : null;
 }
 
 /**
  * A finished game's rematch button (07 §1, alpha A15): Rematch, Accept rematch or Go to rematch,
- * from the envelope's `rematch`; a refusal is shown under it.
+ * from the envelope's `rematch`, or none (`label` null); a refusal is shown under it, and stays
+ * when the refetch after it takes the button away.
  */
 function RematchButton({
   label,
   onRematch,
 }: {
-  readonly label: string;
+  readonly label: RematchLabel | null;
   readonly onRematch: () => Promise<string | null>;
 }) {
   const [pending, setPending] = useState(false);
@@ -105,15 +112,17 @@ function RematchButton({
   }
   return (
     <>
-      <button
-        type="button"
-        className="button"
-        disabled={pending}
-        aria-describedby="rematch-problem"
-        onClick={() => void press()}
-      >
-        {pending ? "Starting rematch…" : label}
-      </button>
+      {label === null ? null : (
+        <button
+          type="button"
+          className="button"
+          disabled={pending}
+          aria-describedby="rematch-problem"
+          onClick={() => void press()}
+        >
+          {pending ? label.busy : label.idle}
+        </button>
+      )}
       <Problem id="rematch-problem" message={problem} />
     </>
   );
@@ -164,7 +173,9 @@ function Results({
           ))}
         </ol>
       ) : null}
-      {rematch === null ? null : <RematchButton label={rematch} onRematch={onRematch} />}
+      {game.status === "finished" && game.rematch !== undefined ? (
+        <RematchButton label={rematch} onRematch={onRematch} />
+      ) : null}
       <Link to="/" className={rematch === null ? "button" : "button secondary"}>
         Back to games
       </Link>

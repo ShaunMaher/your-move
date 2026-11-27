@@ -856,6 +856,46 @@ describe("the rematch button (07 §1, alpha A15)", () => {
     expect(screen.queryByRole("button", { name: /rematch/iu })).toBeNull();
   });
 
+  it.each([
+    [null, "Rematch", "Starting rematch…"],
+    [{ gameId: "g2", you: "invited" }, "Accept rematch", "Joining rematch…"],
+    [{ gameId: "g2", you: "joined" }, "Go to rematch", "Opening rematch…"],
+  ] as const)(
+    "for %j, says what it is doing while busy (A15-P-9)",
+    async (rematch, label, busy) => {
+      open({
+        "GET /api/v1/games/g1": finished({ rematch }),
+        "POST /api/v1/games/g1/rematch": () => new Promise<Response>(() => undefined),
+      });
+      const card = await results();
+      fireEvent.click(within(card).getByRole("button", { name: label }));
+      const button = await within(card).findByRole("button", { name: busy });
+      expect(button.hasAttribute("disabled")).toBe(true);
+    },
+  );
+
+  it("refetches the finished game after a 404 or 409, so the button follows the server (A15-P-8)", async () => {
+    let shown: unknown = null;
+    const { calls } = open({
+      "GET /api/v1/games/g1": () => finished({ rematch: shown }),
+      "POST /api/v1/games/g1/rematch": () => {
+        // Another player's rematch was made and then left by this player meanwhile.
+        shown = { gameId: "g2", you: "none" };
+        return problem(404, "NOT_FOUND");
+      },
+    });
+    const card = await results();
+    fireEvent.click(within(card).getByRole("button", { name: "Rematch" }));
+    await waitFor(() => {
+      expect(within(card).queryByRole("button")).toBeNull();
+    });
+    // The refusal stays in view after the button goes.
+    expect(within(card).getByRole("alert").textContent).toBe("You're no longer in this rematch.");
+    expect(
+      calls.filter((call) => call.method === "GET" && call.path === "/api/v1/games/g1"),
+    ).toHaveLength(2);
+  });
+
   it("is busy while the call runs, and shows a refusal under it", async () => {
     let answer: (response: Response) => void = () => undefined;
     open({
@@ -881,7 +921,16 @@ describe("the rematch button (07 §1, alpha A15)", () => {
 
   it.each([
     [400, "INVALID_INVITEES", "Someone from this game can't be added any more"],
-    [400, "INVALID_OPTIONS", "This game's options can't be used any more"],
+    [
+      400,
+      "INVALID_OPTIONS",
+      "This game's options aren't available to you. Start a new game instead.",
+    ],
+    [
+      409,
+      "REMATCH_UNAVAILABLE",
+      "There's no one left from this game to play with. Start a new game instead.",
+    ],
     [404, "NOT_FOUND", "You're no longer in this rematch."],
     [429, "RATE_LIMITED", "Too many attempts."],
   ])("explains a %i %s", async (status, code, text) => {

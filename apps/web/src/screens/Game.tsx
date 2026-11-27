@@ -297,8 +297,11 @@ export function Game({
       return null;
     }
     if (result.status === 401) onSessionLost();
+    // The rematch isn't what the screen showed (gone, ended, or another player's meanwhile):
+    // refetch, so the button says what the server now does (A15-P-8).
+    if (result.status === 404 || result.status === 409) void refetch(true);
     return rematchProblem(result.status, result.code);
-  }, [api, id, onSessionLost]);
+  }, [api, id, onSessionLost, refetch]);
 
   if (load.status === "loading") {
     return (

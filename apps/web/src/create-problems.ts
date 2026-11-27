@@ -30,11 +30,12 @@ const CREATE_PROBLEMS: Readonly<Record<string, string>> = {
  */
 const REMATCH_PROBLEMS: Readonly<Record<string, string>> = {
   ...SHARED,
-  INVALID_OPTIONS: "This game's options can't be used any more. Start a new game instead.",
+  INVALID_OPTIONS: "This game's options aren't available to you. Start a new game instead.",
   INVALID_SEATS: "This game's options don't work any more. Start a new game instead.",
   INVALID_INVITEES:
     "Someone from this game can't be added any more. Start a new game with the people you can play.",
   UNKNOWN_GAME: "This game isn't available any more.",
+  REMATCH_UNAVAILABLE: "There's no one left from this game to play with. Start a new game instead.",
   NOT_FOUND: "You're no longer in this rematch.",
   WRONG_STATUS: "The rematch has already ended.",
   STALE_GAME: "The rematch changed while you were joining it. Try again.",
