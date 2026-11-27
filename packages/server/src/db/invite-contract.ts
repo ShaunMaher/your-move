@@ -149,40 +149,47 @@ export function inviteRepositoryContract(target: () => InviteTarget): void {
       expect(await repos().emailSuppressions.suppressedAmong([])).toEqual([]);
     });
 
-    it("hasFinishedGame is true only for a seat in a finished game", async () => {
-      const someone = await human();
-      expect(await repos().users.hasFinishedGame(someone.id)).toBe(false);
-      const seated = (status: "active" | "finished", seat: number | null, state: string) =>
-        repos().games.create(
-          {
-            id: crypto.randomUUID(),
-            gameType: "contract",
-            gameVersion: 1,
-            options: "{}",
-            status,
-            seats: 2,
-            turnTimeoutDays: 3,
-            seatOrder: "join",
-            aiAssistance: "off",
-            lastActionAt: LATER,
-            createdAt: LATER,
-            updatedAt: LATER,
-          },
-          [
-            {
-              id: crypto.randomUUID(),
-              userId: someone.id,
-              seat,
-              state: state as NewGamePlayer["state"],
-            },
-          ],
+    it("hasPastOpponent is true once the user has a past-opponent row, and only their own", async () => {
+      const [someone, other] = [await human(), await human()];
+      expect(await repos().users.hasPastOpponent(someone.id)).toBe(false);
+      // A row naming them as the other side is the other user's, not theirs (06 §6.9 both ways).
+      await target().sql(
+        "INSERT INTO past_opponents (user_id, other_id, last_finished_at) VALUES (?, ?, ?)",
+        other.id,
+        someone.id,
+        LATER,
+      );
+      expect(await repos().users.hasPastOpponent(someone.id)).toBe(false);
+      expect(await repos().users.hasPastOpponent(other.id)).toBe(true);
+    });
+
+    it("markSent records sent_at for the given invites only", async () => {
+      const seat = await lobby(address());
+      const [creator] = await target().sql(
+        "SELECT created_by FROM games WHERE id = ?",
+        seat.gameId,
+      );
+      const ids = [crypto.randomUUID(), crypto.randomUUID()];
+      for (const id of ids) {
+        await target().sql(
+          "INSERT INTO invites (id, game_id, inviter_id, email_hash, sent_at, expires_at) VALUES (?, ?, ?, ?, NULL, ?)",
+          id,
+          seat.gameId,
+          String(creator?.["created_by"]),
+          freshEmailId(),
+          LATER,
         );
-      await seated("active", 0, "playing");
-      // An invitation dropped at the start holds no seat: that game wasn't theirs to complete.
-      await seated("finished", null, "dropped");
-      expect(await repos().users.hasFinishedGame(someone.id)).toBe(false);
-      await seated("finished", 1, "out");
-      expect(await repos().users.hasFinishedGame(someone.id)).toBe(true);
+      }
+      await repos().invites.markSent([ids[0] ?? ""], LATER + 5);
+      await repos().invites.markSent([], LATER + 6);
+      const rows = await target().sql(
+        "SELECT id, sent_at FROM invites WHERE game_id = ? ORDER BY sent_at IS NULL",
+        seat.gameId,
+      );
+      expect(rows).toEqual([
+        { id: ids[0], sent_at: LATER + 5 },
+        { id: ids[1], sent_at: null },
+      ]);
     });
 
     it("allOverdueLobbies lists lobbies created by the cut-off, oldest first, whoever is in them", async () => {

@@ -120,10 +120,10 @@ export interface UserRepo {
    */
   disableNudgesByEmailId(emailId: string, updatedAt: number): Promise<void>;
   /**
-   * Whether the user has completed a game: held a seat in a game that reached `finished` (the
-   * new-account invite-email rate, 06 §6.6).
+   * Whether the user has a past opponent (04 `past_opponents`: a finished game in which both
+   * acted), which lifts the new-account invite-email rate (06 §6.6).
    */
-  hasFinishedGame(userId: string): Promise<boolean>;
+  hasPastOpponent(userId: string): Promise<boolean>;
   /**
    * Deletes an account that holds no game rows (04 §Account deletion steps 1, 3, 4 and 5): its
    * sessions and API tokens, its OTP challenges, blocks and past-opponent rows, the
@@ -546,6 +546,8 @@ export interface InviteRepo {
    * transition: the version is checked, never bumped. True only for the call that changed the row.
    */
   claim(claim: InviteClaim): Promise<boolean>;
+  /** Records that the invite emails of these `invites` rows were handed to the sender (04). */
+  markSent(inviteIds: readonly string[], at: number): Promise<void>;
 }
 
 /** A seat whose user may be sent an "It's your turn" email (03 §7). */

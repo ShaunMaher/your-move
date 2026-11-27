@@ -21,8 +21,6 @@ import {
   apiTokens,
   authEvents,
   blocks,
-  gamePlayers,
-  games,
   otpChallenges,
   pastOpponents,
   rateLimits,
@@ -181,18 +179,11 @@ export function userRepo(db: Database): UserRepo {
         })
         .where(eq(users.emailId, emailId));
     },
-    async hasFinishedGame(userId) {
+    async hasPastOpponent(userId) {
       const row = await db
-        .select({ id: gamePlayers.id })
-        .from(gamePlayers)
-        .innerJoin(games, eq(games.id, gamePlayers.gameId))
-        .where(
-          and(
-            eq(gamePlayers.userId, userId),
-            isNotNull(gamePlayers.seat),
-            eq(games.status, "finished"),
-          ),
-        )
+        .select({ otherId: pastOpponents.otherId })
+        .from(pastOpponents)
+        .where(eq(pastOpponents.userId, userId))
         .limit(1)
         .get();
       return row !== undefined;

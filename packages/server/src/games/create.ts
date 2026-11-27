@@ -28,11 +28,10 @@ import { normaliseAddress, type NormalisedEmail } from "../accounts/email.js";
 import { checkLimits, type LimitCheck } from "../auth/limits.js";
 import { emailId, type Subkeys } from "../crypto/subkeys.js";
 import type { NewGamePlayer, UserRecord } from "../db/repositories.js";
-import type { EmailMessage } from "../email/sender.js";
 import { ApiError } from "../http/api-error.js";
 import type { Platform } from "../platform.js";
 import { expireOverdueLobbies } from "./expiry.js";
-import { planInviteMail } from "./invite-mail.js";
+import { type InviteMail, planInviteMail } from "./invite-mail.js";
 import { LOBBY_LIFETIME_MS } from "./lifecycle.js";
 import type { GameType } from "./registry.js";
 import type { ResourceProvider } from "./resources.js";
@@ -224,7 +223,7 @@ export interface CreatedGame {
    * was typed. Whenever it isn't null the caller schedules one background task for it, whatever
    * it carries, so the work doesn't say which addresses are mailed (Q3).
    */
-  readonly invitations: readonly EmailMessage[] | null;
+  readonly invitations: InviteMail | null;
 }
 
 /**
@@ -328,18 +327,6 @@ export async function createGame(
     user?.kind === "human" && user.onboardedAt !== null ? user : null,
   );
   const delivery = await inboundDelivery(deps, creator, emailIds, invitable, now);
-  const mail = await planInviteMail(
-    { platform, keys },
-    {
-      creator,
-      gameName: type.manifest.name,
-      turnTimeoutDays,
-      emails,
-      emailIds,
-      invitable,
-    },
-    now,
-  );
   // One lookup for every request, with a placeholder for each address that resolves to no one,
   // so the reads don't depend on what the addresses turn out to be (Q3).
   const blocked = await blockLookup(deps, [
@@ -382,6 +369,21 @@ export async function createGame(
       lastSeenVersion: NEVER_SEEN,
     };
   });
+  const inviteIds = emailIds.map(() => crypto.randomUUID());
+  const mail = await planInviteMail(
+    { platform, keys },
+    {
+      creator,
+      gameName: type.manifest.name,
+      emails,
+      emailIds,
+      inviteIds,
+      // An email-invite seat with `normal` delivery: never a user's invitation, an `inert` seat
+      // or one the inbound cap made `hidden` (06 §6.3).
+      mailable: emailRows.map((row, i) => invitable[i] === null && row.delivery === "normal"),
+    },
+    now,
+  );
   const gameId = crypto.randomUUID();
   const players: NewGamePlayer[] = [
     {
@@ -418,10 +420,11 @@ export async function createGame(
       version: resource.version ?? null,
     })),
     invites: emailIds.map((hash, i) => ({
-      id: crypto.randomUUID(),
+      id: inviteIds[i] ?? crypto.randomUUID(),
       inviterId: creator.id,
       emailHash: hash,
-      sentAt: mail.sentAt[i] ?? null,
+      // Set by the background task once the sender has accepted the email (04).
+      sentAt: null,
       expiresAt: now + LOBBY_LIFETIME_MS,
     })),
   };
@@ -440,6 +443,6 @@ export async function createGame(
     added: pickedRows.flatMap((row) =>
       row.state === "joined" && row.userId != null ? [row.userId] : [],
     ),
-    invitations: emails.length === 0 ? null : mail.messages,
+    invitations: emails.length === 0 ? null : mail,
   };
 }

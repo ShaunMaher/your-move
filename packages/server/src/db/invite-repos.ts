@@ -4,12 +4,12 @@
  * guarded update of one `game_players` row that checks the game's version without bumping it.
  * Written once over the shared schema and run by either adapter's {@link Database}.
  */
-import { and, asc, eq, gt, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 
 import type { NormalisedEmail } from "../accounts/email.js";
 import type { Database } from "./database.js";
 import type { InviteRepo } from "./repositories.js";
-import { gamePlayers, games, users } from "./schema.js";
+import { gamePlayers, games, invites, users } from "./schema.js";
 
 /** No row of game `gameId` holds user `userId` (SQL operands): the "no other row" guard. */
 function holdsNoRow(gameId: unknown, userId: unknown) {
@@ -90,6 +90,13 @@ export function inviteRepo(db: Database): InviteRepo {
         )
         .returning({ id: gamePlayers.id });
       return rows.length === 1;
+    },
+    async markSent(inviteIds, at) {
+      if (inviteIds.length === 0) return;
+      await db
+        .update(invites)
+        .set({ sentAt: at })
+        .where(inArray(invites.id, [...inviteIds]));
     },
   };
 }

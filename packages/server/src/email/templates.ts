@@ -159,7 +159,6 @@ export interface InvitationContext {
   readonly inviterEmail: string;
   /** The game type's display name, from its manifest. */
   readonly gameName: string;
-  readonly turnTimeoutDays: number;
   /** How many days the invitation stays open: the lobby's lifetime (02 §4). */
   readonly openDays: number;
   readonly unsubscribeUrl: string;
@@ -178,7 +177,8 @@ export function invitationEmail(to: NormalisedEmail, context: InvitationContext)
   const { appName, inviterName, gameName } = context;
   const paragraphs: Paragraph[] = [
     `${inviterName} (${context.inviterEmail}) has invited you to play ${gameName} on ${appName}.`,
-    `Each player has ${days(context.turnTimeoutDays)} for each move. The invitation stays open for ${days(context.openDays)}.`,
+    // No per-move time limit until turn timeouts exist (06 §6.3; not in the alpha).
+    `The invitation stays open for ${days(context.openDays)}.`,
     { text: "To join, sign in with this email address at", href: context.publicUrl },
     `There's no password: ${appName} emails you a sign-in code. Then choose the name other players will see, and the invitation will be waiting in your list of games.`,
     `On a phone you can add ${appName} to your home screen. On an iPhone, open the link in Safari, tap Share, then "Add to Home Screen". On Android, open it in Chrome and choose "Install app" or "Add to Home screen".`,

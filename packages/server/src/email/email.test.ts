@@ -127,7 +127,6 @@ describe("the invite email (06 §6.3, alpha A17)", () => {
     inviterName: 'Ann <img src=x onerror="y">',
     inviterEmail: "ann@example.org",
     gameName: "Words",
-    turnTimeoutDays: 1,
     openDays: 14,
     unsubscribeUrl: 'https://play.example.org/api/v1/email/unsubscribe?t=a"b',
   };
@@ -142,9 +141,11 @@ describe("the invite email (06 §6.3, alpha A17)", () => {
     expect(message.text).toContain(
       `${invitation.inviterName} (ann@example.org) has invited you to play Words on ${context.appName}.`,
     );
+    expect(message.text).toContain("The invitation stays open for 14 days.");
+    // No per-move limit until turn timeouts exist (06 §6.3).
+    expect(message.text).not.toContain("each move");
     // One day is singular.
-    expect(message.text).toContain("Each player has 1 day for each move.");
-    expect(message.text).toContain("stays open for 14 days.");
+    expect(invitationEmail(to, { ...invitation, openDays: 1 }).text).toContain("open for 1 day.");
     expect(message.text).toContain(
       "To join, sign in with this email address at https://play.example.org",
     );

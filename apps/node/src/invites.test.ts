@@ -145,7 +145,8 @@ describe("the invite email (06 §6.3)", () => {
     expect(mail?.text).toBe(
       [
         `Ada (${ada.email}) has invited you to play Words on Family Games.`,
-        "Each player has 5 days for each move. The invitation stays open for 14 days.",
+        // No per-move time limit until turn timeouts exist (06 §6.3).
+        "The invitation stays open for 14 days.",
         "To join, sign in with this email address at https://play.example.org",
         "There's no password: Family Games emails you a sign-in code. Then choose the name other players will see, and the invitation will be waiting in your list of games.",
         'On a phone you can add Family Games to your home screen. On an iPhone, open the link in Safari, tap Share, then "Add to Home Screen". On Android, open it in Chrome and choose "Install app" or "Add to Home screen".',
@@ -153,6 +154,7 @@ describe("the invite email (06 §6.3)", () => {
         `Don't send me invites again: ${unsubscribe}`,
       ].join("\n\n") + "\n",
     );
+    expect(mail?.text).not.toContain("5 days");
     // Nothing of the game itself: not its id, not its options.
     const options = Object.values(game.options as Record<string, unknown>).filter(
       (value): value is string => typeof value === "string",
@@ -203,8 +205,10 @@ describe("the invite email (06 §6.3)", () => {
     expect(answer.status).toBe(200);
     expect(await answer.text()).toContain("No more invitation emails");
     expect(h.query("SELECT reason FROM email_suppressions")).toEqual([{ reason: "unsubscribed" }]);
-    h.advance(HOUR);
+    // Days later, so the inbound cap doesn't make the seat hidden (which is never mailed either).
+    h.advance(2 * DAY);
     const second = await invite(ada, address);
+    expect(playerRow(second.game.id, "delivery")).toBe("normal");
     expect(await invitesTo(address)).toHaveLength(1);
     expect(shape(second)).toEqual(shape(first));
   });
@@ -238,6 +242,8 @@ describe("the invite email (06 §6.3)", () => {
       expect.objectContaining({ msg: "invite email not sent", errorClass: "TypeError" }),
     ]);
     expect(JSON.stringify(h.logs)).not.toContain(address);
+    // Only a send the provider accepted records sent_at (04).
+    expect(h.query("SELECT sent_at FROM invites")).toEqual([{ sent_at: null }]);
   });
 });
 
@@ -299,9 +305,10 @@ describe("invite-email caps (06 §6.6, 08 §4)", () => {
   it("mails one address at most 3 times in 30 days, across inviters", async () => {
     h = gameHarness();
     const address = freshEmail();
+    // A day apart, so the inbound cap's 3 a day never makes one hidden.
     for (const name of ["Ada", "Bo", "Cy", "Di"]) {
       await invite(await seasoned(name), address);
-      h.advance(MINUTE);
+      h.advance(DAY);
     }
     expect(await invitesTo(address)).toHaveLength(3);
     h.advance(31 * DAY);
@@ -353,7 +360,10 @@ describe("Q3: every typed address alike (06 §6.1)", () => {
     await suppress(suppressed, "unsubscribed");
     // Three invite emails from others already: this address is over its own cap.
     const capped = freshEmail();
-    for (const name of ["Cy", "Di", "Ed"]) await invite(await seasoned(name), capped);
+    for (const name of ["Cy", "Di", "Ed"]) {
+      await invite(await seasoned(name), capped);
+      h.advance(DAY);
+    }
     const cases = {
       known: known.email,
       unknown: freshEmail(),
@@ -460,6 +470,113 @@ describe("Q3: every typed address alike (06 §6.1)", () => {
     ).toEqual([{ user_id: null, delivery: "inert" }]);
     expect(await invitesTo(bo.email)).toEqual([]);
   });
+});
+
+describe("what a typed address uses up (06 §6.6, review A17-S-1)", () => {
+  /** Makes `address` a hidden seat for the next stranger's invitation today: 3 others invite it. */
+  async function overInboundCap(address: string): Promise<void> {
+    for (const name of ["Hal", "Ivy", "Jo"]) await invite(await seasoned(name), address);
+  }
+
+  /** The kinds of first address, each set up in the harness and returned as an address. */
+  const firsts: Record<string, () => Promise<string>> = {
+    known: async () => (await signUp(h, "Kim")).email,
+    unknown: () => Promise.resolve(freshEmail()),
+    suppressed: async () => {
+      const address = freshEmail();
+      await suppress(address, "unsubscribed");
+      return address;
+    },
+    hidden: async () => {
+      const address = freshEmail();
+      await overInboundCap(address);
+      return address;
+    },
+  };
+
+  /** One four-seat game for [first, c1, c2]; how many invite emails c1 and c2 got. */
+  async function outcome(creator: Player, first: string): Promise<number[]> {
+    const [c1, c2] = [freshEmail(), freshEmail()];
+    await createGame(h, creator, {
+      gameType: "example",
+      seats: 4,
+      invitees: [{ email: first }, { email: c1 }, { email: c2 }],
+    });
+    return [(await invitesTo(c1)).length, (await invitesTo(c2)).length];
+  }
+
+  for (const [kind, env] of [
+    ["young inviter (2 a day)", {}],
+    [
+      "seasoned inviter (LIMIT_INVITE_EMAILS_INVITER_DAY=2)",
+      { LIMIT_INVITE_EMAILS_INVITER_DAY: "2" },
+    ],
+  ] as const) {
+    it(`${kind}: the first address uses one attempt whatever it is, so the others fare alike`, async () => {
+      h = gameHarness(env);
+      const seen: Record<string, number[]> = {};
+      for (const [name, make] of Object.entries(firsts)) {
+        const first = await make();
+        const creator = kind.startsWith("young") ? await signUp(h, "Yan") : await seasoned("Sam");
+        seen[name] = await outcome(creator, first);
+        h.advance(MINUTE);
+      }
+      // The first address takes attempt 1, c1 attempt 2 (mailed), c2 attempt 3 (over the cap).
+      for (const name of Object.keys(firsts)) expect(seen[name], name).toEqual([1, 0]);
+    });
+  }
+
+  it("never mails a seat the inbound cap made hidden, and counts only silent shared caps for it", async () => {
+    h = gameHarness();
+    const ada = await seasoned("Ada");
+    const address = freshEmail();
+    await invite(ada, address);
+    h.advance(MINUTE);
+    const second = await invite(ada, address);
+    expect(playerRow(second.game.id, "delivery")).toBe("hidden");
+    expect(await invitesTo(address)).toHaveLength(1);
+    // Its per-address count stayed at the one real send: two more strangers on later days still
+    // reach it before its 3 in 30 days run out.
+    for (const name of ["Bo", "Cy"]) {
+      h.advance(2 * DAY);
+      await invite(await seasoned(name), address);
+    }
+    expect(await invitesTo(address)).toHaveLength(3);
+  });
+
+  for (const [kind, env] of [
+    ["the inviter's daily cap", { LIMIT_INVITE_EMAILS_INVITER_DAY: "1" }],
+    ["the new-account rate", {}],
+  ] as const) {
+    it(`Q3: an address stopped by ${kind} is answered and worked like a known one`, async () => {
+      const calls: string[] = [];
+      h = gameHarness(env, { wrapRepos: (repos) => recording(repos, calls) });
+      const creator = kind.includes("new-account") ? await signUp(h, "Yan") : await seasoned("Ada");
+      // Use the allowance up first: 1 for the seasoned cap, 2 for the new-account rate.
+      for (let i = 0; i < (kind.includes("new-account") ? 2 : 1); i++) {
+        await invite(creator, freshEmail());
+        h.advance(MINUTE);
+      }
+      const known = await signUp(h, "Bo");
+      const unknown = freshEmail();
+      const seen: unknown[] = [];
+      for (const address of [known.email, unknown]) {
+        await h.drain();
+        calls.length = 0;
+        const before = { counted: counted(), scheduled: h.backgroundScheduled() };
+        const body = await invite(creator, address);
+        seen.push({
+          shape: shape(body),
+          calls: calls.filter((name) => name !== "sessions.touch"),
+          counted: counted() - before.counted,
+          scheduled: h.backgroundScheduled() - before.scheduled,
+        });
+        h.advance(MINUTE);
+      }
+      expect(seen[1]).toEqual(seen[0]);
+      expect(await invitesTo(unknown)).toEqual([]);
+    });
+  }
 });
 
 describe("claims (06 §6.4)", () => {

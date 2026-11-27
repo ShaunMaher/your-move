@@ -182,7 +182,7 @@ Tracks invitation emails (for rate limiting, expiry and abuse handling). Stores 
 | game_id | TEXT FK → games ON DELETE CASCADE | |
 | inviter_id | TEXT FK → users ON DELETE CASCADE | |
 | email_hash | TEXT | `emailId` (HMAC, 09 §1.1) of the normalised address |
-| sent_at | INTEGER NULL | when the invite email was handed to the sender (06 §6.3); NULL when none was (an invitation to an onboarded user, a suppressed address, a cap) |
+| sent_at | INTEGER NULL | when the sender accepted the invite email, set by the background task that sends it, never before the response (06 §6.3); NULL when none was sent (an invitation to an onboarded user, a suppressed address or `hidden` seat, a cap, a failed send) |
 | expires_at | INTEGER | = lobby expiry: 14 days from the game's `created_at` (02 §4) |
 
 ### `email_suppressions`

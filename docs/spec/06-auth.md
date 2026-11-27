@@ -291,11 +291,16 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    your home screen" + one-click unsubscribe ("Don't send me invites again", 05 §Email links:
    purpose `invites`, the address's `emailId`, with the `List-Unsubscribe` headers). The subject is
    *"<Display Name> invited you to play <game name> on <APP_NAME>"*. Nothing else about the game:
-   never its options, state or other players (alpha A17). It is built for **every** typed address
-   (the same work whatever the address turns out to be, §6.1) and sent via `waitUntil` after the
-   response, only for an email-invite seat whose address isn't suppressed (any reason, 04
-   `email_suppressions`) or over an invite cap (§6.6); the seat is created either way. The
-   `invites` row's `sent_at` records when it was handed to the sender, NULL when it wasn't.
+   never its options, state or other players (alpha A17). Until turn timeouts exist (they aren't in
+   the alpha, 10) the email leaves the turn timeout out rather than promise a limit nothing
+   enforces. It is built for **every** typed address (the same work whatever the address turns out
+   to be, §6.1) and sent via `waitUntil` after the response, only for an email-invite seat with
+   `normal` delivery whose address isn't suppressed (any reason, 04 `email_suppressions`) and
+   that passed every invite cap (§6.6). A seat the inbound cap made `hidden` (§6.7) is never
+   mailed, exactly like a suppressed address (review A17-P-1): it would otherwise reach the person
+   with no badge and no list entry to match. The seat is created either way. The `invites` row's
+   `sent_at` is set by that background task once the sender has accepted the email, never before
+   the response; a failed send leaves it NULL.
 4. When a user **completes onboarding** (not merely verifies a code), every `invited`, non-`inert`
    email seat with matching `invite_email` in a `lobby` game where they hold no other row is
    claimed (guard, version check and retries in 02 §4): `user_id` set, `invite_email` kept for the
@@ -330,16 +335,31 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
      whole request is `429` and nothing is created.
    - **Invite emails** (to email-invite seats: no account, or one that hasn't finished
      onboarding): per inviter 5 / day and 20 / 30 days;
-     accounts younger than 7 days **that have not yet completed a game** (held a seat in a game
-     that reached `finished`) get 2 / day; per target
+     accounts younger than 7 days **that have not yet completed a game** (have no past-opponent
+     row, §6.9: a finished game in which both players acted) get 2 / day; per target
      address 3 invite emails / 30 days across all inviters (counted in `rate_limits` keyed by the
      email HMAC, so the count survives invite deletion); instance-wide caps in 08 §4. Over these
-     limits, and for suppressed addresses, the seat is still created but **no email is sent** — the
-     response doesn't change. An email that would be sent (an email-invite seat whose address
-     isn't suppressed) adds 1 to each of these counters, even when another of them stops it (they
-     count attempts, like the OTP caps); every other typed address adds 1 to the never-read
-     `silent` counter of each instead (§3.2), so every typed address writes the same counters and
-     schedules the same background task (alpha A17).
+     limits, and for suppressed or `hidden` seats (§6.3), the seat is still created but **no email
+     is sent** — the response doesn't change. They are counted in two tiers, the same way for
+     every typed address (alpha A17 review S-1):
+     1. the **inviter's** caps (a day, 30 days, the new-account rate) count **every** typed address
+        as one attempt, whatever it resolves to — an onboarded user, no account, an un-onboarded
+        account, a suppressed address, a `hidden` seat — so how much allowance an address uses up
+        reveals nothing about it, and the inviter, the only one who can observe these caps, learns
+        nothing from them. Inviting existing players by address therefore uses up the inviter's
+        invite-email allowance too;
+     2. the **shared** caps (per target address, instance-wide) count under their real keys only an
+        address that may be mailed (an email-invite seat with `normal` delivery, not suppressed)
+        and passed the inviter's caps; every other address adds 1 to the never-read `silent`
+        counter of each instead (§3.2), so addresses that would never be mailed can't spend another
+        address's or the instance's budget;
+     3. the email is sent only when every cap passed.
+
+     Every typed address therefore writes the same number of counters and schedules the same
+     background task. Known residual (review A17-P-13): for a mailed address the per-target row
+     is typically inserted, while an unmailed one updates the long-lived `silent` row, so the
+     database work differs as an insert differs from an update; nothing of it is visible through
+     the API, and the statistical timing suite covers the timing class (ADR 0006).
 7. Game creation is also limited per pair (5 / day) and per user (30 / day), so a harasser can't
    spam declines-and-recreate. A **pair** is (creator, `userId`) for a picked past opponent and
    (creator, `emailId`) for every typed address, whatever it resolves to, so these limits (and the

@@ -46,7 +46,7 @@ const METHODS = {
     setEmailNudges: true,
     setTheme: true,
     disableNudgesByEmailId: true,
-    hasFinishedGame: true,
+    hasPastOpponent: true,
     deleteAccount: true,
   } satisfies Record<keyof UserRepo, true>,
   otp: { issue: true, live: true, attempt: true, consume: true } satisfies Record<
@@ -68,7 +68,10 @@ const METHODS = {
     keyof EmailSuppressionRepo,
     true
   >,
-  invites: { claimable: true, pending: true, claim: true } satisfies Record<keyof InviteRepo, true>,
+  invites: { claimable: true, pending: true, claim: true, markSent: true } satisfies Record<
+    keyof InviteRepo,
+    true
+  >,
   pushSubscriptions: {
     save: true,
     remove: true,
