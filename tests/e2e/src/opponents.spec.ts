@@ -76,7 +76,10 @@ test("a finished game's players start the next one from the list or its Rematch 
   await expect(annResults).toBeVisible(FAR);
   await expectAccessible(ann);
   await annResults.getByRole("button", { name: "Rematch" }).click();
+  // The finished game shows its final board too: wait for the move to the new game first.
+  await expect(ann).not.toHaveURL(new RegExp(`/g/${first}$`, "u"), FAR);
   await expect(ann.getByRole("region", { name: "Words board" })).toBeVisible(FAR);
+  await expect(ann.getByRole("region", { name: "Final result" })).toHaveCount(0);
   const third = /\/g\/([^/]+)$/u.exec(new URL(ann.url()).pathname)?.[1] ?? "";
   expect([first, second, ""]).not.toContain(third);
 
