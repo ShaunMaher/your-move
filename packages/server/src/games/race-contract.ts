@@ -17,6 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { normaliseAddress } from "../accounts/email.js";
 import { createApp, type App } from "../app.js";
+import { parseIp } from "../auth/client-ip.js";
 import { createSession } from "../auth/session.js";
 import { parseConfig } from "../config/parse.js";
 import type {
@@ -205,8 +206,11 @@ export function gameRaceContract(
           log,
           email: createConsoleEmailSender(log, now),
           push: DISABLED_PUSH_SENDER,
-          // No game route uses the client address.
-          clientIp: () => ({ ok: false, reason: "missing" }),
+          // The join routes' per-IP limit reads it (08 §4.1); every racer shares one address.
+          clientIp: () => {
+            const ip = parseIp("203.0.113.9");
+            return ip === null ? { ok: false, reason: "missing" } : { ok: true, ip };
+          },
           dictionaries: NO_DICTIONARIES,
           now,
         },
@@ -562,6 +566,81 @@ export function gameRaceContract(
       expect(retried.body?.game?.status).toBe("active");
       await consistent(gameId, 2);
       clock += 1;
+    });
+
+    /** A lobby with a join link asked for at creation, and the link's token (alpha A18). */
+    const linkedLobby = async (seats: number, invitees: readonly Player[]) => {
+      const creator = await player();
+      const created = await send(creator, "POST", "/api/v1/games", {
+        gameType: game.type,
+        seats,
+        invitees: invitees.map((invitee) => ({ email: invitee.email })),
+        joinLink: true,
+      });
+      expect(created.status).toBe(201);
+      const url = (created.body as { joinLinkUrl?: string } | null)?.joinLinkUrl ?? "";
+      return { creator, gameId: created.body?.game?.id ?? "", token: url.split("#")[1] ?? "" };
+    };
+
+    it("join against join for the last open seat: one joins, the other's retry finds it full", async () => {
+      for (let round = 0; round < 3; round++) {
+        const { gameId, token } = await linkedLobby(2, []);
+        const joiners = [await player(), await player()];
+        const { answers, stale } = await races.race(
+          joiners.map((who) => () => send(who, "POST", "/api/v1/join", { token })),
+        );
+        // The server retried the loser (03 §5.2): it never sees STALE_GAME, only the full game.
+        expect(answers.map((answer) => answer.status).sort()).toEqual([200, 404]);
+        expect(stale).toBe(1);
+        const winner = answers.findIndex((answer) => answer.status === 200);
+        const { game: stored, players } = await consistent(gameId, 1);
+        expect(stored?.status).toBe("lobby");
+        expect(players.filter((row) => row.state === "joined")).toHaveLength(2);
+        const joined = joiners[winner];
+        if (joined === undefined) throw new Error("no winner");
+        expect(rowOf(players, joined).joinedVia).toBe("join_link");
+        expect(players.some((row) => row.userId === joiners[1 - winner]?.id)).toBe(false);
+        clock += 1;
+      }
+    });
+
+    it("remove against a join accepting the same invitation: exactly one happens", async () => {
+      for (let round = 0; round < 4; round++) {
+        const b = await player();
+        const { creator, gameId, token } = await linkedLobby(3, [b]);
+        const before = await rows(gameId);
+        const removeWins = round % 2 === 0;
+        const { answers, stale } = await races.race(
+          [
+            () =>
+              send(creator, "POST", `/api/v1/games/${gameId}/remove-seat`, {
+                expectedVersion: 0,
+                playerId: rowOf(before, b).id,
+              }),
+            () => send(b, "POST", "/api/v1/join", { token }),
+          ],
+          {
+            hold: (writes) =>
+              (writes.updatePlayers ?? []).some((update) =>
+                removeWins ? update.set.state === "joined" : update.set.state === "removed",
+              ),
+          },
+        );
+        const [removing, joining] = answers;
+        expect(stale).toBe(1);
+        const { players } = await consistent(gameId, 1);
+        if (removeWins) {
+          expect(removing?.status).toBe(200);
+          // Removed while the link was live: the join's retry is the link's 404.
+          expect(joining?.status).toBe(404);
+          expect(rowOf(players, b).state).toBe("removed");
+        } else {
+          expect([removing?.status, removing?.body?.error?.code]).toEqual([409, "STALE_GAME"]);
+          expect(joining?.status).toBe(200);
+          expect(rowOf(players, b)).toMatchObject({ state: "joined", joinedVia: "invitation" });
+        }
+        clock += 1;
+      }
     });
   });
 }

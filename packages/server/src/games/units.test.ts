@@ -16,6 +16,7 @@ import {
   isModuleOutcome,
   isRefusal,
   LOBBY_LIFETIME_MS,
+  removeSeat,
   rerank,
   start,
   startAtCreation,
@@ -367,6 +368,7 @@ describe("an automatic start validateStart refuses (02 §4 Start, step 2)", () =
       options: {},
       state: null,
       random: cryptoRandom(),
+      joinLink: null,
     };
     expect(accept(ctx, invited, 5)).toEqual({
       game: { updatedAt: 5 },
@@ -409,6 +411,7 @@ describe("start and accept at the lobby's expiry (A2 review S2-5)", () => {
     options: {},
     state: null,
     random: cryptoRandom(),
+    joinLink: null,
   };
   const due = 1000 + LOBBY_LIFETIME_MS;
 
@@ -501,6 +504,7 @@ describe("typed addresses on open invitations (A12-S-3)", () => {
     options: {},
     state: null,
     random: cryptoRandom(),
+    joinLink: null,
   };
 
   it("holds for every lobby transition", () => {
@@ -515,6 +519,8 @@ describe("typed addresses on open invitations (A12-S-3)", () => {
       cancel(ctx, creator, at),
       expire(ctx.game, ctx.players, 1000 + LOBBY_LIFETIME_MS),
       startAtCreation({ ...ctx, game: { ...ctx.game, seats: 2 }, players: [creator, added] }, at),
+      removeSeat(ctx, creator, typedX.id, at),
+      removeSeat(ctx, creator, pickedInvitation.id, at),
     ];
     let checked = 0;
     for (const outcome of outcomes) {

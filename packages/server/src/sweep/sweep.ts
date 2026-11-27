@@ -1,8 +1,8 @@
 /**
  * The one `sweep()` (docs/spec/03-architecture.md §8): scheduled work, run by the Worker's Cron
- * Trigger or a Node `setInterval`. The alpha has three steps: expiring overdue lobbies and claiming
- * pending email-invite seats (A17), then sending due email nudges (A6); the others arrive with
- * their milestones. A failing step is logged by class and the rest still run.
+ * Trigger or a Node `setInterval`. The alpha has four steps: expiring overdue lobbies and claiming
+ * pending email-invite seats (A17), deleting expired join links (A18), then sending due email
+ * nudges (A6); the others arrive with their milestones. A failing step is logged by class and the rest still run.
  */
 import { deriveSubkeys, type Subkeys } from "../crypto/subkeys.js";
 import { instanceGames } from "../games/instance.js";
@@ -33,6 +33,8 @@ export interface SweepReport {
   /** Overdue lobbies looked at (each expired, unless something else ended it first). */
   readonly lobbies: number | null;
   readonly claims: ClaimReport | null;
+  /** Expired join links deleted (03 §8). */
+  readonly joinLinks: number | null;
   readonly nudges: NudgeReport | null;
 }
 
@@ -70,6 +72,9 @@ export function createSweep(options: SweepOptions): Sweep {
     const claims = await step("claims", () =>
       claimPendingInvites(platform.repos, platform.now().getTime(), options.claimsPerRun),
     );
+    const joinLinks = await step("joinLinks", () =>
+      platform.repos.joinLinks.deleteExpired(platform.now().getTime()),
+    );
     const nudges = await step("nudges", () =>
       sendDueNudges({ platform, registry, keys, perRun: options.nudgesPerRun }),
     );
@@ -79,6 +84,7 @@ export function createSweep(options: SweepOptions): Sweep {
       ...(claims === null
         ? { claimsFailedStep: true }
         : { invitesClaimed: claims.claimed, invitesSkipped: claims.skipped }),
+      ...(joinLinks === null ? { joinLinksFailedStep: true } : { joinLinksExpired: joinLinks }),
       ...(nudges === null
         ? { nudgesFailedStep: true }
         : {
@@ -89,6 +95,6 @@ export function createSweep(options: SweepOptions): Sweep {
             nudgesCapped: nudges.capped,
           }),
     });
-    return { lobbies, claims, nudges };
+    return { lobbies, claims, joinLinks, nudges };
   };
 }

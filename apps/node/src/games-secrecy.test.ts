@@ -12,8 +12,9 @@
  *    the bag or deck order are rewritten in the stored state, and every read must answer the viewer
  *    byte for byte as before — so even a partial leak (one tile, a count derived from the order)
  *    fails;
- * 3. **coverage**: every `/api/v1/games*`, `/api/v1/players*` and `/api/v1/catalog` route the app
- *    registers must have been exercised, so a new route can't escape the test.
+ * 3. **coverage**: every `/api/v1/games*`, `/api/v1/players*`, `/api/v1/join*` and
+ *    `/api/v1/catalog` route the app registers must have been exercised, so a new route can't
+ *    escape the test.
  */
 import type { InstalledGame } from "@your-move/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -242,7 +243,7 @@ let gamesInPlay: string[] = [];
  */
 async function hit(
   player: Player,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   template: string,
   params: Record<string, string> = {},
   body?: unknown,
@@ -458,6 +459,14 @@ async function readEverything(gameId: string, players: readonly Player[], strang
     },
   );
   expect(seen.status).toBe(404);
+  for (const [method, template, body] of [
+    ["POST", "/api/v1/games/:id/remove-seat", { expectedVersion: 0, playerId: "x" }],
+    ["POST", "/api/v1/games/:id/join-link", {}],
+    ["DELETE", "/api/v1/games/:id/join-link", undefined],
+  ] as const) {
+    const answer = await hit(stranger, method, template, { id: gameId }, body);
+    expect([answer.status, answer.json.error?.code], template).toEqual([404, "NOT_FOUND"]);
+  }
 }
 
 const version = async (gameId: string, player: Player): Promise<number> =>
@@ -981,6 +990,85 @@ describe("route-wide secrecy (04 invariant 4)", () => {
     expect(await unchangedByHiddenState(game, [a, b, newcomer])).toBe(3);
   });
 
+  it("a join link (alpha A18): the lookup, joins, a rotation, a removal and a revoke, then the game", async () => {
+    const a = await signUp(h, "Ada");
+    const [b, c] = [await signUp(h, "Bo"), await signUp(h, "Cy")];
+    const stranger = await signUp(h, "Stranger");
+    const address = `typed-${crypto.randomUUID().slice(0, 8)}@example.org`;
+    const made = await hit(
+      a,
+      "POST",
+      "/api/v1/games",
+      {},
+      {
+        gameType: "example",
+        seats: 3,
+        invitees: [{ email: address }],
+        joinLink: true,
+      },
+    );
+    expect(made.status, made.text).toBe(201);
+    const game = made.json.game?.id ?? "";
+    gamesInPlay.push(game);
+    const tokenOf = (text: string) => /#([A-Za-z0-9_-]{22})"/u.exec(text)?.[1] ?? "";
+    let token = tokenOf(made.text);
+    const lookup = (who: Player) => hit(who, "POST", "/api/v1/join/lookup", {}, { token });
+    const join = (who: Player) => hit(who, "POST", "/api/v1/join", {}, { token });
+    expect((await lookup(b)).status).toBe(200);
+    expect((await join(b)).status).toBe(200);
+    await readEverything(game, [a, b], stranger);
+
+    // A removal while the link is live keeps b out; a rotation lets b back in.
+    const row = h.query(
+      "SELECT id FROM game_players WHERE game_id = ? AND user_id = ?",
+      game,
+      b.id,
+    );
+    const removed = await hit(
+      a,
+      "POST",
+      "/api/v1/games/:id/remove-seat",
+      { id: game },
+      {
+        expectedVersion: await version(game, a),
+        playerId: row[0]?.["id"],
+      },
+    );
+    expect(removed.status, removed.text).toBe(200);
+    expect((await join(b)).status).toBe(404);
+    h.advance(MINUTE);
+    const rotated = await hit(a, "POST", "/api/v1/games/:id/join-link", { id: game }, {});
+    expect(rotated.status).toBe(200);
+    token = tokenOf(rotated.text);
+    expect((await join(b)).status).toBe(200);
+    expect((await join(c)).status).toBe(404);
+    await readEverything(game, [a, b], stranger);
+
+    // Revoked: the typed address's seat stays, and the creator starts the game with who joined.
+    expect((await hit(a, "DELETE", "/api/v1/games/:id/join-link", { id: game })).status).toBe(204);
+    expect((await lookup(c)).status).toBe(404);
+    expect((await transition(game, a, "start")).json.game?.status).toBe("active");
+    const players = [a, b];
+    for (let step = 0; step < 3 && stored(game).status === "active"; step++) {
+      await readEverything(game, players, stranger);
+      expect(await unchangedByHiddenState(game, players)).toBe(2);
+      const now = (await hit(a, "GET", "/api/v1/games/:id", { id: game })).json;
+      const seat = now.game?.toAct[0];
+      const player = playerAt(now, seat, players);
+      const { view } = (await hit(player, "GET", "/api/v1/games/:id", { id: game })).json;
+      const card = (view as ExampleView).seats[seat ?? 0]?.hand?.[0];
+      const moved = await hit(
+        player,
+        "POST",
+        "/api/v1/games/:id/actions",
+        { id: game },
+        { expectedVersion: now.game?.version, action: { card } },
+      );
+      expect(moved.status, moved.text).toBe(200);
+    }
+    await readEverything(game, players, stranger);
+  });
+
   it("perturbation can fail: a body that showed one hidden tile would differ", async () => {
     const players = [await signUp(h, "Ada"), await signUp(h, "Bo")];
     const [a, b] = players as [Player, Player];
@@ -1010,6 +1098,7 @@ describe("coverage (A2 review S-2)", () => {
             route.method !== "ALL" &&
             (route.path.startsWith("/api/v1/games") ||
               route.path.startsWith("/api/v1/players") ||
+              route.path.startsWith("/api/v1/join") ||
               route.path === "/api/v1/catalog"),
         )
         .map((route) => `${route.method} ${route.path}`),

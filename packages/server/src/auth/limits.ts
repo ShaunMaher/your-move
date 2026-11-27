@@ -59,6 +59,11 @@ const LIMITS = {
   INVITE_EMAILS_NEW_INVITER_DAY: { limit: 2, windowMs: DAY },
   INVITE_EMAILS_TARGET_30D: { limit: 3, windowMs: 30 * DAY },
   INVITE_EMAILS_GLOBAL_DAY: { limit: 100, windowMs: DAY },
+  // Join links (alpha A18, 06 §6.8): lookups and joins together, per user and per IP bucket (the
+  // joiner's own limits only), and the links a creator makes or rotates.
+  JOIN_LINK_USER_HOUR: { limit: 30, windowMs: HOUR },
+  JOIN_LINK_IP_HOUR: { limit: 60, windowMs: HOUR },
+  JOIN_LINKS_CREATED_USER_DAY: { limit: 20, windowMs: DAY },
 } as const satisfies Record<string, LimitRule>;
 
 export type LimitName = keyof typeof LIMITS;

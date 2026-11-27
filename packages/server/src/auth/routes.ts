@@ -23,7 +23,7 @@ import { z } from "zod";
 import { validateDisplayName } from "../accounts/display-name.js";
 import { normaliseAddress } from "../accounts/email.js";
 import { isLocalDev } from "../config/local-dev.js";
-import { emailId, hmacHex, type Subkeys } from "../crypto/subkeys.js";
+import { emailId, type Subkeys } from "../crypto/subkeys.js";
 import type { UserRecord } from "../db/repositories.js";
 import type { EmailMessage } from "../email/sender.js";
 import {
@@ -38,7 +38,7 @@ import { type Claimant, claimInvitations } from "../games/claim.js";
 import { background } from "../http/background.js";
 import { errorBody, type ErrorReason } from "../http/error-log.js";
 import type { AppEnv, Platform } from "../platform.js";
-import { ipBuckets } from "./client-ip.js";
+import { clientBucketsOf } from "./client-buckets.js";
 import { checkLimits } from "./limits.js";
 import {
   issueSignInCode,
@@ -151,17 +151,8 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
   };
 
   /** The client's IP buckets, hashed (08 §4.1), or null when the address is missing. */
-  const clientBuckets = async (c: Context, keys: Subkeys): Promise<ClientBuckets | null> => {
-    const ip = platform.clientIp(c.req.raw, c.env);
-    if (!ip.ok) return null;
-    const buckets = await Promise.all(
-      ipBuckets(ip.ip).map(async (bucket) => ({
-        hash: await hmacHex(keys.ip, bucket.bucket),
-        multiplier: bucket.multiplier,
-      })),
-    );
-    return { ipBuckets: buckets };
-  };
+  const clientBuckets = (c: Context, keys: Subkeys): Promise<ClientBuckets | null> =>
+    clientBucketsOf(platform, c, keys);
 
   /**
    * Claims the new user's email-invite seats before onboarding answers, so their game list shows

@@ -9,6 +9,7 @@ import type {
   EmailSuppressionRepo,
   GameRepo,
   InviteRepo,
+  JoinLinkRepo,
   NudgeRepo,
   OtpRepo,
   PushSubscriptionRepo,
@@ -72,6 +73,10 @@ const METHODS = {
     keyof InviteRepo,
     true
   >,
+  joinLinks: { put: true, revoke: true, find: true, deleteExpired: true } satisfies Record<
+    keyof JoinLinkRepo,
+    true
+  >,
   pushSubscriptions: {
     save: true,
     remove: true,
@@ -122,6 +127,7 @@ export function detachedRepositories(): Repositories {
     nudges: detached("nudges", METHODS.nudges),
     emailSuppressions: detached("emailSuppressions", METHODS.emailSuppressions),
     invites: detached("invites", METHODS.invites),
+    joinLinks: detached("joinLinks", METHODS.joinLinks),
     pushSubscriptions: detached("pushSubscriptions", METHODS.pushSubscriptions),
     otp: detached("otp", METHODS.otp),
     sessions: detached("sessions", METHODS.sessions),

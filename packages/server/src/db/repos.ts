@@ -31,6 +31,7 @@ import {
 } from "./auth-repos.js";
 import { type Database, runBatch, type Statement } from "./database.js";
 import { inviteRepo } from "./invite-repos.js";
+import { joinLinkRepo } from "./join-link-repos.js";
 import { emailSuppressionRepo, nudgeRepo } from "./nudge-repos.js";
 import { pushSubscriptionRepo } from "./push-repos.js";
 import { guardedInsert, transitionStatements } from "./queries/transition.js";
@@ -44,7 +45,7 @@ import type {
   Repositories,
 } from "./repositories.js";
 import { UNPLAYED } from "./repositories.js";
-import { gameActions, gamePlayers, gameResources, games, invites } from "./schema.js";
+import { gameActions, gamePlayers, gameResources, games, invites, joinLinks } from "./schema.js";
 
 /** The `game_actions` columns history may show: never `action` or `rng` (04 invariant 4). */
 const PUBLIC_ACTION_COLUMNS = {
@@ -87,6 +88,9 @@ function gameRepo(db: Database): GameRepo {
         ...(extras.invites ?? []).map((invite) =>
           db.insert(invites).values({ ...invite, gameId: game.id }),
         ),
+        ...(extras.joinLink === undefined
+          ? []
+          : [db.insert(joinLinks).values({ ...extras.joinLink, gameId: game.id })]),
       ];
       await runBatch(db, statements);
     },
@@ -123,6 +127,9 @@ function gameRepo(db: Database): GameRepo {
         ...(extras.invites ?? []).map((invite) =>
           guardedInsert(db, invites, { ...invite, gameId: game.id }, open),
         ),
+        ...(extras.joinLink === undefined
+          ? []
+          : [guardedInsert(db, joinLinks, { ...extras.joinLink, gameId: game.id }, open)]),
         db
           .update(games)
           .set({ rematchGameId: game.id })
@@ -158,16 +165,23 @@ function gameRepo(db: Database): GameRepo {
       return { game, viewerState };
     },
     async load(id) {
-      const [gameRows, playerRows] = await db.batch([
+      const [gameRows, playerRows, linkRows] = await db.batch([
         db.select().from(games).where(eq(games.id, id)),
         db
           .select()
           .from(gamePlayers)
           .where(eq(gamePlayers.gameId, id))
           .orderBy(...PLAYER_ORDER),
+        // The link's times only: its token hash never leaves the join-link repository.
+        db
+          .select({ createdAt: joinLinks.createdAt, expiresAt: joinLinks.expiresAt })
+          .from(joinLinks)
+          .where(eq(joinLinks.gameId, id)),
       ]);
       const game = gameRows[0];
-      return game === undefined ? null : { game, players: playerRows };
+      return game === undefined
+        ? null
+        : { game, players: playerRows, joinLink: linkRows[0] ?? null };
     },
     async players(gameId) {
       return db
@@ -399,6 +413,7 @@ export function createRepositories(db: Database): Repositories {
     nudges: nudgeRepo(db),
     emailSuppressions: emailSuppressionRepo(db),
     invites: inviteRepo(db),
+    joinLinks: joinLinkRepo(db),
     pushSubscriptions: pushSubscriptionRepo(db),
     otp: otpRepo(db),
     sessions: sessionRepo(db),

@@ -80,6 +80,7 @@ const ACTIVE: LoadedGame = {
     row("bob", { seat: 1 }),
     row("cara", { seat: 2 }),
   ],
+  joinLink: null,
 };
 
 const PLAYED: Text = [{ seat: 0 }, " played QUIZ for 64"];
@@ -196,6 +197,7 @@ describe("transitionPushes", () => {
         row("alice", { joinedVia: "creator", state: "joined" }),
         row("bob", { state: "joined" }),
       ],
+      joinLink: null,
     };
     const start = (actor: string) =>
       transition(
@@ -246,6 +248,7 @@ describe("transitionPushes", () => {
         row("bob", { state: "invited" }),
         row("cara", { state: "joined" }),
       ],
+      joinLink: null,
     };
     expect(transitionPushes(transition(lobby, writes, "bob"))).toEqual([]);
   });
@@ -406,6 +409,7 @@ describe("sendTransitionPushes and the per-transition cap (A8-R2-3)", () => {
     const before: LoadedGame = {
       game: { ...game("active"), seats: ids.length },
       players: ids.map((id, seat) => row(id, { seat, toAct: seat === 0 ? 1 : 0 })),
+      joinLink: null,
     };
     const ended = transition(
       before,

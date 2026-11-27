@@ -9,7 +9,7 @@
  * invites, the game list, history, unread markers and past opponents; alpha A6 the email-nudge
  * setting, the seats due a nudge and the suppression list; alpha A8 the push subscriptions; alpha
  * A12 picking past opponents and the blocks among a game's players; alpha A17 the invite claims,
- * the suppressions among typed addresses and the sweep's overdue lobbies.
+ * the suppressions among typed addresses and the sweep's overdue lobbies; alpha A18 join links.
  */
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm";
 
@@ -261,10 +261,26 @@ export type NewGameAction = Omit<InferInsertModel<typeof gameActions>, "gameId">
 /** A new `invites` row of a known game: the `emailId` of an address the creator typed. */
 export type NewInvite = Omit<InferInsertModel<typeof invites>, "gameId">;
 
-/** What a new game is created with besides its players (04 `game_resources`, `invites`). */
+/** When a join link was made and when it stops working (04 `join_links`); never its token hash. */
+export interface JoinLinkTimes {
+  readonly createdAt: number;
+  readonly expiresAt: number;
+}
+
+/** A join link to store: the SHA-256 of its token (never the token) and its times (04). */
+export interface NewJoinLink extends JoinLinkTimes {
+  readonly tokenHash: string;
+}
+
+/**
+ * What a new game is created with besides its players (04 `game_resources`, `invites`,
+ * `join_links`).
+ */
 export interface NewGameExtras {
   readonly resources?: readonly GameResourceRecord[];
   readonly invites?: readonly NewInvite[];
+  /** A join link asked for at creation (05 `joinLink`). */
+  readonly joinLink?: NewJoinLink;
 }
 
 /**
@@ -313,6 +329,11 @@ export interface GameWriteSet {
    * statement.
    */
   readonly pastOpponents?: readonly PastOpponentPair[];
+  /**
+   * Deletes the game's join link (04 `join_links`): a start, and every other ending of a lobby,
+   * ends the link with it.
+   */
+  readonly deleteJoinLink?: boolean;
 }
 
 /** `stale`: another transition changed the game since `expectedVersion`; nothing was written. */
@@ -325,10 +346,12 @@ export interface LiveGameRow {
   readonly gameVersion: number;
 }
 
-/** A game with all of its `game_players` rows, read together. */
+/** A game with all of its `game_players` rows and its join link's times, read together. */
 export interface LoadedGame {
   readonly game: GameRecord;
   readonly players: readonly GamePlayerRecord[];
+  /** The game's join link, live or expired, if it has one (04 `join_links`). */
+  readonly joinLink: JoinLinkTimes | null;
 }
 
 /**
@@ -425,7 +448,7 @@ export interface GameRepo {
   get(id: string): Promise<GameRecord | null>;
   /** The rematch `gameId` as `userId` sees it from the finished game; null if no such game. */
   rematchRead(gameId: string, userId: string): Promise<RematchRead | null>;
-  /** The game row and its players, read in one batch. */
+  /** The game row, its players and its join link's times, read in one batch. */
   load(id: string): Promise<LoadedGame | null>;
   /** The game's `game_players` rows, ordered by seat and then as they were added. */
   players(gameId: string): Promise<GamePlayerRecord[]>;
@@ -550,6 +573,30 @@ export interface InviteRepo {
   markSent(inviteIds: readonly string[], at: number): Promise<void>;
 }
 
+/** The join link a token's hash names (04 `join_links`): its game and times. */
+export interface FoundJoinLink extends JoinLinkTimes {
+  readonly gameId: string;
+}
+
+/**
+ * Join links (04 `join_links`, 06 §6.8, alpha A18). Not transitions: a link's changes never touch
+ * the game row (05 `POST /api/v1/games/:id/join-link`). A start and every other lobby ending
+ * delete it inside their own transition ({@link GameWriteSet.deleteJoinLink}).
+ */
+export interface JoinLinkRepo {
+  /**
+   * Creates the game's link, or replaces it (a rotation: a new token and a newer `created_at`),
+   * only while the game is a `lobby`. True if it was written.
+   */
+  put(gameId: string, link: NewJoinLink): Promise<boolean>;
+  /** Deletes the game's link, if it has one (a revoke). */
+  revoke(gameId: string): Promise<void>;
+  /** The link whose token has this SHA-256, live or expired; null if there is none. */
+  find(tokenHash: string): Promise<FoundJoinLink | null>;
+  /** Deletes every link whose `expires_at` is at or before `now` (03 §8); returns how many. */
+  deleteExpired(now: number): Promise<number>;
+}
+
 /** A seat whose user may be sent an "It's your turn" email (03 §7). */
 export interface DueNudge {
   /** The `game_players` row. */
@@ -640,6 +687,7 @@ export interface Repositories {
   readonly nudges: NudgeRepo;
   readonly emailSuppressions: EmailSuppressionRepo;
   readonly invites: InviteRepo;
+  readonly joinLinks: JoinLinkRepo;
   readonly pushSubscriptions: PushSubscriptionRepo;
   readonly otp: OtpRepo;
   readonly sessions: SessionRepo;

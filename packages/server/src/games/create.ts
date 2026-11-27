@@ -18,7 +18,9 @@
  * typed addresses, whatever their order in the request, so a typed address never changes how a
  * picked one is seated: an address that resolves to a picked user, or to a user with a block
  * against anyone seated before it, gets an `inert` seat instead (06 §6.1). The route starts a game
- * whose seats are all filled this way (05 Created).
+ * whose seats are all filled this way (05 Created), unless a join link was asked for: it is created
+ * in the same batch, its token returned once for the response's URL, and the game waits for the
+ * creator's Start (06 §6.8, alpha A18).
  */
 import type { z } from "@hono/zod-openapi";
 import { isGameError, type GameError, type OptionsContext } from "@your-move/sdk";
@@ -32,6 +34,7 @@ import { ApiError } from "../http/api-error.js";
 import type { Platform } from "../platform.js";
 import { expireOverdueLobbies } from "./expiry.js";
 import { type InviteMail, planInviteMail, type TypedAddress } from "./invite-mail.js";
+import { hashJoinToken, linkTimes, newJoinToken } from "./join-links.js";
 import { LOBBY_LIFETIME_MS } from "./lifecycle.js";
 import type { GameType } from "./registry.js";
 import type { ResourceProvider } from "./resources.js";
@@ -224,6 +227,8 @@ export interface CreatedGame {
    * it carries, so the work doesn't say which addresses are mailed (Q3).
    */
   readonly invitations: InviteMail | null;
+  /** The join link's token when one was asked for, for the one response that shows it. */
+  readonly joinToken: string | null;
 }
 
 /**
@@ -317,6 +322,10 @@ export async function createGame(
       key: `${creator.id}:user:${id}`,
       amount: 1,
     })),
+    // A link asked for at creation counts like one made in the lobby (08 §4).
+    ...(body.joinLink === true
+      ? [{ name: "JOIN_LINKS_CREATED_USER_DAY" as const, key: creator.id, amount: 1 }]
+      : []),
   ];
   const limits = await checkLimits(repos, config, now, checks);
   if (limits.some((limit) => limit.exceeded)) throw ApiError.of("RATE_LIMITED");
@@ -417,7 +426,16 @@ export async function createGame(
     createdAt: now,
     updatedAt: now,
   };
+  const joinToken = body.joinLink === true ? newJoinToken() : null;
   const extras = {
+    ...(joinToken === null
+      ? {}
+      : {
+          joinLink: {
+            tokenHash: await hashJoinToken(joinToken),
+            ...linkTimes({ createdAt: now }, now),
+          },
+        }),
     resources: requested.map((resource) => ({
       kind: resource.kind,
       resourceId: resource.id,
@@ -448,5 +466,6 @@ export async function createGame(
       row.state === "joined" && row.userId != null ? [row.userId] : [],
     ),
     invitations: emails.length === 0 ? null : mail,
+    joinToken,
   };
 }

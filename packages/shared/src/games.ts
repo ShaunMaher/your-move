@@ -211,12 +211,22 @@ export const CreateGameBodySchema = z
       description:
         "At most `seats - 1` people: addresses to invite, or past opponents to add by `userId`.",
     }),
+    joinLink: z.boolean().optional().openapi({
+      description:
+        "Create a join link for the seats left open (06 §6.8). Its URL is in the response, the only time it is shown; the game then waits for your Start.",
+    }),
   })
   .strict()
   .openapi("CreateGameRequest");
 
 export const CreatedGameSchema = z
-  .object({ game: GameEnvelopeSchema })
+  .object({
+    game: GameEnvelopeSchema,
+    joinLinkUrl: z.string().optional().openapi({
+      description:
+        "The join link asked for with `joinLink`, shown only here: `PUBLIC_URL/join#<token>`.",
+    }),
+  })
   .strict()
   .openapi("CreatedGame");
 
@@ -229,7 +239,7 @@ export const createGameRoute = createRoute({
   tags: ["Games"],
   summary: "Create a game",
   description:
-    "Every valid address gets a seat and the same response, whatever it turns out to be (Q3). A past opponent picked by `userId` is added at once. The game starts at once (`active`) only if every seat is filled by past opponents added that way; otherwise it waits in the lobby.",
+    "Every valid address gets a seat and the same response, whatever it turns out to be (Q3). A past opponent picked by `userId` is added at once. The game starts at once (`active`) only if every seat is filled by past opponents added that way and no join link was asked for; otherwise it waits in the lobby.",
   request: { body: jsonBody(CreateGameBodySchema) },
   responses: {
     201: { description: "The game.", content: json(CreatedGameSchema) },
@@ -238,7 +248,7 @@ export const createGameRoute = createRoute({
       400: "`UNKNOWN_GAME`, `INVALID_OPTIONS` (`detail: { code, detail? }` with the module's code), `INVALID_SEAT_COUNT`, `INVALID_TIMEOUT`, `INVALID_INVITEES`, `CANNOT_PLAY_SELF` or `BAD_REQUEST`.",
       403: "`BAD_ORIGIN`, `ONBOARDING_REQUIRED` or `SUSPENDED`.",
       409: "`INVALID_SEATS` (the module's `validateStart`, `detail: { code, detail? }`) or `TOO_MANY_GAMES`.",
-      429: "Too many games or email invitees (`RATE_LIMITED`); nothing is created.",
+      429: "Too many games, email invitees or join links (`RATE_LIMITED`); nothing is created.",
     }),
   },
 });
@@ -633,5 +643,193 @@ export const recentPlayersRoute = createRoute({
   responses: {
     200: { description: "Your past opponents.", content: json(RecentPlayersSchema) },
     ...errors({ ...COMMON_ERRORS, 403: "`ONBOARDING_REQUIRED` or `SUSPENDED`." }),
+  },
+});
+
+// Lobby: removing a seat, join links ------------------------------------------------------------
+
+export const RemoveSeatBodySchema = z
+  .object({
+    expectedVersion: ExpectedVersion,
+    playerId: z.string().min(1).max(64).openapi({
+      description: "The row to remove: a `playerId` from the lobby's `players` (creator only).",
+    }),
+  })
+  .strict()
+  .openapi("RemoveSeatRequest");
+
+export const removeSeatRoute = createRoute({
+  operationId: "removeSeat",
+  "x-scope": "games:create",
+  security: SESSION,
+  method: "post",
+  path: `${API_V1}/games/{id}/remove-seat`,
+  tags: ["Games"],
+  summary: "Remove a player from the lobby",
+  description:
+    "Creator only, in the lobby: an invited or joined row of this game, never your own, becomes `removed` (a typed address is cleared). A remove never ends the lobby; someone removed while a join link is live can't come back through that link (06 §6.8).",
+  request: { params: GameId, body: jsonBody(RemoveSeatBodySchema) },
+  responses: {
+    200: { description: "The game after the removal.", content: json(GameWithViewSchema) },
+    ...errors({
+      ...MEMBER_ERRORS,
+      403: "`NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`.",
+      404: "No such game, you're not a member of it, or no such seat to remove in it (`NOT_FOUND`).",
+      409: "`STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine).",
+      429: "Too many game writes (`RATE_LIMITED`).",
+    }),
+  },
+});
+
+export const JoinLinkSchema = z
+  .object({
+    url: z.string().openapi({
+      description:
+        "`PUBLIC_URL/join#<token>`: the token is in the fragment, so it never reaches a server log. Shown only now.",
+    }),
+    expiresAt: z.number().int().openapi({
+      description:
+        "When the link stops working: 7 days from now or the lobby's expiry, whichever is first; it also ends at the start, a rotation or a revoke.",
+    }),
+  })
+  .strict()
+  .openapi("JoinLink");
+
+export const createJoinLinkRoute = createRoute({
+  operationId: "createJoinLink",
+  "x-scope": "games:create",
+  security: SESSION,
+  method: "post",
+  path: `${API_V1}/games/{id}/join-link`,
+  tags: ["Games"],
+  summary: "Create or rotate the lobby's join link",
+  description:
+    "Creator only, in the lobby. Replaces any link the game has (the old one stops working, and people removed while it was live may use the new one). Anyone signed in with the link sees the game type, options and the joined players' names, and can take an open seat; the game then waits for your Start. Changes no game state, so the game's `version` stays the same. Takes no input: an empty body or `{}`.",
+  request: { params: GameId, body: { required: false, content: json(EmptyObjectSchema) } },
+  responses: {
+    200: { description: "The new link.", content: json(JoinLinkSchema) },
+    ...errors({
+      ...MEMBER_ERRORS,
+      403: "`NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`.",
+      409: "`WRONG_STATUS` (the lobby has ended).",
+      429: "Too many join links today (`RATE_LIMITED`).",
+    }),
+  },
+});
+
+export const revokeJoinLinkRoute = createRoute({
+  operationId: "revokeJoinLink",
+  "x-scope": "games:create",
+  security: SESSION,
+  method: "delete",
+  path: `${API_V1}/games/{id}/join-link`,
+  tags: ["Games"],
+  summary: "Revoke the lobby's join link",
+  description:
+    "Creator only. The link stops working at once; nobody who joined through it is removed, and the lobby never ends because of it. `204` also when there is no live link.",
+  request: { params: GameId },
+  responses: {
+    204: { description: "Revoked." },
+    ...errors({
+      ...MEMBER_ERRORS,
+      403: "`NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`.",
+      429: "Too many game writes (`RATE_LIMITED`).",
+    }),
+  },
+});
+
+export const JoinTokenBodySchema = z
+  .object({
+    token: z.string().max(64).openapi({
+      description:
+        "The join link's fragment, as given. Any value that isn't a live link's token is the same `404`.",
+    }),
+  })
+  .strict()
+  .openapi("JoinTokenRequest");
+
+const JOIN_404 =
+  "The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or were removed while this link was live (`NOT_FOUND`, the same in every case).";
+
+export const JoinPreviewSchema = z
+  .object({
+    game: z
+      .object({
+        id: z.string(),
+        gameType: z.string(),
+        options: present(),
+        resources: gameEnvelopeSchema.shape.resources,
+        turnTimeoutDays: z.number().int().min(1).max(30),
+        seatOrder: z.enum(["join", "random"]),
+        aiAssistance: z.enum(["off", "allowed"]),
+        creatorName: z.string().nullable(),
+        players: z.array(
+          z
+            .object({
+              displayName: z.string().nullable(),
+              kind: z.enum(["human", "agent"]),
+              aiOwnerName: z.string().optional(),
+            })
+            .strict(),
+        ),
+        openSeats: z.number().int().min(0),
+        expiresAt: z.number().int().openapi({ description: "When the link stops working." }),
+      })
+      .strict()
+      .openapi({
+        description:
+          "What the link shows anyone signed in who has it (06 §6.8): only the players who have joined.",
+      }),
+  })
+  .strict()
+  .openapi("JoinPreview");
+
+const JOIN_ERRORS = {
+  ...COMMON_ERRORS,
+  400: "Invalid request (`BAD_REQUEST`), a cookie and a bearer token together, or no client address on a proxied deployment.",
+  403: "`ONBOARDING_REQUIRED`, `BAD_ORIGIN` or `SUSPENDED`.",
+  404: JOIN_404,
+  429: "Too many join-link lookups and joins from you or your network (`RATE_LIMITED`).",
+} as const;
+
+export const joinLookupRoute = createRoute({
+  operationId: "lookUpJoinLink",
+  "x-scope": "join",
+  security: SESSION,
+  method: "post",
+  path: `${API_V1}/join/lookup`,
+  tags: ["Games"],
+  summary: "See the game a join link is for",
+  description:
+    "Nothing is joined: joining needs `POST /api/v1/join`. Counts toward your join-link limits, as a join does.",
+  request: { body: jsonBody(JoinTokenBodySchema) },
+  responses: {
+    200: { description: "The game.", content: json(JoinPreviewSchema) },
+    ...errors(JOIN_ERRORS),
+  },
+});
+
+export const JoinedGameSchema = z
+  .object({ game: GameEnvelopeSchema })
+  .strict()
+  .openapi("JoinedGame");
+
+export const joinRoute = createRoute({
+  operationId: "joinGame",
+  "x-scope": "join",
+  security: SESSION,
+  method: "post",
+  path: `${API_V1}/join`,
+  tags: ["Games"],
+  summary: "Join a game through its join link",
+  description:
+    "Takes an open seat, or accepts the invitation you already hold in the game. Never starts the game: its creator does. Retried on the server when another change to the game wins a race.",
+  request: { body: jsonBody(JoinTokenBodySchema) },
+  responses: {
+    200: { description: "You've joined.", content: json(JoinedGameSchema) },
+    ...errors({
+      ...JOIN_ERRORS,
+      409: "`ALREADY_JOINED`, `STALE_GAME` (every retry lost a race; try again) or `GAME_UNAVAILABLE`.",
+    }),
   },
 });

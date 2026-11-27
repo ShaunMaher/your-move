@@ -17,7 +17,7 @@ import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 
 import type { Database, Statement } from "../database.js";
 import type { GameWriteSet } from "../repositories.js";
-import { blocks, gameActions, gamePlayers, games, pastOpponents } from "../schema.js";
+import { blocks, gameActions, gamePlayers, games, joinLinks, pastOpponents } from "../schema.js";
 
 /** True only while `token` is the game's stored write token: this transition won. */
 export function tokenGuard(gameId: string, token: string): SQL {
@@ -95,6 +95,9 @@ export function transitionStatements(
         set: { lastFinishedAt: pair.lastFinishedAt },
       }),
     ),
+    ...(writes.deleteJoinLink === true
+      ? [db.delete(joinLinks).where(and(eq(joinLinks.gameId, gameId), guard))]
+      : []),
   ];
   return [first, ...dependent];
 }

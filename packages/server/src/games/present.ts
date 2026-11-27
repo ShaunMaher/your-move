@@ -10,11 +10,18 @@ import type {
   GamePlayerRecord,
   GameRecord,
   GameResourceRecord,
+  JoinLinkTimes,
   ListedGame,
   RematchRead,
   UserRecord,
 } from "../db/repositories.js";
-import { deadlineOf, endedUnplayed, type FinalViews, lobbyExpiresAt } from "./lifecycle.js";
+import {
+  deadlineOf,
+  endedUnplayed,
+  type FinalViews,
+  linkLive,
+  lobbyExpiresAt,
+} from "./lifecycle.js";
 import type { GameType } from "./registry.js";
 
 type EnvelopePlayer = GameEnvelope["players"][number];
@@ -106,6 +113,10 @@ export interface PresentInput {
   readonly describeResource: (kind: "dictionary", id: string) => ResourceMeta | undefined;
   /** A finished game's rematch as the viewer sees it ({@link rematchOf}); null if it has none. */
   readonly rematch?: GameEnvelope["rematch"];
+  /** The game's join link, live or expired, if it has one. */
+  readonly joinLink: JoinLinkTimes | null;
+  /** The time the envelope is for (whether the link is still live). */
+  readonly now: number;
 }
 
 /** What presenting the players needs: a few game columns, the rows, their users, the viewer. */
@@ -152,7 +163,9 @@ export function visiblePlayers(input: PlayersInput): EnvelopePlayer[] {
   return rows.map((row) => playerOf(row, input, creatorView));
 }
 
-function resourcesOf(input: PresentInput): GameEnvelope["resources"] {
+export function resourcesOf(
+  input: Pick<PresentInput, "resources" | "describeResource">,
+): GameEnvelope["resources"] {
   return input.resources.flatMap((resource) => {
     if (resource.kind !== "dictionary") return [];
     const meta = input.describeResource("dictionary", resource.resourceId);
@@ -227,6 +240,16 @@ export function turnOf(
   return { toAct, yourTurn: viewer.seat !== null && toAct.includes(viewer.seat) };
 }
 
+/** The envelope's `joinLink` (05): live until its expiry, else inactive with no time. */
+function joinLinkOf(
+  link: JoinLinkTimes | null,
+  now: number,
+): NonNullable<GameEnvelope["joinLink"]> {
+  return link !== null && linkLive(link, now)
+    ? { active: true, expiresAt: link.expiresAt }
+    : { active: false, expiresAt: null };
+}
+
 /** The game envelope for one member (05 §Common types). */
 export function envelope(input: PresentInput): GameEnvelope {
   const { game, viewer } = input;
@@ -249,6 +272,10 @@ export function envelope(input: PresentInput): GameEnvelope {
     toAct,
     yourTurn,
     yourInvitation: invitationOf(game, viewer),
+    // The creator's own lobby only: whether its link works, never the link itself (05).
+    ...(viewer.joinedVia === "creator" && game.status === "lobby"
+      ? { joinLink: joinLinkOf(input.joinLink, input.now) }
+      : {}),
     // Finished games only, and only ever to their players: nobody else reads a finished game.
     ...(game.status === "finished" ? { rematch: input.rematch ?? null } : {}),
     createdAt: game.createdAt,

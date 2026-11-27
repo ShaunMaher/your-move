@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { address, authRepositoryContract } from "./auth-contract.js";
 import { inviteRepositoryContract } from "./invite-contract.js";
+import { joinLinkRepositoryContract } from "./join-link-contract.js";
 import { nudgeRepositoryContract } from "./nudge-contract.js";
 import { pushRepositoryContract } from "./push-contract.js";
 import type {
@@ -125,6 +126,7 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
     nudgeRepositoryContract(() => target);
     pushRepositoryContract(() => target);
     inviteRepositoryContract(() => target);
+    joinLinkRepositoryContract(() => target);
 
     describe("users", () => {
       it("creates and finds a user by id and by email", async () => {
