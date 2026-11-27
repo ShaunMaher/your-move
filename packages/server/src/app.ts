@@ -42,14 +42,11 @@ export interface AppOptions {
   readonly random?: RandomFactory;
   /**
    * Email-invite seats the request that completes onboarding claims at most (06 §6.4); the sweep
-   * claims the rest. The runtime's per-request budget bounds it (09 §3): Node 50, the Worker 8,
-   * which is also the default.
+   * claims the rest. Each runtime sets it from its per-request budget (09 §3): Node 50, the
+   * Worker 8.
    */
-  readonly onboardingClaims?: number;
+  readonly onboardingClaims: number;
 }
-
-/** {@link AppOptions.onboardingClaims} when a runtime gives none: the Worker's budget. */
-const DEFAULT_ONBOARDING_CLAIMS = 8;
 
 /** The HTTP application `createApp` returns. */
 export type App = OpenAPIHono<AppEnv>;
@@ -247,7 +244,7 @@ export function createApp(options: AppOptions): App {
   registerAuthRoutes(app, {
     platform,
     keys,
-    onboardingClaims: options.onboardingClaims ?? DEFAULT_ONBOARDING_CLAIMS,
+    onboardingClaims: options.onboardingClaims,
   });
   registerUnsubscribeRoutes(app, { platform, keys });
   registerPushRoutes(app, platform);

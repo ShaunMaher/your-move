@@ -211,6 +211,7 @@ export function gameRaceContract(
           now,
         },
         games: installed,
+        onboardingClaims: 8,
       });
     });
 

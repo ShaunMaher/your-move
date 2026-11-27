@@ -31,7 +31,7 @@ import type { NewGamePlayer, UserRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
 import type { Platform } from "../platform.js";
 import { expireOverdueLobbies } from "./expiry.js";
-import { type InviteMail, planInviteMail } from "./invite-mail.js";
+import { type InviteMail, planInviteMail, type TypedAddress } from "./invite-mail.js";
 import { LOBBY_LIFETIME_MS } from "./lifecycle.js";
 import type { GameType } from "./registry.js";
 import type { ResourceProvider } from "./resources.js";
@@ -369,19 +369,23 @@ export async function createGame(
       lastSeenVersion: NEVER_SEEN,
     };
   });
-  const inviteIds = emailIds.map(() => crypto.randomUUID());
+  // Each typed address with its emailId, its `invites` row and whether it may be mailed, paired
+  // once: an email-invite seat with `normal` delivery, never a user's invitation, an `inert` seat
+  // or one the inbound cap made `hidden` (06 §6.3).
+  const addresses = emails.map((email, i): TypedAddress => {
+    const emailId = emailIds[i];
+    const row = emailRows[i];
+    if (emailId === undefined || row === undefined) throw new Error("typed addresses out of step");
+    return {
+      email,
+      emailId,
+      inviteId: crypto.randomUUID(),
+      mailable: invitable[i] === null && row.delivery === "normal",
+    };
+  });
   const mail = await planInviteMail(
     { platform, keys },
-    {
-      creator,
-      gameName: type.manifest.name,
-      emails,
-      emailIds,
-      inviteIds,
-      // An email-invite seat with `normal` delivery: never a user's invitation, an `inert` seat
-      // or one the inbound cap made `hidden` (06 §6.3).
-      mailable: emailRows.map((row, i) => invitable[i] === null && row.delivery === "normal"),
-    },
+    { creator, gameName: type.manifest.name, addresses },
     now,
   );
   const gameId = crypto.randomUUID();
@@ -419,10 +423,10 @@ export async function createGame(
       resourceId: resource.id,
       version: resource.version ?? null,
     })),
-    invites: emailIds.map((hash, i) => ({
-      id: inviteIds[i] ?? crypto.randomUUID(),
+    invites: addresses.map((address) => ({
+      id: address.inviteId,
       inviterId: creator.id,
-      emailHash: hash,
+      emailHash: address.emailId,
       // Set by the background task once the sender has accepted the email (04).
       sentAt: null,
       expiresAt: now + LOBBY_LIFETIME_MS,

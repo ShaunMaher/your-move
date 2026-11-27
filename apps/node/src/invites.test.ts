@@ -247,6 +247,34 @@ describe("the invite email (06 §6.3)", () => {
   });
 });
 
+describe("sent_at (04 `invites`, review A17-R2-9)", () => {
+  it("is set only for the emails the sender accepted: of two addresses, the failed one stays NULL", async () => {
+    const refused = freshEmail();
+    const accepted = freshEmail();
+    const failing = (capture: EmailSender): EmailSender => ({
+      send: (message) =>
+        message.to === refused ? Promise.reject(new TypeError("refused")) : capture.send(message),
+    });
+    h = gameHarness({}, { wrapSender: failing });
+    const ada = await seasoned("Ada");
+    const game = await createGame(h, ada, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: refused }, { email: accepted }],
+    });
+    await h.drain();
+    const sentAt = async (address: string) =>
+      h.query(
+        "SELECT sent_at FROM invites WHERE game_id = ? AND email_hash = ?",
+        game.id,
+        await emailIdOfAddress(address),
+      )[0]?.["sent_at"];
+    expect(await sentAt(accepted)).toBe(now());
+    expect(await sentAt(refused)).toBeNull();
+    expect(await invitesTo(accepted)).toHaveLength(1);
+  });
+});
+
 describe("invite-email caps (06 §6.6, 08 §4)", () => {
   /** Invites a fresh address in a new game each hour (inside the email-invitee caps). */
   async function inviteFresh(creator: Player, count: number): Promise<string[]> {
@@ -314,6 +342,30 @@ describe("invite-email caps (06 §6.6, 08 §4)", () => {
     h.advance(31 * DAY);
     await invite(await seasoned("Ed"), address);
     expect(await invitesTo(address)).toHaveLength(4);
+  });
+
+  it("once the instance cap is crossed, sends nothing more that UTC day, whatever the estimate; the next day resumes (review A17-S2-1)", async () => {
+    h = gameHarness({ LIMIT_INVITE_EMAILS_GLOBAL_DAY: "3" });
+    const day = (n: number, hour: number) => Date.UTC(2026, 0, 1 + n, hour);
+    /** A fresh inviter invites a fresh address at that time; whether it was mailed. */
+    const attempt = async (at: number): Promise<number> => {
+      h.setTime(at);
+      const address = freshEmail();
+      await invite(await seasoned("Ivy"), address);
+      return (await invitesTo(address)).length;
+    };
+    // Day 0: three sent, the fourth crosses the cap.
+    const day0 = [];
+    for (let i = 0; i < 4; i++) day0.push(await attempt(day(0, 10 + i)));
+    expect(day0).toEqual([1, 1, 1, 0]);
+    // Day 1 just after midnight: day 0's four still weigh on the sliding estimate; this attempt
+    // crosses again and marks day 1.
+    expect(await attempt(day(1, 0))).toBe(0);
+    // Late on day 1 the estimate (about 4 × 1/24 + 2) is back under 3, but day 1 is stopped.
+    expect(await attempt(day(1, 23))).toBe(0);
+    // Day 2: sending resumes.
+    expect(await attempt(day(2, 1))).toBe(1);
+    expect(h.logs.filter((line) => line["alert"] === "INVITE_EMAILS_GLOBAL_DAY")).toHaveLength(2);
   });
 
   it("counts every typed address toward the creator's email-invitee cap, whatever it is (08 §4)", async () => {

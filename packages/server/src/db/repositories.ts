@@ -510,7 +510,7 @@ export interface ClaimableSeat {
 }
 
 /** A seat the sweep claims (03 §8): the row, its game and the onboarded user with that address. */
-export interface PendingClaim extends ClaimableSeat {
+interface PendingClaim extends ClaimableSeat {
   readonly userId: string;
   readonly email: NormalisedEmail;
 }

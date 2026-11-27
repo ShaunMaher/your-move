@@ -147,9 +147,11 @@ export function alertOnCrossing(
 /**
  * Logs an instance-wide limit's alert (08 §4) at most once per fixed window of that limit: a
  * counter of its own (`alert:<NAME>` in `rate_limits`, a key `checkLimits`, whose keys start with
- * a limit's name, can't produce) is raised, and only the call that makes
- * it 1 logs. For callers that read a limit without counting over it, so the crossing itself is
- * never counted (the nudge sweep, 03 §7).
+ * a limit's name, can't produce) is raised, and only the call that makes it 1 logs. Callers that
+ * read a limit without counting over it use it so the crossing itself is never counted (the nudge
+ * sweep, 03 §7); the invite emails use it from their background task, whose request already
+ * counted, so the alert and the marker are written after the response (06 §6.6), and read the
+ * marker back with {@link crossedThisWindow} to stop for the rest of the window.
  */
 export async function alertOncePerWindow(
   repos: Repositories,
@@ -163,4 +165,22 @@ export async function alertOncePerWindow(
     { key: `alert:${name}`, windowStart, previousWindowStart: windowStart - windowMs, amount: 1 },
   ]);
   if (count?.current === 1) log.error("instance-wide limit exceeded", { alert: name });
+}
+
+/**
+ * Whether {@link alertOncePerWindow} has marked the limit crossed in the current fixed window of
+ * that limit (for a day limit, the UTC day). A read through the same statements as any counter,
+ * adding nothing.
+ */
+export async function crossedThisWindow(
+  repos: Repositories,
+  name: LimitName,
+  now: number,
+): Promise<boolean> {
+  const { windowMs } = LIMITS[name];
+  const windowStart = Math.floor(now / windowMs) * windowMs;
+  const [count] = await repos.rateLimits.hit([
+    { key: `alert:${name}`, windowStart, previousWindowStart: windowStart - windowMs, amount: 0 },
+  ]);
+  return (count?.current ?? 0) > 0;
 }

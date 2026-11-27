@@ -8,9 +8,7 @@ import {
   ConfigError,
   coreEmailSender,
   corePushSender,
-  createApp,
   createJsonLogger,
-  createSweep,
   GameConfigError,
   installedSchema,
   parseConfig,
@@ -23,12 +21,8 @@ import installedJson from "../../../generated/installed.json" with { type: "json
 import { installedGames as games } from "../../../generated/server-registry.js";
 import { d1Repositories } from "./d1.js";
 import { assetDictionaries } from "./dictionaries.js";
+import { type Built, workerRuntime } from "./runtime.js";
 import { runScheduled } from "./scheduled.js";
-
-interface Built {
-  readonly app: ReturnType<typeof createApp>;
-  readonly sweep: ReturnType<typeof createSweep>;
-}
 
 /** A startup problem whose message carries no configuration value (safe to log in full). */
 class StartupError extends Error {
@@ -92,33 +86,8 @@ async function build(env: Readonly<Record<string, unknown>>): Promise<Built> {
         trustedPeers: [],
       }),
   };
-  return {
-    app: createApp({ platform, games, onboardingClaims: WORKER_ONBOARDING_CLAIMS }),
-    sweep: createSweep({
-      platform,
-      games,
-      nudgesPerRun: WORKER_NUDGES_PER_RUN,
-      claimsPerRun: WORKER_CLAIMS_PER_RUN,
-      lobbiesPerRun: WORKER_LOBBIES_PER_RUN,
-    }),
-  };
+  return workerRuntime(platform, games);
 }
-
-/**
- * What one Cron Trigger invocation does at most (03 §7, §8), inside the Free plan's
- * per-invocation D1 query limit (09 §3 has the arithmetic): one overdue lobby expired (at most 4
- * statements and one per typed address), one email-invite seat claimed (5) and 2 email nudges (10
- * each, and up to 5 per run), 35 for a two-seat game; re-measure at the first Workers deployment
- * (10).
- */
-const WORKER_NUDGES_PER_RUN = 2;
-const WORKER_CLAIMS_PER_RUN = 1;
-const WORKER_LOBBIES_PER_RUN = 1;
-/**
- * Email-invite seats completing onboarding claims at most on the Worker (06 §6.4): 4 statements
- * each, so 8 keep the request near 40 (09 §3); the sweep claims the rest.
- */
-const WORKER_ONBOARDING_CLAIMS = 8;
 
 let built: Promise<Built> | null = null;
 
