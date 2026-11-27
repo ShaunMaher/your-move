@@ -127,18 +127,26 @@ function Appearance({
   const [chosen, setChosen] = useState<Theme | null>(null);
   const [saved, setSaved] = useState(false);
   const shown = chosen ?? me.settings.theme;
-  // The page shows what the radios show: the choice at once, the saved theme again when a save
-  // fails. Applied from here, not from the click, so App's own effect for the saved theme, which
-  // React runs just before the click's render, cannot overwrite a fresh choice.
+  // The page shows what the radios show. The click's render applies the choice (not the handler):
+  // React runs App's pending effect for the saved theme before that render, so it cannot overwrite
+  // the choice afterwards. On mount both effects apply the same value.
   useEffect(() => {
     applyTheme(shown);
   }, [shown]);
+  // The saved theme as of the latest render, for a save that fails after this screen has gone.
+  const savedTheme = useRef(me.settings.theme);
+  useEffect(() => {
+    savedTheme.current = me.settings.theme;
+  }, [me.settings.theme]);
 
   async function choose(value: Theme) {
     if (chosen !== null) return;
     setChosen(value);
     setSaved(false);
     const ok = await change(value);
+    // Also when Settings has unmounted mid-save: its effect and App's no longer run, so the page
+    // would keep the unsaved choice. When mounted this applies what the effect applies anyway.
+    if (!ok) applyTheme(savedTheme.current);
     setSaved(ok);
     setChosen(null);
   }
