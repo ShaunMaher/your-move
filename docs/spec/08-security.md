@@ -84,13 +84,13 @@ generated `_headers` file for static assets (03 §9). One shared definition gene
 | OTP request per IP (bucketed, §4.1) | 20 / h | `429` |
 | OTP verify fails per email | 10 / h | `429` (temporary lockout) |
 | OTP verify per IP | 50 / h | `429` |
-| **OTP emails instance-wide** | 200 / h, 1,000 / day | silent; alert; auto-Turnstile if configured |
+| **OTP emails instance-wide** (sign-in and step-up codes, and the suspended notice) | 200 / h, 500 / day (sized in §4.2) | silent; alert; auto-Turnstile if configured |
 | **Failed verifies instance-wide** | 500 / h | alert; auto-Turnstile if configured |
 | Email invitees per user (every typed address, whatever it turns out to be) | 10 / day, 5 / h | `429`, nothing created |
 | Game creation per pair / per user (a pair is creator + `userId`, or creator + `emailId` for a typed address, 06 §6.7) | 5 / day / 30 / day | `429` |
 | Invite emails per inviter (every typed address counts as an attempt, whatever it resolves to; only email-invite seats are mailed, 06 §6.6) | 5 / day, 20 / 30 days (2 / day for new accounts, 06 §6.6) | silent (seat created, no email) |
 | Invite emails per target address (by email HMAC) | 3 / 30 days | silent (seat created, no email) |
-| **Invite emails instance-wide** | 100 / day | silent; alert once per UTC day; once crossed, no invite email is sent for the rest of that fixed UTC day, whatever the sliding estimate says later. Many new accounts can still drain it, and an instance held at it reveals whether a typed address is an email-invite seat that may be mailed — nearly noiselessly on a quiet instance, at most about once a day since the stop: accepted risk F-20; the per-IP-bucket invite-email limit planned for M4 raises the cost of reaching the cap but doesn't close the probe |
+| **Invite emails instance-wide** | 100 / day (sized in §4.2) | silent; alert once per UTC day; once crossed, no invite email is sent for the rest of that fixed UTC day, whatever the sliding estimate says later. Many new accounts can still drain it, and an instance held at it reveals whether a typed address is an email-invite seat that may be mailed — nearly noiselessly on a quiet instance, at most about once a day since the stop: accepted risk F-20; the per-IP-bucket invite-email limit planned for M4 raises the cost of reaching the cap but doesn't close the probe |
 | New accounts per IP (bucketed) | 10 / day | silent on `/otp/request` for unknown emails from that bucket (a never-emailed challenge is still inserted, for verify parity, 06 §3.2). Judged and counted where a sign-in creates an account, against the verifying client's buckets (an unknown address verifying from a full bucket gets `INVALID_CODE`); `/otp/request` only reads it, on every path |
 | WebSocket upgrades per IP | 30 / min | `429` |
 | Moves per user | 120 / min | `429` |
@@ -106,7 +106,7 @@ generated `_headers` file for static assets (03 §9). One shared definition gene
 | Join-link lookups and joins per IP (bucketed) | 60 / h | `429` |
 | Join-link creations per user | 20 / day | `429` |
 | Any authenticated write per user | 300 / min | `429` |
-| **"It's your turn" email nudges instance-wide** (alpha A6, `LIMIT_NUDGE_EMAILS_PER_DAY`) | 200 / day: about the cap per UTC day, up to about twice the cap in any 24 hours (a sliding window over fixed UTC days) | silent: the sweep stops and claims nothing more, the rest wait for a later run; only claimed nudges count; alert once per UTC day (03 §7) |
+| **"It's your turn" email nudges instance-wide** (alpha A6, `LIMIT_NUDGE_EMAILS_PER_DAY`) | 150 / day: at most the cap per UTC day, up to twice the cap in any 24 hours (a sliding window over fixed UTC days; sized in §4.2) | silent: the sweep stops and claims nothing more, the rest wait for a later run; only claimed nudges count, and a claimed nudge whose count goes over the cap (only when two runs overlap) isn't sent; alert once per UTC day (03 §7) |
 | "It's your turn" email nudges per recipient (alpha A6, `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`) | 10 / day: about the cap per UTC day, up to about twice the cap in any 24 hours | silent: that recipient's other due nudges wait unclaimed; only claimed nudges count (03 §7) |
 | Requests per API token | 120 / min, 10,000 / day (the account's limits apply too) | `429` |
 | Failed bearer authentications per IP (bucketed) | 30 / h | `429` |
@@ -118,7 +118,8 @@ generated `_headers` file for static assets (03 §9). One shared definition gene
 | Admin requests per admin | 60 / min | `429` |
 | Refused admin-route requests (non-admins, `404`) per user and per IP bucket | 20 / h | `429`; logged, not audited |
 
-Instance-wide numbers are sized for a friends-and-family deployment; operators raise them in config.
+Instance-wide numbers are sized for a friends-and-family deployment; operators raise them in config,
+the instance-wide email caps only within the outbound email budget (§4.2).
 
 **Deliberate exception (T13): the unsubscribe POST** (`/api/v1/email/unsubscribe`, 05 §Email links)
 is public and not rate-limited. A request without a valid token costs one HMAC verification and
@@ -158,6 +159,63 @@ whatever notification the operator uses.
 - Unit tests cover mapped addresses, XFF parsing with spoofed left entries, `CF-Connecting-IP`
   handling (missing/invalid → `400` on an IP-using route), peers outside `TRUST_PROXY_PEERS`
   (→ `400`), `/api/health` without the header (→ `200`), and IPv6 layering.
+
+### 4.2 Outbound email budget
+
+Every email the server sends counts toward exactly one of three instance-wide day caps: sign-in and
+step-up codes and the suspended notice toward `OTP_EMAIL_GLOBAL_DAY` (*C*), invite emails toward
+`INVITE_EMAILS_GLOBAL_DAY` (*I*), "It's your turn" nudges toward `NUDGE_EMAILS_PER_DAY` (*N*). A
+new kind of email MUST count toward one of them, or add a day cap of its own to the sum below.
+
+**Each cap lets out at most twice its figure in any 24 hours.** The caps are sliding windows over
+fixed UTC days (two adjacent days, the previous one weighted by how much of it the last 24 hours
+still overlap). A message is sent only while the estimate with that message counted is at or
+below the cap, and the estimate is never below the current day's own count, so no fixed UTC day
+sends more than the cap *L*. Counting is an atomic increment that returns the new count, so two
+concurrent requests can't both take the last place; the nudge sweep, which reads its room once per
+run, also checks the count each claimed nudge adds and doesn't send one that goes over (03 §7), so
+overlapping runs can't either. Any 24 hours overlap at most two fixed UTC days, so they send at most
+2*L*, and 2*L* is reachable: *L* in the last minutes of one day, then, as that day's weight fades,
+*L* more through the next. Fixed UTC-day windows on their own would allow the same 2*L* in the 24
+hours around midnight, and Gmail's quota is a rolling 24 hours, so the caps are sized on 2*L*. The
+invite cap's stop for the rest of the UTC day (§4) doesn't change this, since the next day starts
+afresh. The hourly sign-in cap (200 / h, so at most 25 × 200 in any 24 hours, which touch 25 fixed
+hours) is above 2*C* and isn't counted.
+
+**Sizing.** In any 24 hours the instance sends at most *W* = 2 × (*C* + *I* + *N*). With the
+defaults, *W* = 2 × (500 + 100 + 150) = **1,500**, against the `gmail` provider's 2,000 messages
+a day (09 §2): a margin of 500, a quarter of the quota. The margin absorbs:
+
+- the time between counting and sending: a message is counted at its request's time and sent
+  moments later, after the response, and a sweep run counts its nudges at the run's start and sends
+  them over up to a few minutes, so a 24-hour span of *send* times can hold a few messages more
+  than *W*;
+- Google's limits being approximate and subject to change without notice, and lower for some
+  accounts (a Workspace trial allows 500 a day: set `EMAIL_DAILY_QUOTA`, below).
+
+Nothing else sends from the sender user: it is dedicated to one instance and never used
+interactively (09 §2), and a message Gmail refuses with `401` is retried once only after it was
+refused.
+
+**Sign-in comes first.** Each kind keeps its own cap rather than drawing on one shared budget, so
+invites and nudges at their worst can't use up the room sign-in codes have, and because *W* stays
+under the quota the provider never refuses a code for quota. Sign-in has two thirds of the budget.
+Draining the sign-in cap itself is a denial of service on sign-in, which T2's controls address
+(per-email and per-IP limits, auto-Turnstile once it is built), not this budget.
+
+**Startup check.** `EMAIL_DAILY_QUOTA` (09 §1) is the provider's limit on messages in any 24 hours:
+2,000 by default for `gmail`, unset for the other providers. When it is known, the configuration is
+refused unless *W* ≤ `EMAIL_DAILY_QUOTA`, so raising one of the three caps means lowering another
+or stating a larger quota; the error names the three `LIMIT_*` variables, *W* and the quota. With no
+quota known (another provider and `EMAIL_DAILY_QUOTA` unset) nothing is checked; operators of other
+providers set it to their plan's daily limit.
+
+**Why not strict counting.** Summing the last 25 hourly buckets would bound any 24 hours by *L*
+rather than 2*L*, almost doubling the usable volume, but needs a 25-row counter read on every
+sign-in request, under the same-statements parity of 06 §3.2. At friends-and-family volumes the
+sized defaults leave ample room (500 codes a day), so the simpler sizing is used; an instance that
+needs more than half its provider's quota should move to strict counting or a transactional
+provider with a larger quota.
 
 ## 5. Privacy
 

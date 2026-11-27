@@ -336,7 +336,10 @@ filesystems are unsupported for the database anyway).
   `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`. The run reads the room left under each without counting;
   a nudge over either waits unclaimed for a later run (at the instance-wide cap the run stops),
   only claimed nudges are counted, and the instance-wide cap is alerted once per fixed window,
-  through a counter of its own. Then `last_nudged_at` is claimed with one conditional update that
+  through a counter of its own. The room is read once per run, so a run also checks the
+  instance-wide count each claimed nudge adds: one that goes over the cap (only possible when two
+  runs overlap) isn't sent and is lost for that day like a failed send, and the run stops there, so
+  no fixed UTC day sends more than the cap (08 §4.2). Then `last_nudged_at` is claimed with one conditional update that
   re-checks everything above — the seat, the game being `active` and the user's eligibility —
   **before** the email is sent (so two sweeps can't both send, an unsubscribe or a move in
   between stops it, and a failed send isn't retried that day). It is a notification throttle, not game state: it is
