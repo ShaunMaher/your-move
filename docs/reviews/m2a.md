@@ -65,3 +65,19 @@ with sign-in in M2b and isn't covered here.
 | P2-6 | Fixed. ADR 0005 is dated 2026-11-24, the v0.9.13 entry's date. | `docs/adr/0005-node-sqlite-storage-and-migration-rules.md` |
 | P2-7 | Fixed. The e2e teardown deletes `E2E_DATA_DIR` only when it is a direct child named `join(tmpdir(), "your-move-e2e-")*`, and warns otherwise. | `tests/e2e/src/global-teardown.ts` |
 | P2-8 | Fixed. A test seeds orphans {A, B} and shows {A}'s digest is refused and the printed {A, B} digest is accepted. | `apps/node/src/storage.test.ts` |
+
+## Round 3 (issue #13's comments)
+
+The follow-ups from MR !13's security (S-) and picky (R-) reviews, posted on issue #13, on branch
+`alpha-b1-migrations`. S2-3 from round 2 landed with sign-in in M2b: `users.findByEmail` takes a
+`NormalisedEmail`, and so does `users.create` through `NewUser.email`
+(`packages/server/src/db/repositories.ts`). Every new check passes on the shipped migrations
+0000–0002, none of which was edited.
+
+| ID | Outcome | Where |
+|---|---|---|
+| S-1 / R-1 | Fixed. `pnpm db:check` also compares every table's `table_list` entry (`STRICT`, `WITHOUT ROWID`) and `table_xinfo` (`hidden` marks a generated column), and reads from each table's SQL the clauses no pragma reports, normalised for comments, quoting, case and spacing: each column's `COLLATE`, `CHECK` and generated expression, the table's `CHECK` constraints, and each foreign key's `DEFERRABLE` clause, keyed by its columns and parent table so drizzle-kit's inline `REFERENCES` (from `ALTER TABLE … ADD`) and a table-level `FOREIGN KEY` compare alike. 04 now lists what is still reviewer-only: constraint names, `ON CONFLICT` clauses, `AUTOINCREMENT` and a primary key's `ASC`/`DESC`. Tests: a hand edit of each clause in a copy of `0000_init.sql` is reported, and the clause reader's normalisation; `gates:prove` shows a hand-added `COLLATE` fails `db:check`. | `scripts/src/db/schema-compare.ts`, `scripts/src/db/sql.ts`, `scripts/src/bin/gates-prove.ts`, 04 §Migrations |
+| S-2 | Fixed. A migration containing `ALTER TABLE … DROP [COLUMN]` needs a `-- migration-reviewed:` line, with its own message. 04 says drizzle-kit writes it when its rename prompt is answered "create" for a renamed column. `gates:prove` shows an unreviewed one (a column added and dropped, so no schema difference) fails `db:check`. | `scripts/src/db/migrations.ts`, `scripts/src/bin/gates-prove.ts`, 04 §Migrations |
+| S-3 / R-4 | Fixed. The driver's backstop also throws when a statement closes the transaction it ran in, so a batch stops there instead of running its other statements in autocommit. A statement that failed and took its transaction with it (SQLite's own rollback, such as `RAISE(ROLLBACK)`) keeps its own error. Tests cover `COMMIT` and `ROLLBACK` mid-batch and the `RAISE(ROLLBACK)` case. | `apps/node/src/db/sqlite.ts`, 03 §4 |
+| R-2 | Fixed. A migration is linted in both readings: whole, as SQLite and wrangler read it on D1 (the breakpoint is a comment), and cut at every `--> statement-breakpoint` as Drizzle's migrator cuts it on Node, even inside a literal or a comment. A statement either reading finds is checked, and a review line must be a `--` comment in both. Tests: the trigger without `;` before `COMMIT`, statements a breakpoint lets out of a comment or literal, and a review line that is a comment on Node only. | `scripts/src/db/sql.ts`, `scripts/src/db/migrations.ts`, 04 §Migrations |
+| R-3 | Fixed. A line comment no longer keeps a CRLF's `\r`, so a review line in a CRLF file counts. Tests for the lexer and the lint. | `scripts/src/db/sql.ts` |
