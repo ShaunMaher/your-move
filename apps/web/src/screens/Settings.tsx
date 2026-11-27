@@ -127,14 +127,18 @@ function Appearance({
   const [chosen, setChosen] = useState<Theme | null>(null);
   const [saved, setSaved] = useState(false);
   const shown = chosen ?? me.settings.theme;
+  // The page shows what the radios show: the choice at once, the saved theme again when a save
+  // fails. Applied from here, not from the click, so App's own effect for the saved theme, which
+  // React runs just before the click's render, cannot overwrite a fresh choice.
+  useEffect(() => {
+    applyTheme(shown);
+  }, [shown]);
 
   async function choose(value: Theme) {
     if (chosen !== null) return;
     setChosen(value);
     setSaved(false);
-    applyTheme(value);
     const ok = await change(value);
-    if (!ok) applyTheme(me.settings.theme);
     setSaved(ok);
     setChosen(null);
   }

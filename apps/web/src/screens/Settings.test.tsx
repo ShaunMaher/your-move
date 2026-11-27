@@ -1,5 +1,5 @@
 /** The Settings toggles: email nudges (03 §7; alpha A6) and notifications (07 §4; alpha A8). */
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../App.js";
@@ -128,7 +128,10 @@ describe("the theme choice (07 §5, alpha A9)", () => {
     render(<App api={api} />);
     await screen.findByRole("heading", { name: "Settings" });
     expect(radio("Light").checked).toBe(true);
-    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    // The heading renders before React runs the passive effect that shows the theme.
+    await waitFor(() => {
+      expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    });
   });
 
   it("works when storage throws", async () => {
@@ -157,9 +160,8 @@ describe("the theme choice (07 §5, alpha A9)", () => {
     );
     render(<App api={api} />);
     await screen.findByRole("heading", { name: "Settings" });
-    // The app applies the saved theme in a passive effect that may not have run yet when the
-    // heading appears (it lags under load); flush it so it cannot overwrite the click below.
-    await act(() => Promise.resolve());
+    // No wait for App's passive effect that shows the saved theme: it may still be pending, and
+    // must not overwrite the click below.
     radio("Dark").focus();
     fireEvent.click(radio("Dark"));
     // Before the server has answered.
@@ -191,7 +193,10 @@ describe("the theme choice (07 §5, alpha A9)", () => {
     await screen.findByText(message);
     expect(radio("System").checked).toBe(true);
     expect(radio("Light").checked).toBe(false);
-    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+    // The old theme is shown again by the passive effect that follows the rollback's render.
+    await waitFor(() => {
+      expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+    });
     expect(window.localStorage.getItem("ym.theme")).toBe("system");
   });
 
