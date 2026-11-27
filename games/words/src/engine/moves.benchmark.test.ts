@@ -20,6 +20,9 @@
  * | full walk, one blank (median 65,000)    | none        |   242,000 |    60 ms |
  * | full walk, two blanks (median 316,000)  | none        |   803,000 |   195 ms |
  *
+ * Each run writes its own maxima to the test report as annotations; times are recorded, never
+ * asserted (ADR 0004), and only the deterministic step counts are checked.
+ *
  * About 0.24 µs a step here (an array of the words was 0.09 µs, but costs several megabytes more
  * on a phone); a slow phone is assumed 5–10× slower, so the limit (150,000 steps) is about 36 ms
  * here and a few hundred milliseconds there, in slices. The "full walk" rows search with a word
@@ -71,6 +74,16 @@ function measure(state: State, board: Board, tiles: readonly string[], lexicon: 
   };
 }
 
+/**
+ * The most steps and time of a set of searches, for the test report. The time is a measurement
+ * only (ADR 0004): it is recorded, never asserted.
+ */
+function summary(results: readonly Measured[]): string {
+  const steps = Math.max(...results.map((result) => result.steps));
+  const ms = Math.max(...results.map((result) => result.ms));
+  return `${String(results.length)} searches: at most ${String(steps)} steps, ${ms.toFixed(1)} ms`;
+}
+
 /** The rack with its blanks swapped for `e`, then its first `blanks` tiles made blanks. */
 function withBlanks(tiles: readonly string[], blanks: number): string[] {
   return tiles.map((tile, i) => (i < blanks ? "?" : tile === "?" ? "e" : tile));
@@ -118,35 +131,37 @@ describe.each([...RULESETS.keys()])("the no-play search under the %s ruleset", (
     expect(states.length).toBeGreaterThanOrEqual(GAMES * 2 - 2);
   });
 
-  it.each([0, 1, 2])(
+  it.for([0, 1, 2])(
     "answers for the player's own rack with %i blanks well inside the limit",
-    (blanks) => {
-      for (const state of states) {
-        const result = measure(state, state.board, withBlanks(rackOf(state), blanks), lexicon);
-        expect(result.kind).not.toBe("unknown");
-        expect(result.steps).toBeLessThan(HINT_MAX_STEPS / 10);
-      }
+    async (blanks, { annotate }) => {
+      const results = states.map((state) =>
+        measure(state, state.board, withBlanks(rackOf(state), blanks), lexicon),
+      );
+      for (const result of results) expect(result.steps).toBeLessThan(HINT_MAX_STEPS / 10);
+      await annotate(summary(results));
     },
   );
 
-  it("proves there is no play for awkward racks, well inside the limit", () => {
-    let none = 0;
-    for (const state of states) {
-      for (const tiles of AWKWARD) {
-        const result = measure(state, state.board, tiles.split(""), lexicon);
-        if (result.kind === "none") none += 1;
-        expect(result.steps).toBeLessThan(HINT_MAX_STEPS / 10);
-      }
-    }
-    expect(none).toBeGreaterThan(states.length);
+  it("proves there is no play for awkward racks, well inside the limit", async ({ annotate }) => {
+    const results = states.flatMap((state) =>
+      AWKWARD.map((tiles) => measure(state, state.board, tiles.split(""), lexicon)),
+    );
+    for (const result of results) expect(result.steps).toBeLessThan(HINT_MAX_STEPS / 10);
+    expect(results.filter((result) => result.kind === "none").length).toBeGreaterThan(
+      states.length,
+    );
+    await annotate(summary(results));
   });
 
-  it("walks every prefix of a rack with no blank inside the limit", () => {
+  it("walks every prefix of a rack with no blank inside the limit", async ({ annotate }) => {
     const refusing: Lexicon = { has: () => false, follows: (prefix) => lexicon.follows(prefix) };
-    for (const state of states) {
-      const result = measure(state, state.board, withBlanks(rackOf(state), 0), refusing);
+    const results = states.map((state) =>
+      measure(state, state.board, withBlanks(rackOf(state), 0), refusing),
+    );
+    for (const result of results) {
       expect(result.kind).toBe("none");
       expect(result.steps).toBeLessThan(HINT_MAX_STEPS);
     }
+    await annotate(summary(results));
   });
 });
