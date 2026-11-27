@@ -149,6 +149,14 @@ by the shell for every game.)
   becomes theirs, the same tiles become ordinary placements in place, and the word
   check starts. When a new version of the game takes a planned tile's square, the tile goes back
   to the rack; no tile is lost or overlaps another.
+- **No-play hint** (alpha A14, words §10.8). On the player's turn, when the client's exhaustive
+  search over their own rack, the board and the game's `public` word list proves that no word can
+  be played, the status line says "No word can be played with your tiles. Try swapping some." (the
+  bag holds at least the ruleset's `swapMinBag`) or "No word can be played with your tiles. You can
+  pass." in place of "Place tiles to make a word.", announced by its live region. It runs once per
+  game version in slices that yield to the browser, never off turn or while dragging; when the
+  search can't finish within its step limit, or there is no `public` list, it says nothing. Play
+  stays available and nothing is done automatically.
 - **Swap and Pass are board controls**, each a dialog on the board (swap: pick the rack tiles, with
   the reason when the bag is too small; pass: confirm). **Resign is the shell's menu** (02 §3): the
   module's `Action` has no resign, and the shell's `resign` call is not part of `BoardProps`.
@@ -254,7 +262,8 @@ dictionaries is the shell's job and needs no change to the module contract.
     without `distribution: "public"` is never fetched, whatever else it carries. Downloads run one
     at a time. **Tracked gap:** nothing reads this cache yet. The module contract has no channel to
     hand the list to a board (a `resources` prop on `BoardProps` is a spec change, M3), so previews
-    still answer from the server until one is specified.
+    still answer from the server, and the no-play hint (words §10.8) stays silent, until one is
+    specified.
   - **Alpha refresh rates** (no realtime yet, 10 Alpha), only in a visible tab and also on focus
     and when the tab becomes visible: an open game polls every 5 s while it waits on someone else
     (a lobby, or another player's turn); the game list polls every 15 s whether or not anything

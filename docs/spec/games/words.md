@@ -567,3 +567,37 @@ debounced (§9.5).
 In addition to the framework test kit: rule tables for every rule in §3–§6, both `swapOrder`
 variants, each MVP ruleset's tile table and premium counts, and tile conservation
 (bag + racks + board = ruleset multiset) on every state produced by random play.
+
+### 10.8 No-play hint (client)
+
+On their turn, the board tells a player whose rack has no legal play (alpha A14), so they swap or
+pass instead of hunting for a word that isn't there.
+
+- **Client only, from what the viewer may see.** The search runs in the browser on the viewer's
+  view (the public board and `yourRack`) and the game's `public` word list, the same list the
+  client keeps for previews (§9.4). It never uses another seat's rack, the bag or a `serverOnly`
+  list, sends nothing, and needs no server, API or view change. Without a loaded `public` list
+  the board says nothing. **Tracked gap:** the module contract doesn't hand the list to a board
+  yet (07 §4); until it does, the board takes it as an optional `lexicon` prop that the shell
+  doesn't pass, so the app stays silent.
+- **Sound, never a false "no".** The search (`moves.ts` in the engine, pure and deterministic)
+  is exhaustive: anchor squares (the start square on an empty board), cross-checks for the words
+  formed across the play line, a prefix walk of the sorted list, every letter for a blank, and
+  the ruleset's board, rack size and opening rules (§3.1). Two-tile plays are tried everywhere
+  first, then every length. A play it finds is confirmed with the engine's own placement rules
+  (`analysePlay`) and the list. Its work is counted in steps (search nodes and list questions),
+  never timed; past `HINT_MAX_STEPS` (300,000, measured in `moves.benchmark.test.ts`) it gives up
+  and the board says nothing. Only a finished search that found nothing shows the hint.
+- **When it runs.** Only on the player's turn in an active game, once per game version (the answer
+  is kept for that version), never while tiles are moved or dragged, and in slices of 5,000 steps
+  that yield to the browser between them. Off turn nothing runs.
+- **What it says.** In the status line, in place of "Place tiles to make a word." while no tiles
+  are on the board: "No word can be played with your tiles. Try swapping some." when the bag holds
+  at least `swapMinBag` tiles (§3.2), else "No word can be played with your tiles. You can pass."
+  The status line's live region announces it when it appears. It is a hint only: Play, Swap and
+  Pass work as before, and nothing is done for the player.
+- **Tests.** Rule tables; a property test on a small board where a brute-force enumerator asks
+  `analysePlay` about every placement and must agree ("none" exactly when it finds nothing);
+  every play found in random games under each ruleset passes `validate` with the real list; a
+  benchmark on mid- and late-game boards with 0, 1 and 2 blanks that records steps and time; and
+  Board tests for each answer.
