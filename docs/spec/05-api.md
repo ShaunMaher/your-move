@@ -345,8 +345,8 @@ These don't take `expectedVersion`.
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/v1/games/:id/join-link` | Creator, in `lobby`: create or rotate the join link → `{ url, expiresAt }` (the only time the URL is returned). Changes `join_links` only, not the game row. Errors: `403 NOT_ALLOWED`, `409 WRONG_STATUS`, `429` |
-| DELETE | `/api/v1/games/:id/join-link` | Creator: revoke (body-less). Never ends the lobby (02 §4). `204`; `403 NOT_ALLOWED` |
+| POST | `/api/v1/games/:id/join-link` | Creator, in `lobby`: create or rotate the join link → `{ url, expiresAt }` (the only time the URL is returned). Changes `join_links` only, not the game row. Counts toward the creator's join-link creations (08 §4), as a `joinLink` on create does. Errors: `403 NOT_ALLOWED`, `404` (not a member), `409 WRONG_STATUS`, `429` |
+| DELETE | `/api/v1/games/:id/join-link` | Creator: revoke (body-less). Never ends the lobby (02 §4). `204`, also when there is no live link or the lobby has ended; `403 NOT_ALLOWED`, `404` (not a member) |
 | POST | `/api/v1/games/:id/seen` | `{ version }` — marks activity as read (not a transition). `204` |
 | POST | `/api/v1/games/:id/add-player` | Creator of a `finished` game: `{ userId }` → records creator ↔ that link joiner as past opponents, if both acted and neither has blocked the other (02 §4, 06 §6.9). `204`; when a block exists in either direction it is a silent `204` no-op (no pair is written), so the creator can't learn about the block; `404` if not one of `canAddPlayers` |
 
@@ -356,11 +356,12 @@ or proxy logs. The web page reads it and calls:
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/v1/join/lookup` | `{ token }` → `200 { game: { id, gameType, options, resources, turnTimeoutDays, aiAssistance, creatorName, players (joined only: names, `kind`, `aiOwnerName`), openSeats } }` or `404` (invalid, revoked, expired, full, blocked with any member, the viewer declined/left this game, or was removed while this link was live — indistinguishable) |
-| POST | `/api/v1/join` | `{ token }` → takes an open seat → `200 { game }`; same `404` cases; `409 ALREADY_JOINED`. Blocks are checked against **every** row in the game (`404` if any). If the viewer already holds a `normal` or `hidden` invitation in this game, joining accepts it instead of taking another seat (`joined_via = invitation`); an `inert` row is never accepted (its block makes the join `404` anyway). Server-side retries on version conflict (02 §4), so callers never see `STALE_GAME` |
+| POST | `/api/v1/join/lookup` | `{ token }` → `200 { game: { id, gameType, options, resources (as in the envelope), turnTimeoutDays, seatOrder, aiAssistance, creatorName, players (joined only: `{ displayName, kind, aiOwnerName? }`), openSeats, expiresAt } }` or `404` (invalid, revoked, expired, full, a block with anyone holding a row in the game, the viewer declined/left this game, holds an `inert` row in it, or was removed while this link was live — indistinguishable). A viewer who has already joined gets the `200` (their join would be `409 ALREADY_JOINED`); one holding an invitation in the game gets it even when no seat is open, since joining accepts that invitation. `token` is the fragment as given (22 base64url characters); any other value is the same `404` |
+| POST | `/api/v1/join` | `{ token }` → takes an open seat → `200 { game }`; same `404` cases; `409 ALREADY_JOINED`. Blocks are checked against **every** row in the game (`404` if any). If the viewer already holds a `normal` or `hidden` invitation in this game, joining accepts it instead of taking another seat (`joined_via = invitation`); an `inert` row is never accepted (its block makes the join `404` anyway). Server-side retries on version conflict (up to 3 times, 03 §5.2), so callers see `STALE_GAME` only if every retry loses |
 
 Both return `403 ONBOARDING_REQUIRED` until onboarding is complete, and both are rate-limited per
-user and per IP (08 §4); a link join counts only against the joiner's own limits, never the
+user and per IP (08 §4; lookups and joins share the counters, and every call counts, whatever it
+answers); a link join counts only against the joiner's own limits, never the
 creator's game caps. Joining always requires an explicit tap on Join (07 §1).
 
 ### Other

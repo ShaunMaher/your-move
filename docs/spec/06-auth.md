@@ -400,10 +400,13 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
      clears the `sessionStorage` entry after a successful join or a `404`. Nothing ever joins
      automatically: the user always taps **Join**.
    - Refused with the indistinguishable `404` if the joiner has a block in either direction with the
-     creator **or any current member**, if they declined or left this game, or if they were removed
+     creator **or anyone else holding a row in the game** (joined, invited, declined, left or
+     removed alike, 05), if they declined or left this game, or if they were removed
      from it while this link was live (`removed_at ≥ join_links.created_at`; rotating the link
-     lets the creator re-admit them). A user who already holds a `normal` or `hidden` invitation in
-     the game accepts it by joining (`joined_via = invitation`); an `inert` row is never accepted.
+     lets the creator re-admit them: their row is joined again, `joined_via = join_link`). A user who already holds a `normal` or `hidden` invitation in
+     the game accepts it by joining (`joined_via = invitation`); an `inert` row is never accepted, and
+     its holder gets the same `404`. The checks read the same rows for every outcome, so the
+     answer's work doesn't say which reason refused it.
    - A link join counts only against the joiner's own limits (lookup/join per user and per IP,
      08 §4), never against the creator's game caps.
    - The link reveals the game type, options, creator's display name and **joined** players'

@@ -168,7 +168,7 @@ in the same transition), and deleted in both directions when either user blocks 
 |---|---|---|
 | game_id | TEXT PK FK → games ON DELETE CASCADE | one live link per game |
 | token_hash | TEXT UNIQUE NOT NULL | SHA-256 of the 128-bit token; the raw token is shown only in the create/rotate response |
-| created_at, expires_at | INTEGER | expiry ≤ 7 days and ≤ lobby expiry; deleted at game start/revoke/rotate; swept when expired |
+| created_at, expires_at | INTEGER | expiry ≤ 7 days and ≤ lobby expiry; deleted at game start/revoke/rotate and when the lobby ends any other way (cancelled, declined, expired); swept when expired |
 
 A user whose row has `removed_at ≥ join_links.created_at` can't use the current link; rotating it
 issues a new token (and a newer `created_at`), which re-admits them (06 §6.8).
