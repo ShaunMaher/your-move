@@ -10,7 +10,7 @@
  * alone (07 §3). Nothing here is authoritative: the server validates every play.
  */
 import { isGameError, shuffle, type GameError } from "@your-move/sdk";
-import { formatText, type BoardProps } from "@your-move/sdk/client";
+import { formatText, type BoardProps, type PublicWordList } from "@your-move/sdk/client";
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactElement } from "react";
 
 import {
@@ -35,6 +35,7 @@ import {
   zoomAround,
   type Viewport,
 } from "./geometry.js";
+import { useNoPlayHint } from "./hint.js";
 import { Rack } from "./Rack.js";
 import { webCryptoRandom } from "./random.js";
 import { clearOrder, loadOrder, rackOrderKey, saveOrder } from "./storage.js";
@@ -170,6 +171,14 @@ function Table(
   const dragged = useRef(false);
   const dragging = useRef(false);
   const arranged = useRef(false);
+  const noPlay = useNoPlayHint({
+    active: canAct,
+    version: game.version,
+    ruleset,
+    view,
+    lexicon: gameWordList(props.resources, view),
+    paused: dragging,
+  });
   useEffect(() => {
     preview.current = props.preview;
     live.current = { viewport, t, rack };
@@ -488,7 +497,14 @@ function Table(
         <>
           <div className="ym-w-status" aria-live="polite" aria-atomic="true">
             {note !== null && <span key={note.n}>{note.text}</span>}
-            <Status analysis={analysis} answer={answer} held={held} sent={sent} canAct={canAct} />
+            <Status
+              analysis={analysis}
+              answer={answer}
+              held={held}
+              sent={sent}
+              canAct={canAct}
+              noPlay={noPlay}
+            />
           </div>
           {message !== null && (
             <p role="alert" className="ym-w-status" data-tone="bad">
@@ -626,6 +642,15 @@ function Table(
   );
 }
 
+/**
+ * The public word list the shell loaded for the board (02 §3), if it is this game's own list
+ * (words §10.8): the shell hands over only public lists, and the id must match the view's.
+ */
+function gameWordList(resources: Props["resources"], view: View): PublicWordList | null {
+  const list = resources?.dictionary;
+  return list?.id === view.dictionary.id ? list : null;
+}
+
 /** Off turn, what the status line says about the tiles on the board. */
 const PLANNING = "Not your turn yet. Tiles you place now are only a plan.";
 
@@ -653,6 +678,8 @@ function Status(props: {
   readonly held: string | null;
   readonly sent: boolean;
   readonly canAct: boolean;
+  /** The no-play hint, shown instead of the prompt while no tiles are on the board. */
+  readonly noPlay: string | null;
 }): ReactElement {
   const { analysis, answer, held } = props;
   // Selecting a tile (by tap or by keyboard) is announced, with what to do next.
@@ -670,7 +697,7 @@ function Status(props: {
         </>
       );
     }
-    return holding ?? <span>Place tiles to make a word.</span>;
+    return holding ?? <span>{props.noPlay ?? "Place tiles to make a word."}</span>;
   }
   if (isGameError(analysis)) {
     return (

@@ -2,7 +2,7 @@ import { array, assert, constantFrom, oneof, property, string, stringMatching } 
 import { describe, expect, it } from "vitest";
 
 import { formatWordList } from "./format.js";
-import { createWordList, hasWord, WordListFormatError } from "./lookup.js";
+import { createWordList, followingLetters, hasWord, WordListFormatError } from "./lookup.js";
 
 const LIST = formatWordList(["aa", "ab", "abs", "bat", "bath", "bats", "cat", "zyzzyva"]);
 
@@ -117,5 +117,81 @@ describe("createWordList", () => {
 
   it("refuses a text without its final newline", () => {
     expect(() => createWordList("tiny", 1, "aa\nab")).toThrow(WordListFormatError);
+  });
+});
+
+/** A mask's letters, in order. */
+const named = (mask: number): string =>
+  Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i))
+    .filter((_, i) => (mask & (1 << i)) !== 0)
+    .join("");
+
+describe("followingLetters (words §10.8)", () => {
+  it.each([
+    ["", "abcz", "every first letter"],
+    ["a", "ab", "after a prefix"],
+    ["ab", "s", "after a word that prefixes another"],
+    ["bat", "hs", "after a word with two extensions"],
+    ["bath", "", "after a word nothing extends"],
+    ["zyzzyv", "a", "on the last word"],
+    ["q", "", "a prefix of no word"],
+    ["zz", "", "after the last word"],
+    ["Ba", "", "upper case"],
+    ["b\n", "", "a line break"],
+  ])("%j → %j (%s)", (prefix, letters) => {
+    expect(named(followingLetters(LIST, prefix))).toBe(letters);
+  });
+
+  it("handles an empty list and a last line without its newline", () => {
+    expect(followingLetters("", "")).toBe(0);
+    expect(named(followingLetters("aa\nab", "a"))).toBe("ab");
+    expect(named(followingLetters("aa\nab", "ab"))).toBe("");
+  });
+
+  it("agrees with the words themselves on random lists and prefixes", () => {
+    const word = stringMatching(/^[a-d]{2,5}$/u);
+    const prefix = stringMatching(/^[a-d]{0,4}$/u);
+    assert(
+      property(array(word, { maxLength: 60 }), array(prefix, { maxLength: 30 }), (words, asked) => {
+        const text = formatWordList(words);
+        for (const query of [...asked, ...words.map((w) => w.slice(0, 2))]) {
+          let mask = 0;
+          for (const w of words) {
+            if (w.length > query.length && w.startsWith(query)) {
+              mask |= 1 << (w.charCodeAt(query.length) - 97);
+            }
+          }
+          expect(followingLetters(text, query)).toBe(mask);
+        }
+      }),
+      { seed: 20261127, numRuns: 300 },
+    );
+  });
+
+  // A14-S-1: characters above `z` used to send the walk back to the same line for ever.
+  it.each([
+    ["aa\naé\n", "", "a"],
+    ["aa\naé\n", "a", "a"],
+    ["a{\n", "", "a"],
+    ["a{\n", "a", ""],
+    ["a{\nab\n", "a", "b"],
+    ["é\nzz\n", "", "z"],
+    ["aa\na\u00ff\u00ff\nab\n", "a", "ab"],
+  ])("ends on a text that isn't a word list: %j after %j → %j", (text, prefix, letters) => {
+    expect(named(followingLetters(text, prefix))).toBe(letters);
+  });
+
+  it("ends on any text, and answers only a–z", () => {
+    assert(
+      property(string({ maxLength: 40 }), stringMatching(/^[a-c{é]{0,3}$/u), (text, prefix) => {
+        const mask = followingLetters(`${text}\n`, prefix);
+        expect(mask >>> 26).toBe(0);
+      }),
+      { seed: 20261127, numRuns: 500 },
+    );
+  });
+
+  it("is what a word list's follows answers", () => {
+    expect(named(createWordList("t", 1, LIST).follows("ba"))).toBe("t");
   });
 });

@@ -239,3 +239,37 @@ export function removeFakePush(): void {
   Reflect.deleteProperty(window.navigator, "serviceWorker");
   vi.unstubAllGlobals();
 }
+
+/** The served path of a word list with this content (03 §10): its hash's first 8 bytes in hex. */
+export async function servedName(text: string, id = "enable"): Promise<string> {
+  const bytes = new TextEncoder().encode(text);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  const hex = Array.from(digest.subarray(0, 8), (b) => b.toString(16).padStart(2, "0")).join("");
+  return `/assets/dictionaries/${id}-v1.${hex}.txt`;
+}
+
+/** An in-memory Cache Storage with insertion-ordered keys, as the real one's `keys()` is. */
+export function fakeCacheStorage() {
+  const stores = new Map<string, Map<string, Response>>();
+  return {
+    stores,
+    open: vi.fn((name: string) => {
+      const store = stores.get(name) ?? new Map<string, Response>();
+      stores.set(name, store);
+      return Promise.resolve({
+        match: (path: string) => Promise.resolve(store.get(path)?.clone()),
+        put: (path: string, response: Response) => {
+          store.delete(path);
+          store.set(path, response);
+          return Promise.resolve();
+        },
+        keys: () =>
+          Promise.resolve([...store.keys()].map((path) => new Request(`http://localhost${path}`))),
+        delete: (request: Request | string) =>
+          Promise.resolve(
+            store.delete(typeof request === "string" ? request : new URL(request.url).pathname),
+          ),
+      });
+    }),
+  };
+}

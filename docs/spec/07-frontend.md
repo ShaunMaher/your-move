@@ -163,6 +163,14 @@ by the shell for every game.)
   planned one, to say that letting go returns it. Every return, by drag, button or key, is
   announced in the status line ("Tile S returned to the rack."). No rule changes: it is only a
   shorter way to do what the keyboard path (select the tile, "Return tile to rack") already does.
+- **No-play hint** (alpha A14, words §10.8). On the player's turn, when the client's exhaustive
+  search over their own rack, the board and the game's `public` word list proves that no word can
+  be played, the status line says "No word can be played with your tiles. Try swapping some." (the
+  bag holds at least the ruleset's `swapMinBag`) or "No word can be played with your tiles. You can
+  pass." in place of "Place tiles to make a word.", announced by its live region. It runs once per
+  game version in slices that yield to the browser, never off turn or while a tile is pressed or
+  dragged; when the search can't finish within its step limit, or there is no `public` list, it
+  says nothing. Play stays available and nothing is done automatically.
 - **Swap and Pass are board controls**, each a dialog on the board (swap: pick the rack tiles, with
   the reason when the bag is too small; pass: confirm). **Resign is the shell's menu** (02 §3): the
   module's `Action` has no resign, and the shell's `resign` call is not part of `BoardProps`.
@@ -180,9 +188,11 @@ placement validity, words formed, score, bingo. The game's own `rulesetId@versio
 `dictionaryId` are used. This mirrors the server exactly (same code). For `serverOnly`
 dictionaries the client computes placement and score locally and gets word validity from the
 debounced preview endpoint (05). Until validity is known (either way),
-previews show score only. The module itself never downloads a list: it asks the shell's `preview`
-(02 §3: "local when possible, else from the server"), so holding and caching the list for public
-dictionaries is the shell's job and needs no change to the module contract.
+previews show score only. The module itself never downloads a list: holding and caching the list
+for public dictionaries is the shell's job. The shell hands the game's public list to the board as
+`resources.dictionary` (02 §3), and the board uses it for the no-play hint (words §10.8); word
+validity in previews still comes from the shell's `preview`, which asks the server. Answering
+previews from the list locally is a follow-up that can build on the same `resources` entry.
 
 ## 4. PWA requirements
 
@@ -266,9 +276,18 @@ dictionaries is the shell's job and needs no change to the module contract.
     credentials and refusing redirects), stores it only if its content hashes to the digest in its
     own file name, and the worker's clean-up of old shell caches leaves it alone. A resource
     without `distribution: "public"` is never fetched, whatever else it carries. Downloads run one
-    at a time. **Tracked gap:** nothing reads this cache yet. The module contract has no channel to
-    hand the list to a board (a `resources` prop on `BoardProps` is a spec change, M3), so previews
-    still answer from the server until one is specified.
+    at a time. The game's own list (its one resource of kind `dictionary`; with none or several,
+    nothing), when it is public, is then opened for the board as `resources.dictionary` (02 §3).
+    Its bytes are hashed, and its text put through the word-list check (lower-case `a`–`z`
+    words, sorted; about 30 ms on a laptop for the built-in list), once: as they are downloaded,
+    and only a list that passes both is stored, or as they are read back from this cache, where
+    an entry that fails either is deleted and downloaded again once. The opened list is kept by
+    its URL, which names its content, so every game with that list gets the same object; the
+    three most recently used are kept. It is held as the list's sorted text (about one byte a character, 1.7 MB for
+    the built-in list) with binary-search lookups and nothing built. A failed download, a digest
+    that doesn't match, a text that isn't a word list, no Cache Storage, or a list that isn't
+    public hands nothing over, and the board goes on without it. Previews still answer
+    from the server; answering them from the list locally is a follow-up.
   - **Alpha refresh rates** (no realtime yet, 10 Alpha), only in a visible tab and also on focus
     and when the tab becomes visible: an open game polls every 5 s while it waits on someone else
     (a lobby, or another player's turn); the game list polls every 15 s whether or not anything

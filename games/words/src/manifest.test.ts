@@ -29,6 +29,11 @@ describe("words manifest (02 §7.2)", () => {
     }
   });
 
+  it("tells players about the no-play hint, which every game has (words §10.8)", () => {
+    expect(manifest.rules[1]).toMatch(/no word can be made from your tiles/u);
+    expect(manifest.rules[1]).toMatch(/Every player gets this hint in every game/u);
+  });
+
   it("has rules in Markdown without HTML or trademarked names", () => {
     for (const rules of Object.values(manifest.rules)) {
       expect(rules).not.toMatch(/[<>]/u);

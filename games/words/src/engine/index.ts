@@ -13,6 +13,13 @@ export const engines = { 1: wordsV1 } satisfies GameEngines;
 export { analyseViewPlay } from "./analysis.js";
 export { premiumAt, tilePoints, type PlayAnalysis } from "./board.js";
 export { isCompatible, type DictionaryTraits } from "./compatibility.js";
+export {
+  HINT_MAX_STEPS,
+  searchPlays,
+  type Lexicon,
+  type PlaySearch,
+  type SearchOutcome,
+} from "./moves.js";
 export { findRuleset, latestRuleset, RULESETS, type RulesetRegistry } from "./rulesets/index.js";
 export {
   BLANK,

@@ -1,19 +1,22 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { forgetCatalog } from "../catalog.js";
-import { fakeClient, submitted } from "../test-client.js";
+import { boardResources, fakeClient, submitted } from "../test-client.js";
 import {
   CATALOG,
   envelope,
   fakeApi,
+  fakeCacheStorage,
   fakePush,
   json,
   player,
   problem,
   PUSH_KEY,
   removeFakePush,
+  servedName,
 } from "../test-support.js";
+import { WORD_LIST_CACHE } from "../word-lists.js";
 import { Game } from "./Game.js";
 
 const VIEW = { board: "empty" };
@@ -42,6 +45,7 @@ const lobby = (over = {}) =>
 beforeEach(() => {
   window.history.replaceState(null, "", "/g/g1");
   submitted.length = 0;
+  boardResources.length = 0;
 });
 afterEach(() => {
   cleanup();
@@ -1074,5 +1078,87 @@ describe("the notifications offer after accepting an invitation (A8-P-2)", () =>
     fireEvent.click(await screen.findByRole("button", { name: "Accept" }));
     await screen.findByText(/Waiting for the creator to start/u);
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("the word list for the board (02 §3)", () => {
+  const TEXT = "aa\nab\nba\n";
+  const NONE = "Word list: none";
+
+  /** A game whose one word list is served at `url`, with this distribution. */
+  const gameWith = (url: string, distribution: "public" | "serverOnly" = "public", over = {}) =>
+    envelope({
+      resources: [
+        { kind: "dictionary", id: "enable", name: "ENABLE", distribution, downloadUrl: url },
+      ],
+      ...over,
+    });
+
+  function serve(text: string | Error) {
+    const storage = fakeCacheStorage();
+    vi.stubGlobal("caches", storage);
+    const fetcher = vi.fn(() =>
+      text instanceof Error ? Promise.reject(text) : Promise.resolve(new Response(text)),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    return { storage, fetcher };
+  }
+
+  /** Lets the shell's promise chain settle: no timers, only promises and the hash. */
+  async function settle(opens: () => number, expected: number): Promise<void> {
+    await waitFor(() => {
+      expect(opens()).toBe(expected);
+    });
+    for (let i = 0; i < 5; i += 1) await act(() => Promise.resolve());
+  }
+
+  it("hands the board a public list, once, as one object through new versions", async () => {
+    const { fetcher } = serve(TEXT);
+    const url = await servedName(TEXT);
+    let game = gameWith(url);
+    open({
+      "GET /api/v1/games/g1": () => withView(game),
+      "POST /api/v1/games/g1/actions": () => withView(gameWith(url, "public", { version: 4 })),
+    });
+    expect(await screen.findByText("Word list: enable v1, ab true")).toBeDefined();
+    const handed = boardResources.at(-1);
+    game = gameWith(url, "public", { version: 4 });
+    click("Play");
+    expect(await screen.findByText(/Board v4/u)).toBeDefined();
+    expect(boardResources.at(-1)).toBe(handed);
+    expect(
+      boardResources.filter((seen) => seen !== undefined).every((seen) => seen === handed),
+    ).toBe(true);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("hands over nothing for a list only the server holds", async () => {
+    const { storage, fetcher } = serve(TEXT);
+    open({ "GET /api/v1/games/g1": withView(gameWith(await servedName(TEXT), "serverOnly")) });
+    await screen.findByRole("region", { name: "Fake board" });
+    await settle(() => storage.open.mock.calls.length, 0);
+    expect(screen.getByText(NONE)).toBeDefined();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(boardResources.every((seen) => seen === undefined)).toBe(true);
+  });
+
+  // Each test below has a list of its own: the shell keeps the lists it opened for the page's
+  // life, by URL, and a URL names its content.
+  it("hands over nothing when the download fails", async () => {
+    const { storage } = serve(new Error("offline"));
+    open({ "GET /api/v1/games/g1": withView(gameWith(await servedName("aa\nbb\n"))) });
+    await screen.findByRole("region", { name: "Fake board" });
+    await settle(() => storage.open.mock.calls.length, 1);
+    expect(screen.getByText(NONE)).toBeDefined();
+    expect(storage.stores.get(WORD_LIST_CACHE)?.size ?? 0).toBe(0);
+  });
+
+  it("hands over nothing whose content doesn't match the hash in its name", async () => {
+    const { storage } = serve("aa\nzz\n");
+    open({ "GET /api/v1/games/g1": withView(gameWith(await servedName("aa\ncc\n"))) });
+    await screen.findByRole("region", { name: "Fake board" });
+    await settle(() => storage.open.mock.calls.length, 1);
+    expect(screen.getByText(NONE)).toBeDefined();
+    expect(boardResources.every((seen) => seen === undefined)).toBe(true);
   });
 });

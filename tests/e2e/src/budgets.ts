@@ -63,3 +63,11 @@ export const RESIGN_TEST_TIMEOUT_MS = 60_000;
  * run (a cold browser), 2026-11-27; still well inside 90 s.
  */
 export const REMATCH_TEST_TIMEOUT_MS = 90_000;
+
+/**
+ * The no-play hint test (no-play.spec.ts, alpha A14): two sign-ins, an invitation, and the first
+ * player's board with the word list downloaded and searched; no moves. The same steps as the short
+ * game test, so the same 60 s. Measured locally in the pinned image with a warm browser: 1.7 s
+ * (Chromium) and 2.4 s (WebKit), 2026-11-27.
+ */
+export const NO_PLAY_TEST_TIMEOUT_MS = 60_000;

@@ -4,7 +4,12 @@
  * built-in word list for property tests. Never imported by the engine, client or manifest, and
  * left out of the published files.
  */
-import { createWordList, toResourceMeta } from "@your-move/dictionary";
+import {
+  createWordList,
+  formatWordList,
+  toResourceMeta,
+  type WordList,
+} from "@your-move/dictionary";
 import type { buildBuiltin } from "@your-move/dictionary/builder";
 import type { GameEnvelope, ResourceMeta, Resources } from "@your-move/sdk";
 
@@ -107,6 +112,15 @@ export function rack(tiles: string): string[] {
 export function dictionary(words: string): Resources {
   const set = new Set(words.split(/\s+/u).filter((word) => word !== ""));
   return { dictionary: { id: BUILTIN_ID, version: 1, has: (word) => set.has(word) } };
+}
+
+/**
+ * A word list over these words, in any order, as the shell hands a public list to the board
+ * (02 §3): the server's binary search over the sorted text, with `follows` for the no-play
+ * search (words §10.8).
+ */
+export function wordList(words: Iterable<string>, id = BUILTIN_ID): WordList {
+  return createWordList(id, 1, formatWordList(words));
 }
 
 /** Every tile in a state: board, racks and bag, sorted. */
