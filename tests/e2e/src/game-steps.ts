@@ -34,7 +34,7 @@ export async function createAndAccept(ann: Page, bob: Page, bobAddress: string):
   await expect(ann.getByRole("heading", { name: /options/u })).toBeVisible();
   await ann.getByRole("button", { name: "Next" }).click();
   await ann.getByLabel("Their email address").fill(bobAddress);
-  await expect(ann.getByText(/must have signed in to E2E Games at least once/u)).toBeVisible();
+  await expect(ann.getByText(/We'll email them an invitation from you/u)).toBeVisible();
   await ann.getByRole("button", { name: "Review" }).click();
   await expect(ann.getByText(`Check the address: ${bobAddress}`)).toBeVisible();
   await ann.getByRole("button", { name: "Create game" }).click();

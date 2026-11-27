@@ -11,28 +11,46 @@ export function freshAddress(): string {
   return `player-${String(Date.now())}-${String(counter)}-${String(process.pid)}@example.org`;
 }
 
+/** One email the dev capture holds (`/__dev/emails`, local dev only). */
+export interface CapturedEmail {
+  readonly to: string;
+  readonly subject: string;
+  readonly text: string;
+  readonly listUnsubscribe?: string;
+}
+
+/** The `n`th email (0-based) sent to `address` whose subject matches, once it has arrived. */
+export async function emailTo(
+  request: APIRequestContext,
+  address: string,
+  subject: RegExp,
+  n = 0,
+): Promise<CapturedEmail> {
+  let found: CapturedEmail | undefined;
+  await expect
+    .poll(async () => {
+      const response = await request.get("/__dev/emails");
+      const { emails } = (await response.json()) as { emails: CapturedEmail[] };
+      found = emails.filter((email) => email.to === address && subject.test(email.subject))[n];
+      return found !== undefined;
+    })
+    .toBe(true);
+  if (found === undefined) throw new Error("no such email");
+  return found;
+}
+
 /**
- * The code in the `n`th email sent to `address` (0-based), read from the dev email capture
- * (`/__dev/emails`, local dev only). The subject carries the code ungrouped (06 §3.3).
+ * The code in the `n`th sign-in code email sent to `address` (0-based), read from the dev email
+ * capture. The subject carries the code ungrouped (06 §3.3). Other emails to the address (an
+ * invitation, alpha A17) don't count.
  */
 export async function codeFrom(
   request: APIRequestContext,
   address: string,
   n: number,
 ): Promise<string> {
-  let code = "";
-  await expect
-    .poll(async () => {
-      const response = await request.get("/__dev/emails");
-      const { emails } = (await response.json()) as {
-        emails: { to: string; subject: string }[];
-      };
-      const subject = emails.filter((email) => email.to === address)[n]?.subject ?? "";
-      code = /^(\d{8}) is your /u.exec(subject)?.[1] ?? "";
-      return code;
-    })
-    .not.toBe("");
-  return code;
+  const email = await emailTo(request, address, /^\d{8} is your /u, n);
+  return /^(\d{8}) is your /u.exec(email.subject)?.[1] ?? "";
 }
 
 /**

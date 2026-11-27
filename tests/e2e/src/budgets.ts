@@ -71,3 +71,11 @@ export const REMATCH_TEST_TIMEOUT_MS = 90_000;
  * (Chromium) and 2.4 s (WebKit), 2026-11-27.
  */
 export const NO_PLAY_TEST_TIMEOUT_MS = 60_000;
+
+/**
+ * The email invite test (invites.spec.ts, alpha A17): one sign-in, a game for an address with no
+ * account, the invitation email read from the capture, the second person's sign-up from it, an
+ * accept and a pass each, then the email's unsubscribe page. The short game test's steps and two
+ * moves, so the same 60 s for now. TO BE MEASURED in the pinned image and on CI.
+ */
+export const INVITE_TEST_TIMEOUT_MS = 60_000;
