@@ -177,6 +177,40 @@ const proofs: Record<string, Proof> = {
     });
   },
 
+  "db:check: an unreviewed DROP COLUMN, in a scratch copy of the migrations"() {
+    return withMigrationsCopy((dir) => {
+      // Adding a column and dropping it leaves the schema as it was: only the column rule fires.
+      addMigration(
+        dir,
+        "0003_gate_fixture",
+        "ALTER TABLE `users` ADD `gate_fixture` text;\n--> statement-breakpoint\nALTER TABLE `users` DROP COLUMN `gate_fixture`;",
+      );
+      const result = exec("pnpm", ["db:check", "--migrations", dir]);
+      if (result.status === 0) return "db:check passed";
+      if (!result.output.includes("0003_gate_fixture.sql drops a column")) {
+        return "db:check did not report the unreviewed DROP COLUMN";
+      }
+      return result.output.includes("build a different schema")
+        ? "db:check also reported a schema difference, so the proof isn't of the column rule alone"
+        : null;
+    });
+  },
+
+  "db:check: a hand-added COLLATE in a committed migration, in a scratch copy"() {
+    return withMigrationsCopy((dir) => {
+      const file = join(dir, "0000_init.sql");
+      const original = readFileSync(file, "utf8");
+      const from = "`action` text NOT NULL,";
+      if (original.split(from).length !== 2) return "0000_init.sql no longer has the anchor column";
+      writeFileSync(file, original.replace(from, "`action` text NOT NULL COLLATE NOCASE,"));
+      const result = exec("pnpm", ["db:check", "--migrations", dir]);
+      if (result.status === 0) return "db:check passed";
+      return result.output.includes("table admin_audit: column action: clauses")
+        ? null
+        : "db:check did not report the added COLLATE";
+    });
+  },
+
   "games:verify: the installed example's engine importing React and reading the clock"() {
     const engineDir = join(ROOT_DIR, "games/example/src/engine");
     const index = join(engineDir, "index.ts");
