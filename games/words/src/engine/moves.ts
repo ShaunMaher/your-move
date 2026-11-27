@@ -64,6 +64,11 @@ export interface PlaySearch {
   advance(steps: number): SearchOutcome | null;
   /** The steps used so far. */
   readonly steps: number;
+  /**
+   * Plays the search built that the engine's own rules then refused (see `confirm`): always 0,
+   * because the search's checks are those rules; tests pin it.
+   */
+  readonly refused: number;
 }
 
 /** What the search is given: the public board and the viewer's own rack (words §7). */
@@ -159,6 +164,7 @@ export function searchPlays(input: SearchInput): PlaySearch {
 
 class Search implements PlaySearch {
   steps = 0;
+  refused = 0;
   private readonly size: number;
   private readonly opening: boolean;
   private readonly units: Unit[] = [];
@@ -527,11 +533,12 @@ class Search implements PlaySearch {
     // Were they ever to disagree, the engine's answer wins: a play it refuses is no play, and the
     // search goes on.
     /* v8 ignore start */
-    if (isGameError(analysis)) return null;
-    return analysis.words.every((scored) => this.input.lexicon.has(scored.word))
-      ? placements
-      : null;
+    if (isGameError(analysis) || !analysis.words.every((w) => this.input.lexicon.has(w.word))) {
+      this.refused += 1;
+      return null;
+    }
     /* v8 ignore stop */
+    return placements;
   }
 }
 

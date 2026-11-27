@@ -293,11 +293,68 @@ describe("the step limit", () => {
   });
 });
 
+/** A search run in slices of `budget` steps: its outcome and the steps it took. */
+function sliced(input: Parameters<typeof searchPlays>[0], budget: number) {
+  const run = searchPlays(input);
+  let outcome: SearchOutcome | null = null;
+  while (outcome === null) outcome = run.advance(budget);
+  return { outcome, steps: run.steps, refused: run.refused };
+}
+
 describe("slices (A14-P-1)", () => {
   let all: string[];
+  let res: Resources;
   beforeAll(async () => {
     all = await realWordList();
+    res = (await realDictionary()).resources;
   });
+
+  // A14-R2-1: a resume that loses any of the search's place (a letter not yet tried, a frame, a
+  // cross-check) changes the outcome, the play or the steps somewhere here.
+  it("finds the same play in the same steps whether run at once or in slices of any size", () => {
+    const list = wordList(all);
+    const noWords: Lexicon = { has: () => false, follows: (prefix) => list.follows(prefix) };
+    const inputs: Parameters<typeof searchPlays>[0][] = [];
+    for (let game = 0; game < 4; game += 1) {
+      const rng = seededRandom(700 + game);
+      let now: State = words.setup({ options: options(), seats: 2, rng: seededRandom(game) });
+      for (let turn = 0; words.result(now) === null && turn < 40; turn += 1) {
+        const [seat = 0] = words.toAct(now);
+        if (turn % 8 === 7) {
+          const tiles = now.racks[seat] ?? [];
+          for (const blanks of [0, 1, 2]) {
+            const rackWith = tiles.map((t, i) => (i < blanks ? "?" : t === "?" ? "e" : t));
+            for (const lexicon of [list, noWords]) {
+              inputs.push({
+                ruleset: CLASSIC,
+                board: now.board,
+                rack: rackWith,
+                lexicon,
+                maxSteps: blanks === 2 && lexicon === noWords ? 20_000 : PLENTY,
+              });
+            }
+          }
+        }
+        now = words.apply(
+          now,
+          seat,
+          words.test.randomAction(now, seat, rng, res),
+          seededRandom(turn),
+        ).state;
+      }
+    }
+    const kinds = new Set<string>();
+    for (const input of inputs) {
+      const whole = sliced(input, Number.MAX_SAFE_INTEGER);
+      kinds.add(whole.outcome.kind);
+      // Every play it built on these busy boards, cross-words and all, the engine accepted
+      // (A14-R2-2): the guard in `confirm` never refuses one.
+      expect(whole.refused).toBe(0);
+      for (const budget of [1, 7, 100, 5_000]) expect(sliced(input, budget)).toEqual(whole);
+    }
+    // Plays found, proofs of none and searches cut off by their limit are all compared.
+    expect([...kinds].sort()).toEqual(["none", "some", "unknown"]);
+  }, 120_000);
 
   /** Runs a search in slices of `budget`: the most any slice went over it, and the steps in all. */
   function slices(grid: Board, tiles: string, list: Lexicon, budget: number) {
@@ -463,6 +520,12 @@ describe("against brute force on a small board", () => {
         });
         const where = `game ${String(game)} turn ${String(turn)} rack ${tiles.join("")}`;
         expect(outcome.kind, where).toBe(plays.length > 0 ? "some" : "none");
+        // In every fourth game, the same answer one step at a time: every resume keeps the
+        // search's place (A14-R2-1). (All 200 games this way take minutes under coverage.)
+        const input = { ruleset: SMALL, board: grid, rack: tiles, lexicon: list, maxSteps: PLENTY };
+        const stepwise = sliced(input, game % 4 === 0 ? 1 : Number.MAX_SAFE_INTEGER);
+        expect(stepwise.outcome, where).toEqual(outcome);
+        expect(stepwise.refused, where).toBe(0);
         if (outcome.kind === "some") {
           expect(legal(SMALL, grid, tiles, list, outcome.play), where).toBe(true);
           tally.some += 1;
@@ -483,7 +546,7 @@ describe("against brute force on a small board", () => {
     // Both answers come up often enough to mean something.
     expect(tally.some).toBeGreaterThan(400);
     expect(tally.none).toBeGreaterThan(400);
-  }, 120_000);
+  }, 300_000);
 });
 
 // ---------------------------------------------------------------------------------------------
