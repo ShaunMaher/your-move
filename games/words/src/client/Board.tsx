@@ -344,6 +344,7 @@ function Table(
       if (!moved && distance(start, at) < DRAG_SLOP) return;
       moved = true;
       const target = aim();
+      // `back` is refreshed only here, so a cancel with no move counts as not back.
       // A tile from the board let go anywhere but a square of the board goes back to the rack.
       back = source.kind === "square" && !overBoard(at.x, at.y - lift);
       setGhost({ tile, x: at.x, y: at.y - lift, back });

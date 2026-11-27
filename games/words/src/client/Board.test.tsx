@@ -909,6 +909,28 @@ describe("when it isn't your turn", () => {
     expect(p.preview).not.toHaveBeenCalled();
   });
 
+  it("moves and announces nothing when a new version takes the dragged tile's square mid-drag", () => {
+    const game = envelope(NAMES, 0, { yourTurn: false, toAct: [1] });
+    const p = props();
+    const { rerender } = render(<Board game={game} view={view(fresh({ turn: 1 }), 0)} {...p} />);
+    place("S, 1 point", SR, SC + 2);
+    fireEvent.pointerDown(square(SR, SC + 2), { pointerId: 1, clientX: 5, clientY: 5 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 400, clientY: 400 });
+    // The opponent plays CATS: the square under my S is taken, and the S is already on the rack.
+    const next = fresh({
+      turn: 1,
+      board: board(CLASSIC, [{ row: SR, col: SC - 1, word: "cats" }]),
+    });
+    rerender(<Board game={{ ...game, version: 4 }} view={view(next, 0)} {...p} />);
+    // Another tile is selected: a return that did nothing must not clear that either.
+    fireEvent.click(rackTile("E, 1 point"));
+    const racked = document.querySelectorAll("[data-rack-id]").length;
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 400, clientY: 400 });
+    expect(screen.queryByText("Tile S returned to the rack.")).toBeNull();
+    expect(document.querySelectorAll("[data-rack-id]")).toHaveLength(racked);
+    expect(screen.getByText("Tile E selected. Choose a square.")).toBeTruthy();
+  });
+
   it.each([
     ["a new version of the game", true],
     ["the turn passing", false],

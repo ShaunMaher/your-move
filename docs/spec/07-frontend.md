@@ -152,13 +152,13 @@ by the shell for every game.)
 - **Dragging a tile off the board returns it** (alpha A13). A tile the player may move (this
   turn's placed tiles, or planned tiles off turn) that is let go anywhere that is not a square of
   the board goes back to the rack: outside the grid, over the page or the scores, or off-screen.
-  The place it is let go is where the release event says it is. A cancelled pointer (a system
+  The place it is let go is where the release event says it is. A returned tile goes to the end of
+  the rack (as "Return tile to rack" and Backspace/Delete on a focused square do), unless it is let
+  go on the rack, which keeps the position it is dropped at. A cancelled pointer (a system
   gesture, say) returns the tile only if the ghost was in its off-board state at that moment;
-  cancelled over the board, the tile stays on the square it was lifted from. It goes to the end of the rack (as "Return tile to rack" and
-  Backspace/Delete on a focused square do), unless it is let go on the rack, which keeps the
-  position it is dropped at. A blank loses its chosen letter. Over a square, a drop is unchanged
-  (moving, or snapping to the nearest empty square). Tiles from earlier turns can't be picked up,
-  and a tile dragged from the rack and let go off the board stays on the rack. While the pointer
+  cancelled over the board, the tile stays on the square it was lifted from. A blank loses its
+  chosen letter. Over a square, a drop is unchanged (moving, or snapping to the nearest empty
+  square). Tiles from earlier turns can't be picked up, and a tile dragged from the rack and let go off the board stays on the rack. While the pointer
   is off the board the ghost is drawn as a plain rack tile with an ink ring, not as a placed or
   planned one, to say that letting go returns it. Every return, by drag, button or key, is
   announced in the status line ("Tile S returned to the rack."). No rule changes: it is only a
