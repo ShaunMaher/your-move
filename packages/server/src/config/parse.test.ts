@@ -138,10 +138,25 @@ describe("parseConfig: valid configurations", () => {
   });
 
   it("treats empty values as unset", () => {
-    expect(parseConfig({ ...PROD_ENV, APP_NAME: "", MIN_AGE: "" }, NODE)).toMatchObject({
-      appName: DEFAULT_APP_NAME,
-      minAge: 13,
-    });
+    expect(
+      parseConfig({ ...PROD_ENV, APP_NAME: "", MIN_AGE: "", PRIVACY_RETENTION: "" }, NODE),
+    ).toMatchObject({ appName: DEFAULT_APP_NAME, minAge: 13, privacyRetention: null });
+  });
+
+  it("counts PRIVACY_RETENTION in code points, not UTF-16 units (A21-P-14)", () => {
+    // 1000 emoji are 2000 UTF-16 units: still within the limit; one more is over it.
+    const emoji = "🙂".repeat(1000);
+    expect(parseConfig({ ...PROD_ENV, PRIVACY_RETENTION: emoji }, NODE).privacyRetention).toBe(
+      emoji,
+    );
+    expect(() => parseConfig({ ...PROD_ENV, PRIVACY_RETENTION: `${emoji}🙂` }, NODE)).toThrow(
+      /PRIVACY_RETENTION: must be at most 1000 characters/u,
+    );
+  });
+
+  it("keeps PRIVACY_RETENTION as written, up to 1000 characters", () => {
+    const text = "Logs are kept 14 days. ".repeat(43).slice(0, 1000);
+    expect(parseConfig({ ...PROD_ENV, PRIVACY_RETENTION: text }, NODE).privacyRetention).toBe(text);
   });
 
   it("accepts gmail when GMAIL_SENDER equals the EMAIL_FROM address", () => {
@@ -328,6 +343,16 @@ describe("parseConfig: invalid configurations", () => {
       "MIN_AGE below 13",
       { ...PROD_ENV, MIN_AGE: "12" },
       "MIN_AGE: must be a whole number of at least 13",
+    ],
+    [
+      "PRIVACY_RETENTION over 1000 characters",
+      { ...PROD_ENV, PRIVACY_RETENTION: "a".repeat(1001) },
+      "PRIVACY_RETENTION: must be at most 1000 characters",
+    ],
+    [
+      "PRIVACY_RETENTION with a control character",
+      { ...PROD_ENV, PRIVACY_RETENTION: "Logs 14 days.\nBackups 30." },
+      "PRIVACY_RETENTION: must not contain control characters",
     ],
     [
       "MIN_AGE not a number",

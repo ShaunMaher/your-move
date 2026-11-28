@@ -44,8 +44,18 @@ type EmailNudgesChange =
   | { readonly enabled: false; readonly updatedAt: number };
 
 /** The `users` columns the account endpoints change. `updated_at` is always set. */
-export type UserUpdate = Partial<Pick<UserRecord, "displayName" | "onboardedAt">> &
+export type UserUpdate = Partial<
+  Pick<UserRecord, "displayName" | "onboardedAt" | "ageAttestedAt" | "ageAttestedMinAge">
+> &
   Pick<UserRecord, "updatedAt">;
+
+/** What the under-age exit's short deletion needs of the account (04 §Account deletion, 06 §5). */
+interface UnderAgeAccount {
+  readonly id: string;
+  readonly email: NormalisedEmail;
+  /** The address's `emailId` (09 §1.1), the suppression list's key. */
+  readonly emailId: string;
+}
 
 /** One of a user's past opponents, as `GET /api/v1/players/recent` lists them (05). */
 interface RecentOpponent {
@@ -96,6 +106,21 @@ export interface UserRepo {
   blocksAmong(userIds: readonly string[]): Promise<BlockPair[]>;
   update(id: string, set: UserUpdate): Promise<void>;
   /**
+   * Every column change of a `PATCH /api/v1/me` (05): the display name and the age confirmation,
+   * before or after onboarding, with `updated_at`. In the same atomic batch it then tries to
+   * complete onboarding, which only ever applies while `onboarded_at` is NULL: it sets it to
+   * `complete.at` when the stored row now has a display name and an age confirmation of at least
+   * `complete.minAge` (06 §5). Judged on the stored row, so two requests that each bring one
+   * answer still complete onboarding, and only one of them reports it; an `onboarded_at` already
+   * set is never overwritten. Answers whether this call completed onboarding, and the row as stored
+   * afterwards (null when the account is gone).
+   */
+  saveOnboarding(
+    id: string,
+    set: UserUpdate,
+    complete: { readonly at: number; readonly minAge: number },
+  ): Promise<{ completed: boolean; user: UserRecord | null }>;
+  /**
    * Sets `settings.lastGameType` and, unless `input` is null, `settings.lastOptions[gameType]` to
    * the JSON `input`, leaving every other key as it is now in the database (05 §Remembered
    * options). `gameType` matches the manifest's type pattern.
@@ -145,6 +170,20 @@ export interface UserRepo {
    * remaining references. One atomic batch, so it is safe to repeat.
    */
   deleteAccount(user: { id: string; email: NormalisedEmail }, event: NewAuthEvent): Promise<void>;
+  /**
+   * The under-age exit of an account that never completed onboarding (06 §5, 04 §Account
+   * deletion): the short deletion (steps 1, 3, 4 and 5, as {@link deleteAccount} without the join
+   * links, which such an account can't have), the address's `unsubscribed` suppression (a row
+   * already there keeps its reason), every `invited` email-invite seat typed as the address made
+   * `inert`, and the `under_age_exit` and `account_deleted` events with `ipHash`, written while the
+   * row still exists. One atomic batch whose every statement applies only while the user's
+   * `onboarded_at` is NULL, so an onboarding that completed meanwhile (and may have claimed seats)
+   * is never half deleted. True when it deleted the account; false when nothing was written.
+   */
+  underAgeDelete(
+    account: UnderAgeAccount,
+    at: { readonly ipHash: string | null; readonly createdAt: number },
+  ): Promise<boolean>;
 }
 
 export type OtpPurpose = InferSelectModel<typeof otpChallenges>["purpose"];

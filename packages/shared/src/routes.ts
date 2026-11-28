@@ -39,6 +39,10 @@ export const ClientConfigSchema = z
       .openapi({ description: "Home-screen label of this instance (APP_SHORT_NAME)." }),
     operatorContact: z.string().openapi({ description: "How to reach the instance operator." }),
     minAge: z.number().int().openapi({ description: "Minimum age confirmed at onboarding." }),
+    privacyRetention: z.string().optional().openapi({
+      description:
+        "The operator's statement of how long logs, backups and the email provider's copies of sent messages are kept (PRIVACY_RETENTION), for the privacy page; absent when not set.",
+    }),
     vapidPublicKey: z
       .string()
       .optional()

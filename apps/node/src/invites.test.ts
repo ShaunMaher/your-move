@@ -643,7 +643,12 @@ describe("claims (06 §6.4)", () => {
     // Signing in alone claims nothing: the account isn't onboarded yet.
     const cookie = await h.signIn(address);
     expect(playerRow(game.id, "user_id")).toBeNull();
-    const onboarded = await h.request("PATCH", "/api/v1/me", { displayName: "Bo" }, { cookie });
+    const onboarded = await h.request(
+      "PATCH",
+      "/api/v1/me",
+      { displayName: "Bo", ageAttested: true },
+      { cookie },
+    );
     expect(onboarded.status).toBe(200);
     const bo: Player = {
       email: address,
@@ -678,7 +683,10 @@ describe("claims (06 §6.4)", () => {
     const halfway = await signUp(h, null);
     const { game } = await invite(ada, halfway.email);
     expect(playerRow(game.id, "user_id")).toBeNull();
-    const done = await call(h, halfway, "PATCH", "/api/v1/me", { displayName: "Hal" });
+    const done = await call(h, halfway, "PATCH", "/api/v1/me", {
+      displayName: "Hal",
+      ageAttested: true,
+    });
     expect(done.status).toBe(200);
     expect(playerRow(game.id, "user_id")).toBe(halfway.id);
     expect((await getGame(h, halfway, game.id)).game.yourInvitation).toBe("normal");
@@ -714,9 +722,10 @@ describe("claims (06 §6.4)", () => {
       now(),
     );
     const creatorBefore = await getGame(h, ada, game.id);
-    expect((await call(h, halfway, "PATCH", "/api/v1/me", { displayName: "Hal" })).status).toBe(
-      200,
-    );
+    expect(
+      (await call(h, halfway, "PATCH", "/api/v1/me", { displayName: "Hal", ageAttested: true }))
+        .status,
+    ).toBe(200);
     expect(playerRow(game.id, "delivery")).toBe("inert");
     expect(playerRow(game.id, "user_id")).toBe(halfway.id);
     expect((await call(h, halfway, "GET", `/api/v1/games/${game.id}`)).status).toBe(404);

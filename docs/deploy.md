@@ -114,8 +114,8 @@ own wherever you see `example.org`.
    `no-reply@example.org`, used for nothing else and never signed in to after step 3. Turn on
    2-Step Verification for it, turn off IMAP and POP for it, and set up a regular purge of its
    _Sent_ folder (Gmail keeps a copy of every message it sends; purged messages stay in Trash for
-   30 days, and a Vault hold keeps them longer, so the privacy page's retention statement must
-   allow for both, 08 §5).
+   30 days, and a Vault hold keeps them longer, so the privacy page's retention statement,
+   `PRIVACY_RETENTION`, must allow for both, 08 §5).
 2. **DNS.** The sending domain must have SPF, DKIM and DMARC. For a Workspace domain they usually
    exist; check them before go-live (an Admin console "Authenticate email" page, or
    `dig TXT example.org`, `dig TXT google._domainkey.example.org`, `dig TXT _dmarc.example.org`).
@@ -279,8 +279,9 @@ the app trusts it only from the tunnel's own address.
 
 4. **The settings.** Copy [`apps/node/tunnel.env.example`](../apps/node/tunnel.env.example) to a
    file outside the repository and fill it in: `PUBLIC_URL=https://<hostname>`, `SECRETS_DIR`,
-   `OPERATOR_CONTACT`, `EMAIL_FROM`, `GMAIL_SENDER`, `VAPID_SUBJECT` and optionally `APP_NAME`
-   and `ADMIN_EMAILS`.
+   `OPERATOR_CONTACT`, `EMAIL_FROM`, `GMAIL_SENDER`, `VAPID_SUBJECT`, `PRIVACY_RETENTION` (the
+   privacy page's statement of how long logs, backups and the _Sent_ folder's copies are kept;
+   allow for the 30 days purged mail stays in Trash) and optionally `APP_NAME` and `ADMIN_EMAILS`.
 5. **The image**, by digest: the `publish:image` job of the pipeline that built the commit you
    want prints it. Put it in the settings file as `APP_IMAGE=<registry>/<project>/server@sha256:<digest>`,
    and `docker login` to the registry first if it is private.

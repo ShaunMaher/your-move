@@ -43,6 +43,7 @@ test("a join link brings a new player into the lobby, and the game starts when i
   await bob.getByLabel("Sign-in code").fill(await codeFrom(bob.request, bobAddress, 0));
   await bob.getByRole("button", { name: "Sign in", exact: true }).click();
   await bob.getByLabel("Display name").fill("Bob");
+  await bob.getByLabel("I'm 13 or older").check();
   await bob.getByRole("button", { name: "Continue" }).click();
 
   // Back on the link's page, nothing joined until he taps Join.

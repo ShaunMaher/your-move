@@ -3,9 +3,24 @@
  * auth events, account deletion and API-token revocation. Written once over the shared schema and
  * run by either adapter's {@link Database}; every multi-statement write is one atomic batch.
  */
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 
-import { type Database, runBatch } from "./database.js";
+import type { NormalisedEmail } from "../accounts/email.js";
+import { type Database, runBatch, runBatchEndingWith, type Statement } from "./database.js";
 import { guardedInsert, unblocked } from "./queries/transition.js";
 import type {
   ApiTokenRepo,
@@ -91,6 +106,35 @@ export function userRepo(db: Database): UserRepo {
     },
     async update(id, set) {
       await db.update(users).set(set).where(eq(users.id, id));
+    },
+    async saveOnboarding(id, set, complete) {
+      // `set` always has `updatedAt`: anything more is a column to write.
+      const write =
+        Object.keys(set).length > 1 ? [db.update(users).set(set).where(eq(users.id, id))] : [];
+      // Judged on the stored row inside the batch, after this request's own write: two requests
+      // that each bring one answer still complete onboarding, whichever commits second.
+      const completed = await runBatchEndingWith(
+        db,
+        write,
+        db
+          .update(users)
+          .set({ onboardedAt: complete.at, updatedAt: complete.at })
+          .where(
+            and(
+              eq(users.id, id),
+              isNull(users.onboardedAt),
+              isNotNull(users.displayName),
+              gte(users.ageAttestedMinAge, complete.minAge),
+            ),
+          )
+          .returning(),
+      );
+      const row = completed[0];
+      if (row !== undefined) return { completed: true, user: asUser(row) };
+      return {
+        completed: false,
+        user: asUser(await db.select().from(users).where(eq(users.id, id)).get()),
+      };
     },
     async pastOpponentsOf(userId, candidates) {
       if (candidates.length === 0) return [];
@@ -233,19 +277,9 @@ export function userRepo(db: Database): UserRepo {
       return row !== undefined;
     },
     async deleteAccount(user, event) {
-      // Agents go with their owner (owner_user_id cascades), and their sessions and tokens with
-      // them; the user's own sessions and tokens cascade from the users row too, but are deleted
-      // first so the account is unusable from the first statement (04 §Account deletion).
+      const exists = sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${user.id})`;
       await runBatch(db, [
-        db.delete(sessions).where(eq(sessions.userId, user.id)),
-        db
-          .delete(apiTokens)
-          .where(or(eq(apiTokens.userId, user.id), eq(apiTokens.createdBy, user.id))),
-        db.delete(otpChallenges).where(eq(otpChallenges.email, user.email)),
-        db.delete(blocks).where(or(eq(blocks.blockerId, user.id), eq(blocks.blockedId, user.id))),
-        db
-          .delete(pastOpponents)
-          .where(or(eq(pastOpponents.userId, user.id), eq(pastOpponents.otherId, user.id))),
+        ...shortDeletion(db, user),
         // The links of the lobbies the user created (alpha A18): before the users row goes, while
         // the creator row still names the user. Cancelling those lobbies is step 2's (04, M4).
         db.delete(joinLinks).where(
@@ -264,16 +298,91 @@ export function userRepo(db: Database): UserRepo {
               ),
           ),
         ),
-        guardedInsert(
-          db,
-          authEvents,
-          { id: crypto.randomUUID(), ...event },
-          sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${user.id})`,
-        ),
+        guardedInsert(db, authEvents, { id: crypto.randomUUID(), ...event }, exists),
         db.delete(users).where(eq(users.id, user.id)),
       ]);
     },
+    async underAgeDelete(account, at) {
+      // Every statement is guarded on the account still not being onboarded (06 §5), read inside
+      // the batch, so an onboarding that won the race leaves this batch writing nothing at all.
+      const pending = sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${account.id} AND ${users.onboardedAt} IS NULL)`;
+      const event = (type: "under_age_exit" | "account_deleted") =>
+        guardedInsert(
+          db,
+          authEvents,
+          {
+            id: crypto.randomUUID(),
+            userId: account.id,
+            type,
+            ipHash: at.ipHash,
+            createdAt: at.createdAt,
+          },
+          pending,
+        );
+      const deleted = await runBatchEndingWith(
+        db,
+        [
+          ...shortDeletion(db, account, pending),
+          // No more invite emails to the address (04 `email_suppressions`); a row already there
+          // keeps its reason, which stops at least as much mail.
+          guardedInsert(
+            db,
+            emailSuppressions,
+            { emailHash: account.emailId, reason: "unsubscribed", createdAt: at.createdAt },
+            pending,
+          ).onConflictDoNothing({ target: emailSuppressions.emailHash }),
+          // Its pending email seats are never delivered or claimed (04 `delivery`). Not a game
+          // transition: like a claim, the row changes in a way no member can see (the creator
+          // still sees the typed address while the seat is invited, Q3), so the version stays.
+          db
+            .update(gamePlayers)
+            .set({ delivery: "inert" })
+            .where(
+              and(
+                eq(gamePlayers.state, "invited"),
+                isNull(gamePlayers.userId),
+                eq(gamePlayers.inviteEmail, account.email),
+                pending,
+              ),
+            ),
+          event("under_age_exit"),
+          event("account_deleted"),
+        ],
+        db
+          .delete(users)
+          .where(and(eq(users.id, account.id), isNull(users.onboardedAt)))
+          .returning({ id: users.id }),
+      );
+      return deleted.length === 1;
+    },
   };
+}
+
+/**
+ * The account-deletion statements every deletion shares (04 §Account deletion steps 1 and 3):
+ * sessions and API tokens first, so the account is unusable from the first statement (its agents
+ * go with the users row, whose `owner_user_id` cascades, and their sessions and tokens with them),
+ * then OTP challenges, blocks and past-opponent rows. With a `guard`, each applies only while it
+ * holds, read inside the batch.
+ */
+function shortDeletion(
+  db: Database,
+  user: { readonly id: string; readonly email: NormalisedEmail },
+  guard?: SQL,
+): Statement[] {
+  const when = (condition: SQL | undefined) =>
+    guard === undefined ? condition : and(condition, guard);
+  return [
+    db.delete(sessions).where(when(eq(sessions.userId, user.id))),
+    db
+      .delete(apiTokens)
+      .where(when(or(eq(apiTokens.userId, user.id), eq(apiTokens.createdBy, user.id)))),
+    db.delete(otpChallenges).where(when(eq(otpChallenges.email, user.email))),
+    db.delete(blocks).where(when(or(eq(blocks.blockerId, user.id), eq(blocks.blockedId, user.id)))),
+    db
+      .delete(pastOpponents)
+      .where(when(or(eq(pastOpponents.userId, user.id), eq(pastOpponents.otherId, user.id)))),
+  ];
 }
 
 /** Whether a challenge is live: unconsumed, unexpired, with attempts left (06 §3). */

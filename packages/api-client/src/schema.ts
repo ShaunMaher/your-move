@@ -142,10 +142,30 @@ export interface paths {
     options?: never;
     head?: never;
     /**
-     * Change the display name or settings; completes onboarding
-     * @description Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`). `settings` changes only the keys given.
+     * Change the display name or settings; confirm the age; completes onboarding
+     * @description Session only. The request that leaves both a display name and the age confirmation for the current `MIN_AGE` done completes onboarding (06 §5); they may come together or apart. After onboarding, at most 3 name changes per 30 days (`429`). `settings` changes only the keys given.
      */
     patch: operations["updateMe"];
+    trace?: never;
+  };
+  "/api/v1/me/under-age": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Say the user is under the minimum age
+     * @description Session only, and only while `needsOnboarding` is true (06 §5). An account that never completed onboarding is deleted at once with its sessions, with no step-up code; invite emails to its address stop and its pending email seats are never delivered. An onboarded account re-prompted after a `MIN_AGE` rise is only signed out of this session; nothing is deleted. Either way the cookie is cleared.
+     */
+    post: operations["underAgeExit"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/me/delete/otp": {
@@ -625,6 +645,8 @@ export interface components {
       operatorContact: string;
       /** @description Minimum age confirmed at onboarding. */
       minAge: number;
+      /** @description The operator's statement of how long logs, backups and the email provider's copies of sent messages are kept (PRIVACY_RETENTION), for the privacy page; absent when not set. */
+      privacyRetention?: string;
       /** @description Web Push application server key, when push is configured. */
       vapidPublicKey?: string;
       /** @description Turnstile site key, when Turnstile is enabled. */
@@ -655,7 +677,7 @@ export interface components {
       settings: components["schemas"]["UserSettings"];
       /** @description Whether the age confirmation for the current MIN_AGE is given. */
       ageAttested: boolean;
-      /** @description True until onboarding is complete (06 §5); gated endpoints answer 403 until then. */
+      /** @description True until onboarding is complete, and again after a `MIN_AGE` rise until the age is confirmed again (06 §5); gated endpoints answer 403 until then. */
       needsOnboarding: boolean;
       /** @description Lets the client show admin links; grants nothing. */
       isAdmin: boolean;
@@ -691,9 +713,14 @@ export interface components {
       revokeTokens?: boolean;
     };
     PatchMe: {
-      /** @description 1–24 characters; no links, addresses, long digit runs or reserved words (06 §5.1). Setting it completes onboarding. */
+      /** @description 1–24 characters; no links, addresses, long digit runs or reserved words (06 §5.1). Onboarding completes once both this and `ageAttested` are given, in one request or two (06 §5); after that, a change is a rename. */
       displayName?: string;
       settings?: components["schemas"]["UserSettingsPatch"];
+      /**
+       * @description The user confirms they are at least `minAge` (`GET /api/v1/config`): records the time and the `MIN_AGE` in force, or changes nothing while the current `MIN_AGE` is already confirmed (06 §5). Onboarding completes once both this and a display name are given, in one request or two; a user re-prompted after a `MIN_AGE` rise sends it alone.
+       * @enum {boolean}
+       */
+      ageAttested?: true;
     };
     UserSettingsPatch: {
       /** @description Email me "It's your turn" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default. */
@@ -1799,7 +1826,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description `BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`. */
+      /** @description `BAD_ORIGIN`, `SUSPENDED`, or `ONBOARDING_REQUIRED` for `emailNudges: true` while onboarding isn't done (as this request leaves it, 06 §5). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -1826,7 +1853,101 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description Too many display-name changes (`RATE_LIMITED`). */
+      /** @description Too many writes or display-name changes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  underAgeExit: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["EmptyObject"];
+      };
+    };
+    responses: {
+      /** @description Done; this session has ended. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid request (`BAD_REQUEST`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Onboarding is complete for the current `MIN_AGE` (`WRONG_STATUS`). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many writes (`RATE_LIMITED`). */
       429: {
         headers: {
           [name: string]: unknown;
@@ -2563,7 +2684,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description `BAD_ORIGIN` or `SUSPENDED`. */
+      /** @description `BAD_ORIGIN`, `ONBOARDING_REQUIRED` (onboarding incomplete, or a re-prompt after a `MIN_AGE` rise, 06 §5) or `SUSPENDED`. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -3781,7 +3902,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description `NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`. */
+      /** @description `NOT_ALLOWED` (not the creator), `ONBOARDING_REQUIRED` (onboarding incomplete, or a re-prompt after a `MIN_AGE` rise, 06 §5), `BAD_ORIGIN` or `SUSPENDED`. */
       403: {
         headers: {
           [name: string]: unknown;

@@ -344,7 +344,9 @@ describe("the generic invitation push (06 §6.2, 03 §7)", () => {
     const samPhone = await device(sam);
     await invite(ada, sam.email);
     expect(await received(samPhone)).toEqual([]);
-    expect((await call(h, sam, "PATCH", "/api/v1/me", { displayName: "Sam" })).status).toBe(200);
+    expect(
+      (await call(h, sam, "PATCH", "/api/v1/me", { displayName: "Sam", ageAttested: true })).status,
+    ).toBe(200);
     expect(await received(samPhone)).toEqual([INVITATION]);
 
     // By the sweep: onboarding committed while the game was being created, so nothing claimed.
@@ -361,7 +363,9 @@ describe("the generic invitation push (06 §6.2, 03 §7)", () => {
     const cyd = await seasoned("Cyd");
     await invite(cyd, hal.email);
     block(cyd, hal);
-    expect((await call(h, hal, "PATCH", "/api/v1/me", { displayName: "Hal" })).status).toBe(200);
+    expect(
+      (await call(h, hal, "PATCH", "/api/v1/me", { displayName: "Hal", ageAttested: true })).status,
+    ).toBe(200);
     expect(await received(halPhone)).toEqual([]);
   });
 
@@ -561,7 +565,13 @@ describe("the invitation email to a user with email nudges on (06 §6.2)", () =>
     harness();
     const ada = await seasoned("Ada");
     const ray = await signUp(h, null);
-    await nudgesOn(ray);
+    // Nudges on before onboarding: the API refuses that since alpha A21 (review S-1), so the row
+    // is set directly, to keep the claim's own guard tested.
+    await h.platform.repos.users.setEmailNudges(ray.id, {
+      enabled: true,
+      emailId: await emailIdOfAddress(ray.email),
+      updatedAt: now(),
+    });
     await invite(ada, ray.email);
     expect(await inviteEmailsTo(ray.email)).toHaveLength(1);
     h.exec("UPDATE users SET onboarded_at = ?, display_name = 'Ray' WHERE id = ?", now(), ray.id);

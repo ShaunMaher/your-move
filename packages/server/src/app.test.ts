@@ -34,6 +34,7 @@ describe("GET /api/v1/config", () => {
       VAPID_PUBLIC_KEY: TEST_VAPID.publicKey,
       VAPID_PRIVATE_KEY: TEST_VAPID.privateKey,
       VAPID_SUBJECT: "mailto:ops@example.org",
+      PRIVACY_RETENTION: "Logs 14 days, backups 30 days.",
     });
     const res = await app.request("/api/v1/config");
     expect(res.status).toBe(200);
@@ -43,6 +44,7 @@ describe("GET /api/v1/config", () => {
       appShortName: "Family Games",
       operatorContact: "ops@example.org",
       minAge: 13,
+      privacyRetention: "Logs 14 days, backups 30 days.",
       vapidPublicKey: TEST_VAPID.publicKey,
 
       uploadsEnabled: true,
@@ -56,6 +58,7 @@ describe("GET /api/v1/config", () => {
     const body = (await (await app.request("/api/v1/config")).json()) as Record<string, unknown>;
     expect(body).not.toHaveProperty("vapidPublicKey");
     expect(body).not.toHaveProperty("turnstileSiteKey");
+    expect(body).not.toHaveProperty("privacyRetention");
   });
 });
 
@@ -99,6 +102,7 @@ describe("GET /api/v1/openapi.json", () => {
       "/api/v1/join/lookup",
       "/api/v1/me",
       "/api/v1/me/delete/otp",
+      "/api/v1/me/under-age",
       "/api/v1/players/recent",
       "/api/v1/push/subscriptions",
     ]);
@@ -518,6 +522,11 @@ describe("errors and logging", () => {
         const platform = testPlatform(PROD_ENV);
         const repos = {
           ...platform.repos,
+          // Account writes count toward the per-user write limit (A21-S-3): always under it here.
+          rateLimits: {
+            hit: (hits: readonly unknown[]) =>
+              Promise.resolve(hits.map(() => ({ current: 1, previous: 0 }))),
+          },
           sessions: {
             ...platform.repos.sessions,
             findByTokenHash: () =>
@@ -567,7 +576,14 @@ describe("errors and logging", () => {
       });
 
       it("gives turning nudges on for an account without an address the reason no_email", async () => {
-        const { app, platform } = signedInAs({ email: null, onboardedAt: 1 });
+        // Onboarded for the current MIN_AGE: nudges are refused before onboarding (A21-S-1).
+        const { app, platform } = signedInAs({
+          email: null,
+          displayName: "Sam",
+          onboardedAt: 1,
+          ageAttestedAt: 1,
+          ageAttestedMinAge: 13,
+        });
         const res = await app.request(ME, {
           method: "PATCH",
           headers: {

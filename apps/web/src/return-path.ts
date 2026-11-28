@@ -7,8 +7,11 @@
 const KEY = "ym.return-path";
 const MAX_LENGTH = 200;
 
-/** Never a destination: the sign-in screens themselves. */
-const AUTH_PATHS: ReadonlySet<string> = new Set(["/signin", "/welcome"]);
+/**
+ * Never a destination: the sign-in screens themselves, and the privacy page, which anyone may read
+ * on the way without it taking the place of where they were headed (07 §1).
+ */
+const AUTH_PATHS: ReadonlySet<string> = new Set(["/signin", "/welcome", "/privacy"]);
 
 let inMemory: string | null = null;
 

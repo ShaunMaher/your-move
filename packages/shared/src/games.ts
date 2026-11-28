@@ -309,7 +309,7 @@ export const addPlayerRoute = createRoute({
     204: { description: "Answered: added, already added, or a silent no-op." },
     ...errors({
       ...COMMON_ERRORS,
-      403: "`BAD_ORIGIN` or `SUSPENDED`.",
+      403: "`BAD_ORIGIN`, `ONBOARDING_REQUIRED` (onboarding incomplete, or a re-prompt after a `MIN_AGE` rise, 06 §5) or `SUSPENDED`.",
       404: "No such game, you're not its creator, it isn't `finished`, or that player didn't join it through a link and act in it (`NOT_FOUND`, the same in every case).",
       429: "Too many game writes (`RATE_LIMITED`).",
     }),
@@ -743,7 +743,7 @@ export const createJoinLinkRoute = createRoute({
     200: { description: "The new link.", content: json(JoinLinkSchema) },
     ...errors({
       ...MEMBER_ERRORS,
-      403: "`NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`.",
+      403: "`NOT_ALLOWED` (not the creator), `ONBOARDING_REQUIRED` (onboarding incomplete, or a re-prompt after a `MIN_AGE` rise, 06 §5), `BAD_ORIGIN` or `SUSPENDED`.",
       409: "`WRONG_STATUS` (the lobby has ended).",
       429: "Too many join links today (`RATE_LIMITED`).",
     }),

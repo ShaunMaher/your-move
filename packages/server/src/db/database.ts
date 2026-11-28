@@ -37,3 +37,17 @@ export async function runBatch(db: Database, statements: readonly Statement[]): 
   if (first === undefined) return [];
   return (await db.batch([first, ...rest])) as unknown[];
 }
+
+/**
+ * Runs `statements` and then `last` as one atomic batch, answering what `last` returned, typed by
+ * the statement itself (a `RETURNING` query's rows), so a caller never states the shape by hand.
+ */
+export async function runBatchEndingWith<T extends Statement>(
+  db: Database,
+  statements: readonly Statement[],
+  last: T,
+): Promise<Awaited<T>> {
+  const results = await runBatch(db, [...statements, last]);
+  // The batch answers each statement's own result, in order: the last is `last`'s.
+  return results.at(-1) as Awaited<T>;
+}

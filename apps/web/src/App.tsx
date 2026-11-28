@@ -17,10 +17,11 @@ import { Home } from "./screens/Home.js";
 import { Install } from "./screens/Install.js";
 import { Join } from "./screens/Join.js";
 import { NewGame } from "./screens/NewGame.js";
+import { Privacy } from "./screens/Privacy.js";
 import { Settings } from "./screens/Settings.js";
 import { SignIn } from "./screens/SignIn.js";
 import { Loading, NotFound, Unreachable } from "./screens/Status.js";
-import { Welcome } from "./screens/Welcome.js";
+import { UnderAgeNotice, Welcome } from "./screens/Welcome.js";
 import {
   announceSignedIn,
   announceSignedOut,
@@ -41,6 +42,8 @@ type Boot =
       readonly me: Me | null;
       /** Where a signed-out visit was headed, taken when the person signs in (never at render). */
       readonly returnTo: string | null;
+      /** Signed out by "I'm under MIN_AGE": its message shows before the sign-in screen (06 §5). */
+      readonly underAge?: boolean;
     };
 
 interface AppProps {
@@ -52,10 +55,14 @@ interface AppProps {
  * a signed-out visit was headed for, when there is one, else home).
  */
 function placeFor(me: Me | null, path: string, returnTo: string | null): string {
+  // Anyone may read the privacy page, before giving an address or while onboarding (07 §1).
+  if (path === PRIVACY_PATH) return path;
   if (me === null) return "/signin";
   if (me.needsOnboarding) return "/welcome";
   return path === "/signin" || path === "/welcome" ? (returnTo ?? "/") : path;
 }
+
+const PRIVACY_PATH = "/privacy";
 
 /** The game id of a `/g/:id` path, or `null` for any other path. */
 function gameIdOf(path: string): string | null {
@@ -75,6 +82,8 @@ function gameIdOf(path: string): string | null {
 export function App({ api }: AppProps) {
   const [boot, setBoot] = useState<Boot>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
+  // The name typed on the welcome screen, kept here so a look at the privacy page doesn't lose it.
+  const [welcomeName, setWelcomeName] = useState("");
   const path = usePath();
 
   useEffect(() => {
@@ -148,12 +157,13 @@ export function App({ api }: AppProps) {
 
   // The session ended here or in another tab or device: clear what the app keeps about the
   // person and show the sign-in screen (08 §2).
-  const endSession = useCallback((announce: boolean) => {
+  const endSession = useCallback((announce: boolean, underAge = false) => {
     clearClientState();
+    setWelcomeName("");
     if (announce) announceSignedOut();
     navigate("/signin", { replace: true });
     setBoot((current) =>
-      current.status === "ready" ? { ...current, me: null, returnTo: null } : current,
+      current.status === "ready" ? { ...current, me: null, returnTo: null, underAge } : current,
     );
   }, []);
   // Asks the server who the session is now. Nobody ends it here; a different person ends it for
@@ -195,7 +205,12 @@ export function App({ api }: AppProps) {
 
   // After a move to another screen, focus goes to its heading so a screen reader starts reading
   // there. A field the new screen has focused itself (its effects run first) keeps focus.
-  const screenKey = boot.status === "ready" ? (me === null ? "signin" : place) : boot.status;
+  const screenKey =
+    boot.status === "ready"
+      ? me === null && place !== PRIVACY_PATH
+        ? "signin"
+        : place
+      : boot.status;
   const lastKey = useRef<string | null>(null);
   useEffect(() => {
     const previous = lastKey.current;
@@ -211,6 +226,7 @@ export function App({ api }: AppProps) {
   // in the handler, so it survives a reload during Welcome. A late reply for someone who is no
   // longer signed in (another account took over meanwhile) is dropped.
   const setMe = (next: Me) => {
+    setWelcomeName("");
     const returnTo = peekReturnPath();
     setBoot((current) =>
       current.status === "ready" && current.me?.id === next.id
@@ -234,6 +250,13 @@ export function App({ api }: AppProps) {
   const signedOut = () => {
     endSession(true);
   };
+  // "I'm under MIN_AGE": the server ended the session; its message comes before sign-in (06 §5).
+  const leftUnderAge = () => {
+    endSession(true, true);
+  };
+  const dismissUnderAge = () => {
+    setBoot((current) => (current.status === "ready" ? { ...current, underAge: false } : current));
+  };
   // A game call answered 401: the session ended elsewhere, so end it here too.
   const sessionLost = useCallback(() => {
     endSession(false);
@@ -243,11 +266,31 @@ export function App({ api }: AppProps) {
   if (boot.status === "loading") screen = <Loading />;
   else if (boot.status === "unreachable") {
     screen = <Unreachable offline={boot.offline} onRetry={retry} />;
+  } else if (place === PRIVACY_PATH) {
+    // Back returns to the sign-in flow's own screen, never through `/`, which would replace the
+    // remembered return path (07 §1, A21-P-1).
+    const back = me === null ? "/signin" : me.needsOnboarding ? "/welcome" : "/";
+    screen = <Privacy config={boot.config} back={back} />;
   } else if (me === null) {
-    screen = <SignIn api={api} appName={boot.config.appName} onSignedIn={signedInHere} />;
+    screen =
+      boot.underAge === true ? (
+        <UnderAgeNotice appName={boot.config.appName} onDone={dismissUnderAge} />
+      ) : (
+        <SignIn api={api} appName={boot.config.appName} onSignedIn={signedInHere} />
+      );
   } else if (place === "/welcome") {
     screen = (
-      <Welcome api={api} appName={boot.config.appName} onDone={setMe} onSignedOut={signedOut} />
+      <Welcome
+        api={api}
+        appName={boot.config.appName}
+        minAge={boot.config.minAge}
+        me={me}
+        name={welcomeName}
+        onNameChange={setWelcomeName}
+        onDone={setMe}
+        onSignedOut={signedOut}
+        onUnderAge={leftUnderAge}
+      />
     );
   } else if (place === "/") {
     screen = <Home api={api} appName={boot.config.appName} me={me} onSessionLost={sessionLost} />;

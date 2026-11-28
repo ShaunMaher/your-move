@@ -334,6 +334,9 @@ export function Settings({
           <dt>Email</dt>
           <dd>{me.email}</dd>
         </dl>
+        <p>
+          <Link to="/privacy">Privacy: what {appName} keeps and who sees it</Link>
+        </p>
       </section>
       <section className="card stack" aria-labelledby="install-heading">
         <h2 id="install-heading">Home Screen</h2>

@@ -1,12 +1,14 @@
 /**
- * Onboarding (07 §1, 06 §5): the display name, with the warning that other players see it. The age
- * confirmation and the "I'm under MIN_AGE" choice arrive with M4 (10 M2): the API has no
- * `ageAttested` field yet.
+ * Onboarding (07 §1, 06 §5): the display name, with the warning that other players see it, and the
+ * age confirmation, with an explicit "I'm under MIN_AGE" choice. A step already done isn't asked
+ * again, so an account re-prompted after a `MIN_AGE` rise sees only the age step, addressed to the
+ * account holder: a child may be holding a parent's phone (Q20).
  */
 import type { ApiClient } from "@your-move/api-client";
 import { type SyntheticEvent, useEffect, useRef, useState } from "react";
 
-import { type Failure, type Me, saveDisplayName } from "../auth-api.js";
+import { type Failure, leaveUnderAge, type Me, saveOnboarding } from "../auth-api.js";
+import { Link } from "../router.js";
 import { DISPLAY_NAME_MAX, graphemeCount } from "../text.js";
 import { useSignOut } from "../use-sign-out.js";
 import { Page } from "./Page.js";
@@ -15,93 +17,219 @@ import { Problem } from "./Problem.js";
 interface WelcomeProps {
   readonly api: ApiClient;
   readonly appName: string;
+  /** `MIN_AGE`, from the instance's config. */
+  readonly minAge: number;
+  readonly me: Me;
+  /** The typed name, kept by the app so a look at the privacy page doesn't lose it. */
+  readonly name: string;
+  readonly onNameChange: (name: string) => void;
   readonly onDone: (me: Me) => void;
   /** The session is gone (401). */
   readonly onSignedOut: () => void;
+  /** "I'm under MIN_AGE" was answered: the session is over. */
+  readonly onUnderAge: () => void;
 }
 
-function nameMessage(failure: Failure): string {
+/** The control a problem is about, or null for one that is nobody's (offline, a server fault). */
+type Field = "name" | "age" | null;
+
+const SOMETHING_WRONG = "Something went wrong. Please try again.";
+const OFFLINE = "You seem to be offline. Check your connection and try again.";
+
+function saveMessage(failure: Failure): string {
   switch (failure) {
     case "offline":
-      return "You seem to be offline. Check your connection and try again.";
+      return OFFLINE;
     case "rejected":
       return `That name can't be used. Names can't contain links, email addresses or long runs of digits, or look like official or staff names.`;
     default:
-      return "Something went wrong. Please try again.";
+      return SOMETHING_WRONG;
   }
 }
 
-export function Welcome({ api, appName, onDone, onSignedOut }: WelcomeProps) {
-  const [name, setName] = useState("");
+export function Welcome({
+  api,
+  appName,
+  minAge,
+  me,
+  name,
+  onNameChange,
+  onDone,
+  onSignedOut,
+  onUnderAge,
+}: WelcomeProps) {
+  const askName = me.displayName === null;
+  const askAge = !me.ageAttested;
+  const [confirmed, setConfirmed] = useState(false);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const field = useRef<HTMLInputElement>(null);
-  const leaving = useSignOut(api, onSignedOut);
+  const [leaving, setLeaving] = useState(false);
+  const [error, setError] = useState<{ readonly field: Field; readonly text: string } | null>(null);
+  const [leaveError, setLeaveError] = useState<string | null>(null);
+  const nameField = useRef<HTMLInputElement>(null);
+  const ageField = useRef<HTMLInputElement>(null);
+  const signOut = useSignOut(api, onSignedOut);
+  const age = String(minAge);
 
+  const focus = (field: Field) => {
+    (field === "name" ? nameField : ageField).current?.focus();
+  };
+  // On arrival the first question gets the focus.
   useEffect(() => {
-    field.current?.focus();
-  }, []);
+    (askName ? nameField : ageField).current?.focus();
+  }, [askName]);
+
+  /** A problem with one control: it alone is marked invalid, and it gets the focus. */
+  const refuse = (field: Field, text: string) => {
+    setError({ field, text });
+    focus(field);
+  };
 
   async function submit(event: SyntheticEvent) {
     event.preventDefault();
-    if (pending) return;
+    if (pending || leaving) return;
     const length = graphemeCount(name.trim());
-    if (length < 1) {
-      setError("Enter a display name.");
+    if (askName && length < 1) {
+      refuse("name", "Enter a display name.");
       return;
     }
-    if (length > DISPLAY_NAME_MAX) {
-      setError(`Display names can be up to ${String(DISPLAY_NAME_MAX)} characters.`);
+    if (askName && length > DISPLAY_NAME_MAX) {
+      refuse("name", `Display names can be up to ${String(DISPLAY_NAME_MAX)} characters.`);
+      return;
+    }
+    if (askAge && !confirmed) {
+      refuse("age", `Confirm you're ${age} or older to continue.`);
       return;
     }
     setPending(true);
     setError(null);
-    const outcome = await saveDisplayName(api, name);
+    const outcome = await saveOnboarding(api, {
+      ...(askName ? { displayName: name } : {}),
+      ...(askAge ? { ageAttested: true as const } : {}),
+    });
     if (outcome.ok) {
       onDone(outcome.data);
       return;
     }
     setPending(false);
     if (outcome.failure === "unauthenticated") onSignedOut();
-    else setError(nameMessage(outcome.failure));
+    // A refused request is the name's: the confirmation can't be refused.
+    else if (outcome.failure === "rejected" && askName) refuse("name", saveMessage("rejected"));
+    else setError({ field: null, text: saveMessage(outcome.failure) });
   }
 
+  async function underAge() {
+    if (pending || leaving) return;
+    setLeaving(true);
+    setLeaveError(null);
+    const outcome = await leaveUnderAge(api);
+    if (outcome.ok) {
+      onUnderAge();
+      return;
+    }
+    setLeaving(false);
+    if (outcome.failure === "unauthenticated") onSignedOut();
+    else setLeaveError(outcome.failure === "offline" ? OFFLINE : SOMETHING_WRONG);
+  }
+
+  const invalid = (field: Field) => (error?.field === field ? true : undefined);
+  const described = (field: Field, hint: string) =>
+    error?.field === field ? `${hint} problem` : hint;
   return (
     <Page appName={appName}>
-      <h1 tabIndex={-1}>Welcome to {appName}</h1>
+      <h1 tabIndex={-1}>{askName ? `Welcome to ${appName}` : "Confirm your age"}</h1>
       <form className="stack" onSubmit={(event) => void submit(event)} noValidate>
-        <div className="field">
-          <label htmlFor="display-name">Display name</label>
-          <p id="display-name-hint" className="hint">
-            Other players will see this. Don&apos;t use your full name.
-          </p>
-          <input
-            ref={field}
-            id="display-name"
-            name="displayName"
-            type="text"
-            autoComplete="nickname"
-            required
-            value={name}
-            onChange={(event) => {
-              setName(event.target.value);
-            }}
-            aria-invalid={error === null ? undefined : true}
-            aria-describedby={error === null ? "display-name-hint" : "display-name-hint problem"}
-          />
-        </div>
-        <Problem id="problem" message={error} />
-        <button type="submit" className="button" disabled={pending}>
+        {askName && (
+          <div className="field">
+            <label htmlFor="display-name">Display name</label>
+            <p id="display-name-hint" className="hint">
+              Other players will see this. Don&apos;t use your full name.
+            </p>
+            <input
+              ref={nameField}
+              id="display-name"
+              name="displayName"
+              type="text"
+              autoComplete="nickname"
+              required
+              value={name}
+              onChange={(event) => {
+                onNameChange(event.target.value);
+              }}
+              aria-invalid={invalid("name")}
+              aria-describedby={described("name", "display-name-hint")}
+            />
+          </div>
+        )}
+        {askAge && (
+          <div className="field">
+            <div id="age-hint" className="hint">
+              <p>
+                {appName} is for people aged {age} or older.
+              </p>
+              {!askName && <p>Please confirm you, the account holder, are {age} or older.</p>}
+            </div>
+            <label className="check">
+              <input
+                ref={ageField}
+                type="checkbox"
+                name="ageAttested"
+                checked={confirmed}
+                onChange={(event) => {
+                  setConfirmed(event.target.checked);
+                }}
+                aria-invalid={invalid("age")}
+                aria-describedby={described("age", "age-hint")}
+              />
+              <span className="check-text">I&apos;m {age} or older</span>
+            </label>
+          </div>
+        )}
+        <Problem id="problem" message={error?.text ?? null} />
+        <button type="submit" className="button" disabled={pending || leaving}>
           {pending ? "Saving…" : "Continue"}
         </button>
       </form>
+      {askAge && (
+        <>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={pending || leaving}
+            onClick={() => void underAge()}
+          >
+            {leaving ? "Signing out…" : `I'm under ${age}`}
+          </button>
+          <Problem id="under-age-problem" message={leaveError} />
+        </>
+      )}
       <p className="aside">
         Not you?
-        <button type="button" className="link" disabled={leaving.pending} onClick={leaving.signOut}>
-          {leaving.pending ? "Signing out…" : "Sign out"}
+        <button type="button" className="link" disabled={signOut.pending} onClick={signOut.signOut}>
+          {signOut.pending ? "Signing out…" : "Sign out"}
         </button>
       </p>
-      <Problem id="signout-problem" message={leaving.error} />
+      <Problem id="signout-problem" message={signOut.error} />
+      <p className="aside">
+        <Link to="/privacy">Privacy</Link>
+      </p>
+    </Page>
+  );
+}
+
+interface UnderAgeNoticeProps {
+  readonly appName: string;
+  readonly onDone: () => void;
+}
+
+/** After "I'm under MIN_AGE" (06 §5): the session is over either way, and this says what next. */
+export function UnderAgeNotice({ appName, onDone }: UnderAgeNoticeProps) {
+  return (
+    <Page appName={appName}>
+      <h1 tabIndex={-1}>You&apos;re signed out</h1>
+      <p role="status">Ask a parent or carer to sign in and play with you on their account.</p>
+      <button type="button" className="button" onClick={onDone}>
+        Back to sign in
+      </button>
     </Page>
   );
 }

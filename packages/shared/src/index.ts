@@ -20,6 +20,7 @@ export {
   otpVerifyRoute,
   PatchMeBodySchema,
   patchMeRoute,
+  underAgeRoute,
   UserSettingsSchema,
   type Me,
 } from "./auth.js";
