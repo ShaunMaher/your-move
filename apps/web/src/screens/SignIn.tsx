@@ -7,6 +7,7 @@ import type { ApiClient } from "@your-move/api-client";
 import { type SyntheticEvent, useEffect, useRef, useState } from "react";
 
 import { type Failure, type Me, requestCode, verifyCode } from "../auth-api.js";
+import { Link } from "../router.js";
 import { CODE_LENGTH, cleanCode, looksLikeEmail } from "../text.js";
 import { Page } from "./Page.js";
 import { Problem } from "./Problem.js";
@@ -198,6 +199,9 @@ export function SignIn({ api, appName, onSignedIn }: SignInProps) {
           </div>
         </form>
       )}
+      <p className="aside">
+        <Link to="/privacy">Privacy</Link>
+      </p>
     </Page>
   );
 }

@@ -226,15 +226,16 @@ describe("signed out", () => {
 });
 
 describe("onboarding", () => {
-  async function toWelcome(save: Response) {
+  /** A new account: no name, no age confirmation yet. */
+  const NEW_USER = { ...ME, displayName: null, ageAttested: false, needsOnboarding: true };
+
+  async function toWelcome(save: Response, extra: Record<string, Response> = {}) {
     const { api, calls } = fakeApi({
       ...signedOut,
       "POST /api/v1/auth/otp/request": json({}, 202),
-      "POST /api/v1/auth/otp/verify": json({
-        user: { ...ME, displayName: null, needsOnboarding: true },
-        needsOnboarding: true,
-      }),
+      "POST /api/v1/auth/otp/verify": json({ user: NEW_USER, needsOnboarding: true }),
       "PATCH /api/v1/me": save,
+      ...extra,
     });
     render(<App api={api} />);
     await screen.findByRole("heading", { name: "Sign in" });
@@ -246,14 +247,19 @@ describe("onboarding", () => {
     await screen.findByRole("heading", { name: "Welcome to Family Games" });
     return calls;
   }
+  const confirmAge = () => {
+    fireEvent.click(screen.getByLabelText("I'm 13 or older"));
+  };
 
-  it("asks for a display name with the warning, then shows the home screen", async () => {
+  it("asks for a display name with the warning and the age confirmation, then shows the home screen", async () => {
     const calls = await toWelcome(json(ME));
     await waitFor(() => {
       expect(window.location.pathname).toBe("/welcome");
     });
     expect(screen.getByText(/Don't use your full name/u)).toBeDefined();
+    expect(screen.getByText("Family Games is for people aged 13 or older.")).toBeDefined();
     typeInto("Display name", "Sam");
+    confirmAge();
     click("Continue");
     expect(await screen.findByRole("heading", { name: "Hi, Sam" })).toBeDefined();
     await waitFor(() => {
@@ -261,13 +267,35 @@ describe("onboarding", () => {
     });
     expect(calls.filter((call) => call.method !== "GET").at(-1)).toMatchObject({
       method: "PATCH",
-      body: { displayName: "Sam" },
+      body: { displayName: "Sam", ageAttested: true },
     });
+  });
+
+  it("uses the instance's MIN_AGE", async () => {
+    const { api } = fakeApi({
+      "GET /api/v1/config": json({ ...CONFIG, minAge: 16 }),
+      "GET /api/v1/me": json(NEW_USER),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Welcome to Family Games" });
+    expect(screen.getByLabelText("I'm 16 or older")).toBeDefined();
+    expect(screen.getByRole("button", { name: "I'm under 16" })).toBeDefined();
+  });
+
+  it("won't continue until the age is confirmed", async () => {
+    const calls = await toWelcome(json(ME));
+    typeInto("Display name", "Sam");
+    click("Continue");
+    await waitFor(() => {
+      expect(alertText()).toContain("Confirm you're 13 or older to continue.");
+    });
+    expect(calls.some((call) => call.method === "PATCH")).toBe(false);
   });
 
   it("explains a refused name", async () => {
     await toWelcome(problem(400, "BAD_REQUEST"));
     typeInto("Display name", "admin");
+    confirmAge();
     click("Continue");
     await waitFor(() => {
       expect(alertText()).toContain("can't be used");
@@ -279,6 +307,7 @@ describe("onboarding", () => {
 
   it("checks the length before asking", async () => {
     const calls = await toWelcome(json(ME));
+    confirmAge();
     typeInto("Display name", "   ");
     click("Continue");
     await waitFor(() => {
@@ -295,6 +324,7 @@ describe("onboarding", () => {
   it("counts characters as people do, not code units", async () => {
     const calls = await toWelcome(json(ME));
     typeInto("Display name", "👨‍👩‍👧".repeat(24));
+    confirmAge();
     click("Continue");
     await waitFor(() => {
       expect(calls.some((call) => call.method === "PATCH")).toBe(true);
@@ -303,9 +333,7 @@ describe("onboarding", () => {
 
   it("holds a signed-in person who hasn't onboarded at /welcome, wherever they go", async () => {
     window.history.replaceState(null, "", "/settings");
-    render(
-      <App api={fakeApi(signedIn({ ...ME, displayName: null, needsOnboarding: true })).api} />,
-    );
+    render(<App api={fakeApi(signedIn(NEW_USER)).api} />);
     await screen.findByRole("heading", { name: "Welcome to Family Games" });
     await waitFor(() => {
       expect(window.location.pathname).toBe("/welcome");
@@ -314,7 +342,7 @@ describe("onboarding", () => {
 
   it("lets them sign out instead", async () => {
     const { api, calls } = fakeApi({
-      ...signedIn({ ...ME, displayName: null, needsOnboarding: true }),
+      ...signedIn(NEW_USER),
       "POST /api/v1/auth/logout": new Response(null, { status: 204 }),
     });
     render(<App api={api} />);
@@ -322,6 +350,107 @@ describe("onboarding", () => {
     click("Sign out");
     await screen.findByRole("heading", { name: "Sign in" });
     expect(calls.some((call) => call.path === "/api/v1/auth/logout")).toBe(true);
+  });
+
+  it('"I\'m under 13" ends the session with the parent or carer message, then sign-in', async () => {
+    const calls = await toWelcome(json(ME), {
+      "POST /api/v1/me/under-age": new Response(null, { status: 204 }),
+    });
+    click("I'm under 13");
+    expect(await screen.findByRole("heading", { name: "You're signed out" })).toBeDefined();
+    expect(
+      screen.getByText("Ask a parent or carer to sign in and play with you on their account."),
+    ).toBeDefined();
+    expect(calls.find((call) => call.path === "/api/v1/me/under-age")).toMatchObject({
+      method: "POST",
+      body: {},
+    });
+    // Nothing was asked to be saved on the way.
+    expect(calls.some((call) => call.method === "PATCH")).toBe(false);
+    click("Back to sign in");
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeDefined();
+    expect(window.location.pathname).toBe("/signin");
+  });
+
+  it("says so when \"I'm under 13\" doesn't go through, and stays", async () => {
+    await toWelcome(json(ME), { "POST /api/v1/me/under-age": problem(500, "INTERNAL") });
+    click("I'm under 13");
+    await waitFor(() => {
+      expect(alertText()).toContain("Something went wrong");
+    });
+    expect(screen.getByRole("heading", { name: "Welcome to Family Games" })).toBeDefined();
+  });
+
+  describe("a re-prompt after a MIN_AGE rise (06 §5)", () => {
+    const REPROMPTED = { ...ME, ageAttested: false, needsOnboarding: true };
+
+    it("asks only for the age, addressed to the account holder", async () => {
+      const { api, calls } = fakeApi({
+        ...signedIn(REPROMPTED),
+        "PATCH /api/v1/me": json(ME),
+      });
+      render(<App api={api} />);
+      await screen.findByRole("heading", { name: "Confirm your age" });
+      expect(
+        screen.getByText("Please confirm you, the account holder, are 13 or older."),
+      ).toBeDefined();
+      expect(screen.queryByLabelText("Display name")).toBeNull();
+      confirmAge();
+      click("Continue");
+      expect(await screen.findByRole("heading", { name: "Hi, Sam" })).toBeDefined();
+      expect(calls.find((call) => call.method === "PATCH")?.body).toEqual({ ageAttested: true });
+    });
+
+    it('"I\'m under 13" shows the same message', async () => {
+      const { api } = fakeApi({
+        ...signedIn(REPROMPTED),
+        "POST /api/v1/me/under-age": new Response(null, { status: 204 }),
+      });
+      render(<App api={api} />);
+      await screen.findByRole("heading", { name: "Confirm your age" });
+      click("I'm under 13");
+      expect(await screen.findByRole("heading", { name: "You're signed out" })).toBeDefined();
+    });
+  });
+});
+
+describe("the privacy page (07 §1, 08 §5)", () => {
+  it("is readable signed out, linked from sign-in, and doesn't become the return path", async () => {
+    // A signed-out visit to Settings is remembered on the way to sign-in.
+    window.history.replaceState(null, "", "/settings");
+    render(<App api={fakeApi(signedOut).api} />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    expect(peekReturnPath()).toBe("/settings");
+    fireEvent.click(screen.getByRole("link", { name: "Privacy" }));
+    expect(await screen.findByRole("heading", { name: "Privacy" })).toBeDefined();
+    expect(window.location.pathname).toBe("/privacy");
+    expect(peekReturnPath()).toBe("/settings");
+  });
+
+  it("is readable while onboarding, linked from the welcome screen", async () => {
+    render(
+      <App
+        api={
+          fakeApi(signedIn({ ...ME, displayName: null, ageAttested: false, needsOnboarding: true }))
+            .api
+        }
+      />,
+    );
+    await screen.findByRole("heading", { name: "Welcome to Family Games" });
+    fireEvent.click(screen.getByRole("link", { name: "Privacy" }));
+    expect(await screen.findByRole("heading", { name: "Privacy" })).toBeDefined();
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/privacy");
+    });
+  });
+
+  it("is linked from Settings", async () => {
+    window.history.replaceState(null, "", "/settings");
+    render(<App api={fakeApi(signedIn()).api} />);
+    await screen.findByRole("heading", { name: "Settings" });
+    expect(
+      screen.getByRole("link", { name: "Privacy: what Family Games keeps and who sees it" }),
+    ).toBeDefined();
   });
 });
 

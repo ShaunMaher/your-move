@@ -92,12 +92,27 @@ export async function verifyCode(
   };
 }
 
-export async function saveDisplayName(api: ApiClient, displayName: string): Promise<Outcome<Me>> {
-  const outcome = await settle(api.PATCH("/api/v1/me", { body: { displayName } }));
+/**
+ * Onboarding's answers (06 §5): the display name, the age confirmation, or both; the server
+ * completes onboarding once both are done.
+ */
+export async function saveOnboarding(
+  api: ApiClient,
+  answers: { readonly displayName?: string; readonly ageAttested?: true },
+): Promise<Outcome<Me>> {
+  const outcome = await settle(api.PATCH("/api/v1/me", { body: answers }));
   if (!outcome.ok) return outcome;
   return outcome.data === undefined
     ? { ok: false, failure: "failed" }
     : { ok: true, data: outcome.data };
+}
+
+/**
+ * "I'm under MIN_AGE" (06 §5): the server deletes a new account, or signs a re-prompted one out
+ * of this session; either way the session is over when it answers.
+ */
+export async function leaveUnderAge(api: ApiClient): Promise<Outcome<undefined>> {
+  return settle(api.POST("/api/v1/me/under-age", { body: {} }));
 }
 
 /** Turns the "It's your turn" email nudges on or off (03 §7); answers the updated user. */
