@@ -1,6 +1,6 @@
 {
-  // Solution file: the engine (built to dist/, no DOM library), the client entry point (built to
-  // dist/) and the package's own config files (type-checked only), so all are type-checked and
+  // Solution file: the engine (built to dist/, no DOM library), the client (built to dist/, with
+  // the DOM) and the package's own config files (type-checked only), so all are type-checked and
   // lintable (11 §2).
   "files": [],
   "references": [

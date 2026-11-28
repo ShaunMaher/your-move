@@ -80,7 +80,7 @@ describe("GET /api/v1/catalog and the rules", () => {
     try {
       const a = await signUp(plain, "Ada");
       const catalog = await call<{ games: { type: string }[] }>(plain, a, "GET", "/api/v1/catalog");
-      expect(catalog.body.games.map((game) => game.type)).toEqual(["words", "paths"]);
+      expect(catalog.body.games.map((game) => game.type)).toEqual(["words", "paths", "pairs"]);
       const created = await call(plain, a, "POST", "/api/v1/games", {
         gameType: "example",
         invitees: [],

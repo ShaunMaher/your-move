@@ -22,6 +22,7 @@ const config: KnipConfig = {
       // git-ignored registry and client import map (02 §7.3), which knip doesn't read.
       ignoreDependencies: [
         "@your-move/game-example",
+        "@your-move/game-pairs",
         "@your-move/game-paths",
         "@your-move/game-words",
       ],
