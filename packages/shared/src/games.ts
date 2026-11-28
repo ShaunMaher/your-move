@@ -667,7 +667,7 @@ export const removeSeatRoute = createRoute({
   tags: ["Games"],
   summary: "Remove a player from the lobby",
   description:
-    "Creator only, in the lobby: an invited or joined row of this game, never your own, becomes `removed` (a typed address is cleared). A remove never ends the lobby; someone removed while a join link is live can't come back through that link (06 §6.8).",
+    "Creator only, in the lobby: an invited or joined row of this game, never your own, becomes `removed` (a typed address is cleared). A remove never ends the lobby, and the person removed can't come back into this game through any join link, a rotated or new one included (06 §6.8).",
   request: { params: GameId, body: jsonBody(RemoveSeatBodySchema) },
   responses: {
     200: { description: "The game after the removal.", content: json(GameWithViewSchema) },

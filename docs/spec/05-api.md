@@ -361,7 +361,7 @@ or proxy logs. The web page reads it and calls:
 | POST | `/api/v1/join` | `{ token }` → takes an open seat → `200 { game }`; same `404` cases; `409 ALREADY_JOINED`. Blocks are checked against **every** row in the game (`404` if any). If the viewer already holds a `normal` or `hidden` invitation in this game, joining accepts it instead of taking another seat (`joined_via = invitation`); an `inert` row is never accepted (its block makes the join `404` anyway). Server-side retries on version conflict (up to 3 times, 03 §5.2), so callers see `STALE_GAME` only if every retry loses |
 
 Both return `403 ONBOARDING_REQUIRED` until onboarding is complete, and both are rate-limited per
-user and per IP (08 §4; lookups and joins share the counters, and every call counts, whatever it
+user and per IP (08 §4; lookups and joins share the counters, and every call that passes validation counts, whatever it
 answers); a link join counts only against the joiner's own limits, never the
 creator's game caps. Joining always requires an explicit tap on Join (07 §1).
 

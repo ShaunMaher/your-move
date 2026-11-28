@@ -84,6 +84,8 @@ export function registerJoinRoutes(app: OpenAPIHono<AppEnv>, deps: JoinRouteDeps
     if (loaded.game.status !== "lobby" || at >= lobbyExpiresAt(loaded.game)) {
       throw ApiError.of("WRONG_STATUS");
     }
+    // Approximate under concurrent requests by the same creator (read, then counted): they can pass
+    // the cap together, which is acceptable because each only rewrites that game's one link row.
     if ((await creations(user, 0)).some((result) => result.exceeded)) {
       throw ApiError.of("RATE_LIMITED");
     }

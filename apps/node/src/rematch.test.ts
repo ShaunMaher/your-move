@@ -457,7 +457,8 @@ describe("a finished game has one rematch (05, 04 `rematch_game_id`)", () => {
         expect(attempts).toBe(2);
         expect(asked.body.game).toMatchObject({ id: made.id, status: "active" });
       } else {
-        expect(attempts).toBe(3);
+        // One try and 3 retries, as every server-started transition (03 §5.2, A18-P2-4).
+        expect(attempts).toBe(4);
         expect(code(asked.body)).toBe("STALE_GAME");
         expect((await getGame(h, second, game.id)).game.rematch?.you).toBe("invited");
       }

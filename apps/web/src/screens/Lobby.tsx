@@ -228,8 +228,8 @@ export function Lobby({
           }}
         >
           <p>
-            They won&apos;t be in this game. If they joined through the join link, they can&apos;t
-            come back through it; a new link would let them.
+            They won&apos;t be in this game. They can&apos;t come back into this game through any
+            join link.
           </p>
           <div className="row">
             <button

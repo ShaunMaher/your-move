@@ -408,8 +408,9 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
      creator **or anyone else holding a row in the game** (joined, invited, declined, left or
      removed alike, 05), if they declined or left this game, or if the creator removed them from
      it: a removal sticks across links, so no join link brings them back, neither a rotated one nor
-     a new one after a revoke or expiry (the creator can still invite them by address or as a past
-     opponent, alpha A18 review S-3). A user who already holds a `normal` or `hidden` invitation in
+     a new one after a revoke or expiry (the creator can play with them in another game:
+     cancel this one and create a new one, inviting them by address or as a past opponent; alpha
+     A18 review S-3). A user who already holds a `normal` or `hidden` invitation in
      the game accepts it by joining (`joined_via = invitation`); an `inert` row is never accepted, and
      its holder gets the same `404`. The checks read the same rows for every outcome, so the
      answer's work doesn't say which reason refused it.

@@ -649,7 +649,7 @@ export function joinVerdict(
   if (own !== undefined) {
     // An inert row is never accepted (its block, or its being a duplicate, stays hidden). Declined,
     // left and removed rows never come back through any link, a rotated or new one included: the
-    // creator can still invite a removed person by address or as a past opponent (06 §6.8).
+    // creator can play with a removed person in another game (cancel this one, create a new one).
     return own.state === "invited" && own.delivery !== "inert"
       ? { kind: "accept", row: own }
       : refused;

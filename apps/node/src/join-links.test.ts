@@ -2,7 +2,8 @@
  * Join links (alpha A18; docs/spec/06-auth.md §6.8, 05 §Join links and `…/join-link`, 02 §4, 08
  * T24 and §4): creating, rotating and revoking a link, its token (hashed at rest, only in the URL's
  * fragment, never in a log line), the lookup and the join with their one indistinguishable `404`,
- * no re-entry after a decline or a removal while the link was live, blocks with anyone holding a
+ * no re-entry after a decline or a removal through any link of the game, a lobby whose creator was
+ * deleted refusing every join, blocks with anyone holding a
  * row, the rule that a game with a live link or a link joiner waits for its creator's Start, the
  * creator's remove, the joiner's limits, and Q3: what the link shows and how it refuses never
  * depend on whether a typed address has an account. The real app on a real SQLite database.
@@ -818,7 +819,7 @@ describe("Q3 parity (06 §6.1, §6.8)", () => {
     expect(shown[2]).toEqual(shown[0]);
   });
 
-  it("every refusal is the same body: unknown, revoked, expired, full, blocked, declined, removed, inert", async () => {
+  it("every refusal is the same body: unknown, revoked, expired, full, blocked, declined, removed, inert, a deleted creator", async () => {
     const answers: unknown[] = [];
     const record = async (who: Player, token: string) => {
       answers.push(await lookup(who, token), await join(who, token));
@@ -852,10 +853,18 @@ describe("Q3 parity (06 §6.1, §6.8)", () => {
       inert.gameId,
     );
     await record(b, inert.token);
+    // A lobby whose creator's account was deleted (A18-S-1): the creator row has no user.
+    const orphaned = await linkedLobby(c, { seats: 3 });
+    h.exec(
+      "UPDATE game_players SET user_id = NULL WHERE game_id = ? AND user_id = ?",
+      orphaned.gameId,
+      c.id,
+    );
+    await record(b, orphaned.token);
     const expired = await linkedLobby(a, { seats: 3 });
     h.advance(7 * DAY);
     await record(b, expired.token);
-    expect(answers).toHaveLength(16);
+    expect(answers).toHaveLength(18);
     for (const answer of answers) expect(answer).toEqual({ status: 404, body: NOT_FOUND });
   });
 });

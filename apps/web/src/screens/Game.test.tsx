@@ -251,7 +251,9 @@ describe("the creator's join link and Remove (alpha A18, 07 §1)", () => {
     expect(screen.queryByRole("button", { name: "Remove You" })).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Remove Alex" }));
     const dialog = screen.getByRole("dialog", { name: "Remove Alex?" });
-    expect(dialog.textContent).toContain("can't come back through it");
+    expect(dialog.textContent).toContain(
+      "They can't come back into this game through any join link.",
+    );
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();

@@ -58,6 +58,7 @@ import {
   type Refusal,
   removeSeat,
   resign,
+  SERVER_ATTEMPTS,
   start,
   startAtCreation,
 } from "./lifecycle.js";
@@ -88,8 +89,8 @@ const RECENT_PLAYERS = 50;
 /** `GET /api/v1/games` keeps finished games 90 days and other endings 7 days (05). */
 const FINISHED_LISTED_MS = 90 * DAY;
 const ENDED_LISTED_MS = 7 * DAY;
-/** Accepting an invitation in a rematch retries a lost race this often (03 §5.2). */
-const REMATCH_ACCEPT_ATTEMPTS = 3;
+/** Accepting an invitation in a rematch: one try and up to 3 retries on a lost race (03 §5.2). */
+const REMATCH_ACCEPT_ATTEMPTS = SERVER_ATTEMPTS;
 /** Creating a rematch whose guarded insert lost, with no live rematch to show, is tried twice. */
 const REMATCH_CREATE_ATTEMPTS = 2;
 
