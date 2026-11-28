@@ -55,6 +55,13 @@ hangs slow to fail and would blur what the tests are measuring.
     code cost, not a retry: for a module whose cost doesn't depend on earlier calls, the verdict is
     that of always timing all five runs of every sample (the kit stops a sample once three runs
     decide its median), and the allowance and early stop over samples are unchanged.
+  - The kit times the runs in **CPU time** where the host offers it (02 §6.6, added 2026-11-28):
+    with three test suites and an e2e run sharing a 16-thread machine (load average 14–26), a
+    median of five still failed the paths engine, whose inputs cost 0.1–0.3 ms at the median,
+    because single runs waited 8–28 ms for a core. A wall clock counts that wait; 08 T25 is about
+    per-call CPU. `runKit` takes the clock as an option (default `performance.now()`, so the
+    testkit stays Web-standard), and every Node caller passes this thread's CPU time. The median
+    stays: garbage collection and JIT pauses are CPU time on the same thread.
 - **Diagnosability:** when a job fails because of the runner, it prints the runner's CPU model,
   load and memory, so slow infrastructure is visible rather than guessed at.
 

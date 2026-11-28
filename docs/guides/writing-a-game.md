@@ -355,8 +355,11 @@ version, and the resource kinds.
 
 The CPU budget (5 ms per call at the 99th percentile) is the one check whose result depends on the
 host: it is measured on the machine running the kit, so a game within budget on your machine can
-fail on a slower one. Each timed sample is the median of five back-to-back runs, so a run or two
-your machine happened to preempt don't fail the game, but code slow on most calls still does.
+fail on a slower one. Pass `cpuClock: threadCpuClock().now` (from `@your-move/testkit/cpu-clock`)
+to `runKit` in your kit test, as `games:verify` does: the kit then times your engine in this
+thread's CPU time, so a busy machine doesn't fail it (without a clock it uses the wall clock).
+Each timed sample is the median of five back-to-back runs, so a run or two that a garbage
+collection slowed don't fail the game, but code slow on most calls still does.
 `games:verify --cpu-budget-ms <n>`, the `cpuBudgetMs` option of `runKit`, or the
 `KIT_CPU_BUDGET_MS` environment variable (a whole number of milliseconds from 1 to 50, read by
 every kit run not given a budget, so set it once for a slow CI runner) sets the budget, raising it

@@ -26,7 +26,10 @@ const MAJORITY = Math.floor(REPETITIONS / 2) + 1;
 
 /**
  * The CPU budget (02 §6.6, 08 T25): `validate` + `preview` + `apply` on each `worstCase` input,
- * timed on the host running the kit, after warm-up runs. Each timed sample is the median of
+ * timed on the host running the kit with `cpuClock` (CPU time where the caller passes a CPU clock,
+ * such as `threadCpuClock()`, otherwise `performance.now()`), after warm-up runs. The median still
+ * matters with a CPU clock: garbage collection and JIT pauses on the calling thread are CPU time
+ * too. Each timed sample is the median of
  * `REPETITIONS` back-to-back runs on fresh copies of the state and the action, and the 99th
  * percentile of the samples must stay within the budget (`cpuBudgetMs`, default 5 ms). The slowest
  * 1 % of samples are dropped, and timing stops as soon as more samples than that are over budget,
@@ -55,6 +58,8 @@ export function checkCpu(
     report.fail("cpu", `cpuBudgetMs must be a positive number; it is ${String(budget)}`, where);
     return;
   }
+  // CPU time where the caller passes a CPU clock, otherwise wall time (02 §6.6).
+  const clock = kitOptions.cpuClock ?? (() => performance.now());
   const samples = SAMPLES[kitOptions.mode];
   // Samples allowed over budget: those above the 99th percentile.
   const allowed = samples - Math.ceil(samples * 0.99);
@@ -99,11 +104,11 @@ export function checkCpu(
       const time = (rngSeed: number): number => {
         const copy = jsonClone(state);
         const move = jsonClone(action);
-        const start = performance.now();
+        const start = clock();
         def.validate(copy, seat, move, resources);
         def.preview?.(copy, seat, move, resources);
         def.apply(copy, seat, move, seededRandom(rngSeed));
-        return performance.now() - start;
+        return clock() - start;
       };
       for (let run = 0; run < WARM_UP_RUNS; run += 1) time(run);
       let over = 0;

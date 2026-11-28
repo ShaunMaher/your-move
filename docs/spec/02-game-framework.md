@@ -571,11 +571,18 @@ plays exactly these hooks, so a game that needs a dictionary supplies one throug
 6. **CPU budget**: per-call CPU for `validate` + `apply` (and `preview`) on the `worstCase` inputs
    stays within the budget in 08 T25 at the 99th percentile, timed after warm-up runs (100 timed
    samples per input in fast mode, 300 in full; the timed runs use other random seeds than the
-   warm-up runs). Each sample is the **median of five back-to-back runs** on fresh copies of the
-   state and the action, so a run or two the host preempted or paused (a busy machine, garbage
-   collection) don't count against the module, while code slow on most calls is slow in most
-   runs. A sample stops once three of its runs are on the same side of the budget; for a module
-   whose cost doesn't depend on earlier calls, that doesn't change the result. The budget is measured **on the host running the
+   warm-up runs). The kit measures **CPU time where the host offers it, the wall clock
+   otherwise**: `runKit` reads an injected clock (`cpuClock`, default `performance.now()`), and
+   every Node caller (`games:verify`, each game package's kit test) passes the calling thread's
+   CPU time (`threadCpuClock()` from `@your-move/testkit/cpu-clock`, built on Node's
+   `process.threadCpuUsage()`, falling back to `process.cpuUsage()`), so time a run spends waiting
+   for a core on a busy host doesn't count; on Linux that clock steps by about 1 ms, so the budget
+   is checked to about a millisecond. Each sample is the **median of five back-to-back runs** on
+   fresh copies of the state and the action, so a run or two that a pause slowed (garbage
+   collection and JIT compilation are CPU time on the same thread; on a wall clock, preemption
+   too) don't count against the module, while code slow on most calls is slow in most runs. A
+   sample stops once three of its runs are on the same side of the budget; for a module whose cost
+   doesn't depend on earlier calls, that doesn't change the result. The budget is measured **on the host running the
    kit**; `pnpm games:verify --cpu-budget-ms <n>`, or the `KIT_CPU_BUDGET_MS` variable (read by every kit run without an explicit budget; CI
    sets it to its calibrated value, 08 T25), sets it (raising it for a host slower than the
    reference hardware, or lowering it). `worstCase` must not be vacuous: it returns at least one

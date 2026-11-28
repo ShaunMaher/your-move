@@ -2,12 +2,19 @@ import type { Resources } from "@your-move/sdk";
 import { z } from "@your-move/sdk/schema";
 import { describe, expect, it } from "vitest";
 
+import { threadCpuClock } from "./cpu-clock.js";
 import { runKit, type KitOptions } from "./kit.js";
 import { asEngines, brokenFixtures, toyGame, toyManifest } from "./test-support.js";
 
 /** A dictionary that knows every word: the "reads resources in setup" fixture needs one. */
 const resources: Resources = { dictionary: { id: "all", version: 1, has: () => true } };
-const fast: KitOptions = { mode: "fast", resources, manifest: toyManifest };
+/** The CPU budget is timed in this thread's CPU time, as every Node caller of the kit does. */
+const fast: KitOptions = {
+  mode: "fast",
+  resources,
+  manifest: toyManifest,
+  cpuClock: threadCpuClock().now,
+};
 
 describe("runKit on a correct module", () => {
   it("passes in fast mode at every seat count", () => {
@@ -310,18 +317,21 @@ describe("runKit's static checks", () => {
   });
 
   /**
-   * The toy game whose worst-case states are marked, with `validate` wrapped: `slow(n)` is told
-   * the 1-based count of worst-case calls so far (game play isn't counted) and may waste time.
+   * The toy game whose worst-case states are marked, timed by a virtual clock: `validate` is
+   * wrapped, and `cost(n)`, told the 1-based count of worst-case calls so far (game play isn't
+   * counted), says how many milliseconds that call takes. Nothing else takes any time, so these
+   * tests are exact whatever the host's load, and they use the injected clock (`cpuClock`).
    */
-  const marked = (slow: (call: number) => void) => {
+  const marked = (cost: (call: number) => number) => {
     const toy = toyGame();
     const calls = { count: 0 };
+    const clock = { ms: 0 };
     const def = {
       ...toy,
       validate: (...args: Parameters<typeof toy.validate>) => {
         if (args[0].marker === 7) {
           calls.count += 1;
-          slow(calls.count);
+          clock.ms += cost(calls.count);
         }
         return toy.validate(...args);
       },
@@ -331,32 +341,25 @@ describe("runKit's static checks", () => {
           toy.test.worstCase(...args).map((c) => ({ ...c, state: { ...c.state, marker: 7 } })),
       },
     };
-    return { engines: asEngines(def), calls };
+    // One option input, so two worst-case inputs (two and three seats), one game each.
+    const options = (cpuBudgetMs: number): KitOptions => ({
+      mode: "fast",
+      games: 1,
+      optionInputs: [{}],
+      cpuBudgetMs,
+      cpuClock: () => clock.ms,
+    });
+    return { engines: asEngines(def), calls, options };
   };
-  /** Waits on the clock for `ms` milliseconds: wall time, as a preemption or a pause costs. */
-  const busyWait = (ms: number) => {
-    const until = performance.now() + ms;
-    while (performance.now() < until) {
-      // Spinning, not sleeping: the kit's runs are synchronous.
-    }
-  };
-  // One option input, so two worst-case inputs (two and three seats), one game each.
-  const cpuOnly = (cpuBudgetMs: number): KitOptions => ({
-    mode: "fast",
-    games: 1,
-    optionInputs: [{}],
-    cpuBudgetMs,
-  });
+  const cpuMessages = (report: ReturnType<typeof runKit>): string =>
+    report.failures.map((f) => f.message).join("\n");
 
   it("fails a module slow on every call, after three over-budget runs of each sample", () => {
-    const { engines, calls } = marked(() => {
-      busyWait(0.5);
-    });
-    const failures = runKit(engines, cpuOnly(0.1)).failures.map((f) => f.message);
-    expect(failures).toHaveLength(2);
-    expect(failures[0]).toMatch(
-      /^worstCase input 0 is over the 0\.1 ms budget at the 99th percentile \(2 samples over, the slowest at least \d+\.\d\d ms; a sample is the median of 5 runs\)$/u,
-    );
+    const { engines, calls, options } = marked(() => 0.5);
+    expect(runKit(engines, options(0.1)).failures.map((f) => f.message)).toEqual([
+      "worstCase input 0 is over the 0.1 ms budget at the 99th percentile (2 samples over, the slowest at least 0.50 ms; a sample is the median of 5 runs)",
+      "worstCase input 0 is over the 0.1 ms budget at the 99th percentile (2 samples over, the slowest at least 0.50 ms; a sample is the median of 5 runs)",
+    ]);
     // Per input: the validity check, 10 warm-up runs, then 3 runs of each sample (3 over budget
     // decide its median) until one more sample than the 1 % allowance (1 of 100) is over budget.
     expect(calls.count).toBe(2 * (1 + 10 + 2 * 3));
@@ -365,55 +368,74 @@ describe("runKit's static checks", () => {
   it("reports the slowest sample, which is the median of its runs", () => {
     // Each sample's runs take 8, 0.5, 3.5, 0.5 and 6 ms (calls 12–16 are the first sample, after
     // the validity check and the warm-up runs): over, within, over, within and over a 2.5 ms
-    // budget, so every sample takes all five runs and its median is 3.5 ms.
-    const { engines } = marked((call) => {
-      busyWait(call <= 11 ? 0.2 : ([8, 0.5, 3.5, 0.5, 6][(call - 12) % 5] ?? 0));
-    });
-    const [message] = runKit(engines, cpuOnly(2.5)).failures.map((f) => f.message);
-    const slowest = Number(/the slowest at least (\d+\.\d\d) ms/u.exec(message ?? "")?.[1]);
-    // At least the 3.5 ms that was waited, and well short of the 6 and 8 ms runs it must ignore.
-    expect(slowest).toBeGreaterThanOrEqual(3.5);
-    expect(slowest).toBeLessThan(5.5);
+    // budget, so every sample takes all five runs and its median is 3.5 ms, not 6 or 8.
+    const { engines, options } = marked((call) =>
+      call <= 11 ? 0.2 : ([8, 0.5, 3.5, 0.5, 6][(call - 12) % 5] ?? 0),
+    );
+    expect(runKit(engines, options(2.5)).failures[0]?.message).toBe(
+      "worstCase input 0 is over the 2.5 ms budget at the 99th percentile (2 samples over, the slowest at least 3.50 ms; a sample is the median of 5 runs)",
+    );
   });
 
   it("fails a module slow on every second call, which a fastest-of-runs sample would pass", () => {
     // Half the calls are 2.5× over budget: every other sample holds three slow runs of five.
-    const { engines } = marked((call) => {
-      if (call % 2 === 0) busyWait(10);
-    });
-    expect(
-      runKit(engines, cpuOnly(4))
-        .failures.map((f) => f.message)
-        .join("\n"),
-    ).toMatch(/over the 4 ms budget at the 99th percentile/u);
+    const { engines, options } = marked((call) => (call % 2 === 0 ? 10 : 0));
+    expect(cpuMessages(runKit(engines, options(4)))).toMatch(
+      /over the 4 ms budget at the 99th percentile/u,
+    );
   });
 
   it("fails a module slow on two calls in every three (CH8-S-1)", () => {
     // Any five back-to-back runs hold at least three slow ones, so every sample is over budget.
-    const { engines } = marked((call) => {
-      if (call % 3 !== 0) busyWait(10);
-    });
-    expect(
-      runKit(engines, cpuOnly(4))
-        .failures.map((f) => f.message)
-        .join("\n"),
-    ).toMatch(/over the 4 ms budget at the 99th percentile/u);
+    const { engines, options } = marked((call) => (call % 3 === 0 ? 0 : 10));
+    expect(cpuMessages(runKit(engines, options(4)))).toMatch(
+      /over the 4 ms budget at the 99th percentile/u,
+    );
   });
 
-  it("passes a module slow only on an occasional call, as a preempted or paused run is", () => {
+  it("passes a module slow only on an occasional call, as a pause is", () => {
     // Every 7th worst-case call is 2.5× over budget: about 14 of 100 single runs, far over the 1 %
     // allowance, but no five back-to-back runs hold more than one of them, so no median is slow.
     let slowCalls = 0;
-    const { engines, calls } = marked((call) => {
-      if (call % 7 === 0) {
-        slowCalls += 1;
-        busyWait(10);
-      }
+    const { engines, calls, options } = marked((call) => {
+      if (call % 7 !== 0) return 0;
+      slowCalls += 1;
+      return 10;
     });
-    expect(runKit(engines, cpuOnly(4)).failures).toEqual([]);
+    expect(runKit(engines, options(4)).failures).toEqual([]);
     // The slow calls really happened, often enough to fail a check of single runs.
     expect(slowCalls).toBeGreaterThanOrEqual(2 * 10);
     expect(calls.count).toBeGreaterThanOrEqual(2 * (1 + 10 + 100));
+  });
+
+  it("reads time only from the injected clock", () => {
+    // A module that spins 0.3 ms of real time on every worst-case call, against a 0.1 ms budget:
+    // the default clock fails it, a clock that never moves passes it...
+    const { engines } = marked(() => {
+      const until = performance.now() + 0.3;
+      while (performance.now() < until) {
+        // Real time passes; the virtual clock doesn't.
+      }
+      return 0;
+    });
+    const wallClock: KitOptions = { mode: "fast", games: 1, optionInputs: [{}], cpuBudgetMs: 0.1 };
+    expect(cpuMessages(runKit(engines, wallClock))).toMatch(/over the 0\.1 ms budget/u);
+    expect(runKit(engines, { ...wallClock, cpuClock: () => 0 }).failures).toEqual([]);
+    // ...and one that moves 100 ms on every read fails even the toy game's microsecond calls.
+    let now = 0;
+    const racing = () => (now += 100);
+    expect(
+      cpuMessages(runKit(asEngines(toyGame()), { mode: "fast", games: 1, cpuClock: racing })),
+    ).toMatch(/over the 5 ms budget at the 99th percentile/u);
+  });
+
+  it("charges busy work with this thread's CPU clock, and passes a fast module", () => {
+    const cpuClock = threadCpuClock().now;
+    const tooSlow = brokenFixtures()["is too slow on its worst case"]?.engines() ?? {};
+    expect(
+      cpuMessages(runKit(tooSlow, { mode: "fast", games: 1, stopAtFirstFailure: true, cpuClock })),
+    ).toMatch(/over the 5 ms budget at the 99th percentile/u);
+    expect(runKit(asEngines(toyGame()), { mode: "fast", games: 1, cpuClock }).failures).toEqual([]);
   });
 
   it("reports a worstCase that throws", () => {

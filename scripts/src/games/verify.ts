@@ -10,6 +10,7 @@ import { relative, resolve, sep } from "node:path";
 
 import { isGameType } from "@your-move/sdk";
 import { runKit, type KitMode } from "@your-move/testkit";
+import { threadCpuClock } from "@your-move/testkit/cpu-clock";
 import { gamePackageRules } from "@your-move/testkit/depcruise";
 import { engineEslintConfig } from "@your-move/testkit/eslint-engine";
 import { cruise, type ICruiseResult } from "dependency-cruiser";
@@ -20,6 +21,12 @@ import { isAllowedExpression } from "../licences/policy.js";
 import type { CheckedPackage } from "./inputs.js";
 import type { LoadedGame } from "./load.js";
 import { packageFileProblems, packedFiles } from "./packages.js";
+
+/**
+ * The clock the kit's CPU budget check reads: this thread's CPU time, so a busy build host's load
+ * doesn't count against a game (02 §6.6, 08 T25).
+ */
+export const kitClock = threadCpuClock();
 
 /** The instance supplies these; a game names them only as peers (02 §7.1.1). */
 const ALLOWED_PEERS: ReadonlySet<string> = new Set(["@your-move/sdk", "react", "zod"]);
@@ -314,6 +321,7 @@ function checkKit(game: LoadedGame, mode: KitMode, cpuBudgetMs: number | undefin
     const report = runKit(game.engines, {
       mode,
       manifest: game.manifest,
+      cpuClock: kitClock.now,
       ...(cpuBudgetMs === undefined ? {} : { cpuBudgetMs }),
     });
     return report.failures.map(

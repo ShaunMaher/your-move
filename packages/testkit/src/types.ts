@@ -63,6 +63,14 @@ export interface KitOptions {
    * running the kit. Default 5.
    */
   readonly cpuBudgetMs?: number;
+  /**
+   * The clock the CPU budget check reads, in milliseconds. Default `performance.now()`, a wall
+   * clock, which on a busy host also counts time spent waiting for a core; where the host offers
+   * CPU time, pass a CPU clock, such as Node's from `threadCpuClock()`
+   * (`@your-move/testkit/cpu-clock`), so the check measures the module, not the host's load
+   * (02 §6.6).
+   */
+  readonly cpuClock?: () => number;
   /** Stop at the first failing game instead of playing on: for tests of modules that must fail. */
   readonly stopAtFirstFailure?: boolean;
 }

@@ -7,6 +7,7 @@
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
+    "./cpu-clock": "./src/cpu-clock.ts",
     "./depcruise": "./src/depcruise.ts",
     "./eslint-engine": "./src/eslint-engine.ts"
   },
@@ -15,6 +16,10 @@
       ".": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
+      },
+      "./cpu-clock": {
+        "types": "./dist/cpu-clock.d.ts",
+        "default": "./dist/cpu-clock.js"
       },
       "./depcruise": {
         "types": "./dist/depcruise.d.ts",
