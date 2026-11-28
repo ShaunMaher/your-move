@@ -107,6 +107,13 @@ export const createGame = (api: ApiClient, body: CreateGameRequest) =>
 export const rematchGame = (api: ApiClient, id: string) =>
   settle(api.POST("/api/v1/games/{id}/rematch", { params: { path: { id } }, body: {} }));
 
+/**
+ * The creator of a finished game adds a link joiner to their players (05 `add-player`): `204`,
+ * the same whether or not a block stopped the pair.
+ */
+export const addPlayer = (api: ApiClient, id: string, userId: string) =>
+  settle(api.POST("/api/v1/games/{id}/add-player", { params: { path: { id } }, body: { userId } }));
+
 /** The creator makes or rotates the lobby's join link: its URL, shown only now (05). */
 export const createJoinLink = (api: ApiClient, id: string) =>
   settle(api.POST("/api/v1/games/{id}/join-link", { params: { path: { id } }, body: {} }));

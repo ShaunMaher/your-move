@@ -39,7 +39,12 @@ interface FrameProps {
    * Opens the finished game's rematch, creating or accepting it (05); resolves to what went wrong,
    * or `null` once it is on its way to the rematch.
    */
-  readonly onRematch: () => Promise<string | null>;
+  readonly onRematch: () => Promise<RematchFailure | null>;
+  /**
+   * The creator adds a link joiner to their players (05 `add-player`); resolves to what went
+   * wrong, or `null` when it was answered.
+   */
+  readonly onAddPlayer: (userId: string) => Promise<string | null>;
   readonly onSessionLost: () => void;
   /** Why the screen may be out of date (offline, a failing server), or `null`. */
   readonly notice: string | null;
@@ -73,6 +78,98 @@ function PlayerChip({ player, acting }: { player: Player; acting: boolean }) {
   );
 }
 
+/** Why the rematch button didn't open the rematch: the API's code and the text for it. */
+export interface RematchFailure {
+  readonly code: string;
+  readonly message: string;
+}
+
+/** "Bob", "Bob and Di", "Bob, Di and Ed". */
+function namesText(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names.at(-1) ?? ""}`;
+}
+
+type Addable = NonNullable<GameEnvelope["canAddPlayers"]>[number];
+
+/**
+ * "Add <name> to your players?" for each link joiner the creator may add (07 §1, 02 §4, alpha
+ * A19), with Add and Not now. An answered Add says the same whatever the server did with it: a
+ * block makes the answer a silent `204` (06 §6.9).
+ */
+function AddPlayers({
+  asked,
+  added,
+  onAdd,
+  onNotNow,
+}: {
+  readonly asked: readonly Addable[];
+  readonly added: readonly string[];
+  readonly onAdd: (person: Addable) => Promise<string | null>;
+  readonly onNotNow: (person: Addable) => void;
+}) {
+  const [pending, setPending] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  async function add(person: Addable) {
+    if (pending !== null) return;
+    setPending(person.userId);
+    setProblem(null);
+    const failure = await onAdd(person);
+    setPending(null);
+    setProblem(failure);
+  }
+  return (
+    <>
+      {asked.length === 0 ? null : (
+        <ul className="plain stack">
+          {asked.map((person) => (
+            <li
+              key={person.userId}
+              role="group"
+              aria-labelledby={`add-${person.userId}`}
+              className="stack"
+            >
+              <p id={`add-${person.userId}`}>Add {person.displayName} to your players?</p>
+              <p className="hint">
+                They joined through your link. Once added, either of you can start a game with the
+                other, a rematch included.
+              </p>
+              <div className="row">
+                <button
+                  type="button"
+                  className="button"
+                  disabled={pending !== null}
+                  aria-describedby="add-player-problem"
+                  onClick={() => void add(person)}
+                >
+                  {pending === person.userId ? "Adding…" : "Add"}
+                </button>
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={pending !== null}
+                  onClick={() => {
+                    setProblem(null);
+                    onNotNow(person);
+                  }}
+                >
+                  Not now
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Problem id="add-player-problem" message={problem} />
+      <div role="status">
+        {added.map((name) => (
+          <p key={name}>Added {name} to your players.</p>
+        ))}
+      </div>
+    </>
+  );
+}
+
 /** The rematch button's label, and what it says while busy, for your place in it (07 §1). */
 interface RematchLabel {
   readonly idle: string;
@@ -95,9 +192,12 @@ function rematchLabel(rematch: GameEnvelope["rematch"]): RematchLabel | null {
 function RematchButton({
   label,
   onRematch,
+  needs,
 }: {
   readonly label: RematchLabel | null;
   readonly onRematch: () => Promise<string | null>;
+  /** What a rematch needs first (07 §1, alpha A19), said under the button; null for nothing. */
+  readonly needs: string | null;
 }) {
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -119,11 +219,16 @@ function RematchButton({
           type="button"
           className="button"
           disabled={pending}
-          aria-describedby="rematch-problem"
+          aria-describedby={needs === null ? "rematch-problem" : "rematch-needs rematch-problem"}
           onClick={() => void press()}
         >
           {pending ? label.busy : label.idle}
         </button>
+      )}
+      {label === null || needs === null ? null : (
+        <p id="rematch-needs" className="hint">
+          {needs}
+        </p>
       )}
       <Problem id="rematch-problem" message={problem} />
     </>
@@ -138,11 +243,33 @@ function Results({
   game,
   showScores,
   onRematch,
+  onAddPlayer,
 }: {
   readonly game: GameEnvelope;
   readonly showScores: boolean;
-  readonly onRematch: () => Promise<string | null>;
+  readonly onRematch: () => Promise<RematchFailure | null>;
+  readonly onAddPlayer: (userId: string) => Promise<string | null>;
 }) {
+  /** Who was added on this screen, by id, with the name shown for them. */
+  const [added, setAdded] = useState<ReadonlyMap<string, string>>(new Map());
+  /** Whose question Not now hid on this screen. */
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
+  const listed = game.canAddPlayers ?? [];
+  // Still to add: the line under Rematch names them, and a Rematch refused for them asks again.
+  const needed = listed.filter((person) => !added.has(person.userId));
+  const asked = needed.filter((person) => !hidden.has(person.userId));
+  async function add(person: Addable): Promise<string | null> {
+    const failure = await onAddPlayer(person.userId);
+    if (failure === null) setAdded((now) => new Map(now).set(person.userId, person.displayName));
+    return failure;
+  }
+  async function rematchOrAsk(): Promise<string | null> {
+    const failure = await onRematch();
+    if (failure === null) return null;
+    if (failure.code !== "INVALID_INVITEES" || needed.length === 0) return failure.message;
+    setHidden(new Set());
+    return "Add them to your players first, then press Rematch again.";
+  }
   const seated = game.players
     .filter((player) => player.seat !== null)
     .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99) || (a.seat ?? 0) - (b.seat ?? 0));
@@ -175,8 +302,27 @@ function Results({
           ))}
         </ol>
       ) : null}
+      {/* Only while there is someone to ask about or something to say: a live region each. */}
+      {game.status === "finished" && (listed.length > 0 || added.size > 0) ? (
+        <AddPlayers
+          asked={asked}
+          added={[...added.values()]}
+          onAdd={add}
+          onNotNow={(person) => {
+            setHidden((now) => new Set(now).add(person.userId));
+          }}
+        />
+      ) : null}
       {game.status === "finished" && game.rematch !== undefined ? (
-        <RematchButton label={rematch} onRematch={onRematch} />
+        <RematchButton
+          label={rematch}
+          onRematch={rematchOrAsk}
+          needs={
+            game.rematch === null && needed.length > 0
+              ? `To rematch, first add ${namesText(needed.map((person) => person.displayName))} to your players.`
+              : null
+          }
+        />
       ) : null}
       <Link to="/" className={rematch === null ? "button" : "button secondary"}>
         Back to games
@@ -277,7 +423,14 @@ export function Frame(props: FrameProps) {
             {notice}
           </p>
         )}
-        {over ? <Results game={game} showScores={!drawn} onRematch={props.onRematch} /> : null}
+        {over ? (
+          <Results
+            game={game}
+            showScores={!drawn}
+            onRematch={props.onRematch}
+            onAddPlayer={props.onAddPlayer}
+          />
+        ) : null}
         {over || drawn ? null : (
           <>
             <ul className="chips" aria-label="Players">
