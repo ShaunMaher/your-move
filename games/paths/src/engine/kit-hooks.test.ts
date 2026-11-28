@@ -1,0 +1,128 @@
+import { isGameError } from "@your-move/sdk";
+import { seededRandom } from "@your-move/testkit";
+import { describe, expect, it } from "vitest";
+
+import { at, game, OPTIONS, placedFor, STRAIGHT, unplaced } from "../test-support.js";
+import { testHooks } from "./kit-hooks.js";
+import { resolveOptions } from "./options.js";
+import { validate } from "./rules.js";
+import { actionSchema, optionsSchema, type Options } from "./schemas.js";
+import { placeTile, seatStatus, setup } from "./state.js";
+
+const SAFE = placedFor(STRAIGHT);
+
+describe("the kit hooks (02 §6)", () => {
+  const markers = game({ phase: "markers", markers: [at(0, 0, 0), unplaced], turn: 1 });
+  const tiles = game({
+    markers: [at(0, 2, 0), at(5, 5, 4)],
+    hands: [
+      [SAFE.tileId, 1, 2],
+      [3, 4, 5],
+    ],
+  });
+
+  it("draws legal actions of the phase's kind for the seat to act", () => {
+    const rng = seededRandom(1);
+    for (let i = 0; i < 50; i += 1) {
+      for (const [state, seat] of [
+        [markers, 1],
+        [tiles, 0],
+      ] as const) {
+        const action = testHooks.randomAction(state, seat, rng, {});
+        expect(validate(state, seat, action)).toEqual({ ok: true });
+      }
+    }
+  });
+
+  it("draws schema-valid actions of both kinds, legal and illegal", () => {
+    const rng = seededRandom(2);
+    const codes = new Set<string>();
+    for (let i = 0; i < 400; i += 1) {
+      for (const [state, seat] of [
+        [markers, 1],
+        [tiles, 0],
+      ] as const) {
+        const action = testHooks.randomAnyAction(state, seat, rng);
+        expect(actionSchema.parse(action)).toEqual(action);
+        const verdict = validate(state, seat, action);
+        codes.add(isGameError(verdict) ? verdict.code : "OK");
+      }
+    }
+    expect([...codes].sort()).toEqual([
+      "NOTCH_OCCUPIED",
+      "NOT_IN_HAND",
+      "OK",
+      "OUT_OF_RANGE",
+      "SELF_ELIMINATION_AVOIDABLE",
+      "WRONG_PHASE",
+    ]);
+  });
+
+  it("perturbs the deck and other hands only, keeping every count and the viewer's hand", () => {
+    const rng = seededRandom(3);
+    const state = setup({ options: OPTIONS, seats: 3, rng });
+    const dealt = {
+      ...state,
+      phase: "tiles" as const,
+      hands: [
+        [0, 1, 2],
+        [3, 4, 5],
+        [6, 7, 8],
+      ],
+    };
+    dealt.deck = dealt.deck.filter((tile) => tile > 8);
+    const perturbed = testHooks.perturbHidden(dealt, 1, rng);
+    expect(perturbed.hands[1]).toEqual([3, 4, 5]);
+    expect(perturbed.hands.map((hand) => hand.length)).toEqual([3, 3, 3]);
+    expect(perturbed.deck).toHaveLength(dealt.deck.length);
+    expect([...perturbed.deck, ...perturbed.hands.flat()].sort((a, b) => a - b)).toEqual(
+      [...dealt.deck, ...dealt.hands.flat()].sort((a, b) => a - b),
+    );
+    expect(perturbed.hands).not.toEqual(dealt.hands);
+    expect(perturbed.board).toEqual(dealt.board);
+    expect(perturbed.markers).toEqual(dealt.markers);
+    for (const hand of perturbed.hands) expect(hand).toEqual([...hand].sort((a, b) => a - b));
+  });
+
+  it("perturbs only the deck once the game is over, when the hands are on show", () => {
+    const over = { ...tiles, endReason: "board-full" as const, turn: null };
+    const perturbed = testHooks.perturbHidden(over, null, seededRandom(4));
+    expect(perturbed.hands).toEqual(over.hands);
+    expect([...perturbed.deck].sort((a, b) => a - b)).toEqual(over.deck);
+  });
+
+  it("bounds a game by its markers, its tiles and one exit per player", () => {
+    expect(testHooks.maxActions(OPTIONS, 2)).toBe(39);
+    expect(testHooks.maxActions(OPTIONS, 8)).toBe(51);
+  });
+
+  it("plays option inputs that all resolve, covering each hand size and both variants", () => {
+    const resolved = testHooks
+      .optionInputs({ config: {}, resources: [] })
+      .map((input) => optionsSchema.parse(resolveOptions(input)));
+    expect(new Set(resolved.map((options) => options.handSize))).toEqual(new Set([1, 2, 3]));
+    expect(new Set(resolved.map((options) => options.selfElimination))).toEqual(
+      new Set(["avoidIfPossible", "allowed"]),
+    );
+  });
+
+  it.each([2, 3, 5, 8])(
+    "finds legal late-game worst cases at %i players, one of them putting the mover out",
+    (seats) => {
+      for (const options of [OPTIONS, { ...OPTIONS, handSize: 1 } satisfies Options]) {
+        const cases = testHooks.worstCase(options, seats, seededRandom(seats));
+        expect(cases.length).toBeGreaterThanOrEqual(1);
+        for (const { state, seat, action } of cases) {
+          expect(seatStatus(state)).toHaveLength(seats);
+          expect(state.turn).toBe(seat);
+          expect(validate(state, seat, action)).toEqual({ ok: true });
+        }
+        const eliminating = cases.filter(({ state, seat, action }) => {
+          if (action.type !== "place-tile") return false;
+          return placeTile(state, seat, action, seededRandom(1)).record.eliminated.includes(seat);
+        });
+        expect(eliminating.length).toBeGreaterThanOrEqual(1);
+      }
+    },
+  );
+});
