@@ -1,6 +1,6 @@
 /**
- * A game waiting for its players (07 §1, 02 §4): who is invited and who has joined, Accept or
- * Decline for an invitation, Decline for a player already in (a past opponent added them without
+ * A game waiting for its players (07 §1, 02 §4): who is invited and who has joined, Accept,
+ * Decline or Block (its creator, alpha A23) for an invitation, Decline for a player already in (a past opponent added them without
  * asking, alpha A12, or they joined through the link), and for the creator Start, Cancel, Remove
  * per seat and the join-link controls (alpha A18).
  */
@@ -24,6 +24,8 @@ interface LobbyProps {
   readonly onAction: (action: LobbyAction) => Promise<string | null>;
   /** The creator removes a seat (05 `remove-seat`); what went wrong, or null. */
   readonly onRemove: (playerId: string) => Promise<string | null>;
+  /** An invitee blocks the game's creator (05 §Blocks); what went wrong, or null. */
+  readonly onBlock: (userId: string) => Promise<string | null>;
   readonly onCreateLink: () => Promise<MadeLink>;
   readonly onRevokeLink: () => Promise<string | null>;
   /** A join link made at creation, to show once (06 §6.8). */
@@ -63,22 +65,26 @@ export function Lobby({
   game,
   onAction,
   onRemove,
+  onBlock,
   onCreateLink,
   onRevokeLink,
   freshLink,
   notice,
 }: LobbyProps) {
-  const [pending, setPending] = useState<LobbyAction | "remove" | null>(null);
+  const [pending, setPending] = useState<LobbyAction | "remove" | "block" | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
   /** The seat whose removal is being confirmed. */
   const [removing, setRemoving] = useState<(Player & { playerId: string }) | null>(null);
+  const [confirmBlock, setConfirmBlock] = useState(false);
   const you = game.players.find((player) => player.isYou);
   const isCreator = you?.isCreator === true;
   const invited = game.yourInvitation !== null;
   /** In the lobby but not its creator: added by a past opponent, or accepted. Either may decline. */
   const joinedNotCreator = you?.state === "joined" && !isCreator;
   const creator = game.players.find((player) => player.isCreator);
+  /** Who Block blocks: the inviter, while their account exists. */
+  const blockable = invited && creator?.userId != null ? creator : undefined;
   const joined = game.players.filter((player) => player.state === "joined").length;
 
   async function run(action: LobbyAction) {
@@ -89,6 +95,16 @@ export function Lobby({
     setPending(null);
     setProblem(failure);
     setConfirmCancel(false);
+  }
+
+  async function block(userId: string) {
+    if (pending !== null) return;
+    setPending("block");
+    setProblem(null);
+    const failure = await onBlock(userId);
+    setPending(null);
+    setProblem(failure);
+    setConfirmBlock(false);
   }
 
   async function remove(playerId: string) {
@@ -184,6 +200,18 @@ export function Lobby({
             >
               {pending === "decline" ? "Declining…" : "Decline"}
             </button>
+            {blockable === undefined ? null : (
+              <button
+                type="button"
+                className="button secondary"
+                disabled={pending !== null}
+                onClick={() => {
+                  setConfirmBlock(true);
+                }}
+              >
+                Block
+              </button>
+            )}
           </>
         ) : null}
         {joinedNotCreator ? (
@@ -249,6 +277,45 @@ export function Lobby({
               }}
             >
               Keep them
+            </button>
+          </div>
+        </Dialog>
+      ) : null}
+      {confirmBlock && blockable?.userId != null ? (
+        <Dialog
+          title={`Block ${seatLabel(blockable)}?`}
+          dismissible={pending === null}
+          onClose={() => {
+            setConfirmBlock(false);
+          }}
+        >
+          <p>
+            They won&apos;t be able to add you to games or invite you, and you won&apos;t be put in
+            a game with them. You&apos;ll decline this invitation, and leave other games with them
+            that haven&apos;t started yet (or they&apos;re removed, if you created the game).
+          </p>
+          <p>
+            Games you&apos;re already playing carry on. They won&apos;t be told. You can unblock
+            them in Settings.
+          </p>
+          <div className="row">
+            <button
+              type="button"
+              className="button danger"
+              disabled={pending !== null}
+              onClick={() => void block(blockable.userId ?? "")}
+            >
+              {pending === "block" ? "Blocking…" : "Block"}
+            </button>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={pending !== null}
+              onClick={() => {
+                setConfirmBlock(false);
+              }}
+            >
+              Cancel
             </button>
           </div>
         </Dialog>

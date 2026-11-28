@@ -428,13 +428,16 @@ describe("a rematch with a link joiner (06 §6.11, alpha A15)", () => {
       expect([refused.status, refused.body.error.code]).toEqual([400, "INVALID_INVITEES"]);
     }
     expect(pairsOf(b, c)).toEqual(both(a, b).concat(both(a, c)).sort());
-    // The creator's rematch takes everyone.
+    // The creator's rematch takes everyone: two picks, so both are invited (Q29).
     const asked = await rematch(a, gameId);
     expect(asked.status, JSON.stringify(asked.body)).toBe(201);
-    expect(asked.body.game.status).toBe("active");
-    expect(asked.body.game.players.map((row) => row.userId).sort()).toEqual(
-      [a.id, b.id, c.id].sort(),
-    );
+    expect(asked.body.game.status).toBe("lobby");
+    expect(
+      h
+        .query("SELECT user_id, state FROM game_players WHERE game_id = ?", asked.body.game.id)
+        .map((row) => `${String(row["user_id"])} ${String(row["state"])}`)
+        .sort(),
+    ).toEqual([`${a.id} joined`, `${b.id} invited`, `${c.id} invited`].sort());
   });
 
   it("stays INVALID_INVITEES after a yes across a block: the add wrote nothing", async () => {

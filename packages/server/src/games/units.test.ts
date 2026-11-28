@@ -9,6 +9,8 @@ import { ApiError } from "../http/api-error.js";
 import { EngineFault, guardEngine } from "./engine-fault.js";
 import {
   accept as acceptWith,
+  blockedBy,
+  blockEffect,
   type Blocked,
   cancel,
   decline,
@@ -671,5 +673,85 @@ describe("whom a finished game's creator may add to their players (05 `canAddPla
     for (const status of ["lobby", "active", "declined", "cancelled", "expired"] as const) {
       expect(addableUserIds({ status }, players, creator), status).toEqual([]);
     }
+  });
+});
+
+describe("what a block writes in one lobby (06 §6.10, alpha A23)", () => {
+  const row = (id: string, over: Partial<GamePlayerRecord> = {}) =>
+    ({
+      id,
+      userId: `u-${id}`,
+      state: "joined",
+      joinedVia: "invitation",
+      joinedAt: 1,
+      inviteEmail: null,
+      delivery: "normal",
+      seat: null,
+      ...over,
+    }) as GamePlayerRecord;
+  const ctxWith = (players: GamePlayerRecord[], status: GameRecord["status"] = "lobby") => ({
+    game: {
+      status,
+      createdAt: 1000,
+      seats: 4,
+      aiAssistance: "off",
+      seatOrder: "join",
+    } as GameRecord,
+    players,
+    definition: {
+      players: () => ({ min: 2, max: 4 }),
+      validateStart: () => OK,
+    } as unknown as AnyGameDefinition,
+    options: {},
+    state: null,
+    random: cryptoRandom(),
+    joinLink: null,
+  });
+  const creator = row("a", { joinedVia: "creator" });
+  const third = row("c");
+  const invited = { state: "invited" as const, joinedAt: null, joinedVia: null };
+
+  it.each([
+    ["the creator, the other joined", creator, row("b"), "removed"],
+    ["the creator, the other their pick", creator, row("b", invited), "removed"],
+    ["a member, the other joined", row("v"), row("b"), "declined"],
+    [
+      "an invitee, the other the creator",
+      row("v", invited),
+      row("b", { joinedVia: "creator" }),
+      "declined",
+    ],
+  ] as const)("changes the lobby for %s", (_name, viewer, other, outcome) => {
+    const players = viewer === creator ? [creator, other, third] : [creator, viewer, other, third];
+    const writes = blockEffect(ctxWith(players), viewer, other.userId ?? "", 2000);
+    const changed = writes?.updatePlayers?.[0];
+    expect(changed?.id).toBe(outcome === "removed" ? other.id : viewer.id);
+    expect(changed?.set.state).toBe(outcome);
+  });
+
+  it.each([
+    [
+      "a typed invitation, for the creator (Q3)",
+      creator,
+      row("b", { ...invited, inviteEmail: "b@example.org" }),
+    ],
+    ["someone else's invitation, for a member", row("v"), row("b", invited)],
+    ["a viewer whose own row is inert", row("v", { ...invited, delivery: "inert" }), row("b")],
+  ] as const)("leaves the lobby alone for %s", (_name, viewer, other) => {
+    const players = viewer === creator ? [creator, other] : [creator, viewer, other];
+    expect(blockEffect(ctxWith(players), viewer, other.userId ?? "", 2000)).toBeNull();
+  });
+
+  it("leaves a game that isn't an open lobby alone", () => {
+    const other = row("b");
+    expect(blockEffect(ctxWith([creator, other], "active"), creator, "u-b", 2000)).toBeNull();
+    expect(
+      blockEffect(ctxWith([creator, other]), creator, "u-b", 1000 + LOBBY_LIFETIME_MS),
+    ).toBeNull();
+  });
+
+  it("looks blocks up either way round", () => {
+    const blocked = blockedBy([{ blockerId: "x", blockedId: "y" }]);
+    expect([blocked("x", "y"), blocked("y", "x"), blocked("x", "z")]).toEqual([true, true, false]);
   });
 });

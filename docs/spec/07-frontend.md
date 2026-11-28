@@ -39,8 +39,10 @@ with an AI badge (icon + accessible label "AI player"), from the envelope's `kin
 `via`). Games with AI assistance allowed show it in the header, lobby, invitation and join page.
 
 **Blocking** (alpha A23, 05 §Blocks, 06 §6.10). An invitation offers **Block** next to Accept and
-Decline, in the game list's *Invitations* and *Hidden invitations* and in the lobby; it blocks the
-game's creator (the inviter), named from `players`. It asks first, in a dialog titled "Block
+Decline on its lobby screen, which every row of the game list's *Invitations* and *Hidden
+invitations* opens (the list's own rows carry no buttons, so "accept/decline/block" above happens
+there); it blocks the game's creator (the inviter), named from `players`, and isn't offered when
+the creator's account is gone. It asks first, in a dialog titled "Block
 <name>?" that says plainly what a block does: "They won't be able to add you to games or invite
 you, and you won't be put in a game with them. You'll decline this invitation, and leave other
 games with them that haven't started yet (or they're removed, if you created the game). Games you're already playing carry on. They won't be told. You

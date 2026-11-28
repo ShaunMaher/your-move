@@ -72,7 +72,7 @@ export interface BlockPair {
 }
 
 /** One of a user's blocks, as `GET /api/v1/blocks` lists them (05 §Blocks). */
-export interface BlockedUser {
+interface BlockedUser {
   readonly userId: string;
   readonly displayName: string | null;
   readonly createdAt: number;

@@ -213,16 +213,21 @@ function typedAddressesOnlyTheirOwn(
       for (const row of players as Record<string, unknown>[]) {
         const address = row["invitedAs"];
         if (typeof address !== "string") continue;
-        expect(typedAddresses(record["id"]), `${label}: invitedAs is not stored`).toContain(
-          address,
-        );
+        // A pick's invitedAs is the name the creator picked (05), not an address: only the
+        // creator check below applies to it, and it counts toward no address.
+        const typed = address.includes("@");
+        if (typed) {
+          expect(typedAddresses(record["id"]), `${label}: invitedAs is not stored`).toContain(
+            address,
+          );
+        }
         const [mine] = h.query(
           "SELECT joined_via FROM game_players WHERE game_id = ? AND user_id = ?",
           record["id"],
           viewer.id,
         );
         expect(mine?.["joined_via"], `${label}: invitedAs shown to a non-creator`).toBe("creator");
-        accounted += 1;
+        if (typed) accounted += 1;
       }
     }
     Object.values(record).forEach(walk);
@@ -837,8 +842,8 @@ describe("route-wide secrecy (04 invariant 4)", () => {
       await readEverything(game, players, stranger);
       await hit(a, "GET", "/api/v1/games/types/:type/rules", { type: "example" });
 
-      // Past opponents picked from the list: the game starts at creation (alpha A12), and the
-      // creator's response is checked like every other.
+      // Past opponents picked from the list: two picks are both invited (Q29, alpha A23), and
+      // the creator's response, the invitations and the start are checked like every other.
       const recent = await hit(a, "GET", "/api/v1/players/recent");
       expect(recent.text).toContain(b.id);
       const rematch = await created(a, {
@@ -846,6 +851,8 @@ describe("route-wide secrecy (04 invariant 4)", () => {
         seats: 3,
         invitees: [{ userId: c.id }, { userId: b.id }],
       });
+      expect(stored(rematch).status).toBe("lobby");
+      for (const player of [c, b]) await transition(rematch, player, "accept");
       expect(stored(rematch).status).toBe("active");
       await readEverything(rematch, players, stranger);
       expect(await unchangedByHiddenState(rematch, players)).toBe(3);

@@ -15,6 +15,7 @@ import { rematchProblem } from "../create-problems.js";
 import {
   adapt,
   addPlayer,
+  blockPlayer,
   createJoinLink,
   type GameEnvelope,
   type GameWithView,
@@ -64,6 +65,11 @@ const LOBBY_PROBLEMS: Readonly<Record<string, string>> = {
 const REMOVE_PROBLEMS: Readonly<Record<string, string>> = {
   ...LOBBY_PROBLEMS,
   NOT_FOUND: "That player is no longer in the lobby.",
+};
+
+const BLOCK_PROBLEMS: Readonly<Record<string, string>> = {
+  RATE_LIMITED: "That's a lot at once. Wait a minute, then try again.",
+  NOT_FOUND: "You can't block this player.",
 };
 
 const LINK_PROBLEMS: Readonly<Record<string, string>> = {
@@ -346,6 +352,23 @@ export function Game({
     [api, id, game, apply, refetch, onSessionLost],
   );
 
+  /**
+   * Blocks the invitation's creator (05 §Blocks, 07): the invitation is declined with it, so the
+   * game is gone from here and the list is shown again.
+   */
+  const block = useCallback(
+    async (userId: string): Promise<string | null> => {
+      const result = await blockPlayer(api, userId);
+      if (result.ok) {
+        navigate("/");
+        return null;
+      }
+      if (result.status === 401) onSessionLost();
+      return failureText(result.status, result.code, BLOCK_PROBLEMS);
+    },
+    [api, onSessionLost],
+  );
+
   /** The creator makes or rotates the join link; its URL is shown once (06 §6.8). */
   const makeLink = useCallback(async (): Promise<MadeLink> => {
     const result = await createJoinLink(api, id);
@@ -451,6 +474,7 @@ export function Game({
           game={load.game}
           onAction={act}
           onRemove={remove}
+          onBlock={block}
           onCreateLink={makeLink}
           onRevokeLink={revokeLink}
           freshLink={freshLink}

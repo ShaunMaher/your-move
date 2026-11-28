@@ -45,6 +45,11 @@ export function linkUntil(at: number): string {
   return untilDate.format(new Date(at));
 }
 
+/** "blocked <date>" for someone in Settings' blocked players (07 §1), in the device's locale. */
+export function blockedOn(at: number): string {
+  return `blocked ${playedDate.format(new Date(at))}`;
+}
+
 /** "last played <date>" for a past opponent (07 §1.1), in the device's locale. */
 export function lastPlayed(at: number): string {
   return `last played ${playedDate.format(new Date(at))}`;

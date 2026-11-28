@@ -399,6 +399,50 @@ describe("the lobby", () => {
     expect(posts(calls, "decline")).toHaveLength(1);
   });
 
+  it("lets an invitee block the creator, after saying what a block does, and goes home (A23)", async () => {
+    const { calls } = open({
+      "GET /api/v1/games/g1": json({ game: invited(), view: null }),
+      "POST /api/v1/blocks": new Response(null, { status: 204 }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Block" }));
+    const dialog = await screen.findByRole("dialog", { name: "Block Robin?" });
+    expect(dialog.textContent).toContain("They won't be able to add you to games or invite you");
+    expect(dialog.textContent).toContain("Games you're already playing carry on.");
+    expect(dialog.textContent).toContain("They won't be told.");
+    expect(dialog.textContent).toContain("You can unblock them in Settings.");
+    // Cancel changes nothing.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(calls.filter((call) => call.path === "/api/v1/blocks")).toHaveLength(0);
+    click("Block");
+    const again = await screen.findByRole("dialog", { name: "Block Robin?" });
+    fireEvent.click(within(again).getByRole("button", { name: "Block" }));
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/");
+    });
+    expect(
+      calls.filter((call) => call.method === "POST" && call.path === "/api/v1/blocks"),
+    ).toEqual([expect.objectContaining({ body: { userId: "u1" } })]);
+  });
+
+  it("says why a block failed and stays on the invitation", async () => {
+    open({
+      "GET /api/v1/games/g1": json({ game: invited(), view: null }),
+      "POST /api/v1/blocks": problem(429, "RATE_LIMITED"),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Block" }));
+    const dialog = await screen.findByRole("dialog", { name: "Block Robin?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Block" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Wait a minute");
+    expect(window.location.pathname).toBe("/g/g1");
+  });
+
+  it("offers Block only on an invitation", async () => {
+    open({ "GET /api/v1/games/g1": json({ game: lobby(), view: null }) });
+    await screen.findByRole("heading", { level: 1, name: "Words lobby" });
+    expect(screen.queryByRole("button", { name: "Block" })).toBeNull();
+  });
+
   it("lets a player who was added (joined, not the creator) decline, and goes home (A12-P-4)", async () => {
     const added = lobby({
       players: [

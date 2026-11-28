@@ -400,19 +400,14 @@ describe("the push to a past opponent added to a new game (alpha A12, 06 §6.2)"
       { title: "Family Games", body: "Ada added you to a game.", ...wordsAt },
     ]);
 
-    // The example game's first round has every seat to act: each added player is told so.
+    // The example game's first round has every seat to act: an added player is told so. (A
+    // single pick: two or more would all be invitations, Q29.)
     const example = await createGame(h, ada, {
       gameType: "example",
-      seats: 3,
-      invitees: [{ userId: bo.id }, { userId: cy.id }],
+      invitees: [{ userId: cy.id }],
     });
     expect(example.status).toBe("active");
     const exampleAt = { url: `/g/${example.id}`, tag: `game-${example.id}` };
-    expect((await received(boPhone)).at(-1)).toEqual({
-      title: "Family Games",
-      body: "Ada added you to a game. Your turn.",
-      ...exampleAt,
-    });
     expect(await received(cyPhone)).toEqual([
       { title: "Family Games", body: "Ada added you to a game. Your turn.", ...exampleAt },
     ]);
