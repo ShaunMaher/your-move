@@ -85,10 +85,20 @@ export function writeVerifiedFiles(rootDir: string, packages: readonly CheckedPa
       client: pkg.client.map(rel).sort(),
     })),
   };
-  const file = join(rootDir, "generated", "verified-files.json");
+  const file = verifiedFile(rootDir);
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(verified, null, 2)}\n`);
 }
+
+/**
+ * Deletes the record of a previous `games:verify`, for a run that doesn't write one (a restricted
+ * or failing run): `games:check-inputs` then fails closed instead of reading a stale record.
+ */
+export function removeVerifiedFiles(rootDir: string): void {
+  rmSync(verifiedFile(rootDir), { force: true });
+}
+
+const verifiedFile = (rootDir: string): string => join(rootDir, "generated", "verified-files.json");
 
 /** Deletes every build's record: `pnpm build` starts with this, so no record is left from before. */
 export function resetBundleInputs(rootDir: string): void {

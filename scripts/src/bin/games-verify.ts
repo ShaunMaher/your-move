@@ -8,8 +8,8 @@
  * `n` shards of each package's full kit, by option set and seat count (`runKit`'s `shard`); every
  * check that plays no game still runs in each shard, and the `n` shards together play exactly the
  * unsharded run's games with the same seeds and find its failures. CI runs the shards as parallel
- * jobs (11 §9). A run restricted either way doesn't write `generated/verified-files.json` (below),
- * which only the whole run's checks may describe. `--cpu-budget-ms` (or the `KIT_CPU_BUDGET_MS` variable, which CI sets once
+ * jobs (11 §9). A run restricted either way deletes `generated/verified-files.json` (below), which
+ * only the whole run's checks may describe, so `games:check-inputs` fails until a whole run. `--cpu-budget-ms` (or the `KIT_CPU_BUDGET_MS` variable, which CI sets once
  * for every job and image build that runs the kit) raises the kit's CPU budget (default 5 ms,
  * 08 T25) on a host slower than the reference hardware; the budget is measured on the host
  * running the kit (@your-move/testkit, budget.ts).
@@ -24,7 +24,7 @@ import { parseArgs } from "node:util";
 
 import { CPU_BUDGET_VARIABLE, readCpuBudget } from "@your-move/testkit";
 
-import { writeVerifiedFiles, type CheckedPackage } from "../games/inputs.js";
+import type { CheckedPackage } from "../games/inputs.js";
 import { loadGames, loadInstanceConfig } from "../games/load.js";
 import { nodeModulesResolver } from "../games/packages.js";
 import { kitClock, parseShard, verifyGames, type KitPlayed } from "../games/verify.js";
@@ -46,10 +46,6 @@ run("games:verify", async () => {
   const { only } = values;
   const shard = values.shard === undefined ? undefined : parseShard(values.shard);
   if (typeof shard === "string") fail("games:verify", [shard]);
-  if (shard !== undefined && values.fast) {
-    // The fast kit judges non-vacuity over each whole rules version (02 §6.3).
-    fail("games:verify", ["--shard runs the full kit only; the fast kit isn't sharded"]);
-  }
   const resolvePackage = nodeModulesResolver(ROOT_DIR);
   const sdkDir = resolvePackage("@your-move/sdk");
   if (sdkDir === null) fail("games:verify", ["@your-move/sdk is not installed at the root"]);
@@ -77,13 +73,14 @@ run("games:verify", async () => {
     ...(shard === undefined ? {} : { shard }),
     checked,
     played,
+    recordIn: ROOT_DIR,
   });
   if (problems.length > 0) fail("games:verify", problems);
   const whole = only === undefined && shard === undefined;
-  if (whole) writeVerifiedFiles(ROOT_DIR, checked);
-  for (const { name, games, combos } of played) {
+  // The whole run's count and fingerprint of combinations, so shard logs can be compared.
+  for (const { name, games, combos, allCombos, comboDigest } of played) {
     console.log(
-      `  ${name}: ${String(games)} games in ${String(combos)} option set and seat count combinations`,
+      `  ${name}: ${String(games)} games in ${String(combos)} of ${String(allCombos)} option set and seat count combinations (list ${comboDigest})`,
     );
   }
   const part = [
@@ -91,6 +88,6 @@ run("games:verify", async () => {
     ...(shard === undefined ? [] : [`shard ${String(shard.index)}/${String(shard.count)}`]),
   ];
   console.log(
-    `games:verify (${mode} kit${part.length === 0 ? "" : `, ${part.join(", ")}`}${cpuBudgetMs === undefined ? "" : `, CPU budget ${String(cpuBudgetMs)} ms`}, timed by ${kitClock.source}): ${String(checked.length)} game package(s) OK against SDK ${sdkVersion}${whole ? "" : "; generated/verified-files.json not written"}`,
+    `games:verify (${mode} kit${part.length === 0 ? "" : `, ${part.join(", ")}`}${cpuBudgetMs === undefined ? "" : `, CPU budget ${String(cpuBudgetMs)} ms`}, timed by ${kitClock.source}): ${String(checked.length)} game package(s) OK against SDK ${sdkVersion}${whole ? "" : "; generated/verified-files.json removed (a restricted run)"}`,
   );
 });

@@ -1,5 +1,6 @@
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -456,6 +457,69 @@ describe("games:verify with the test kit", () => {
     ]);
   });
 
+  it("still reports a duplicate type id under --only, whichever package it names", async () => {
+    const problems = await verifyGames({
+      rootDir: FIXTURES,
+      games: await load("@fixture/game-good", "@fixture/game-twin"),
+      sdkVersion: "1.2.0",
+      sdkDir: SDK_DIR,
+      workspaceDirs: new Set(),
+      only: "good",
+    });
+    expect(problems.join("\n")).toMatch(
+      /game-twin: type "good" is already declared by @fixture\/game-good/u,
+    );
+  });
+
+  it("refuses --shard with the fast kit", async () => {
+    const problems = await verifyGames({
+      rootDir: FIXTURES,
+      games: await load("@fixture/game-kit"),
+      sdkVersion: "1.2.0",
+      sdkDir: SDK_DIR,
+      workspaceDirs: new Set(),
+      kit: "fast",
+      shard: { index: 1, count: 2 },
+    });
+    expect(problems).toEqual(["--shard runs the full kit only; the fast kit isn't sharded"]);
+  });
+
+  it("records the verified files only after a whole run that passes, and deletes them otherwise", async () => {
+    const root = mkdtempSync(join(tmpdir(), "verified-"));
+    onTestFinished(() => {
+      rmSync(root, { recursive: true, force: true });
+    });
+    const file = join(root, "generated", "verified-files.json");
+    const run = async (extra: Partial<Parameters<typeof verifyGames>[0]>, ...names: string[]) =>
+      verifyGames({
+        rootDir: FIXTURES,
+        games: await load(...(names.length > 0 ? names : ["@fixture/game-kit"])),
+        sdkVersion: "1.2.0",
+        sdkDir: SDK_DIR,
+        workspaceDirs: new Set(),
+        kit: "full",
+        recordIn: root,
+        ...extra,
+      });
+    const recorded = (): string[] =>
+      existsSync(file)
+        ? (JSON.parse(readFileSync(file, "utf8")) as { packages: { name: string }[] }).packages.map(
+            (pkg) => pkg.name,
+          )
+        : [];
+    expect(await run({})).toEqual([]);
+    expect(recorded()).toEqual(["@fixture/game-kit"]);
+    expect(await run({ only: "counter" })).toEqual([]);
+    expect(existsSync(file)).toBe(false);
+    expect(await run({})).toEqual([]);
+    expect(await run({ shard: { index: 1, count: 2 } })).toEqual([]);
+    expect(existsSync(file)).toBe(false);
+    expect(await run({})).toEqual([]);
+    expect((await run({}, "@fixture/game-kitbad")).length).toBeGreaterThan(0);
+    expect(existsSync(file)).toBe(false);
+    // Three full kit runs of the fixture and one of the broken one: see the timeout below.
+  }, 120_000);
+
   it("plays one shard of the full kit with --shard, and every shard together plays the whole run", async () => {
     const games = await load("@fixture/game-kit");
     const run = async (shard?: { index: number; count: number }) => {
@@ -481,6 +545,9 @@ describe("games:verify with the test kit", () => {
       Math.floor((whole?.combos ?? 0) / 2),
     ]);
     expect(shards.reduce((sum, shard) => sum + shard.games, 0)).toBe(whole?.games);
+    for (const shard of shards) {
+      expect([shard.allCombos, shard.comboDigest]).toEqual([whole?.combos, whole?.comboDigest]);
+    }
     // A measured budget (ADR 0004): two full kit runs of the fixture take about 0.7 s on a
     // developer machine; CPU-bound tests have run up to 100x slower on the shared CI runner.
   }, 120_000);

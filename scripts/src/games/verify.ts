@@ -18,7 +18,7 @@ import { ESLint } from "eslint";
 import { satisfies, validRange } from "semver";
 
 import { isAllowedExpression } from "../licences/policy.js";
-import type { CheckedPackage } from "./inputs.js";
+import { removeVerifiedFiles, writeVerifiedFiles, type CheckedPackage } from "./inputs.js";
 import type { LoadedGame } from "./load.js";
 import { packageFileProblems, packedFiles } from "./packages.js";
 
@@ -62,6 +62,13 @@ export interface VerifyOptions {
   readonly checked?: CheckedPackage[];
   /** Receives, per package, how much of the kit it played. */
   readonly played?: KitPlayed[];
+  /**
+   * The root whose `generated/verified-files.json` (./inputs.ts) the run records: a whole run
+   * (no `only`, no `shard`) that passes writes it; any other run deletes it, so
+   * `games:check-inputs` fails closed rather than read a record this run didn't make. Unset, the
+   * file is left alone.
+   */
+  readonly recordIn?: string;
 }
 
 /** How much of the kit one package played. */
@@ -70,6 +77,9 @@ export interface KitPlayed {
   readonly games: number;
   /** Option set and seat count combinations played (in this shard). */
   readonly combos: number;
+  /** Combinations in the whole run, and the fingerprint of their list (`KitReport`). */
+  readonly allCombos: number;
+  readonly comboDigest: string;
 }
 
 /**
@@ -357,7 +367,8 @@ function checkKit(game: LoadedGame, mode: KitMode, options: VerifyOptions): stri
       ...(cpuBudgetMs === undefined ? {} : { cpuBudgetMs }),
       ...(shard === undefined ? {} : { shard }),
     });
-    options.played?.push({ name: game.packageName, games: report.games, combos: report.combos });
+    const { games, combos, allCombos, comboDigest } = report;
+    options.played?.push({ name: game.packageName, games, combos, allCombos, comboDigest });
     return report.failures.map(
       (failure) =>
         `${game.packageName}: kit ${failure.property}${failure.version === undefined ? "" : ` (rules version ${String(failure.version)}${failure.seats === undefined ? "" : `, ${String(failure.seats)} seats`}${failure.seed === undefined ? "" : `, seed ${String(failure.seed)}`})`}: ${failure.message}`,
@@ -395,8 +406,26 @@ function unpackedFiles(
  * after the builds (10 M1).
  */
 export async function verifyGames(options: VerifyOptions): Promise<string[]> {
+  const checked = options.checked ?? [];
+  const problems = await runChecks({ ...options, checked });
+  const { only, shard, recordIn } = options;
+  if (recordIn !== undefined) {
+    if (problems.length === 0 && only === undefined && shard === undefined) {
+      writeVerifiedFiles(recordIn, checked);
+    } else {
+      removeVerifiedFiles(recordIn);
+    }
+  }
+  return problems;
+}
+
+async function runChecks(options: VerifyOptions): Promise<string[]> {
   const problems = checkIdentity(options.games);
   const { only } = options;
+  if (options.shard !== undefined && options.kit !== "full") {
+    // The fast kit judges non-vacuity over each whole rules version (02 §6.3).
+    return [...problems, "--shard runs the full kit only; the fast kit isn't sharded"];
+  }
   const games =
     only === undefined
       ? options.games
