@@ -1,15 +1,18 @@
 import { seededRandom } from "@your-move/testkit";
 import { describe, expect, it } from "vitest";
 
+import type { Movement } from "../engine/index.js";
 import { view as viewOf } from "../engine/present.js";
-import { placeTile } from "../engine/state.js";
-import { facing, game, noRandom, out, placedFor, STRAIGHT } from "../test-support.js";
+import { freeEdgeNotches, legalPlacements } from "../engine/rules.js";
+import { placeMarker, placeTile, setup } from "../engine/state.js";
+import { facing, game, noRandom, OPTIONS, out, placedFor, STRAIGHT } from "../test-support.js";
+import { pointOf } from "./layout.js";
 import {
+  FRAME_BUDGET,
   frameCount,
   positionsAt,
   previewPlacement,
   replayOf,
-  selfEliminationBlocked,
   targetOf,
   walks,
 } from "./plan.js";
@@ -54,45 +57,6 @@ describe("the target and the preview", () => {
     expect(previewPlacement(early, 0, SAFE)).toBeNull();
     const gone = viewOf(game({ markers: [out(3), facing(5, 4, 4)] }), 0);
     expect(previewPlacement(gone, 0, SAFE)).toBeNull();
-  });
-});
-
-describe("the self-elimination rule (paths §3 step 4)", () => {
-  it("blocks a placement that puts the viewer out while another choice keeps them in", () => {
-    const view = viewOf(table([KILLER.tileId, SAFE.tileId]), 0);
-    const bad = previewPlacement(view, 0, KILLER);
-    if (bad === null) throw new Error("no preview");
-    expect(selfEliminationBlocked(view, 0, true, bad)).toEqual({ blocked: true, safeExists: true });
-    expect(selfEliminationBlocked(view, 0, false, bad)).toEqual({
-      blocked: false,
-      safeExists: true,
-    });
-  });
-
-  it("lets the viewer play on when every choice puts them out, and never blocks a safe one", () => {
-    const view = viewOf(table([KILLER.tileId]), 0);
-    const bad = previewPlacement(view, 0, KILLER);
-    if (bad === null) throw new Error("no preview");
-    expect(selfEliminationBlocked(view, 0, true, bad)).toEqual({
-      blocked: false,
-      safeExists: false,
-    });
-    const view2 = viewOf(table([SAFE.tileId]), 0);
-    const good = previewPlacement(view2, 0, SAFE);
-    if (good === null) throw new Error("no preview");
-    expect(selfEliminationBlocked(view2, 0, true, good).blocked).toBe(false);
-  });
-
-  it("agrees with the engine's own validation", () => {
-    const state = table([KILLER.tileId, SAFE.tileId]);
-    const view = viewOf(state, 0);
-    for (const placed of [KILLER, SAFE]) {
-      const preview = previewPlacement(view, 0, placed);
-      if (preview === null) throw new Error("no preview");
-      const verdict = selfEliminationBlocked(view, 0, true, preview);
-      // The two tiles with all rotations: the one blocked here is refused there.
-      expect(verdict.blocked).toBe(preview.eliminatesYou);
-    }
   });
 });
 
@@ -206,5 +170,70 @@ describe("animation frames", () => {
 
   it("keeps every replay within its frame budget", () => {
     expect(frameCount(walks(replay))).toBeLessThanOrEqual(90);
+  });
+});
+
+describe("the frame cap over long replays (A24-S-1)", () => {
+  /** A replay whose markers each cross `hops` tiles (the path need only be shaped like one). */
+  function long(markers: number, hops: number) {
+    const moves = Array.from({ length: markers }, (_, seat) => ({
+      seat,
+      path: Array.from({ length: hops + 1 }, (_, i) => ({ r: (i >> 1) % 6, c: i % 6, n: i % 8 })),
+    }));
+    const movement: Movement = { moves, ends: moves.map(() => null), eliminated: [], collided: [] };
+    return { mover: 0, movement };
+  }
+
+  it("never exceeds the budget, and every marker still ends on its last notch", () => {
+    for (const [markers, hops] of [
+      [1, 140],
+      [2, 70],
+      [4, 60],
+      [8, 30],
+      [3, 3],
+      [1, 1],
+    ] as const) {
+      const replay = long(markers, hops);
+      const all = walks(replay);
+      expect(frameCount(all)).toBeLessThanOrEqual(FRAME_BUDGET);
+      for (const [i, one] of all.entries()) {
+        const path = replay.movement.moves[i]?.path ?? [];
+        const last = path[path.length - 1];
+        expect(one.points.at(-1)).toEqual(last === undefined ? undefined : pointOf(last));
+      }
+    }
+  });
+
+  it("holds for every single-tile replay of seeded late-game states", () => {
+    let replays = 0;
+    let longest = 0;
+    for (let seed = 1; seed <= 30; seed += 1) {
+      const rng = seededRandom(seed);
+      let state = setup({ options: OPTIONS, seats: 2 + (seed % 7), rng });
+      for (let step = 0; step < 200 && state.turn !== null; step += 1) {
+        const seat = state.turn;
+        const before = state;
+        if (state.phase === "markers") {
+          const free = freeEdgeNotches(state);
+          state = placeMarker(state, seat, free[rng.nextInt(free.length)] ?? 0).state;
+          continue;
+        }
+        const legal = legalPlacements(state, seat);
+        state = placeTile(state, seat, legal[rng.nextInt(legal.length)] ?? SAFE, rng).state;
+        const replay = replayOf(viewOf(before, seat), viewOf(state, seat));
+        if (replay === null) continue;
+        replays += 1;
+        const all = walks(replay);
+        longest = Math.max(longest, frameCount(all));
+        expect(frameCount(all)).toBeLessThanOrEqual(FRAME_BUDGET);
+        for (const [i, one] of all.entries()) {
+          const path = replay.movement.moves[i]?.path ?? [];
+          const last = path[path.length - 1];
+          expect(one.points.at(-1)).toEqual(last === undefined ? undefined : pointOf(last));
+        }
+      }
+    }
+    expect(replays).toBeGreaterThan(100);
+    expect(longest).toBeGreaterThan(10);
   });
 });

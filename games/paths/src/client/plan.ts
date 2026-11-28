@@ -9,7 +9,6 @@ import type { Seat } from "@your-move/sdk";
 import {
   livePosition,
   movement,
-  ROTATIONS,
   type Movement,
   type NotchPosition,
   type Placed,
@@ -37,26 +36,6 @@ export function previewPlacement(view: View, seat: Seat, placed: Placed): Previe
   if (target === null || view.phase !== "tiles") return null;
   const result = movement(view.board, view.markers, target, placed);
   return { movement: result, eliminatesYou: result.eliminated.includes(seat) };
-}
-
-/**
- * What the viewer may choose (paths §3 step 4). `safe` says whether any tile and rotation in hand
- * keeps their marker on the board; with `avoidIfPossible`, only those may be played if there are
- * any, so a placement that puts the marker off the board is `blocked`.
- */
-export function selfEliminationBlocked(
-  view: View,
-  seat: Seat,
-  avoidIfPossible: boolean,
-  preview: Preview,
-): { blocked: boolean; safeExists: boolean } {
-  const hand = view.yourHand ?? [];
-  const safeExists = hand.some((tileId) =>
-    Array.from({ length: ROTATIONS }, (_, rotation) => rotation).some(
-      (rotation) => previewPlacement(view, seat, { tileId, rotation })?.eliminatesYou === false,
-    ),
-  );
-  return { blocked: avoidIfPossible && preview.eliminatesYou && safeExists, safeExists };
 }
 
 /** One marker's walk for an animation: the points it passes, in order. */
@@ -102,8 +81,9 @@ export function replayOf(prev: View, next: View): Replay | null {
   if (prev.phase !== "tiles" || next.phase !== "tiles") return null;
   if (prev.markers.length !== next.markers.length) return null;
   const tiles = newTiles(prev, next);
-  const [only] = tiles ?? [];
-  if (only?.placed === undefined || tiles?.length !== 1) return null;
+  if (tiles?.length !== 1) return null;
+  const [only] = tiles;
+  if (only === undefined) return null;
   const result = movement(prev.board, prev.markers, only, only.placed);
   const moved = new Map(result.moves.map((move, i) => [move.seat, result.ends[i] ?? null]));
   const agrees = next.markers.every((marker, seat) => {
@@ -117,14 +97,27 @@ export function replayOf(prev: View, next: View): Replay | null {
 }
 
 /** Frames of animation a replay may take in all; each is `FRAME_MS` long. */
-const FRAME_BUDGET = 90;
+export const FRAME_BUDGET = 90;
 /** Points a marker passes inside one tile path, at most. */
 const MAX_STEPS = 6;
 
 /** The time between frames, in milliseconds. */
 export const FRAME_MS = 40;
 
-/** Every moving marker's points, one marker after another (paths §8). */
+/** `count` of `points`, spread evenly and always ending on the last one. */
+function subsample(points: readonly Point[], count: number): Point[] {
+  if (points.length <= count) return [...points];
+  return Array.from(
+    { length: count },
+    (_, i) => points[Math.ceil(((i + 1) * points.length) / count) - 1],
+  ).flatMap((point) => (point === undefined ? [] : [point]));
+}
+
+/**
+ * Every moving marker's points, one marker after another (paths §8). Each marker gets an equal
+ * share of `FRAME_BUDGET` frames, so a whole replay never exceeds it however long the paths are:
+ * a marker with more points than its share is subsampled evenly, keeping its last point.
+ */
 export function walks(replay: Replay): Walk[] {
   const { moves } = replay.movement;
   const each = Math.floor(FRAME_BUDGET / Math.max(1, moves.length));
@@ -135,7 +128,7 @@ export function walks(replay: Replay): Walk[] {
     return {
       seat: move.seat,
       from: start === undefined ? { x: 0, y: 0 } : pointOf(start),
-      points: walk(hops, steps),
+      points: subsample(walk(hops, steps), each),
     };
   });
 }

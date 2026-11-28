@@ -367,7 +367,10 @@ tests are green in CI.
   art.
 - **Accept:** passes the generic test kit at 2, 3, 5 and 8 players (CPU budget included, T25);
   module rule tables (games/paths.md §9); Playwright 4-player game via a join link on iPhone
-  viewports down to 320 px wide.
+  viewports down to 320 px wide, **with touch emulation** (`hasTouch`, `isMobile`) in every
+  context (alpha A24 does this).
+- The writing-a-game guide revision (first bullet) is deferred to M5's close, once the paths
+  client has been through review.
 
 ## M6 — Bring-your-own dictionaries
 - `BlobStore` (R2 / filesystem with key and path checks), `dictionaries` table, `serverOnly`

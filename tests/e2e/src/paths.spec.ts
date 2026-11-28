@@ -14,7 +14,10 @@ import { PATHS_TEST_TIMEOUT_MS } from "./budgets.js";
 import { expect, test } from "./fixtures.js";
 import { FAR, refocus, shot, shotBothThemes } from "./game-steps.js";
 import { codeFrom, expectAccessible, freshAddress, requestCodeFor, signUp } from "./helpers.js";
-import { isMyTurn, placeMarker, playTile, tilesOnBoard } from "./paths-player.js";
+import { alive, isMyTurn, placeMarker, playTile, tilesOnBoard } from "./paths-player.js";
+
+// Phones: touch in every context (the project's own device settings already have it on iPhone).
+test.use({ hasTouch: true, isMobile: true });
 
 /** Screens from the smallest supported phone up; the corners each player's marker starts in. */
 const SEATS = [
@@ -130,13 +133,14 @@ test("four people play a paths game from a join link and the last marker left wi
     await expect(page.locator(".ym-p-over .ym-p-marker")).toHaveCount(4);
   }
 
-  // Tile turns. Whoever is to play does; the last of the five tries a tile that puts their own
-  // marker off the board, which this game's option allows.
+  // Tile turns. Whoever is to play does. Until someone has gone out, each mover prefers a tile that
+  // puts their own marker off the board (this game's option allows it): corner squares have
+  // three other edge notches, so some tile and turn in a hand of three almost always does, and
+  // the test fails if five turns by four players never find one.
   let placed = 0;
   let eliminated: string | null = null;
   for (let turn = 0; turn < 5; turn += 1) {
     for (const page of pages) await refocus(page);
-    const movers = await Promise.all(pages.map((page) => isMyTurn(page)));
     await expect
       .poll(
         async () => (await Promise.all(pages.map((page) => isMyTurn(page)))).includes(true),
@@ -145,31 +149,31 @@ test("four people play a paths game from a join link and the last marker left wi
       .toBe(true);
     const index = (await Promise.all(pages.map((page) => isMyTurn(page)))).indexOf(true);
     const mover = pages[index];
-    if (mover === undefined) throw new Error(`nobody's turn (${movers.join(",")})`);
-    const doomed = turn === 4;
+    if (mover === undefined) throw new Error("nobody's turn");
     if (turn === 0) {
       await expectAccessible(mover);
       await shot(mover, `paths-tile-phase-${String(SEATS[index]?.width ?? 0)}`);
     }
-    const result = await playTile(mover, doomed ? "be eliminated" : "survive");
+    const result = await playTile(
+      mover,
+      eliminated === null ? ["be eliminated", "survive"] : ["survive", "be eliminated"],
+    );
     placed += 1;
-    if (result.eliminated) eliminated = SEATS[index]?.name ?? null;
+    if (result.eliminated && eliminated === null) eliminated = SEATS[index]?.name ?? null;
     await expect.poll(() => isMyTurn(mover), FAR).toBe(false);
     for (const page of pages) {
       await refocus(page);
       await expect(tilesOnBoard(page)).toHaveCount(placed, FAR);
     }
   }
-  // An elimination, if the last mover's hand had a tile that causes one, is seen by everyone.
-  if (eliminated !== null) {
-    for (const page of pages) {
-      await expect(
-        page
-          .getByRole("list", { name: "Players" })
-          .getByRole("listitem")
-          .filter({ hasText: eliminated }),
-      ).toContainText("out", FAR);
-    }
+  // The elimination is seen by everyone: the player is out in every page's list.
+  expect(
+    eliminated,
+    "someone's hand had a tile that puts their marker off the board",
+  ).not.toBeNull();
+  const names: string[] = SEATS.map((seat) => seat.name);
+  for (const page of pages) {
+    await expect.poll(() => alive(page, names), FAR).toEqual(names.filter((n) => n !== eliminated));
   }
   await expectAccessible(ann);
   // The dark theme's colours are checked too.
@@ -179,11 +183,11 @@ test("four people play a paths game from a join link and the last marker left wi
   await shotBothThemes(ann, "paths-board-320");
   await shotBothThemes(cy, "paths-board-390");
 
-  // The rest resign, one after another, until one marker is left: it wins.
-  const alive = SEATS.map((seat) => seat.name).filter((name) => name !== eliminated);
-  const winner = alive[0] ?? "Ann";
-  for (const name of alive.slice(1)) {
-    const page = pages[SEATS.findIndex((seat) => seat.name === name)];
+  // Everyone still in but one resigns, one after another: the last marker left wins.
+  const standing = await alive(bob, names);
+  const winner = standing[0] ?? "Ann";
+  for (const name of standing.slice(1)) {
+    const page = pages[names.indexOf(name)];
     if (page === undefined) throw new Error("no page");
     await refocus(page);
     await page.getByRole("button", { name: "Menu" }).click();
@@ -195,7 +199,7 @@ test("four people play a paths game from a join link and the last marker left wi
     const results = page.getByRole("region", { name: "Final result" });
     await expect(results).toBeVisible(FAR);
     await expect(results.getByRole("listitem").first()).toContainText(
-      page === pages[SEATS.findIndex((seat) => seat.name === winner)] ? "You" : winner,
+      page === pages[names.indexOf(winner)] ? "You" : winner,
     );
     await expect(page.getByRole("region", { name: "How it ended" })).toBeVisible();
   }

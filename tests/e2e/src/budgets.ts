@@ -103,6 +103,8 @@ export const ADD_PLAYER_TEST_TIMEOUT_MS = 90_000;
  * join link used three times, Start, four markers placed in two steps, five tile turns each
  * checked on every page, and three resignations to the end, across four browser contexts at
  * widths from 320 px. The full words game's steps with two more people, so 150 s against its 120 s.
- * Measured locally in the pinned image: see the A24 review record; to be re-measured on CI.
+ * PROVISIONAL: a margin over local runs (about 9 s Chromium, 13 s WebKit in the pinned image), not
+ * a CI measurement; to be re-measured on the CI runner from the first pipeline that runs it, and
+ * then set from that.
  */
 export const PATHS_TEST_TIMEOUT_MS = 150_000;

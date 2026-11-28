@@ -58,14 +58,23 @@ function withoutScreenshotNoise(violations: Violation[], testInfo: TestInfo): Vi
   );
 }
 
-/** A page in a context of its own, with the project's device settings, and its CSP check. */
+/** The device settings a person's context takes, as the project and the test's `use` give them. */
+interface Device {
+  readonly baseURL: string | undefined;
+  readonly viewport: { width: number; height: number } | null | undefined;
+  readonly userAgent: string | undefined;
+  readonly deviceScaleFactor: number | undefined;
+  readonly isMobile: boolean | undefined;
+  readonly hasTouch: boolean | undefined;
+}
+
+/** A page in a context of its own with the given device settings, and its CSP check. */
 async function openPlayer(
   browser: Browser,
+  device: Device,
   testInfo: TestInfo,
-  who: string,
-): Promise<{ page: Page; close: () => Promise<void> }> {
-  const { baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch } =
-    testInfo.project.use;
+): Promise<{ page: Page; violations: () => Promise<Violation[]>; close: () => Promise<void> }> {
+  const { baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch } = device;
   const context = await browser.newContext({
     ...(baseURL === undefined ? {} : { baseURL }),
     ...(viewport === undefined ? {} : { viewport }),
@@ -78,11 +87,8 @@ async function openPlayer(
   const collect = await trackCspViolations(page);
   return {
     page,
-    close: async () => {
-      const violations = withoutScreenshotNoise(await collect(), testInfo);
-      await context.close();
-      expect(violations, `Content-Security-Policy violations (${who})`).toEqual([]);
-    },
+    violations: async () => withoutScreenshotNoise(await collect(), testInfo),
+    close: () => context.close(),
   };
 }
 
@@ -130,22 +136,44 @@ export const test = base.extend<
    * project's device settings, for tests where two people play each other. It fails the test on a
    * Content-Security-Policy violation like the first.
    */
-  friend: async ({ browser }, use, testInfo) => {
-    const player = await openPlayer(browser, testInfo, "second player");
+  friend: async (
+    { browser, baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch },
+    use,
+    testInfo,
+  ) => {
+    const device = { baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch };
+    const player = await openPlayer(browser, device, testInfo);
     await use(player.page);
+    const violations = await player.violations();
     await player.close();
+    expect(violations, "Content-Security-Policy violations (second player)").toEqual([]);
   },
   /**
    * Two more people, for games of four (the paths game's e2e, alpha A24): each a page in a context
-   * of its own, like `friend`, and held to the same Content-Security-Policy check.
+   * of its own, like `friend`, with the same device settings (the test's `use` included, so a
+   * phone test gets touch in every context). Every context is closed and every page's
+   * Content-Security-Policy violations collected before the one expectation, so a failure in one
+   * never hides another's.
    */
-  crowd: async ({ browser }, use, testInfo) => {
+  crowd: async (
+    { browser, baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch },
+    use,
+    testInfo,
+  ) => {
+    const device = { baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch };
     const players = [
-      await openPlayer(browser, testInfo, "third player"),
-      await openPlayer(browser, testInfo, "fourth player"),
+      await openPlayer(browser, device, testInfo),
+      await openPlayer(browser, device, testInfo),
     ];
     await use(players.map((player) => player.page));
-    for (const player of players) await player.close();
+    const found: Violation[][] = [];
+    for (const player of players) {
+      found.push(await player.violations().catch(() => []));
+      await player.close().catch(() => undefined);
+    }
+    expect(found.flat(), "Content-Security-Policy violations (third and fourth players)").toEqual(
+      [],
+    );
   },
 });
 

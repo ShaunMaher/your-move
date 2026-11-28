@@ -16,6 +16,7 @@ import {
   engines,
   livePosition,
   samePosition,
+  selfElimination,
   type Action,
   type NotchPosition,
   type Options,
@@ -29,7 +30,6 @@ import {
   positionsAt,
   previewPlacement,
   replayOf,
-  selfEliminationBlocked,
   targetOf,
   walks,
   type Replay,
@@ -189,7 +189,9 @@ function Table(props: Props & { readonly options: Options }): ReactElement {
       : previewPlacement(view, seat, placed);
   const avoid = options.selfElimination === "avoidIfPossible";
   const verdict =
-    preview === null || seat === null ? null : selfEliminationBlocked(view, seat, avoid, preview);
+    placed === null || target === null || seat === null
+      ? null
+      : selfElimination(view.board, view.markers, seat, target, hand, avoid, placed);
   const ghost: Ghost | null = placed === null || preview === null ? null : { placed, preview };
 
   const taken = view.markers.flatMap((marker) => {

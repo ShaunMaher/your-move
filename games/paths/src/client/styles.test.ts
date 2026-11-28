@@ -95,6 +95,22 @@ describe("the board's colours", () => {
       },
     );
 
+    it("keeps the ink tokens readable on the shell's own page colours, which the board sits on", () => {
+      // apps/web/src/styles.css: --color-bg in each theme.
+      const shell = { light: "#f7f7f5", dark: "#151515" };
+      for (const [theme, tokens] of [
+        ["light", LIGHT],
+        ["dark", DARK],
+      ] as const) {
+        for (const name of ["ink", "muted", "bad", "ok"] as const) {
+          expect(contrast(tokens[name], shell[theme])).toBeGreaterThanOrEqual(4.5);
+        }
+        expect(contrast(tokens.accent, shell[theme])).toBeGreaterThanOrEqual(3);
+        expect(contrast(tokens.ink, shell[theme])).toBeGreaterThanOrEqual(3);
+      }
+      expect(STYLE_TEXT).toMatch(/\.ym-p \{[^}]*background: transparent/u);
+    });
+
     it("shows every marker against the squares and tiles: one of its two outlines always stands out", () => {
       for (const ground of [tokens.cell, tokens.tile, tokens.paper, tokens.path]) {
         const best = Math.max(contrast(HALO.dark, ground), contrast(HALO.light, ground));
@@ -148,9 +164,11 @@ describe("the board's colours", () => {
   it("keeps hand tiles and buttons at 44 px or more, and 40 px or more on the smallest phones", () => {
     expect(STYLE_TEXT).toContain("--p-hand: 4.5rem");
     expect(STYLE_TEXT).toContain("@media (max-width: 359px) { .ym-p { --p-hand: 4rem; } }");
+    // Every button of the marker phase, "Choose another square" included, is 44 CSS px or more.
     expect(STYLE_TEXT).toMatch(
-      /\.ym-p-actions button, \.ym-p-notches button \{[^}]*min-height: 2\.75rem/u,
+      /\.ym-p-actions button, \.ym-p-picker button \{[^}]*min-height: 2\.75rem; min-width: 2\.75rem/u,
     );
+    expect(STYLE_TEXT).toContain(".ym-p-cancel { width: 100%;");
     expect(STYLE_TEXT).toMatch(/\.ym-p-notches button \{ min-height: 3rem/u);
   });
 

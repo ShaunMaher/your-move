@@ -109,7 +109,7 @@ const vars = (tokens: Tokens): string =>
 const CSS = `
 .ym-p { ${vars(LIGHT)} --p-halo-dark: ${HALO.dark}; --p-halo-light: ${HALO.light};
   --p-hand: 4.5rem; color-scheme: light;
-  color: var(--p-ink); background: var(--p-paper); display: flex; flex-direction: column;
+  color: var(--p-ink); background: transparent; display: flex; flex-direction: column;
   gap: 0.5rem; max-width: 34rem; margin: 0 auto; padding: 0.5rem 0 calc(0.5rem + env(safe-area-inset-bottom));
   font-family: system-ui, -apple-system, sans-serif; font-size: 1rem; box-sizing: border-box; }
 :root[data-theme="dark"] .ym-p { ${vars(DARK)} color-scheme: dark; }
@@ -183,7 +183,7 @@ const CSS = `
 .ym-p-chip { font-size: 0.8rem; font-weight: 700; color: var(--p-muted); }
 .ym-p-chip[data-eliminates="true"] { color: var(--p-bad); }
 .ym-p-actions { display: flex; gap: 0.5rem; }
-.ym-p-actions button, .ym-p-notches button { min-height: 2.75rem; min-width: 2.75rem; padding: 0 0.9rem;
+.ym-p-actions button, .ym-p-picker button { min-height: 2.75rem; min-width: 2.75rem; padding: 0 0.9rem;
   border: 2px solid var(--p-muted); border-radius: 8px; background: var(--p-paper); font-weight: 700; }
 .ym-p-actions button { flex: 1 1 0; }
 .ym-p-actions .ym-p-primary { flex-grow: 2; background: var(--p-primary-bg); color: var(--p-primary-ink);
@@ -192,6 +192,7 @@ const CSS = `
 .ym-p-picker legend { font-weight: 700; padding: 0 0.25rem; }
 .ym-p-notches { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-top: 0.25rem; }
 .ym-p-notches button { min-height: 3rem; padding: 0 0.25rem; }
+.ym-p-cancel { width: 100%; margin-top: 0.5rem; }
 .ym-p-final { margin: 0; padding: 0.5rem 0.75rem; border: 2px solid var(--p-ink); border-radius: 8px; }
 .ym-p-final h2 { margin: 0 0 0.25rem; font-size: 1.125rem; }
 .ym-p-final ul { margin: 0; padding: 0; list-style: none; }

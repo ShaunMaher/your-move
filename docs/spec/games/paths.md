@@ -227,7 +227,7 @@ Options = {
 ## 8. UI notes (games/paths client)
 
 - Squares are `min(56 pt, (viewport width − 2 × 16 px) / 6)`, so the board fits a 320 px screen
-  (48 px squares). The board is as wide as the shell's content column up to `6 × 56 pt`, so the
+  (48 px squares; sizes here are CSS px, `pt` meaning the same as elsewhere in the spec). The board is as wide as the shell's content column up to `6 × 56 pt`, so the
   page's 16 px gutters give exactly that formula; markers on the board's edge notches hang half
   outside the board, into the gutter.
 - **Layout**, top to bottom: the players (marker, name, tiles held or "out"), the turn line, the
@@ -260,18 +260,27 @@ Options = {
     with the new view's markers it animates the paths (the markers move along the same curves the
     tiles draw). Anything else (several moves at once after a missed update, a resignation, a
     different game) just shows the new positions.
-  - A replay takes at most 90 frames of 40 ms in all, one marker after another in seat order; a
+  - A replay takes at most 90 frames of 40 ms in all (each marker an equal share; a marker with
+    more points than its share is subsampled evenly and always ends on its last point), one
+    marker after another in seat order; a
     marker that went out stays at the edge until it ends. The status line says what happened ("Ann
     placed a tile. Bo ran off the board.") whether or not the person saw it move.
 - **Marker phase** in two steps, because edge notches are too close together to tap: tap an edge
-  square, then pick one of its free edge notches from large (≥ 44 pt) buttons. Occupied notches are
+  square, then pick one of its free edge notches from large buttons. Occupied notches are
   disabled. Picking a notch places the marker (the second step is the action); "Choose another
-  square" goes back. The square's notches are drawn on the board, the one a button is focused or
+  square" goes back. Every button the picker shows, "Choose another square" included, is at least
+  44 × 44 CSS px (WCAG 2.5.5; the "pt" of the rest of the spec means CSS px), and the e2e measures
+  them.
+  - Trade-off, accepted for the alpha: with no confirm after the notch, a mis-tap on a 44 px
+    button is a permanent marker; the picker's separate step, the notch dots on the board and the
+    focus-and-hover aim mark keep that rare. A "Place marker" confirm is the change if it isn't. The square's notches are drawn on the board, the one a button is focused or
   hovered on larger, and focus moves to the first notch button.
 - **Markers** are told apart by shape as well as colour, in the Okabe–Ito colour set, by seat: blue
   circle, orange square, green triangle, pink diamond, sky-blue star, red hexagon, yellow cross, grey
   ring. Each is drawn with a dark and a light outline so it shows on a tile or an empty square of
   either theme. The players list names each marker ("blue circle marker") for screen readers.
+- Seats that share a display name (a join link takes anyone) are written with their marker's look,
+  "Ann (orange square)", in every line of text the board writes.
 - **Accessibility**: every square has an accessible name ("Row 2, column 5, empty, your marker
   faces this square" / "… tile placed"; another player's marker facing it adds "Sam's marker faces
   this square"; an edge square you can pick in the marker phase adds ", choose a notch"); notch
@@ -281,7 +290,8 @@ Options = {
 - **Theme**: the board follows the page's theme like the shell's own screens (07 §5): light by
   default, dark under `prefers-color-scheme: dark` unless the person chose light, and dark when
   they chose dark. Its colours are tokens (custom properties of the board), each theme's contrast
-  tested.
+  tested. The board has no background of its own: it sits on the shell's page, and its ink tokens
+  are tested against the shell's light and dark page colours as well as its own.
 - **Finished game**: the shell's result card owns the ranks; the board adds how the game ended and
   the tiles each player still held (`view.hands`).
 - Options form: the hand size (1–3) and the self-elimination variant, as radios with plain-language

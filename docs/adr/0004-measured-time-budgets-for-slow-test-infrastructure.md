@@ -40,8 +40,8 @@ hangs slow to fail and would blur what the tests are measuring.
     second person's sign-up from its invitation email, a pass each and the unsubscribe page) 60 s
     (`INVITE_TEST_TIMEOUT_MS`, 6–10 s locally), and the paths game in `paths.spec.ts` (alpha A24:
     four sign-ins, a join link used three times, four markers, five tile turns and three
-    resignations across four contexts) 150 s (`PATHS_TEST_TIMEOUT_MS`, figures in the A24 review
-    record). These are
+    resignations across four contexts) 150 s (`PATHS_TEST_TIMEOUT_MS`, provisional: 9–13 s locally, to be set from the first CI
+    measurement). These are
     margins over local measurements, not CI ones; each is re-measured
     on the CI runner from the first pipeline that runs it, and then set from that.
   - CI runs one worker per job.

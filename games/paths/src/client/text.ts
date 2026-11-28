@@ -5,6 +5,7 @@
  */
 import type { GameEnvelope } from "@your-move/sdk";
 
+import { lookName } from "./art.js";
 import { notchName } from "./layout.js";
 
 /**
@@ -12,13 +13,18 @@ import { notchName } from "./layout.js";
  *
  * Every seat is shown by its display name alone. An AI seat must also be labelled as one (08 T31);
  * the alpha has no AI seats, so that label arrives with the AI milestone, together with the
- * `players` rows' `kind` and `aiOwnerName` this function would then read.
+ * `players` rows' `kind` and `aiOwnerName` this function would then read. Seats that share a
+ * display name get their marker's look added ("Ann (orange square)"), so text never says only "Ann".
  */
 export function seatNames(game: GameEnvelope, seats: number): string[] {
-  return Array.from({ length: seats }, (_, seat) => {
+  const names = Array.from({ length: seats }, (_, seat) => {
     const player = game.players.find((row) => row.seat === seat);
     return player?.displayName ?? `Seat ${String(seat + 1)}`;
   });
+  // People may share a display name (a join link takes anyone): the marker tells them apart.
+  return names.map((name, seat) =>
+    names.filter((other) => other === name).length > 1 ? `${name} (${lookName(seat)})` : name,
+  );
 }
 
 /** "1 tile", "2 tiles". */

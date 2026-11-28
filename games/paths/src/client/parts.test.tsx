@@ -21,6 +21,19 @@ describe("the module", () => {
   });
 });
 
+describe("seat names", () => {
+  it("add the marker's look where two seats share a display name", async () => {
+    const { seatNames } = await import("./text.js");
+    const { envelope } = await import("../test-support.js");
+    expect(seatNames(envelope(["Ann", "Bo", "Ann"], 0), 3)).toEqual([
+      "Ann (blue circle)",
+      "Bo",
+      "Ann (green triangle)",
+    ]);
+    expect(seatNames(envelope(["Ann", null], 0), 2)).toEqual(["Ann", "Seat 2"]);
+  });
+});
+
 describe("OptionsForm", () => {
   it("offers the hand size and the self-elimination rule, defaulting to the catalog's", () => {
     render(<OptionsForm catalog={CATALOG} value={undefined} onChange={vi.fn()} />);
