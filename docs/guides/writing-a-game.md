@@ -334,7 +334,11 @@ The `test` object drives the generic kit (02 §6):
   and the same summary as the public's for every seat not to act. The kit checks both at every
   step of every game, so keep per-viewer conveniences out of the view; only a seat to act may get
   its own summary ("your turn"), and the envelope already says who the viewer is. Never set it
-  for a game with hidden hands. **The kit can't tell if your perturbation stops covering a hidden
+  for a game with hidden hands. The kit doesn't check what the seat to act learns from its
+  summary or from `validate` and `preview` beyond the perturbation comparison, so with the flag
+  set you **must** test that `perturbHidden` covers your whole hidden set (pairs'
+  `kit-hooks.test.ts` checks that only the hidden cards change and that they change whenever two
+  of their faces differ). **The kit can't tell if your perturbation stops covering a hidden
   part**: a hook that leaves the deck alone passes as long as hands change, and the secrecy check
   then never tests the deck. Write a test that it changes every hidden part (paths'
   `kit-hooks.test.ts` checks that the deck order itself changes for the public viewer, for a

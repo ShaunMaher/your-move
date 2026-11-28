@@ -552,16 +552,21 @@ plays exactly these hooks, so a game that needs a dictionary supplies one throug
      differs from `s` instead (it requires `hiddenInformation: true`). The flag means exactly
      this: **while the game is in progress, every seat and the public get the same view**
      (identical JSON), and every seat not in `toAct` the same summary as the public, so only the
-     seats to act may get a different summary ("your turn"). So nothing is hidden from one viewer
-     that another sees, e.g. a game whose only hidden information is the deck order, or a memory
-     game's face-down cards (games/pairs.md §8.7). A module that sets it keeps per-viewer
-     conveniences (which seat is yours) out of the view and the summary: they come from the
-     envelope (05), which already says who the viewer is and who is to act. The kit checks the
-     flag at every step of every game of a module that sets it, and fails the module on any two
-     viewers, seats or the public, whose views differ, and on any seat not to act whose summary
-     differs from the public's (built with the pairs engine slice, 10 §Pairs game; review
-     A25-S-1). A weaker reading, the same perturbation for every viewer, wouldn't do: a hand
-     game that set the flag with a deck-only `perturbHidden` would pass it;
+     seats to act may get a different summary ("your turn"), e.g. a game whose only hidden
+     information is the deck order, or a memory game's face-down cards (games/pairs.md §8.7). A
+     module that sets it keeps per-viewer conveniences (which seat is yours) out of the view and
+     the summary: they come from the envelope (05), which already says who the viewer is and who
+     is to act. The kit checks exactly this at every step of every game of a module that sets it:
+     it fails the module on any two viewers, seats or the public, whose views differ, and on any
+     seat not to act whose summary differs from the public's (built with the pairs engine slice,
+     10 §Pairs game; review A25-S-1). It does **not** check that the seats to act learn nothing
+     more: their summaries and their `validate` and `preview` answers are covered only by the
+     perturbation comparison below, so they are secret only as far as `perturbHidden` changes
+     everything hidden. A module that sets the flag therefore MUST have its own test that
+     `perturbHidden` covers its whole hidden set (pairs' `kit-hooks.test.ts` does; review
+     A25-S2-1, S2-2). A stronger check, that under the flag those answers depend only on the view,
+     is backlog (10). A weaker reading of the flag, the same perturbation for every viewer,
+     wouldn't do: a hand game that set the flag with a deck-only `perturbHidden` would pass it;
    - `validate` and `preview` results, including `detail`, are identical for `s` and `s'`, for
      legal actions from `randomAction` **and** for possibly-illegal ones from `randomAnyAction`;
    - the `record` from `apply`/`onResign`/`onTimeout` by any seat is identical for `s` and `s'`
