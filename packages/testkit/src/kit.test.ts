@@ -309,6 +309,88 @@ describe("runKit's static checks", () => {
     expect(run(10_000)).toEqual([]);
   });
 
+  /**
+   * The toy game whose worst-case states are marked, with `validate` wrapped: `slow(n)` is told
+   * the 1-based count of worst-case calls so far (game play isn't counted) and may waste time.
+   */
+  const marked = (slow: (call: number) => void) => {
+    const toy = toyGame();
+    const calls = { count: 0 };
+    const def = {
+      ...toy,
+      validate: (...args: Parameters<typeof toy.validate>) => {
+        if (args[0].marker === 7) {
+          calls.count += 1;
+          slow(calls.count);
+        }
+        return toy.validate(...args);
+      },
+      test: {
+        ...toy.test,
+        worstCase: (...args: Parameters<typeof toy.test.worstCase>) =>
+          toy.test.worstCase(...args).map((c) => ({ ...c, state: { ...c.state, marker: 7 } })),
+      },
+    };
+    return { engines: asEngines(def), calls };
+  };
+  /** Waits on the clock for `ms` milliseconds: wall time, as a preemption or a pause costs. */
+  const busyWait = (ms: number) => {
+    const until = performance.now() + ms;
+    while (performance.now() < until) {
+      // Spinning, not sleeping: the kit's runs are synchronous.
+    }
+  };
+  // One option input, so two worst-case inputs (two and three seats), one game each.
+  const cpuOnly = (cpuBudgetMs: number): KitOptions => ({
+    mode: "fast",
+    games: 1,
+    optionInputs: [{}],
+    cpuBudgetMs,
+  });
+
+  it("fails a module slow on every call, after timing each over-budget sample three times", () => {
+    const { engines, calls } = marked(() => {
+      busyWait(0.5);
+    });
+    const failures = runKit(engines, cpuOnly(0.1)).failures.map((f) => f.message);
+    expect(failures).toHaveLength(2);
+    expect(failures[0]).toMatch(
+      /^worstCase input 0 is over the 0\.1 ms budget at the 99th percentile \(2 samples over, the slowest \d+\.\d\d ms; a sample is the fastest of 3 runs\)$/u,
+    );
+    // Per input: the validity check, 10 warm-up runs, then 3 runs of each sample until one more
+    // sample than the 1 % allowance (1 of 100) is over budget.
+    expect(calls.count).toBe(2 * (1 + 10 + 2 * 3));
+  });
+
+  it("reports the slowest sample, which is the fastest of its runs", () => {
+    // Each sample's runs take 3, 2 and 1 ms (calls 12–14 are the first sample, after the validity
+    // check and the warm-up runs): every sample is 1 ms.
+    const { engines } = marked((call) => {
+      busyWait(call <= 11 ? 0.2 : 3 - ((call - 12) % 3));
+    });
+    const [message] = runKit(engines, cpuOnly(0.5)).failures.map((f) => f.message);
+    const slowest = Number(/the slowest (\d+\.\d\d) ms/u.exec(message ?? "")?.[1]);
+    // At least the 1 ms that was waited, and well short of the 3 ms run it must have ignored.
+    expect(slowest).toBeGreaterThanOrEqual(1);
+    expect(slowest).toBeLessThan(2.5);
+  });
+
+  it("passes a module slow only on an occasional call, as a preempted or paused run is", () => {
+    // Every 7th worst-case call is 5× over budget: about 14 of 100 single runs, far over the 1 %
+    // allowance, but no three back-to-back runs hold more than one of them.
+    let slowCalls = 0;
+    const { engines, calls } = marked((call) => {
+      if (call % 7 === 0) {
+        slowCalls += 1;
+        busyWait(10);
+      }
+    });
+    expect(runKit(engines, cpuOnly(2)).failures).toEqual([]);
+    // The slow calls really happened, often enough to fail a check of single runs.
+    expect(slowCalls).toBeGreaterThanOrEqual(2 * 10);
+    expect(calls.count).toBeGreaterThanOrEqual(2 * (1 + 10 + 100));
+  });
+
   it("reports a worstCase that throws", () => {
     const toy = toyGame();
     const report = runKit(

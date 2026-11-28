@@ -10,15 +10,26 @@ import type { KitOptions } from "./types.js";
 
 /** Untimed runs first, so the timed ones measure warm code rather than the JIT. */
 const WARM_UP_RUNS = 10;
-/** Timed runs per `worstCase` input. */
-const RUNS = { fast: 100, full: 300 } as const;
+/** Timed samples per `worstCase` input. */
+const SAMPLES = { fast: 100, full: 300 } as const;
+/**
+ * Back-to-back runs per sample; the sample is the fastest of them. A run the host preempted or
+ * paused for garbage collection is slow on its own, while code that really is slow is slow in
+ * every one (a full `pnpm test`, 16 threads busy, showed single 9 ms runs of a 0.5 ms p99 input).
+ */
+const REPETITIONS = 3;
 
 /**
  * The CPU budget (02 §6.6, 08 T25): `validate` + `preview` + `apply` on each `worstCase` input,
- * timed over many runs on the host running the kit, after warm-up runs; the 99th percentile must
- * stay within the budget (`cpuBudgetMs`, default 5 ms). The slowest 1 % of runs are dropped, so a
- * single garbage-collection pause doesn't fail a correct module, and timing stops as soon as more
- * runs than that are over budget, so a slow module fails quickly.
+ * timed on the host running the kit, after warm-up runs. Each timed sample is the fastest of
+ * `REPETITIONS` back-to-back runs on fresh copies of the state, and the 99th percentile of the
+ * samples must stay within the budget (`cpuBudgetMs`, default 5 ms). The slowest 1 % of samples are
+ * dropped, and timing stops as soon as more samples than that are over budget, so a slow module
+ * fails quickly.
+ *
+ * A sample's remaining runs are skipped once one is within budget: the fastest run is then within
+ * budget whatever the others take, so the verdict and the slowest over-budget sample are exactly
+ * those of always running all of them, and a fast module costs about one run per sample.
  *
  * A worst case must be a real move of its combination: a game with that many seats, its seat in
  * `toAct` and its action valid; and a playable seat count must have at least one, or the check
@@ -38,9 +49,9 @@ export function checkCpu(
     report.fail("cpu", `cpuBudgetMs must be a positive number; it is ${String(budget)}`, where);
     return;
   }
-  const runs = RUNS[kitOptions.mode];
-  // Runs allowed over budget: those above the 99th percentile.
-  const allowed = runs - Math.ceil(runs * 0.99);
+  const samples = SAMPLES[kitOptions.mode];
+  // Samples allowed over budget: those above the 99th percentile.
+  const allowed = samples - Math.ceil(samples * 0.99);
   let returned: unknown;
   try {
     returned = def.test.worstCase(options, seats, seededRandom(seed));
@@ -75,24 +86,33 @@ export function checkCpu(
         report.fail("cpu", `${at}: the action doesn't validate (${verdict.code})`, where);
         continue;
       }
-      let over = 0;
-      let slowest = 0;
-      for (let run = 0; run < WARM_UP_RUNS + runs && over <= allowed; run += 1) {
+      /** One run of the three calls on a fresh copy of the state, in milliseconds. */
+      const time = (seed: number): number => {
         const copy = jsonClone(state);
         const start = performance.now();
         def.validate(copy, seat, action, resources);
         def.preview?.(copy, seat, action, resources);
-        def.apply(copy, seat, action, seededRandom(run));
-        const time = performance.now() - start;
-        if (run >= WARM_UP_RUNS && time > budget) {
+        def.apply(copy, seat, action, seededRandom(seed));
+        return performance.now() - start;
+      };
+      for (let run = 0; run < WARM_UP_RUNS; run += 1) time(run);
+      let over = 0;
+      let slowest = 0;
+      for (let sample = 0; sample < samples && over <= allowed; sample += 1) {
+        // Every run of a sample does the same work: the same state, action and random seed.
+        let fastest = time(sample);
+        for (let run = 1; run < REPETITIONS && fastest > budget; run += 1) {
+          fastest = Math.min(fastest, time(sample));
+        }
+        if (fastest > budget) {
           over += 1;
-          slowest = Math.max(slowest, time);
+          slowest = Math.max(slowest, fastest);
         }
       }
       if (over > allowed) {
         report.fail(
           "cpu",
-          `${at} is over the ${String(budget)} ms budget at the 99th percentile (${String(over)} runs over, up to ${slowest.toFixed(2)} ms)`,
+          `${at} is over the ${String(budget)} ms budget at the 99th percentile (${String(over)} samples over, the slowest ${slowest.toFixed(2)} ms; a sample is the fastest of ${String(REPETITIONS)} runs)`,
           where,
         );
       }

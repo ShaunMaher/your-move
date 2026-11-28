@@ -570,7 +570,11 @@ plays exactly these hooks, so a game that needs a dictionary supplies one throug
    ends the game itself), and may also resign; only a seat that has acted times out.
 6. **CPU budget**: per-call CPU for `validate` + `apply` (and `preview`) on the `worstCase` inputs
    stays within the budget in 08 T25 at the 99th percentile, timed after warm-up runs (100 timed
-   runs per input in fast mode, 300 in full). The budget is measured **on the host running the
+   samples per input in fast mode, 300 in full). Each sample is the **fastest of three
+   back-to-back runs** on fresh copies of the state, so a run the host preempted or paused (a busy
+   machine, garbage collection) doesn't count against the module, while code that is really slow
+   is slow in all three; the kit may skip a sample's remaining runs once one is within budget,
+   which doesn't change the result. The budget is measured **on the host running the
    kit**; `pnpm games:verify --cpu-budget-ms <n>`, or the `KIT_CPU_BUDGET_MS` variable (read by every kit run without an explicit budget; CI
    sets it to its calibrated value, 08 T25), sets it (raising it for a host slower than the
    reference hardware, or lowering it). `worstCase` must not be vacuous: it returns at least one
