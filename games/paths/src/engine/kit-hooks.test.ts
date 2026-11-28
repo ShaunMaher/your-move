@@ -133,6 +133,19 @@ describe("the kit hooks (02 §6)", () => {
   });
 
   it.each([2, 3, 5, 8])(
+    "keeps one input per position at %i players, under either variant and several seeds",
+    (seats) => {
+      for (const selfElimination of ["avoidIfPossible", "allowed"] as const) {
+        for (const seed of [1, 2, 3]) {
+          const options = { ...OPTIONS, handSize: 1, selfElimination } satisfies Options;
+          const cases = testHooks.worstCase(options, seats, seededRandom(seats * 10 + seed));
+          expect(new Set(cases.map(({ state }) => state)).size).toBe(cases.length);
+        }
+      }
+    },
+  );
+
+  it.each([2, 3, 5, 8])(
     "finds legal late-game worst cases at %i players, one of them putting the mover out",
     (seats) => {
       for (const options of [OPTIONS, { ...OPTIONS, handSize: 1 } satisfies Options]) {

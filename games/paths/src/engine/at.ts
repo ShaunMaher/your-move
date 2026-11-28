@@ -1,5 +1,5 @@
 /**
- * Small array helpers for the engine.
+ * Small helpers for the engine.
  */
 
 /**

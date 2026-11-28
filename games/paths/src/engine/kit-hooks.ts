@@ -97,7 +97,9 @@ function optionInputs(): readonly unknown[] {
 }
 
 /** How many random games `worstCase` searches, and how many states it keeps. */
-const SEARCH_GAMES = 6;
+// Measured (review A22-S2-1): with 6 games the inputs at 3 and 8 seats were 4–5× cheaper than
+// positions random play reaches; 150 games find them and add about a second to a fast kit run.
+const SEARCH_GAMES = 150;
 const KEEP = 4;
 
 /** A candidate input and the tile paths `validate` + `apply` trace for it. */
@@ -144,7 +146,7 @@ function candidates(state: State, seat: Seat): { best: Candidate; eliminating?: 
  * The most expensive inputs for the CPU budget (02 §6.6, paths §7). A heuristic search, not a
  * proof: seeded random games are played to their end, every tile turn is costed by
  * {@link candidates}, and the `KEEP` costliest states are kept (one input each), plus the costliest
- * placement that puts the mover out if none of those does.
+ * placement that puts the mover out if none of those does and its position isn't kept already.
  */
 function worstCase(
   options: Options,
@@ -170,7 +172,14 @@ function worstCase(
   const byCost = (a: Candidate, b: Candidate): number => b.cost - a.cost;
   const kept = best.sort(byCost).slice(0, KEEP);
   const [worstExit] = eliminating.sort(byCost);
-  if (worstExit !== undefined && !kept.some((candidate) => candidate.eliminates)) {
+  // Added only when no kept input puts the mover out and its position isn't already kept (under
+  // `allowed` the costliest placement of a kept position may differ from its costliest exit).
+  if (
+    worstExit !== undefined &&
+    !kept.some(
+      (candidate) => candidate.eliminates || candidate.input.state === worstExit.input.state,
+    )
+  ) {
     kept.push(worstExit);
   }
   return kept.map((candidate) => candidate.input);
