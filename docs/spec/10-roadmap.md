@@ -386,8 +386,39 @@ tests are green in CI.
 
 ## M7 — Accounts for children (pending Q20)
 - Scope decided by Q20 (e.g. adult-managed profiles without email, device sign-in codes issued by the
-  adult, restricted capabilities). Requires a privacy review first. (The minimum-age confirmation
-  and parent-account guidance ship in M4.)
+  adult, restricted capabilities; see the household-profiles proposal below). Requires a privacy
+  review first. (The minimum-age confirmation and parent-account guidance ship in M4.)
+
+### Proposal: household profiles (2026-11-28, not decided)
+Recorded for the privacy review; nothing here is committed until Q20 (b) is decided. Everything
+below is proposed.
+- **Profiles under one email**, like a streaming service's household: an email address would hold
+  one or more profiles, each adult or child, each with its own display name, games and settings.
+- **Child profiles** would be created and named by an adult profile that has confirmed it is an
+  adult (a separate, higher age than `MIN_AGE`). A child profile would have no email of its own and
+  nothing else collected about the child.
+- **Sign-in:** an alternative to Q20 (b)'s code the adult generates on a device. The household's
+  sign-in email would carry one code per profile, each naming its profile; the adult reads the right
+  one to the child, who enters it on their own device. The sign-in page would answer exactly as for
+  any address (Q3); profile names would appear only in the email. A child session would not reach
+  the household's settings, other profiles or account deletion.
+- **Who a child could play with:** per-child and household-wide allow-lists of email addresses (and
+  optionally whole domains, e.g. a school's), plus a strictest setting, "only this household". A
+  child would play with another household's child only if both households allow each other. An
+  open-signup domain (a public webmail provider) would allow everyone, so such entries would be
+  refused or warned about.
+- **Join links:** a child profile could join only a game whose creator its allow-list permits.
+- **Activity log for the adult:** every invitation, game, and player the child meets would be logged,
+  readable by the household's adult profiles, with a stated retention.
+- **Open points for the privacy review:** consent and age assurance for the adult under the laws
+  that apply (for example Australia's Children's Online Privacy Code, the UK Age Appropriate Design
+  Code, COPPA); what the activity log keeps and for how long, and what other players' details it
+  shows the parent; whether adult profiles sharing an email is acceptable (anyone with the inbox can
+  use any profile).
+- **Open points against 06 §3:** one code per profile has to fit the cap of 3 live challenges per
+  email and the per-challenge guess budget (N codes would multiply the odds of a guess N-fold), the
+  subject line carries a single code for autofill, and the number of codes in the email reveals the
+  household's size to anyone with the inbox.
 
 ## M8 — AI players and MCP
 - AI accounts (02 §9.2): create/rename/delete in Settings (daily limit, rename budget), tokens for
@@ -432,9 +463,51 @@ the generic mechanics, under our own name.
 | Yacht (generic Yahtzee-style dice) | 1–8 | Dice and scorecards; can be played side by side | Rerolls inside one turn |
 | Battleships (generic) | 2 | Kids | **Simultaneous hidden setup** |
 | Hex | 2 | Elegant, has no draws | Swap rule (pie rule) |
+| Pairs (the memory game) | 2–6 | Kids, families; tiny rules | A layout no seat sees until it's turned; two actions per turn (see below) |
+| Grid race (generic Bananagrams-style mechanics, working name) | 2–8 | Fast word game for groups, reuses the words dictionaries | Every seat acting in the same round (see below) |
+| Liar's dice | 2–6 | Bluffing, quick rounds, works well async | Hidden dice per seat; bids as turns |
+| Crazy eights (the traditional ancestor of Uno-style games) | 2–6 | Kids and families | Hidden hands, draw pile |
+| Ultimate tic-tac-toe | 2 | Tiny rules, surprisingly deep | Smallest-module candidate |
+| Ghost, bulls and cows (word games) | 2–6 | Reuse the dictionaries | Secret word held in state |
 
 Go is the strongest next candidate: it's widely loved, has no IP issues, and its scoring agreement
 phase is a good test of multi-seat `toAct`.
+
+#### Pairs: keeping the memory in an async game (idea, 2026-11-28)
+Played asynchronously, the memory game loses its point if the history shows every card turned:
+anyone could scroll back. A design that keeps it:
+- A turn would be two actions: turn a first card, then, having seen it, a second. A match stays face
+  up and the same seat goes again; otherwise the turn passes.
+- Records would name only the positions turned. Whether they matched, and the faces, depend on the
+  hidden layout, so they reach players through `view` (02 §2.1 rule 5), never history.
+- The view would show matched pairs, the cards turned so far this turn and, until the next seat
+  turns its first card, the previous turn's unmatched pair. After that those faces are gone from
+  every view, so remembering them is the game. A seat that resigns or times out mid-turn turns its
+  first card back down. With 3 or more seats only the next seat is sure to see a pair; the others see
+  it only if they look before that seat's first flip (accepted).
+- Screenshots defeat this; that's accepted for a family game.
+
+#### Grid race: a real-time word race made turn-based (idea, 2026-11-28)
+The generic mechanics of Bananagrams-style games (lineage only; our names below): each player builds
+their own crossword grid from their own tiles, everyone at once; a player who has used all their
+tiles calls for more and **every** player draws one; a player may swap one tile for three; the first
+to use all their tiles once the pool is too small for everyone to draw wins. Real time doesn't fit
+an async platform, so it would be played in **rounds where every seat acts** (02 §2.3, `toAct` =
+all playing seats, so their clocks start together and give the round a common deadline):
+- Each seat's grid and tiles would be hidden from the others (state, not view) until the game ends.
+- In a round each seat submits one action, in any order: rearrange or add to its grid, **call** (all
+  tiles used), **swap** one tile for three, or pass. `validate` checks a call's grid against the
+  game's dictionary (resources reach only `validate` and `preview`, 02 §2.1 rule 6), so only a
+  valid grid can call. A seat leaves `toAct` once it has acted.
+- When every seat has acted the round ends and its calls apply in action order: each one makes every
+  seat draw a tile. The first call the pool can't serve ends the game and its caller wins; the rest
+  are ranked by tiles left over. (Open: whether action order or seat order is the fairer tiebreak,
+  how ties in tiles left break, whether a swap needs 3 tiles in the pool, and that seats out of the
+  game don't draw.)
+- **Framework gap:** an overdue seat times out of the game (02 §4: `onTimeout`, `timed_out`), which
+  is too harsh for a missed round. This game would need the module to choose a softer outcome, such
+  as the seat passing that round and staying in, which is a change to 02 §4 to design with turn
+  timeouts (M4). It would follow them.
 
 ### Other
 - Our own rulesets: different board shapes/sizes, tile distribution tweaks, new premium types,
