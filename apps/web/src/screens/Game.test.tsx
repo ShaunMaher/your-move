@@ -1293,25 +1293,34 @@ describe("adding link joiners to your players (07 §1, alpha A19)", () => {
   });
 
   it("names the creator to another player refused with INVALID_INVITEES (A19-P-2)", async () => {
-    const asJoiner = (creatorName: string | null) =>
+    const asJoiner = (creatorName: string | null, creatorId: string | null = "u1") =>
       finished(undefined, {
         players: [
-          player({ rank: 1, isYou: false, isCreator: true, displayName: creatorName }),
+          player({
+            rank: 1,
+            isYou: false,
+            isCreator: true,
+            displayName: creatorName,
+            userId: creatorId,
+          }),
           alex({ rank: 2, isYou: true, displayName: "Bob" }),
         ],
       });
-    for (const [creatorName, text] of [
+    const unnamed =
+      "You can't start this rematch yet. Ask the game's creator to start it, or to add you to their players.";
+    for (const [creatorName, creatorId, text] of [
+      // A deleted creator: no user id, whatever name is shown (A19-P2-1).
+      ["Sam", null, unnamed],
+      ["Deleted player", "u1", unnamed],
       [
         "Sam",
+        "u1",
         "You can't start this rematch yet. Ask Sam to start it, or to add you to their players.",
       ],
-      [
-        null,
-        "You can't start this rematch yet. Ask the game's creator to start it, or to add you to their players.",
-      ],
+      [null, "u1", unnamed],
     ] as const) {
       open({
-        "GET /api/v1/games/g1": asJoiner(creatorName),
+        "GET /api/v1/games/g1": asJoiner(creatorName, creatorId),
         "POST /api/v1/games/g1/rematch": problem(400, "INVALID_INVITEES"),
       });
       const card = await results();

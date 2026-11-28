@@ -273,6 +273,7 @@ function canAddPlayersOf(input: PresentInput): NonNullable<GameEnvelope["canAddP
     .filter((userId) => !known.has(userId))
     .map((userId) => ({
       userId,
+      // Deleted between the two reads: listed as "Deleted player", and Add is then the silent 204.
       displayName: input.users.get(userId)?.displayName ?? DELETED_PLAYER,
     }));
 }

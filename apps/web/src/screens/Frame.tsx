@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Dialog } from "../Dialog.js";
 import type { GameEnvelope, Player } from "../game-api.js";
-import { endReasonText, seatLabel } from "../game-text.js";
+import { DELETED_PLAYER, endReasonText, seatLabel } from "../game-text.js";
 import { Link } from "../router.js";
 import { History } from "./History.js";
 import { Problem } from "./Problem.js";
@@ -271,8 +271,10 @@ function Results({
     if (failure.code !== "INVALID_INVITEES") return failure.message;
     if (!youCreated) {
       // Perhaps they joined by link and weren't added: only the creator can add them (06 §6.11).
-      const name = creator?.displayName ?? null;
-      return `You can't start this rematch yet. Ask ${name ?? "the game's creator"} to start it, or to add you to their players.`;
+      // A creator whose account was deleted has no name to ask by (A19-P2-1).
+      const name = creator?.userId == null ? null : creator.displayName;
+      const who = name === null || name === DELETED_PLAYER ? "the game's creator" : name;
+      return `You can't start this rematch yet. Ask ${who} to start it, or to add you to their players.`;
     }
     if (needed.length === 0) return failure.message;
     setHidden(new Set());
