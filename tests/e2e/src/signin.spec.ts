@@ -31,6 +31,7 @@ test("a new person signs in with an emailed code, names themselves, and signs ou
   await page.reload();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Welcome to E2E Games");
   await page.getByLabel("Display name").fill("Sam");
+  await page.getByLabel("I'm 13 or older").check();
   await page.getByRole("button", { name: "Continue" }).click();
 
   await expect(page).toHaveURL(/\/$/u);
@@ -64,6 +65,7 @@ test("signing out everywhere ends the session", async ({ page, request }) => {
   await page.getByLabel("Sign-in code").fill(await codeFrom(request, address, 0));
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByLabel("Display name").fill("Alex");
+  await page.getByLabel("I'm 13 or older").check();
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi, Alex");
 
@@ -169,6 +171,7 @@ test("with the service worker in charge, no API response comes from it and only 
   await page.getByLabel("Sign-in code").fill(await codeFrom(request, address, 0));
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByLabel("Display name").fill("Robin");
+  await page.getByLabel("I'm 13 or older").check();
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("link", { name: "Settings" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Settings");

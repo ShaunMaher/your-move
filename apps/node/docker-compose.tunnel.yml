@@ -36,6 +36,7 @@ services:
       PUBLIC_URL: ${PUBLIC_URL:?set PUBLIC_URL to https://<hostname>}
       APP_NAME: ${APP_NAME:-}
       OPERATOR_CONTACT: ${OPERATOR_CONTACT:?set OPERATOR_CONTACT to the address shown on the privacy page}
+      PRIVACY_RETENTION: ${PRIVACY_RETENTION:-}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
       EMAIL_PROVIDER: gmail
       EMAIL_FROM: ${EMAIL_FROM:?set EMAIL_FROM to "Name" <address>}

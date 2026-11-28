@@ -84,6 +84,7 @@ export async function signUp(page: Page, address: string, name: string): Promise
   await page.getByLabel("Sign-in code").fill(await codeFrom(page.request, address, 0));
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByLabel("Display name").fill(name);
+  await page.getByLabel("I'm 13 or older").check();
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Hi, ${name}`);
 }
