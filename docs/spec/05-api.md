@@ -112,7 +112,7 @@ GameEnvelope = {
   yourInvitation: "normal" | "hidden" | null, // you hold an `invited` seat in a `lobby` (accept/decline); null once the lobby ended; hidden ones never badge
   joinLink?: { active: boolean, expiresAt: number | null },  // creator only, lobby only; the URL is shown only on create/rotate
   canAddPlayers?: { userId, displayName }[], // creator only, finished games (`[]` when there is no one, and when you never acted yourself, since a pair needs both to have acted): link joiners (`joined_via = join_link`) who acted, whose account still exists and who aren't yet your past opponents, in seat order — blocked, suspended and pending-deletion ones are still listed so the prompt reveals nothing; add-player is a no-op for them (02 §4, alpha A19)
-  rematch?: { gameId: string, you: "joined" | "invited" | "none" } | null, // finished games only (whose only viewers are their players), null until one exists or while the linked one has ended unplayed (it may then be replaced): the game's rematch (POST …/rematch) and your place in it — a joined or seated row, an invitation in its still-open lobby (an `inert` one looks the same), or neither (alpha A15)
+  rematch?: { gameId: string, you: "joined" | "invited" | "none" } | null, // finished games only (whose only viewers are their players), null until one exists or while the linked one has ended unplayed (it may then be replaced): the game's rematch (POST …/rematch) and your place in it — a joined or seated row, an invitation in its still-open lobby, or neither (alpha A15); an `inert` invitation is `none`, like every row that gives no access (Q29, alpha A23)
   createdAt, lastActionAt
 }
 GameSummary = { id, gameType, status, endReason, aiAssistance, yourTurn, yourInvitation /* as in the envelope */, players (as in the envelope),
@@ -178,8 +178,9 @@ answer for every reason. Picked invitees are seated before typed addresses, what
 in the request, so a typed address never changes how a picked one is seated: an address that
 resolves to a picked user gets the `inert` email-only seat above, and one whose user has a block
 with a picked invitee an `inert` seat. A picked past opponent is `joined` at once (`joined_via =
-added`), or gets an invitation when AI assistance is allowed or their stored `whoCanAddMe` is
-`nobody` (02 §4, 06 §6.2; the Settings choice is M4's). When every seat is then
+added`), or gets an invitation when the request picks two or more past opponents (Q29, alpha A23:
+then no pick's state depends on a block between the picks), when AI assistance is allowed or when
+their stored `whoCanAddMe` is `nobody` (02 §4, 06 §6.2; the Settings choice is M4's). When every seat is then
 `joined`, the game starts in the creator's start transition from version 0, right after the insert
 (03 §5.2); if a transition by an added player (a decline) wins that race, the game stays as that
 transition left it and the `201` shows it so; a start that fails for any other reason is logged
@@ -331,7 +332,7 @@ the caller may see.
 | Method | Path | Who / when | Errors (besides `404`, `409 STALE_GAME`) |
 |---|---|---|---|
 | POST | `/api/v1/games/:id/start` | Creator, in `lobby`, with ≥ min joined → `active` (unfilled seats dropped; blocks re-checked, 02 §4) | `403 NOT_ALLOWED`, `409 WRONG_STATUS`, `409 NOT_ENOUGH_PLAYERS`, `409 INVALID_SEATS` (module `validateStart`) |
-| POST | `/api/v1/games/:id/accept` | Holder of a user invitation (normal or hidden), in `lobby` → `joined`. If the accepter has a block in either direction with any joined member, the invitation becomes `declined` instead and the answer is `404` | `403 ONBOARDING_REQUIRED`, `409 WRONG_STATUS` |
+| POST | `/api/v1/games/:id/accept` | Holder of a user invitation (normal or hidden), in `lobby` → `joined`. If the accepter has a block in either direction with any joined member, the invitation becomes `declined` instead, written exactly as their own decline would be (so the lobby may end `declined`, 02 §4), and the answer is `404` (alpha A23) | `403 ONBOARDING_REQUIRED`, `409 WRONG_STATUS` |
 | POST | `/api/v1/games/:id/decline` | Invited or joined non-creator in `lobby`, or any `playing` player — the creator included — before their first action (02 §4: ends the game `declined` if fewer than `min` would remain, else `out_reason = declined`) | `403 NOT_ALLOWED` (the creator in `lobby`: cancel instead), `409 ALREADY_ACTED`, `409 WRONG_STATUS` |
 | POST | `/api/v1/games/:id/leave` | Joined non-creator, in `lobby` | `403 NOT_ALLOWED`, `409 WRONG_STATUS` |
 | POST | `/api/v1/games/:id/remove-seat` | Creator, in `lobby`: `{ expectedVersion, playerId }` → that row becomes `removed` (`removed_at` set; an email seat's address is cleared). `playerId` must be an `invited` or `joined` row of **this** game and not the creator's own. A remove never ends the lobby (02 §4), and the person removed never comes back through a join link (06 §6.8) | `403 NOT_ALLOWED`, `404` (no such row in this game, the creator's own, or a row no longer `invited` or `joined`), `409 WRONG_STATUS`, `429` |
@@ -392,11 +393,15 @@ No endpoint returns a `serverOnly` dictionary's contents, `blob_key`, `sha256`, 
 
 ## Blocks
 
+Alpha A23. Session only (§Token scopes). A block is between the viewer and one other person: it is
+never shown to them, and nothing it changes looks any different from what a person can do anyway
+(a decline, a removal; 06 §6.10). `userId` is 1–64 characters.
+
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/v1/blocks` | The viewer's blocks: `[{ userId, displayName, createdAt }]` |
-| POST | `/api/v1/blocks` | `{ userId }` — only a user who is a past opponent, or who holds or held any row (any state, including rows kept after start, 04) in a game where the viewer also has a row, can be blocked; otherwise `404`. Effects: deletes `past_opponents` rows both ways; in every shared `lobby`, if the viewer is the creator the other user's seat is removed, otherwise the viewer's own seat is declined (if invited) or left (if joined) — realtime only. `204` |
-| DELETE | `/api/v1/blocks/:userId` | `204`; `404` if not the viewer's block |
+| GET | `/api/v1/blocks` | The viewer's blocks, newest first: `{ blocks: [{ userId, displayName, createdAt }], nextCursor }` (an object, like the game list, so it can gain fields; `displayName` is the person's current name, null only for an account without one), 100 per page (`?cursor=`, opaque). |
+| POST | `/api/v1/blocks` | `{ userId }` — only a user who is a past opponent, or who holds or held any row (any state, including rows kept after start, 04) in a game where the viewer also has a row, can be blocked; otherwise `404` (also for the viewer's own id and for an AI account, which is never blocked: its owner's blocks apply, 02 §9.2). Effects, in one batch with the block: deletes `past_opponents` rows both ways. Then, for each `lobby` the two share in which the viewer can already tell the other's row is theirs (06 §6.10: their row has been `joined`, or the viewer created the lobby and picked them by `userId`): if the viewer created it, the other user's seat is removed, exactly as `…/remove-seat` would; otherwise the viewer's own seat is declined, exactly as `…/decline` would (an invited or joined seat alike, 02 §4) — realtime only, no push. Any other shared lobby (the other person's row is an invitation the viewer can't tell apart, e.g. a typed address) is left as it is: the accept, join, claim and start checks keep the two apart there (06 §6.10). At most a per-runtime number of lobbies per call (Node 50, the Worker 6, 09 §3), oldest first; a repeat applies it to any left. `204` whether or not the block already existed (a repeat is idempotent and re-applies the effects). Counts toward the per-user write limit (`429`). Not onboarding-gated: a re-prompted user (06 §5) may still block. |
+| DELETE | `/api/v1/blocks/:userId` | Body-less. `204`; `404` if not the viewer's block. Lifts the block only: past opponents deleted by it stay deleted (they come back only from another game finished together, 06 §6.9) and `inert` seats stay `inert`. Counts toward the per-user write limit (`429`). `403 ONBOARDING_REQUIRED` while onboarding is incomplete or re-prompted (06 §5): unblocking reopens contact, like making a join link |
 
 ## Push subscriptions
 

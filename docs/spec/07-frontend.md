@@ -38,6 +38,21 @@ with an AI badge (icon + accessible label "AI player"), from the envelope's `kin
 `aiOwnerName` (05). Moves made through a token show an "AI" marker in the history drawer (from
 `via`). Games with AI assistance allowed show it in the header, lobby, invitation and join page.
 
+**Blocking** (alpha A23, 05 §Blocks, 06 §6.10). An invitation offers **Block** next to Accept and
+Decline, in the game list's *Invitations* and *Hidden invitations* and in the lobby; it blocks the
+game's creator (the inviter), named from `players`. It asks first, in a dialog titled "Block
+<name>?" that says plainly what a block does: "They won't be able to add you to games or invite
+you, and you won't be put in a game with them. You'll decline this invitation, and leave other
+games with them that haven't started yet (or they're removed, if you created the game). Games you're already playing carry on. They won't be told. You
+can unblock them in Settings." with **Block** and **Cancel**. After a block the invitation is gone
+and the list refreshes. Settings has a **Blocked players** section listing `GET /api/v1/blocks`
+(name, and when they were blocked; "Show more" while there is a next page), each with **Unblock**,
+which asks first ("Unblock <name>? They'll be able to invite you to games again. You won't be on
+each other's lists of people you've played until you finish another game together.") and then
+refreshes the list; with no blocks it says "You haven't blocked anyone.". Nothing a blocked person
+sees ever mentions a block. Blocking from a finished game's players is not offered yet: the
+finished screen has no per-player menu (backlog).
+
 There is no admin UI in v1; operators use the Admin API and its command-line client (09 §1.2).
 
 ### 1.1 New game flow

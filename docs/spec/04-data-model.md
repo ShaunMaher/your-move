@@ -211,6 +211,10 @@ to sign in).
 ### `blocks`
 | blocker_id | blocked_id | created_at |  PK(blocker_id, blocked_id), both FK → users ON DELETE CASCADE.
 
+Written and deleted only by their blocker, through 05 §Blocks (alpha A23); inserting one deletes
+the pair's `past_opponents` rows both ways in the same batch (invariant 6). Never for an AI
+account, whose owner's blocks apply (02 §9.2).
+
 ### `push_subscriptions`
 | Column | Type | Notes |
 |---|---|---|

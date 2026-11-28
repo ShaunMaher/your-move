@@ -254,7 +254,14 @@ that work on both runtimes, plus SMTP for Node only.
     The claimant's invitation push in the background normally costs only its subscriptions read
     (1): a just-onboarded user has no subscription yet (06 §6.4), so the counter, marks and
     deletions are not a normal-case cost.
-    Node claims up to 50 per request. Each nudge also makes one provider subrequest (the `gmail` provider
+    Node claims up to 50 per request.
+  - `POST /api/v1/blocks` (alpha A23): about 8 statements (the session, the write limit, who may
+    be blocked, the block with the past-opponent deletion, the list of shared lobbies) plus about
+    6 per lobby it changes (the game's load, 3, and the Remove or Decline transition, 2–3 for a
+    two-seat lobby, more when a decline ends a lobby with typed addresses), so the Worker changes
+    at most 6 lobbies per call (44) and Node 50; a repeat changes any left, and the accept, join
+    and start checks keep the pair apart in them meanwhile (06 §6.10). A lost race retries a
+    lobby's transition from its load, at most three more times. Each nudge also makes one provider subrequest (the `gmail` provider
   one more per run for its token). A run with a failed step or a failed nudge ends the invocation
   as failed (not retried), so it shows in the trigger's history. Re-measure the per-invocation
   cost at the first Workers deployment (10).

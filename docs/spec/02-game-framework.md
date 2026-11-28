@@ -340,7 +340,9 @@ and in the lobby, and the AI setting also in the game header.
 - **A past opponent picked from the list** (by user id). Whether they're added straight away
   depends on *their* setting **who can add me to games** (`whoCanAddMe`, 06 §6.2): with
   `pastOpponents` (the default) they're *auto-joined* (`joined`) and notified; with `nobody` they get
-  an invitation.
+  an invitation. When the creator picks two or more past opponents at once, every pick gets an
+  invitation, whatever their setting (06 §6.1, Q29), so no pick's state shows a block between
+  two of them.
 - **An email address.** The response never reveals whether the address has an account (06 §6.1,
   Q3). An onboarded user with that address gets an **invitation**: the seat is `invited` with their
   user id; it appears under *Invitations* in their game list with an in-app badge and only a generic
@@ -389,9 +391,11 @@ accepts knowingly (08 T31). At start the framework, in
 the start transition:
 
 1. re-checks blocks between every pair of joined users: if a pair has a block, the member of the
-   pair who joined later is moved to `removed` (realtime only); if fewer than `min` remain the start
-   fails with `409 NOT_ENOUGH_PLAYERS` (or, for an automatic start, simply doesn't happen); a pair
-   with a block never becomes past opponents later either;
+   pair who joined later is moved to `removed` (realtime only; in joining order, the creator
+   first, so each joined row is checked against those kept before it); if fewer than `min`
+   remain the start fails with `409 NOT_ENOUGH_PLAYERS` and writes nothing (or, for an automatic
+   start, simply doesn't happen); a pair with a block never becomes past opponents later either
+   (built by alpha A23);
 2. calls `validateStart(options, joinedCount)`. On failure, Start returns `409 INVALID_SEATS`; an
    automatic start simply doesn't happen, the triggering transition (accept or join) still
    succeeds, and the game waits in the lobby for the creator;
