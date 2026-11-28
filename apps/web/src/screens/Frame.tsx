@@ -121,9 +121,9 @@ function AddPlayers({
   return (
     <>
       {asked.length === 0 ? null : (
-        <ul className="plain stack">
+        <div className="stack">
           {asked.map((person) => (
-            <li
+            <div
               key={person.userId}
               role="group"
               aria-labelledby={`add-${person.userId}`}
@@ -156,9 +156,9 @@ function AddPlayers({
                   Not now
                 </button>
               </div>
-            </li>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
       <Problem id="add-player-problem" message={problem} />
       <div role="status">

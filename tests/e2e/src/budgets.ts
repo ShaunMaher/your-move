@@ -89,3 +89,11 @@ export const INVITE_TEST_TIMEOUT_MS = 60_000;
  * in the full suite, 2026-11-28; to be re-measured on CI.
  */
 export const JOIN_LINK_TEST_TIMEOUT_MS = 60_000;
+/**
+ * Adding a link joiner (add-player.spec.ts, alpha A19): two sign-ins, a words game with a link,
+ * the join and Start, a pass each and a resignation, the creator's Add, then a Rematch both open.
+ * The rematch test's steps with a join in place of an invitation and no second game from the list,
+ * so the same 90 s. Measured locally in the pinned image: 4.6 s (Chromium) and 5.9 s (WebKit)
+ * alone, 2026-11-28; to be re-measured on CI.
+ */
+export const ADD_PLAYER_TEST_TIMEOUT_MS = 90_000;

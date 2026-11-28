@@ -1150,7 +1150,8 @@ describe("the rematch button (07 §1, alpha A15)", () => {
 describe("adding link joiners to your players (07 §1, alpha A19)", () => {
   const bob = { userId: "u2", displayName: "Bob" };
   const di = { userId: "u3", displayName: "Di" };
-  const finished = (canAddPlayers: unknown, over = {}) =>
+  type Listed = { userId: string; displayName: string }[] | undefined;
+  const finished = (canAddPlayers: Listed, over = {}) =>
     withView(
       envelope({
         status: "finished",
@@ -1286,7 +1287,7 @@ describe("adding link joiners to your players (07 §1, alpha A19)", () => {
   });
 
   it("asks nothing when there is no one to add, or for another player", async () => {
-    for (const listed of [[], undefined]) {
+    for (const listed of [[], undefined] as Listed[]) {
       open({ "GET /api/v1/games/g1": finished(listed) });
       const card = await results();
       expect(within(card).queryByRole("group")).toBeNull();
