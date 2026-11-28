@@ -38,6 +38,7 @@ import { type Claimant, claimInvitations } from "../games/claim.js";
 import { background } from "../http/background.js";
 import { errorBody, type ErrorReason } from "../http/error-log.js";
 import type { AppEnv, Platform } from "../platform.js";
+import { sendInvitationPushes } from "../push/notify.js";
 import { clientBucketsOf } from "./client-buckets.js";
 import { checkLimits } from "./limits.js";
 import {
@@ -156,12 +157,16 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
 
   /**
    * Claims the new user's email-invite seats before onboarding answers, so their game list shows
-   * the invitations (06 §6.4). A failure never fails onboarding: it is logged by class (09 §5)
-   * and the sweep claims the seats later.
+   * the invitations (06 §6.4), and when one is a `normal` invitation sends them the generic
+   * invitation push in the background (alpha A20). A failure never fails onboarding: it is logged
+   * by class (09 §5) and the sweep claims the seats later.
    */
-  const claimAtOnboarding = async (claimant: Claimant, at: number): Promise<void> => {
+  const claimAtOnboarding = async (c: Context, claimant: Claimant, at: number): Promise<void> => {
     try {
-      await claimInvitations(repos, claimant, at, options.onboardingClaims);
+      const { normal } = await claimInvitations(repos, claimant, at, options.onboardingClaims);
+      if (normal > 0 && platform.push.enabled) {
+        background(c, platform, () => sendInvitationPushes(platform, [claimant.id]));
+      }
     } catch (error) {
       platform.log.error("invite claim at onboarding failed", {
         errorClass: error instanceof Error ? error.constructor.name : typeof error,
@@ -313,7 +318,9 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
           updatedAt: at,
         });
         user = { ...user, displayName: result.name, onboardedAt: at, updatedAt: at };
-        if (user.email !== null) await claimAtOnboarding({ id: user.id, email: user.email }, at);
+        if (user.email !== null) {
+          await claimAtOnboarding(c, { id: user.id, email: user.email }, at);
+        }
       } else if (result.name !== user.displayName) {
         const [limit] = await checkLimits(repos, config, at, [
           { name: "DISPLAY_NAME_CHANGES_30D", key: user.id, amount: 1 },

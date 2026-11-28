@@ -7,7 +7,13 @@ import { describe, expect, it } from "vitest";
 
 import type { RateLimitCount, RateLimitHit, Repositories } from "../db/repositories.js";
 import { testPlatform } from "../test-support.js";
-import { checkLimits, EMAIL_DAY_CAPS, emailWorstCasePer24h, type LimitName } from "./limits.js";
+import {
+  checkLimits,
+  countInFixedWindow,
+  EMAIL_DAY_CAPS,
+  emailWorstCasePer24h,
+  type LimitName,
+} from "./limits.js";
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
@@ -135,5 +141,35 @@ describe("the outbound email budget (08 §4.2)", () => {
         },
       }),
     ).toBe(120);
+  });
+});
+
+describe("a fixed-window count (alpha A20's invitation push, 06 §6.2)", () => {
+  const HOUR = 60 * MINUTE;
+
+  it("lets the limit through per fixed UTC day, and a refused count never holds back the next day", async () => {
+    const repos = memoryRepos();
+    const config = { limits: {} };
+    const take = (at: number, keys: readonly string[]) =>
+      countInFixedWindow(repos, config, "INVITATION_PUSHES_USER_DAY", keys, at);
+    expect(await take(T0 + 23 * HOUR, ["bo", "cy"])).toEqual([true, true]);
+    // Refused for the rest of that day, however often it is asked.
+    for (let i = 0; i < 5; i++) expect(await take(T0 + 23 * HOUR + i, ["bo"])).toEqual([false]);
+    // The next UTC day starts afresh, even an hour later: nothing carries over.
+    expect(await take(T0 + DAY + 0.5 * HOUR, ["bo", "bo"])).toEqual([true, false]);
+    expect(await take(T0, [])).toEqual([]);
+  });
+
+  it("honours a LIMIT_ override", async () => {
+    const repos = memoryRepos();
+    const config = { limits: { INVITATION_PUSHES_USER_DAY: 2 } };
+    const results = await countInFixedWindow(
+      repos,
+      config,
+      "INVITATION_PUSHES_USER_DAY",
+      ["bo", "bo", "bo"],
+      T0,
+    );
+    expect(results).toEqual([true, true, false]);
   });
 });

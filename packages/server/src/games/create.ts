@@ -8,8 +8,10 @@
  * it belongs to an onboarded user (an invitation), to nobody or to an account that hasn't finished
  * onboarding (an email-invite seat, claimed at onboarding, 06 §6.4). An email-invite seat's address
  * is sent the invite email after the response, unless suppressed or capped (alpha A17,
- * `invite-mail.ts`). Per-pair counts use the typed address's `emailId`, never the user it resolves
- * to (Q3). An invitation over the target's inbound cap is `hidden` (06 §6.7).
+ * `invite-mail.ts`); a user's invitation gets the generic invitation push and, with email nudges
+ * on, the invitation email, from the same one background task (06 §6.2, alpha A20). Per-pair
+ * counts use the typed address's `emailId`, never the user it resolves to (Q3). An invitation over
+ * the target's inbound cap is `hidden` (06 §6.7).
  *
  * A past opponent picked by `userId` (alpha A12) must be one the creator may pick (no block either
  * way, `INVALID_INVITEES` otherwise) and is added at once (`joined`, `joined_via = added`), unless
@@ -27,18 +29,24 @@ import { isGameError, type GameError, type OptionsContext } from "@your-move/sdk
 import type { CreateGameBodySchema } from "@your-move/shared";
 
 import { normaliseAddress, type NormalisedEmail } from "../accounts/email.js";
-import { checkLimits, type LimitCheck } from "../auth/limits.js";
+import { checkLimits, type LimitCheck, limitOf } from "../auth/limits.js";
 import { emailId, type Subkeys } from "../crypto/subkeys.js";
 import type { NewGamePlayer, UserRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
 import type { Platform } from "../platform.js";
 import { expireOverdueLobbies } from "./expiry.js";
-import { type InviteMail, planInviteMail, type TypedAddress } from "./invite-mail.js";
+import { type InviteMail, type MailTarget, planInviteMail } from "./invite-mail.js";
 import { hashJoinToken, linkTimes, newJoinToken } from "./join-links.js";
 import { LOBBY_LIFETIME_MS } from "./lifecycle.js";
 import type { GameType } from "./registry.js";
 import type { ResourceProvider } from "./resources.js";
-import { lastOptionsOf, mergeOptions, rememberedInput, whoCanAddMeOf } from "./settings.js";
+import {
+  emailNudgesOf,
+  lastOptionsOf,
+  mergeOptions,
+  rememberedInput,
+  whoCanAddMeOf,
+} from "./settings.js";
 
 type CreateGameBody = z.infer<typeof CreateGameBodySchema>;
 
@@ -157,20 +165,32 @@ async function blockLookup(deps: CreateDeps, userIds: readonly string[]) {
   return (a: string, b: string): boolean => keys.has(`${a} ${b}`) || keys.has(`${b} ${a}`);
 }
 
+/**
+ * Whether a user's invitation may be mailed the invitation email (06 §6.2): an onboarded human
+ * (as every invitee here is) with email nudges on and `email_id` set, neither suspended nor being
+ * deleted, as the nudge sweep requires (03 §7). Suppression is checked with every address's.
+ */
+function getsInvitationEmail(user: UserRecord): boolean {
+  return (
+    emailNudgesOf(user.settings) &&
+    user.emailId !== null &&
+    user.suspendedAt === null &&
+    user.deletionRequestedAt === null
+  );
+}
+
 /** Stands in for "no user" in the past-opponent lookup, so it runs the same for every address. */
 const NO_USER = "";
-/** The `rate_limits` key that counts what isn't counted for real: written, never read (06 §3.2). */
-const SILENT = "silent";
+const DAY = 86_400_000;
 
 /**
  * The inbound invitation cap (06 §6.7, 08 T20): a user receives at most 1 invitation a day from
  * any one creator who isn't a past opponent, and 3 a day in total from such creators; over the cap
- * the invitation is `hidden`. Counted in `rate_limits` keyed by the target's `emailId` (per
- * creator: creator and `emailId`), so it is counted, with the same lookups and writes, for every
- * typed address whatever it resolves to (Q3): a past opponent's invitation adds nothing to the
- * counters, and one already over the per-creator cap adds nothing to the total; each adds 1 to the
- * never-read `silent` key instead, so every address writes the same rows (06 §3.2: an upsert adding
- * 0 writes nothing and is measurably quicker). The creator's response is the same either way.
+ * the invitation is `hidden`. Counted from the live `invites` rows of the last day for the target's
+ * `emailId` (alpha A20 review S-1, F-17): a lobby that ended unplayed or a seat its creator
+ * removed stops counting, so throwaway lobbies can't push a real invitation into *Hidden*. The same
+ * read for every typed address whatever it resolves to (Q3), with a placeholder user for an
+ * address that has none; nothing is written. The creator's response is the same either way.
  * Returns each address's delivery.
  */
 async function inboundDelivery(
@@ -182,53 +202,50 @@ async function inboundDelivery(
 ): Promise<("normal" | "hidden")[]> {
   if (emailIds.length === 0) return [];
   const { repos, config } = deps.platform;
-  const pastOpponents = new Set(
-    await repos.users.pastOpponentsOf(
+  const targets = emailIds.map((emailHash, i) => ({
+    emailHash,
+    userId: invitable[i]?.id ?? NO_USER,
+  }));
+  const [opponents, received] = await Promise.all([
+    repos.users.pastOpponentsOf(
       creator.id,
-      invitable.map((user) => user?.id ?? NO_USER),
+      targets.map((target) => target.userId),
     ),
-  );
-  const strangers = invitable.map((user) => user === null || !pastOpponents.has(user.id));
-  const perCreator = await checkLimits(
-    repos,
-    config,
-    now,
-    emailIds.map((hash, i) => ({
-      name: "INVITATIONS_RECEIVED_PAIR_DAY",
-      key: strangers[i] === true ? `${creator.id}:${hash}` : SILENT,
-      amount: 1,
-    })),
-  );
-  const total = await checkLimits(
-    repos,
-    config,
-    now,
-    emailIds.map((hash, i) => ({
-      name: "INVITATIONS_RECEIVED_DAY",
-      key: strangers[i] === true && perCreator[i]?.exceeded !== true ? hash : SILENT,
-      amount: 1,
-    })),
-  );
-  return emailIds.map((_hash, i) =>
-    strangers[i] === true && (perCreator[i]?.exceeded === true || total[i]?.exceeded === true)
+    repos.invites.receivedSince(creator.id, now - DAY, targets),
+  ]);
+  const pastOpponents = new Set(opponents);
+  const perCreator = limitOf(config, "INVITATIONS_RECEIVED_PAIR_DAY");
+  const total = limitOf(config, "INVITATIONS_RECEIVED_DAY");
+  return targets.map((target, i) => {
+    const counts = received[i] ?? { fromCreator: 0, total: 0 };
+    const stranger = target.userId === NO_USER || !pastOpponents.has(target.userId);
+    return stranger && (counts.fromCreator >= perCreator || counts.total >= total)
       ? "hidden"
-      : "normal",
-  );
+      : "normal";
+  });
 }
 
-/** A created game: its id, the past opponents added to it at once, and its invite emails. */
+/** A created game: its id, the past opponents added to it at once, and its invitations' notices. */
 export interface CreatedGame {
   readonly gameId: string;
   /** User ids of the picked past opponents seated as `joined` (02 §4), in request order. */
   readonly added: readonly string[];
   /**
-   * The invite emails to send after the response (06 §6.3), possibly none; null when no address
-   * was typed. Whenever it isn't null the caller schedules one background task for it, whatever
-   * it carries, so the work doesn't say which addresses are mailed (Q3).
+   * What to tell the invitees after the response (06 §6.2, §6.3); null when there is nothing to
+   * tell: no address typed and no pick seated as an invitation. Whenever it isn't null the caller
+   * schedules one background task for it, whatever it carries, so the work doesn't say which
+   * addresses are mailed or pushed to (Q3).
    */
-  readonly invitations: InviteMail | null;
+  readonly invitations: InvitationNotices | null;
   /** The join link's token when one was asked for, for the one response that shows it. */
   readonly joinToken: string | null;
+}
+
+/** A new game's invitation notices: its emails, and the users seated with a `normal` invitation. */
+export interface InvitationNotices {
+  readonly mail: InviteMail;
+  /** For the generic invitation push (06 §6.2), in request order. */
+  readonly invited: readonly string[];
 }
 
 /**
@@ -379,23 +396,46 @@ export async function createGame(
     };
   });
   // Each typed address with its emailId, its `invites` row and whether it may be mailed, paired
-  // once: an email-invite seat with `normal` delivery, never a user's invitation, an `inert` seat
-  // or one the inbound cap made `hidden` (06 §6.3).
-  const addresses = emails.map((email, i): TypedAddress => {
+  // once: an email-invite seat with `normal` delivery, or a user's `normal` invitation when the
+  // user gets the invitation email; never an `inert` seat or one the inbound cap made `hidden`
+  // (06 §6.2, §6.3). Worked out in memory from what was read for every address alike (Q3).
+  const addresses = emails.map((email, i): MailTarget => {
     const emailId = emailIds[i];
     const row = emailRows[i];
     if (emailId === undefined || row === undefined) throw new Error("typed addresses out of step");
+    const user = row.userId == null ? null : (invitable[i] ?? null);
+    const normal = row.delivery === "normal";
     return {
       email,
       emailId,
-      inviteId: crypto.randomUUID(),
-      mailable: invitable[i] === null && row.delivery === "normal",
+      // The seat's own id, so the inbound cap can tell a live invitation from one removed (04).
+      inviteId: row.id,
+      seat: user === null ? "emailInvite" : "invitation",
+      mailable: normal && (user === null ? invitable[i] === null : getsInvitationEmail(user)),
     };
+  });
+  // Each pick seated as an invitation, `inert` ones too, so the work doesn't depend on which.
+  const picks = pickedRows.flatMap((row): MailTarget[] => {
+    const user = row.userId == null ? undefined : pickedUsers.get(row.userId);
+    if (row.state !== "invited" || user?.email == null) return [];
+    return [
+      {
+        email: user.email,
+        emailId: user.emailId ?? NO_USER,
+        inviteId: null,
+        seat: "invitation",
+        mailable: row.delivery === "normal" && getsInvitationEmail(user),
+      },
+    ];
   });
   const mail = await planInviteMail(
     { platform, keys },
-    { creator, gameName: type.manifest.name, addresses },
+    { creator, gameName: type.manifest.name, addresses, picked: picks },
     now,
+  );
+  // Who gets the generic invitation push: every `normal` invitation with a user (06 §6.2).
+  const invited = [...pickedRows, ...emailRows].flatMap((row) =>
+    row.state === "invited" && row.delivery === "normal" && row.userId != null ? [row.userId] : [],
   );
   const gameId = crypto.randomUUID();
   const players: NewGamePlayer[] = [
@@ -441,14 +481,21 @@ export async function createGame(
       resourceId: resource.id,
       version: resource.version ?? null,
     })),
-    invites: addresses.map((address) => ({
-      id: address.inviteId,
-      inviterId: creator.id,
-      emailHash: address.emailId,
-      // Set by the background task once the sender has accepted the email (04).
-      sentAt: null,
-      expiresAt: now + LOBBY_LIFETIME_MS,
-    })),
+    // One for every typed address (a pick has none).
+    invites: addresses.flatMap((address) =>
+      address.inviteId === null
+        ? []
+        : [
+            {
+              id: address.inviteId,
+              inviterId: creator.id,
+              emailHash: address.emailId,
+              // Set by the background task once the sender has accepted the email (04).
+              sentAt: null,
+              expiresAt: now + LOBBY_LIFETIME_MS,
+            },
+          ],
+    ),
   };
   if (rematchOf === undefined) {
     await repos.games.create(game, players, extras);
@@ -465,7 +512,7 @@ export async function createGame(
     added: pickedRows.flatMap((row) =>
       row.state === "joined" && row.userId != null ? [row.userId] : [],
     ),
-    invitations: emails.length === 0 ? null : mail,
+    invitations: emails.length === 0 && picks.length === 0 ? null : { mail, invited },
     joinToken,
   };
 }

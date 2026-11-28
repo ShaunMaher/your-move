@@ -26,12 +26,15 @@ function lobby(version: number): LoadedGame {
  * Repositories for one claim: each load reads the game one version later (another transition
  * moved it meanwhile), and the claim succeeds on the attempt numbered `succeedOn` (never if 0).
  */
-function repos(succeedOn: number) {
+function repos(
+  succeedOn: number,
+  blocks: readonly { blockerId: string; blockedId: string }[] = [],
+) {
   const claims: InviteClaim[] = [];
   let loads = 0;
   const fake = {
     games: { load: () => Promise.resolve(lobby(loads++)) },
-    users: { blocksAmong: () => Promise.resolve([]) },
+    users: { blocksAmong: () => Promise.resolve(blocks) },
     invites: {
       claim: (claim: InviteClaim) => {
         claims.push(claim);
@@ -45,7 +48,7 @@ function repos(succeedOn: number) {
 describe("claimSeat", () => {
   it("reloads when the version moved and claims on the second attempt, from the new version", async () => {
     const { fake, claims, loads } = repos(2);
-    expect(await claimSeat(fake, seat, claimant, NOW)).toBe(true);
+    expect(await claimSeat(fake, seat, claimant, NOW)).toBe("normal");
     expect(loads()).toBe(2);
     expect(claims.map((claim) => claim.expectedVersion)).toEqual([0, 1]);
     expect(claims[1]).toEqual({
@@ -57,16 +60,23 @@ describe("claimSeat", () => {
     });
   });
 
+  it("says the claimed row is inert when the claimant and a member have a block (06 §6.4)", async () => {
+    const { fake, claims } = repos(1, [{ blockerId: "u-creator", blockedId: "u-sam" }]);
+    // The invitation push goes only to a `normal` claim (alpha A20).
+    expect(await claimSeat(fake, seat, claimant, NOW)).toBe("inert");
+    expect(claims[0]?.inert).toBe(true);
+  });
+
   it("gives up after one try and 3 retries (03 §5.2)", async () => {
     const { fake, claims, loads } = repos(0);
-    expect(await claimSeat(fake, seat, claimant, NOW)).toBe(false);
+    expect(await claimSeat(fake, seat, claimant, NOW)).toBeNull();
     expect(loads()).toBe(4);
     expect(claims).toHaveLength(4);
   });
 
   it("claims nothing into a lobby at its expiry, and never calls the claim", async () => {
     const { fake, claims } = repos(1);
-    expect(await claimSeat(fake, seat, claimant, NOW + 14 * 86_400_000)).toBe(false);
+    expect(await claimSeat(fake, seat, claimant, NOW + 14 * 86_400_000)).toBeNull();
     expect(claims).toEqual([]);
   });
 });

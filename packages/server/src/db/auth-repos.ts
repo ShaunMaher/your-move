@@ -21,6 +21,7 @@ import {
   apiTokens,
   authEvents,
   blocks,
+  emailSuppressions,
   gamePlayers,
   games,
   joinLinks,
@@ -156,7 +157,7 @@ export function userRepo(db: Database): UserRepo {
     },
     async setEmailNudges(id, change) {
       // One key, in SQL, like rememberGameOptions: other settings survive a concurrent change.
-      await db
+      const set = db
         .update(users)
         .set({
           settings: sql`json_set(${SETTINGS_OBJECT}, '$.emailNudges', json(${change.enabled ? "true" : "false"}))`,
@@ -164,6 +165,23 @@ export function userRepo(db: Database): UserRepo {
           updatedAt: change.updatedAt,
         })
         .where(eq(users.id, id));
+      if (!change.enabled) {
+        await set;
+        return;
+      }
+      // Turning them on is the address holder's own opt-in: it lifts their own `unsubscribed` row,
+      // never a `bounced` or `complained` one (04, alpha A20 review P-3). One batch.
+      await runBatch(db, [
+        set,
+        db
+          .delete(emailSuppressions)
+          .where(
+            and(
+              eq(emailSuppressions.emailHash, change.emailId),
+              eq(emailSuppressions.reason, "unsubscribed"),
+            ),
+          ),
+      ]);
     },
     async setTheme(id, theme, updatedAt) {
       // One key, in SQL, like setEmailNudges. The value is one of three fixed words, bound as text.

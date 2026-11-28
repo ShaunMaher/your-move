@@ -136,17 +136,41 @@ export function nudgeRepositoryContract(target: () => NudgeTarget): void {
       expect((await repos().users.findById(id))?.updatedAt).toBe(T0 + 4);
     });
 
-    it("turning nudges on leaves suppressions alone (A6-S2-1)", async () => {
+    it("turning nudges on lifts only the address's own unsubscribed row (A6-S2-1, A20-P-3)", async () => {
+      const kept: Record<string, unknown> = {};
       for (const reason of ["unsubscribed", "bounced", "complained"] as const) {
         const id = crypto.randomUUID();
         const emailId = freshEmailId();
+        const other = freshEmailId();
         await repos().users.create({ id, email: address(id), createdAt: T0, updatedAt: T0 });
         await repos().emailSuppressions.suppress(emailId, reason, T0);
+        await repos().emailSuppressions.suppress(other, "unsubscribed", T0);
         await repos().users.setEmailNudges(id, { enabled: true, emailId, updatedAt: T0 });
+        kept[reason] = await target().sql(
+          "SELECT reason FROM email_suppressions WHERE email_hash = ?",
+          emailId,
+        );
+        // Another address's row is never touched.
         expect(
-          await target().sql("SELECT reason FROM email_suppressions WHERE email_hash = ?", emailId),
-        ).toEqual([{ reason }]);
+          await target().sql("SELECT reason FROM email_suppressions WHERE email_hash = ?", other),
+        ).toEqual([{ reason: "unsubscribed" }]);
+        // Turning them off deletes nothing.
+        await repos().emailSuppressions.suppress(emailId, "unsubscribed", T0);
+        await repos().users.setEmailNudges(id, { enabled: false, updatedAt: T0 });
+        expect(
+          (
+            await target().sql(
+              "SELECT reason FROM email_suppressions WHERE email_hash = ?",
+              emailId,
+            )
+          ).length,
+        ).toBe(1);
       }
+      expect(kept).toEqual({
+        unsubscribed: [],
+        bounced: [{ reason: "bounced" }],
+        complained: [{ reason: "complained" }],
+      });
     });
 
     it("an unsubscribed row doesn't stop nudges; a bounce or complaint does, in due and in claim", async () => {

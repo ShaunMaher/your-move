@@ -64,6 +64,8 @@ const LIMITS = {
   JOIN_LINK_USER_HOUR: { limit: 30, windowMs: HOUR },
   JOIN_LINK_IP_HOUR: { limit: 60, windowMs: HOUR },
   JOIN_LINKS_CREATED_USER_DAY: { limit: 20, windowMs: DAY },
+  // The generic invitation push (alpha A20, 06 §6.2): per recipient, in the fixed UTC day.
+  INVITATION_PUSHES_USER_DAY: { limit: 1, windowMs: DAY },
 } as const satisfies Record<string, LimitRule>;
 
 export type LimitName = keyof typeof LIMITS;
@@ -119,7 +121,7 @@ export interface LimitResult {
 }
 
 /** The effective allowance for a limit (`LIMIT_<NAME>` or the default). */
-function limitOf(config: LimitConfig, name: LimitName): number {
+export function limitOf(config: LimitConfig, name: LimitName): number {
   return config.limits[name] ?? LIMITS[name].limit;
 }
 
@@ -197,6 +199,35 @@ export async function alertOncePerWindow(
     { key: `alert:${name}`, windowStart, previousWindowStart: windowStart - windowMs, amount: 1 },
   ]);
   if (count?.current === 1) log.error("instance-wide limit exceeded", { alert: name });
+}
+
+/**
+ * Counts one for each key in the current fixed window of the limit (for a day limit, the UTC day)
+ * and says, for each, whether it is still within the limit: at most the limit per fixed window,
+ * with nothing carried over from the one before, so a refused count never holds back the next
+ * window (alpha A20's invitation push, 06 §6.2). One atomic batch, so two concurrent callers can't
+ * both take the last place.
+ */
+export async function countInFixedWindow(
+  repos: Repositories,
+  config: LimitConfig,
+  name: LimitName,
+  keys: readonly string[],
+  now: number,
+): Promise<boolean[]> {
+  if (keys.length === 0) return [];
+  const { windowMs } = LIMITS[name];
+  const windowStart = Math.floor(now / windowMs) * windowMs;
+  const counts = await repos.rateLimits.hit(
+    keys.map((key) => ({
+      key: `${name}:${key}`,
+      windowStart,
+      previousWindowStart: windowStart - windowMs,
+      amount: 1,
+    })),
+  );
+  const limit = limitOf(config, name);
+  return keys.map((_key, i) => (counts[i]?.current ?? Number.POSITIVE_INFINITY) <= limit);
 }
 
 /**

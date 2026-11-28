@@ -49,6 +49,14 @@ beforeAll(async () => {
   };
 });
 
+/** The generic invitation push (06 §6.2, alpha A20): it names nobody. */
+const INVITATION = {
+  title: "Family Games",
+  body: "You have a new game invitation.",
+  url: "/",
+  tag: "invitation",
+};
+
 let h: Harness;
 let sent: Sent[];
 /** What the fake push service answers for an endpoint (default 201). */
@@ -239,9 +247,9 @@ describe("pushes from a game's transitions (03 §7, 08 T18)", () => {
     });
     const url = `/g/${created.id}`;
     const tag = `game-${created.id}`;
-    // Creating the game and inviting are lobby events: no push.
+    // Creating the game is a lobby event: only the invitee's generic invitation push (A20).
     expect(await received(adaPhone)).toEqual([]);
-    expect(await received(boPhone)).toEqual([]);
+    expect(await received(boPhone)).toEqual([INVITATION]);
 
     // Bo's accept starts the game; Ada, the creator, is seat 0 and first to act.
     expect((await transition(h, bo, created.id, "accept")).status).toBe(200);
@@ -253,11 +261,14 @@ describe("pushes from a game's transitions (03 §7, 08 T18)", () => {
         tag,
       },
     ]);
-    expect(await received(boPhone)).toEqual([]);
+    expect(await received(boPhone)).toEqual([INVITATION]);
 
     expect((await act(h, ada, created.id, { type: "pass" })).status).toBe(200);
     const boPushes = await received(boPhone);
-    expect(boPushes).toEqual([{ title: "Family Games", body: "Ada passed. Your turn.", url, tag }]);
+    expect(boPushes).toEqual([
+      INVITATION,
+      { title: "Family Games", body: "Ada passed. Your turn.", url, tag },
+    ]);
     expect(await received(adaPhone)).toHaveLength(1);
 
     // Bo resigns: the game is over for Ada; Bo, who did it, gets nothing.
@@ -268,7 +279,7 @@ describe("pushes from a game's transitions (03 §7, 08 T18)", () => {
       url,
       tag,
     });
-    expect(await received(boPhone)).toHaveLength(1);
+    expect(await received(boPhone)).toHaveLength(2);
   });
 
   it("carries no hidden state: no rack, no state, no address", async () => {
@@ -330,12 +341,14 @@ describe("pushes from a game's transitions (03 §7, 08 T18)", () => {
     const [boPhone, boTablet] = [await device(), await device()];
     await subscribe(bo, boPhone);
     await subscribe(bo, boTablet);
-    answers.set(boPhone.endpoint, new TypeError(`fetch failed for ${boPhone.endpoint}`));
-    answers.set(boTablet.endpoint, 500);
     const created = await createGame(h, ada, {
       gameType: "words",
       invitees: [{ email: bo.email }],
     });
+    // The invitation's push goes out first, delivered; the move's pushes fail.
+    await h.drain();
+    answers.set(boPhone.endpoint, new TypeError(`fetch failed for ${boPhone.endpoint}`));
+    answers.set(boTablet.endpoint, 500);
     await transition(h, bo, created.id, "accept");
     const moved = await act(h, ada, created.id, { type: "pass" });
     expect(moved.status).toBe(200);
@@ -472,17 +485,17 @@ describe("the push to a past opponent added to a new game (alpha A12, 06 §6.2)"
         tag: `game-${lobby.id}`,
       },
     ]);
-    // The invitation push is M4's: an invitation by address sends nothing yet.
-    expect(await received(cyPhone)).toEqual([]);
+    // An invitation by address gets only the generic invitation push (alpha A20).
+    expect(await received(cyPhone)).toEqual([INVITATION]);
 
-    // With AI assistance allowed it's an invitation (02 §4): no "added you" push.
+    // With AI assistance allowed it's an invitation (02 §4): the generic push, not "added you".
     const invited = await createGame(h, ada, {
       gameType: "words",
       aiAssistance: "allowed",
       invitees: [{ userId: bo.id }],
     });
     expect(invited.status).toBe("lobby");
-    expect(await received(boPhone)).toHaveLength(1);
+    expect((await received(boPhone)).slice(1)).toEqual([INVITATION]);
   });
 });
 
@@ -629,7 +642,8 @@ describe("a decline before the first move ends the game (A8-P-3)", () => {
       url: `/g/${created.id}`,
       tag: `game-${created.id}`,
     });
-    expect(await received(boPhone)).toEqual([]);
+    // Bo had only the invitation's push.
+    expect(await received(boPhone)).toEqual([INVITATION]);
   });
 });
 

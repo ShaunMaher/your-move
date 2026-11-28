@@ -70,10 +70,13 @@ const METHODS = {
     keyof EmailSuppressionRepo,
     true
   >,
-  invites: { claimable: true, pending: true, claim: true, markSent: true } satisfies Record<
-    keyof InviteRepo,
-    true
-  >,
+  invites: {
+    receivedSince: true,
+    claimable: true,
+    pending: true,
+    claim: true,
+    markSent: true,
+  } satisfies Record<keyof InviteRepo, true>,
   joinLinks: { put: true, revoke: true, find: true, deleteExpired: true } satisfies Record<
     keyof JoinLinkRepo,
     true

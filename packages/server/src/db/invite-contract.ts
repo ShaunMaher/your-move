@@ -65,7 +65,7 @@ export function inviteRepositoryContract(target: () => InviteTarget): void {
     options: {
       seat?: Partial<NewGamePlayer>;
       others?: readonly NewGamePlayer[];
-      status?: "lobby" | "active" | "cancelled";
+      status?: "lobby" | "active" | "cancelled" | "expired" | "declined";
       createdAt?: number;
     } = {},
   ): Promise<{ gameId: string; playerId: string; creatorId: string }> {
@@ -133,6 +133,85 @@ export function inviteRepositoryContract(target: () => InviteTarget): void {
     email: overrides.email ?? who.email,
     expectedVersion: overrides.expectedVersion ?? 0,
     inert: overrides.inert ?? false,
+  });
+
+  describe("the inbound cap's live invitations (06 §6.7, alpha A20 review S-1)", () => {
+    /** A lobby whose seat for `hash` has an `invites` row with the seat's id; its creator. */
+    async function invited(
+      hash: string,
+      options: Parameters<typeof lobby>[1] & { inviteId?: string } = {},
+    ) {
+      const seat = await lobby(address(), options);
+      await target().sql(
+        "INSERT INTO invites (id, game_id, inviter_id, email_hash, sent_at, expires_at) VALUES (?, ?, ?, ?, NULL, ?)",
+        options.inviteId ?? seat.playerId,
+        seat.gameId,
+        seat.creatorId,
+        hash,
+        LATER + 400 * DAY,
+      );
+      return seat;
+    }
+
+    it("counts live invitations, and not those whose lobby ended unplayed or whose seat was removed", async () => {
+      const hash = freshEmailId();
+      const since = clock;
+      const live = await invited(hash);
+      await invited(hash, { status: "active" });
+      // The target's own decline keeps counting, even when it ended the lobby.
+      await invited(hash, { seat: { state: "declined" }, status: "declined" });
+      // A hidden one counts toward its creator, not the total.
+      const hidden = await invited(hash, { seat: { delivery: "hidden" } });
+      // None of these count.
+      await invited(hash, { status: "cancelled" });
+      await invited(hash, { status: "expired" });
+      await invited(hash, { status: "declined" });
+      await invited(hash, { seat: { state: "removed" } });
+      await invited(hash, { seat: { delivery: "inert" } });
+      // An older row, matching no seat, counts while its lobby is live.
+      await invited(hash, { inviteId: crypto.randomUUID() });
+      await invited(hash, { inviteId: crypto.randomUUID(), status: "cancelled" });
+      const other = freshEmailId();
+      const counts = (creator: string) =>
+        repos().invites.receivedSince(creator, since, [
+          { emailHash: hash, userId: "" },
+          { emailHash: other, userId: "" },
+        ]);
+      expect(await counts(live.creatorId)).toEqual([
+        { fromCreator: 1, total: 4 },
+        { fromCreator: 0, total: 0 },
+      ]);
+      expect((await counts(hidden.creatorId))[0]).toEqual({ fromCreator: 1, total: 4 });
+      // Only games created after `since` count.
+      expect(
+        await repos().invites.receivedSince(live.creatorId, clock, [
+          { emailHash: hash, userId: "" },
+        ]),
+      ).toEqual([{ fromCreator: 0, total: 0 }]);
+      expect(await repos().invites.receivedSince(live.creatorId, since, [])).toEqual([]);
+    });
+
+    it("leaves out invitations from the target user's past opponents", async () => {
+      const hash = freshEmailId();
+      const since = clock;
+      const user = await human();
+      const friend = await invited(hash);
+      await invited(hash);
+      await target().sql(
+        "INSERT INTO past_opponents (user_id, other_id, last_finished_at) VALUES (?, ?, ?)",
+        user.id,
+        friend.creatorId,
+        LATER,
+      );
+      const [asUser] = await repos().invites.receivedSince(friend.creatorId, since, [
+        { emailHash: hash, userId: user.id },
+      ]);
+      expect(asUser).toEqual({ fromCreator: 0, total: 1 });
+      const [asNobody] = await repos().invites.receivedSince(friend.creatorId, since, [
+        { emailHash: hash, userId: "" },
+      ]);
+      expect(asNobody).toEqual({ fromCreator: 1, total: 2 });
+    });
   });
 
   describe("email invites (A17)", () => {
