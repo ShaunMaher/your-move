@@ -704,7 +704,9 @@ describe("a join link through sign-in and onboarding (06 §6.8, 07 §1)", () => 
     render(<App api={api} />);
     await screen.findByRole("heading", { name: "Sign in" });
     seen.push(window.location.href);
-    expect(peekReturnPath()).toBe("/join");
+    await waitFor(() => {
+      expect(peekReturnPath()).toBe("/join");
+    });
     typeInto("Email address", "sam@example.org");
     click("Email me a code");
     await screen.findByLabelText("Sign-in code");
@@ -712,7 +714,9 @@ describe("a join link through sign-in and onboarding (06 §6.8, 07 §1)", () => 
     click("Sign in");
     expect(await screen.findByRole("button", { name: "Join" })).toBeDefined();
     seen.push(window.location.href);
-    expect(window.location.pathname).toBe("/join");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/join");
+    });
     expect(calls.filter((call) => call.path === "/api/v1/join/lookup")).toHaveLength(1);
     expect(calls.filter((call) => call.path === "/api/v1/join")).toHaveLength(0);
     expect(keptJoinToken()).toBe(TOKEN);
@@ -743,7 +747,9 @@ describe("a join link through sign-in and onboarding (06 §6.8, 07 §1)", () => 
     typeInto("Display name", "Sam");
     click("Continue");
     expect(await screen.findByRole("button", { name: "Join" })).toBeDefined();
-    expect(window.location.pathname).toBe("/join");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/join");
+    });
     expect(window.location.href).not.toContain(TOKEN);
   });
 
@@ -756,11 +762,15 @@ describe("a join link through sign-in and onboarding (06 §6.8, 07 §1)", () => 
     });
     render(<App api={api} />);
     await screen.findByRole("heading", { name: "Welcome to Family Games" });
-    expect(window.location.pathname).toBe("/welcome");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/welcome");
+    });
     typeInto("Display name", "Sam");
     click("Continue");
     expect(await screen.findByRole("button", { name: "Join" })).toBeDefined();
-    expect(window.location.pathname).toBe("/join");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/join");
+    });
     expect(window.location.href).not.toContain(TOKEN);
   });
 
