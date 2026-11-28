@@ -152,6 +152,48 @@ export function joinLinkRepositoryContract(target: () => JoinLinkTarget): void {
       expect(await repos().joinLinks.find(link?.tokenHash ?? "")).not.toBeNull();
     });
 
+    it("hold a join to the link it was judged by: revoked, rotated or expired, the join is stale", async () => {
+      const join = (tokenHash: string, now: number): GameWriteSet => ({
+        game: { updatedAt: now },
+        insertPlayers: [
+          { id: crypto.randomUUID(), state: "joined", joinedVia: "join_link", joinedAt: now },
+        ],
+        requireJoinLink: { tokenHash, now },
+      });
+      const rowCount = async (gameId: string) =>
+        (
+          await target().sql("SELECT count(*) AS n FROM game_players WHERE game_id = ?", gameId)
+        )[0]?.["n"];
+
+      const live = await lobby();
+      const hash = live.link?.tokenHash ?? "";
+      expect(await repos().games.applyTransition(live.gameId, 0, join(hash, LATER + DAY))).toBe(
+        "ok",
+      );
+      expect(await rowCount(live.gameId)).toBe(2);
+
+      const revoked = await lobby();
+      await repos().joinLinks.revoke(revoked.gameId);
+      const stale = join(revoked.link?.tokenHash ?? "", LATER + DAY);
+      expect(await repos().games.applyTransition(revoked.gameId, 0, stale)).toBe("stale");
+      expect(await rowCount(revoked.gameId)).toBe(1);
+      expect((await repos().games.get(revoked.gameId))?.version).toBe(0);
+
+      const rotated = await lobby();
+      await repos().joinLinks.put(rotated.gameId, {
+        tokenHash: freshHash(),
+        createdAt: LATER + 1,
+        expiresAt: LATER + DAY,
+      });
+      const old = join(rotated.link?.tokenHash ?? "", LATER + 2);
+      expect(await repos().games.applyTransition(rotated.gameId, 0, old)).toBe("stale");
+
+      const expired = await lobby();
+      const late = join(expired.link?.tokenHash ?? "", LATER + 7 * DAY);
+      expect(await repos().games.applyTransition(expired.gameId, 0, late)).toBe("stale");
+      expect(await rowCount(expired.gameId)).toBe(1);
+    });
+
     it("are swept once expired: at or before the time given, never a live one", async () => {
       const cutoff = LATER + 30 * DAY;
       const expired = await lobby({

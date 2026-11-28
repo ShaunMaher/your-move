@@ -66,10 +66,19 @@ export function transitionStatements(
   writes: GameWriteSet,
 ): [Statement, ...Statement[]] {
   const guard = tokenGuard(gameId, token);
+  const link = writes.requireJoinLink;
   const first = db
     .update(games)
     .set({ ...writes.game, version: sql`${games.version} + 1`, writeToken: token })
-    .where(and(eq(games.id, gameId), eq(games.version, expectedVersion)))
+    .where(
+      and(
+        eq(games.id, gameId),
+        eq(games.version, expectedVersion),
+        link === undefined
+          ? undefined
+          : sql`EXISTS (SELECT 1 FROM ${joinLinks} WHERE ${joinLinks.gameId} = ${gameId} AND ${joinLinks.tokenHash} = ${link.tokenHash} AND ${joinLinks.expiresAt} > ${link.now})`,
+      ),
+    )
     .returning({ id: games.id });
   const dependent: Statement[] = [
     ...(writes.insertPlayers ?? []).map((player) =>

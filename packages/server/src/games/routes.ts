@@ -860,7 +860,8 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
    */
   const resolveJoin = async (token: string, user: UserRecord) => {
     if (!isJoinToken(token)) throw ApiError.of("NOT_FOUND");
-    const link = await repos.joinLinks.find(await hashJoinToken(token));
+    const tokenHash = await hashJoinToken(token);
+    const link = await repos.joinLinks.find(tokenHash);
     if (link === null) throw ApiError.of("NOT_FOUND");
     const at = now();
     const loaded = await loadCurrent(repos, link.gameId, user.id, at);
@@ -875,7 +876,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       blocked,
       now: at,
     });
-    return { link, loaded, verdict, at };
+    return { link, tokenHash, loaded, verdict, at };
   };
 
   app.openapi(joinLookupRoute, async (c) => {
@@ -909,16 +910,21 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     // A server-started transition: a lost race reloads and judges again (03 §5.2), so a seat
     // that filled meanwhile is the same `404` as a full game.
     for (let attempt = 1; ; attempt++) {
-      const { loaded, verdict, at } = await resolveJoin(token, user);
+      const { loaded, verdict, at, tokenHash } = await resolveJoin(token, user);
       if (verdict.kind === "refused") throw ApiError.of("NOT_FOUND");
       if (verdict.kind === "member") throw ApiError.of("ALREADY_JOINED");
       // An orphaned game takes no one new: `409 GAME_UNAVAILABLE`, as every transition (02 §7.3).
       contextOf(loaded);
-      const writes = joinWrites(loaded.game, verdict, {
-        userId: user.id,
-        newRowId: crypto.randomUUID(),
-        now: at,
-      });
+      const writes = {
+        ...joinWrites(loaded.game, verdict, {
+          userId: user.id,
+          newRowId: crypto.randomUUID(),
+          now: at,
+        }),
+        // Only through the link as it was judged: one revoked, rotated or expired meanwhile makes
+        // the join stale, and the retry finds the link gone (T24).
+        requireJoinLink: { tokenHash, now: at },
+      };
       // No push: joins reach the other members as realtime invalidations only (02 §4).
       const result = await repos.games.applyTransition(loaded.game.id, loaded.game.version, writes);
       if (result === "ok")

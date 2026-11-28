@@ -334,6 +334,12 @@ export interface GameWriteSet {
    * ends the link with it.
    */
   readonly deleteJoinLink?: boolean;
+  /**
+   * A precondition of the transition itself: it happens only while the game's join link is still
+   * the one with this token hash and hasn't expired at `now` (a join through it, 06 §6.8). A link
+   * revoked, rotated or expired meanwhile makes the transition `stale`, so it is judged again.
+   */
+  readonly requireJoinLink?: { readonly tokenHash: string; readonly now: number };
 }
 
 /** `stale`: another transition changed the game since `expectedVersion`; nothing was written. */
