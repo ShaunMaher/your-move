@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { forgetCatalog } from "../catalog.js";
@@ -155,6 +155,34 @@ describe("the game list", () => {
     await waitFor(() => {
       expect(fetched()).toBe(3);
     });
+  });
+
+  it("fetches the list again, showing nothing old, when the page comes back from the back-forward cache", async () => {
+    let games = [summary({ id: "frozen", yourTurn: true, players: [player(), alex] })];
+    const { api, calls } = fakeApi({
+      "GET /api/v1/games": () => list(...games),
+      "GET /api/v1/catalog": json(CATALOG),
+    });
+    render(<GameList api={api} onSessionLost={vi.fn()} />);
+    await screen.findByRole("link", { name: /Alex/u });
+    const fetched = () =>
+      calls.filter((call) => call.path === "/api/v1/games" && call.search === "").length;
+    expect(fetched()).toBe(1);
+    // An ordinary pageshow is not a restore.
+    window.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: false }));
+    expect(fetched()).toBe(1);
+    games = [summary({ id: "fresh", yourTurn: false, players: [player(), alex] })];
+    act(() => {
+      window.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true }));
+    });
+    await waitFor(() => {
+      expect(fetched()).toBe(2);
+    });
+    await waitFor(() => {
+      expect(screen.getAllByRole("link")).toHaveLength(1);
+    });
+    expect(document.querySelector('a[href="/g/frozen"]')).toBeNull();
+    expect(document.querySelector('a[href="/g/fresh"]')).not.toBeNull();
   });
 
   it("does not poll while the tab is hidden, and refetches when it is shown again", async () => {

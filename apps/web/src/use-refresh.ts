@@ -25,6 +25,29 @@ export function useRefresh(refresh: () => void, pollMs: number | null): void {
   }, [pollMs]);
 }
 
+/**
+ * Calls `restored` when the page comes back from the browser's back-forward cache (`pageshow` with
+ * `persisted`: a restored page runs no new load and shows whatever it showed when it was frozen,
+ * 07 §4). The caller then refetches before showing anything again, so a view the server has since
+ * replaced never comes back on screen (02 §3; games/pairs.md §9). An ordinary `pageshow` (a first
+ * load) is not a restore.
+ */
+export function useRestored(restored: () => void): void {
+  const latest = useRef(restored);
+  useEffect(() => {
+    latest.current = restored;
+  });
+  useEffect(() => {
+    const call = (event: PageTransitionEvent) => {
+      if (event.persisted) latest.current();
+    };
+    window.addEventListener("pageshow", call);
+    return () => {
+      window.removeEventListener("pageshow", call);
+    };
+  }, []);
+}
+
 /** Whether the tab is showing: a hidden one polls nothing and has seen nothing. */
 export function useVisible(): boolean {
   const [visible, setVisible] = useState(document.visibilityState === "visible");

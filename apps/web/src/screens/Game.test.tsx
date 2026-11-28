@@ -750,6 +750,92 @@ describe("the game frame", () => {
     visibility.mockRestore();
   });
 
+  describe("a page restored from the back-forward cache (07 §4, pairs §9)", () => {
+    /** What the browser fires when it restores a frozen page. */
+    const pageshow = (persisted: boolean) =>
+      window.dispatchEvent(Object.assign(new Event("pageshow"), { persisted }));
+
+    it("drops the frozen view, fetches the game again and shows only the new one", async () => {
+      let answer = withView(envelope(), { board: "frozen" });
+      const { calls } = open({ "GET /api/v1/games/g1": () => answer });
+      await screen.findByText(/Board v3/u);
+      const gets = () => calls.filter((c) => c.method === "GET" && c.path === "/api/v1/games/g1");
+      expect(gets()).toHaveLength(1);
+      let release: (response: Response) => void = () => undefined;
+      answer = new Promise<Response>((resolve) => {
+        release = resolve;
+      }) as never;
+      act(() => {
+        pageshow(true);
+      });
+      // Until the answer arrives the old board is not on screen.
+      expect(screen.queryByText(/Board v3/u)).toBeNull();
+      expect(screen.queryByRole("region", { name: "Fake board" })).toBeNull();
+      await waitFor(() => {
+        expect(gets()).toHaveLength(2);
+      });
+      release(withView(envelope({ version: 4, yourTurn: false, toAct: [1] }), { board: "fresh" }));
+      await screen.findByText(/Board v4/u);
+      expect(screen.queryByText(/Board v3/u)).toBeNull();
+    });
+
+    it("ignores a pageshow that is not a restore, such as the first load", async () => {
+      const { calls } = open();
+      await screen.findByText(/Board v3/u);
+      act(() => {
+        pageshow(false);
+      });
+      expect(screen.getByText(/Board v3/u)).toBeDefined();
+      expect(calls.filter((c) => c.method === "GET" && c.path === "/api/v1/games/g1")).toHaveLength(
+        1,
+      );
+    });
+
+    it("drops an answer asked for before the restore, however late it arrives", async () => {
+      let gets = 0;
+      const releases: ((answer: Response) => void)[] = [];
+      open({
+        "GET /api/v1/games/g1": () => {
+          gets += 1;
+          if (gets === 2 || gets === 3) {
+            return new Promise<Response>((resolve) => releases.push(resolve));
+          }
+          return withView();
+        },
+      });
+      await screen.findByText(/Board v3/u);
+      // A refetch is in flight when the page is frozen; it is restored before it answers.
+      window.dispatchEvent(new Event("focus"));
+      await waitFor(() => {
+        expect(releases).toHaveLength(1);
+      });
+      act(() => {
+        pageshow(true);
+      });
+      await waitFor(() => {
+        expect(releases).toHaveLength(2);
+      });
+      // The old request answers first, with the view of before the freeze: it never shows.
+      releases[0]?.(withView(envelope({ version: 3 }), { board: "frozen" }));
+      await Promise.resolve();
+      expect(screen.queryByText(/Board v3/u)).toBeNull();
+      releases[1]?.(withView(envelope({ version: 5, yourTurn: false, toAct: [1] })));
+      await screen.findByText(/Board v5/u);
+    });
+
+    it("says so, rather than showing the frozen view, when the refetch fails", async () => {
+      let answer: Response = withView();
+      open({ "GET /api/v1/games/g1": () => answer });
+      await screen.findByText(/Board v3/u);
+      answer = problem(500, "INTERNAL");
+      act(() => {
+        pageshow(true);
+      });
+      expect(await screen.findByText(/server isn't answering/u)).toBeDefined();
+      expect(screen.queryByText(/Board v3/u)).toBeNull();
+    });
+  });
+
   it("does not mark a lobby seen", async () => {
     const { calls } = open({ "GET /api/v1/games/g1": json({ game: lobby(), view: null }) });
     await screen.findByRole("button", { name: "Start game" });
