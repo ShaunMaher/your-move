@@ -67,8 +67,14 @@ const MAX_ACTIONS_CAP = 1_000_000;
  * (`KitOptions.shard`) plays each of its combinations exactly as the whole run does.
  */
 const SEED_STRIDE = 2 ** 20;
+/** Seeds must stay below this: `seededRandom` takes a 32-bit seed. */
+const SEED_LIMIT = 2 ** 32;
 /** Isolation pairs per combination (02 §6.7). */
 const ISOLATION_PAIRS = { fast: 3, full: 20 } as const;
+
+/** What a client receives for an output whose JSON is `json` (see `canonical`). */
+const served = (json: string): unknown =>
+  json === "undefined" ? undefined : (JSON.parse(json) as unknown);
 
 interface LogEntry {
   readonly kind: "action" | "resign" | "decline" | "timeout";
@@ -526,9 +532,12 @@ class Kit extends Reporter {
 
   /**
    * Checks every viewer's view and summary against their schemas; returns their JSON, by viewer
-   * (each seat, then the public). Each distinct JSON is checked once per step: viewers who get
-   * identical JSON are served the same thing, and a check of the same JSON gives the same answer
-   * (e.g. every viewer of a `hiddenFromEveryone` game).
+   * (each seat, then the public). What is checked is the JSON the framework serves, parsed again,
+   * not the value the module returned: a `NaN` is served as `null`, an `undefined` property not at
+   * all and a `Date` as its ISO string, so the value could pass a schema the served data fails, or
+   * the other way round. Each distinct JSON is therefore checked once per step, which gives exactly
+   * the answer checking it once per viewer would (every viewer of a `hiddenFromEveryone` game gets
+   * the same one).
    */
   private observeViews(
     def: AnyGameDefinition,
@@ -544,7 +553,7 @@ class Kit extends Reporter {
       const viewJson = canonical(view);
       if (!views.has(viewJson)) {
         this.check(
-          def.viewSchema.safeParse(view).success,
+          def.viewSchema.safeParse(served(viewJson)).success,
           "schema",
           `view for ${String(viewer)} doesn't match viewSchema`,
           where,
@@ -555,7 +564,7 @@ class Kit extends Reporter {
       const summaryJson = canonical(summary);
       if (!summaries.has(summaryJson)) {
         this.check(
-          listSummarySchema.safeParse(summary).success,
+          listSummarySchema.safeParse(served(summaryJson)).success,
           "schema",
           `summary for ${String(viewer)} isn't a ListSummary`,
           where,
@@ -648,8 +657,8 @@ class Kit extends Reporter {
       const view = this.call("schema", "view (perturbed)", where, () =>
         def.view(perturbed, viewer),
       );
-      const served = sample.views[viewer ?? seats];
-      this.check(canonical(view) === served, "secrecy", hidden("view"), where);
+      const shown = sample.views[viewer ?? seats];
+      this.check(canonical(view) === shown, "secrecy", hidden("view"), where);
       same("summary", (s) => def.summary(s, viewer));
       same("toAct", (s) => def.toAct(s));
       same("seatStatus", (s) => def.seatStatus(s));
@@ -999,6 +1008,8 @@ export function runKit(engines: GameEngines, given: KitOptions): KitReport {
   const stop = (): boolean => options.stopAtFirstFailure === true && kit.failures.length > 0;
   // Every combination of every rules version is numbered in order, whichever shard plays it.
   let comboNumber = -1;
+  /** Every combination of the run, in order, whichever shard plays it: see `KitReport.allCombos`. */
+  const list: string[] = [];
   for (const def of Object.values(engines)) {
     kit.claims(def);
     const combos = resolveCombos(kit, def, options);
@@ -1010,8 +1021,18 @@ export function runKit(engines: GameEngines, given: KitOptions): KitReport {
         : Math.max(3, Math.ceil(FAST_GAMES / Math.max(1, combos.length))));
     for (const combo of combos) {
       comboNumber += 1;
-      if (comboNumber % shard.count !== shard.index - 1 || stop()) continue;
       const first = base + comboNumber * SEED_STRIDE;
+      if (first + SEED_STRIDE > SEED_LIMIT) {
+        // Seeds are 32-bit (./random.ts): past this, a combination would replay another's games.
+        kit.fail(
+          "schema",
+          `the kit plays at most ${String(Math.floor((SEED_LIMIT - base) / SEED_STRIDE))} option set and seat count combinations from seed ${String(base)}; this module has more`,
+          { version: def.version },
+        );
+        break;
+      }
+      list.push(`${String(def.version)} ${canonical(combo.options)} ${String(combo.seats)}`);
+      if (comboNumber % shard.count !== shard.index - 1 || stop()) continue;
       kit.combos += 1;
       for (let game = 0; game < perCombo && !stop(); game += 1) {
         kit.games += 1;
@@ -1032,7 +1053,25 @@ export function runKit(engines: GameEngines, given: KitOptions): KitReport {
     if (options.mode === "fast") kit.vacuity(def);
     if (stop()) break;
   }
-  return { failures: kit.failures, games: kit.games, combos: kit.combos };
+  return {
+    failures: kit.failures,
+    games: kit.games,
+    combos: kit.combos,
+    allCombos: list.length,
+    comboDigest: digest(list.join("\n")),
+  };
+}
+
+/**
+ * A short fingerprint of `text` (FNV-1a, 64 bits, over its UTF-16 code units, as 16 hex digits),
+ * for comparing the logs of a run's shards; not a cryptographic hash.
+ */
+function digest(text: string): string {
+  let hash = 0xcbf29ce484222325n;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = BigInt.asUintN(64, (hash ^ BigInt(text.charCodeAt(i))) * 0x100000001b3n);
+  }
+  return hash.toString(16).padStart(16, "0");
 }
 
 /** Whether `shard` names one of `count` shards, numbered from 1. */

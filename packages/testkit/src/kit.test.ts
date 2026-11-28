@@ -744,6 +744,37 @@ describe("how runKit checks views (02 §6.1)", () => {
     expect(distinct.checks.count).toBe(3 * same.checks.count);
   });
 
+  /** The toy with a view of `{ x }` alone, judged by `schema`. */
+  const viewing = (schema: z.ZodType, x: (v: number | null) => unknown) => {
+    const toy = toyGame();
+    return asEngines({
+      ...toy,
+      viewSchema: z.object({ x: schema }).strict() as unknown as typeof toy.viewSchema,
+      view: ((_s: ToyState, v: number | null) => ({ x: x(v) })) as unknown as typeof toy.view,
+      players: () => ({ min: 2, max: 2 }),
+      test: { ...toy.test, hiddenInformation: false, optionInputs: () => [{}] },
+    });
+  };
+  const schemaFailures = (engines: ReturnType<typeof viewing>) =>
+    runKit(engines, { ...options, stopAtFirstFailure: true })
+      .failures.filter((f) => f.property === "schema")
+      .map((f) => f.message);
+
+  it.each([
+    ["seat 0 gets null and the public NaN", (v: number | null) => (v === null ? NaN : null)],
+    ["seat 0 gets NaN and the public null", (v: number | null) => (v === 0 ? NaN : null)],
+  ])("checks the JSON a client is served, in which NaN is null: %s", (_name, x) => {
+    expect(schemaFailures(viewing(z.null(), x))).toEqual([]);
+    expect(schemaFailures(viewing(z.number(), x))).toEqual(["view for 0 doesn't match viewSchema"]);
+  });
+
+  it("checks a Date as the ISO string a client is served", () => {
+    expect(schemaFailures(viewing(z.string(), () => new Date(0)))).toEqual([]);
+    expect(schemaFailures(viewing(z.date(), () => new Date(0)))).toEqual([
+      "view for 0 doesn't match viewSchema",
+    ]);
+  });
+
   it("still checks a view only one viewer gets", () => {
     const toy = toyGame();
     const publicOnly = counted((s, v) =>
@@ -787,6 +818,19 @@ describe("sharding a full run (02 §6)", () => {
     });
     // Combinations 0 and 3, 1, and 2.
     expect(parts.map(({ report: r }) => r.combos)).toEqual([2, 1, 1]);
+    // Every shard names the same whole run.
+    expect(report.allCombos).toBe(4);
+    expect(report.comboDigest).toMatch(/^[0-9a-f]{16}$/u);
+    for (const { report: r } of parts) {
+      expect([r.allCombos, r.comboDigest]).toEqual([report.allCombos, report.comboDigest]);
+    }
+    // A different run has a different list.
+    const twoSeats = runKit(asEngines({ ...toyGame(), players: () => ({ min: 2, max: 2 }) }), {
+      ...full,
+      games: 1,
+    });
+    expect(twoSeats.allCombos).toBe(2);
+    expect(twoSeats.comboDigest).not.toBe(report.comboDigest);
     expect(parts.reduce((games, { report: r }) => games + r.games, 0)).toBe(report.games);
     expect(parts.flatMap(({ report: r }) => r.failures)).toEqual([]);
     expect(parts.flatMap(({ part }) => part.calls).sort()).toEqual([...whole.calls].sort());
@@ -835,6 +879,50 @@ describe("sharding a full run (02 §6)", () => {
       [],
       [],
     ]);
+  });
+
+  it("judges a hiddenFromEveryone module's state changes per option set and seat count in full mode", () => {
+    const toy = toyGame();
+    // Every hand public, so only the deck order is hidden, as the flag requires; the deck is
+    // reordered except under the open option. Two seats: with three, the deck is down to a card
+    // for most of each game, when nothing is hidden at all.
+    const engines = asEngines({
+      ...toy,
+      players: () => ({ min: 2, max: 2 }),
+      view: (s) => ({ ...toy.view(s, null), peek: s.hands }),
+      test: {
+        ...toy.test,
+        hiddenFromEveryone: true,
+        perturbHidden: (s) => (s.open ? s : { ...s, deck: [...s.deck].reverse() }),
+      },
+    });
+    const vacuous = (report: KitReport) =>
+      report.failures.filter((f) => f.message.includes("perturbHidden changed"));
+    const failure = {
+      property: "secrecy",
+      version: 1,
+      seats: 2,
+      message: expect.stringMatching(
+        /^perturbHidden changed the state in only 0 of \d+ samples taken in progress under options \{"open":true\}; it must change at least half$/u,
+      ) as unknown,
+    };
+    expect(vacuous(runKit(engines, full))).toEqual([failure]);
+    // Combination 1 (the open option) is shard 2's.
+    expect(shards(2).map((options) => vacuous(runKit(engines, options)))).toEqual([[], [failure]]);
+  });
+
+  it("fails a run with more combinations than 32-bit seeds leave room for, rather than repeat games", () => {
+    // From this base seed only two combinations fit below 2^32; the toy has four.
+    const seed = 2 ** 32 - 2 * 2 ** 20;
+    const report = runKit(asEngines(toyGame()), { ...full, games: 1, seed });
+    expect(report.failures).toEqual([
+      {
+        property: "schema",
+        version: 1,
+        message: `the kit plays at most 2 option set and seat count combinations from seed ${String(seed)}; this module has more`,
+      },
+    ]);
+    expect([report.combos, report.allCombos]).toEqual([2, 2]);
   });
 
   it.each([

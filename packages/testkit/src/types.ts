@@ -57,7 +57,9 @@ export interface KitOptions {
   /**
    * The base seed. Default 1. The kit numbers the combinations it plays (each rules version's
    * option sets and seat counts, in order) from 0; game `g` of combination `k` uses seed
-   * `seed + k * 2^20 + g`, so a failure's reported seed names its game in every shard.
+   * `seed + k * 2^20 + g`, so a failure's reported seed names its game in every shard. Seeds are
+   * 32-bit, so from the default seed a run may have at most 4,096 combinations; the kit fails one
+   * with more rather than repeat another combination's games.
    */
   readonly seed?: number;
   /** Games per option set and seat count, overriding the mode's number. */
@@ -109,4 +111,12 @@ export interface KitReport {
   readonly games: number;
   /** How many option set and seat count combinations were played (in this shard). */
   readonly combos: number;
+  /** How many combinations the whole run has, whichever shard plays them. */
+  readonly allCombos: number;
+  /**
+   * A fingerprint (16 hex digits, not cryptographic) of the whole run's combination list: each
+   * combination's rules version, resolved options as JSON and seat count, in order. Every shard of
+   * a run reports the same one, so their logs show they split the same run.
+   */
+  readonly comboDigest: string;
 }

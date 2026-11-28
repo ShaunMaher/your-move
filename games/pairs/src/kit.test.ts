@@ -96,26 +96,49 @@ function traced(): { engines: GameEngines; games: Played[]; samples: Samples } {
   return { engines: { 1: wrapped }, games, samples };
 }
 
-// A measured budget (ADR 0004), not Vitest's 5 s default: the one traced fast run plays its 300
-// games, every seat count from 2 to 6 on each grid, in about 27 s alone and about 95 s within
-// `pnpm test` with coverage on a 16-thread developer machine (2026-11-29). The slowdown factor for
-// the shared qemu64 CI runner, about 2.3×, is how much CI's `test` job grew when paths was
-// installed (+634 s) against paths' full kit run locally (281 s); 600 s leaves a wide margin.
+// A measured budget (ADR 0004), not Vitest's 5 s default: the traced fast run plays its 300 games,
+// every seat count from 2 to 6 on each grid, and the second run below 300 more on the two largest
+// grids; together they take about 33 s alone on a 16-thread developer machine (2026-11-29, once the
+// kit checked each distinct view once per step; the first run alone took 27 s before that, and
+// about 95 s within `pnpm test` with coverage). The slowdown factor for the shared qemu64 CI runner, about 2.3×, is how much CI's
+// `test` job grew when paths was installed (+634 s) against paths' full kit run locally (281 s);
+// 600 s leaves a wide margin.
 const TIMEOUT_MS = 600_000;
+
+/** The grids whose late game is rarest among the kit's samples (fewest pairs found per turn). */
+const THIN_GRIDS = [{ grid: "5x6" }, { grid: "6x6" }] as const;
+/** The second run's base seed: past every seed the first run gives a combination's games. */
+const THIN_SEED = 1 + 2 ** 19;
 
 describe("the generic test kit (02 §6) and its coverage (pairs §10)", () => {
   const { engines: wrapped, games, samples } = traced();
-  let report: KitReport = { failures: [], games: 0, combos: 0 };
+  const thin = traced();
+  let report: KitReport = { failures: [], games: 0, combos: 0, allCombos: 0, comboDigest: "" };
+  let thinReport: KitReport = report;
   beforeAll(() => {
     // The grids played come from the engine's own `test.optionInputs` hook, and every seat count
     // `players` allows. The CPU budget is timed in this thread's CPU time (02 §6.6). It is timed
     // through the tracing wrapper, which only adds to each call's cost (a few microseconds of
     // JSON against the 5 ms budget), so passing here is at least as strong as passing unwrapped.
     report = runKit(wrapped, { mode: "fast", manifest, cpuClock: threadCpuClock().now });
+    // A second fast run on the two largest grids only, with seeds of its own, so the late-game
+    // check below rests on more than one run's samples there (review CH12-P-1). No manifest: its
+    // option inputs aren't the engine's. Its samples are counted with the first run's.
+    const def = thin.engines[1];
+    if (def === undefined) throw new Error("rules version 1 is missing");
+    thinReport = runKit(
+      { 1: { ...def, test: { ...def.test, optionInputs: () => THIN_GRIDS } } },
+      { mode: "fast", seed: THIN_SEED, cpuClock: threadCpuClock().now },
+    );
+    for (const [grid, states] of thin.samples) {
+      for (const [state, hidden] of states) samples.get(grid)?.set(state, hidden);
+    }
   }, TIMEOUT_MS);
 
   it("passes the pairs engine at every seat count from 2 to 6, on every grid", () => {
     expect(report.failures).toEqual([]);
+    expect(thinReport.failures).toEqual([]);
+    expect(thinReport.combos).toBe(2 * 5);
     expect(report.games).toBeGreaterThanOrEqual(300);
     expect(games.filter((game) => game.ending !== null).length).toBeGreaterThanOrEqual(300);
   });
@@ -141,11 +164,12 @@ describe("the generic test kit (02 §6) and its coverage (pairs §10)", () => {
   );
 
   // A statistical property, checked on the kit's own seeds: on 5x6 about 1–2 % of sampled states
-  // qualify (3 of 210 today), so a kit change that reseeds or resamples finds none there about 2 %
-  // of the time (review A25-P2-5). If that happens, read the annotation: a share near the usual is
-  // bad luck, and the remedy is to count the samples of a second traced fast run with its `seed`
-  // moved past the first run's games, not to drop the check; a share far lower means the kit's
-  // sampling changed, and pairs §10 needs a look.
+  // qualify (review A25-P2-5), so the two largest grids are sampled by both runs: 7 of 570 states
+  // qualify on 5x6 and 8 of 570 on 6x6 today (the first run alone found 1 of 210 on 5x6). If one still finds none, read the annotation: a share near the usual is
+  // bad luck, and the remedy is another traced run on that grid with its `seed` moved past the
+  // others' (each run's combination k takes seeds from seed + k * 2^20, its games in order), not
+  // to drop the check; a share far lower means the kit's sampling changed, and pairs §10 needs a
+  // look.
   it.for(GRIDS.map((grid) => grid.id))(
     "samples in-progress states with at most 4 hidden cards on %s",
     (grid, { annotate }) => {
