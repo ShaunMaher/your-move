@@ -4,14 +4,15 @@
  * runs `pnpm build` (which runs `pnpm games:generate` and `pnpm games:verify`).
  *
  * `words` (the word game, M1b) is installed and enabled; `example` (the reference game, 02 §7.6)
- * is installed but disabled for new games; `paths` joins in M5.
+ * is installed but disabled for new games; `paths` (the path-laying game, M5) is installed and
+ * enabled.
  */
 import { defineInstance } from "@your-move/scripts/instance";
 
 export default defineInstance({
   games: [
     { package: "@your-move/game-words" },
-    // { package: "@your-move/game-paths" },
+    { package: "@your-move/game-paths" },
     { package: "@your-move/game-example", enabled: false },
     // { package: "@someone/game-hex", acceptLicence: "MPL-2.0" },  // a third-party game
   ],

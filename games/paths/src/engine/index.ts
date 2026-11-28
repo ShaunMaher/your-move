@@ -19,6 +19,7 @@ export {
   samePosition,
   type NotchPosition,
 } from "./geometry.js";
+export { selfElimination, type SelfElimination } from "./rules.js";
 export { livePosition, movement, type Board, type Movement, type Square } from "./movement.js";
 export {
   actionSchema,

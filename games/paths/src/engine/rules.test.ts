@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { facing, game, out, placedFor, STRAIGHT, unplaced } from "../test-support.js";
 import { movement } from "./movement.js";
-import { freeEdgeNotches, legalPlacements, validate } from "./rules.js";
+import { freeEdgeNotches, legalPlacements, selfElimination, validate } from "./rules.js";
 import type { Action } from "./schemas.js";
 import { TILES } from "./tiles.js";
 
@@ -134,5 +134,27 @@ describe("validate: the self-elimination rule (paths §3 step 4)", () => {
       movement(state.board, state.markers, { r: 0, c: 0 }, { tileId: 3, rotation: 1 }).eliminated,
     ).toEqual([1]);
     expect(validate(state, 0, tile(3, 1))).toEqual(OK);
+  });
+});
+
+describe("selfElimination (paths §3 step 4)", () => {
+  const state = game({ markers: [facing(0, 0, 0), facing(5, 5, 4)], hands: [[0, SAFE], [1]] });
+  const safePlaced = placedFor(STRAIGHT);
+  const target = { r: 0, c: 0 };
+  const killer = { tileId: 0, rotation: 0 };
+
+  it("searches the hand for a safe option only when the variant is on and the placement eliminates", () => {
+    const ask = (avoid: boolean, placed: { tileId: number; rotation: number }) =>
+      selfElimination(state.board, state.markers, 0, target, state.hands[0] ?? [], avoid, placed);
+    expect(ask(true, killer)).toEqual({ eliminates: true, safeExists: true, blocked: true });
+    // `allowed` and a safe placement trace nothing beyond the placement: nothing was searched.
+    expect(ask(false, killer)).toEqual({ eliminates: true, safeExists: null, blocked: false });
+    expect(ask(true, safePlaced)).toEqual({ eliminates: false, safeExists: null, blocked: false });
+    expect(ask(false, safePlaced)).toEqual({ eliminates: false, safeExists: null, blocked: false });
+  });
+
+  it("says when no tile in hand is safe", () => {
+    const verdict = selfElimination(state.board, state.markers, 0, target, [0], true, killer);
+    expect(verdict).toEqual({ eliminates: true, safeExists: false, blocked: false });
   });
 });

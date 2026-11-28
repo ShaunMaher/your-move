@@ -97,3 +97,14 @@ export const JOIN_LINK_TEST_TIMEOUT_MS = 60_000;
  * alone, 2026-11-28; to be re-measured on CI.
  */
 export const ADD_PLAYER_TEST_TIMEOUT_MS = 90_000;
+
+/**
+ * The paths game's four-person test (paths.spec.ts, alpha A24, M5 acceptance): four sign-ins, a
+ * join link used three times, Start, four markers placed in two steps, five tile turns each
+ * checked on every page, and three resignations to the end, across four browser contexts at
+ * widths from 320 px. The full words game's steps with two more people, so 150 s against its 120 s.
+ * PROVISIONAL: a margin over local runs (about 9 s Chromium, 13 s WebKit in the pinned image), not
+ * a CI measurement; to be re-measured on the CI runner from the first pipeline that runs it, and
+ * then set from that.
+ */
+export const PATHS_TEST_TIMEOUT_MS = 150_000;

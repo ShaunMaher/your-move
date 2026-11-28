@@ -8,23 +8,73 @@ import { OK, type GameError, type Ok, type Seat } from "@your-move/sdk";
 
 import { at } from "./at.js";
 import { edgeNotch, edgeNotchCount, samePosition } from "./geometry.js";
-import { livePosition, movement } from "./movement.js";
-import { ERROR_CODES, type Action, type Placed } from "./schemas.js";
+import { livePosition, movement, type Board, type Square } from "./movement.js";
+import { ERROR_CODES, type Action, type Marker, type Placed } from "./schemas.js";
 import { faced, type State } from "./state.js";
 import { ROTATIONS } from "./tiles.js";
 
-/** Whether playing `placed` now would put `seat`'s own marker out. */
-function eliminatesSelf(state: State, seat: Seat, placed: Placed): boolean {
-  const moved = movement(state.board, state.markers, faced(state, seat), placed);
-  return moved.eliminated.includes(seat);
+/** What the self-elimination rule (paths §3 step 4) says about one placement. */
+export interface SelfElimination {
+  /** Whether placing it would put the mover's own marker off the board. */
+  readonly eliminates: boolean;
+  /**
+   * Whether some tile and rotation in the mover's hand would keep their marker on the board; null
+   * when that wasn't searched for, which is unless the variant is on and this placement
+   * eliminates (so the `allowed` variant, and a safe placement, trace nothing extra: the kit's
+   * cost model, `candidates` in kit-hooks.ts, counts the search only in that case).
+   */
+  readonly safeExists: boolean | null;
+  /** Whether the rule refuses it: it eliminates, another choice doesn't, and the variant is on. */
+  readonly blocked: boolean;
+}
+
+/** Whether placing `placed` on `target` would put `seat`'s own marker out. */
+function eliminatesSelf(
+  board: Board,
+  markers: readonly Marker[],
+  seat: Seat,
+  target: Square,
+  placed: Placed,
+): boolean {
+  return movement(board, markers, target, placed).eliminated.includes(seat);
+}
+
+/**
+ * The self-elimination rule as one pure function of the public board, the markers, the mover's
+ * marker's target square and the mover's own hand, so the server's `validate` and the client's
+ * preview share it (paths §3 step 4, §8).
+ */
+export function selfElimination(
+  board: Board,
+  markers: readonly Marker[],
+  seat: Seat,
+  target: Square,
+  hand: readonly number[],
+  avoidIfPossible: boolean,
+  placed: Placed,
+): SelfElimination {
+  const eliminates = eliminatesSelf(board, markers, seat, target, placed);
+  const safeExists =
+    avoidIfPossible && eliminates
+      ? hand.some((tileId) =>
+          Array.from({ length: ROTATIONS }, (_, rotation) => rotation).some(
+            (rotation) => !eliminatesSelf(board, markers, seat, target, { tileId, rotation }),
+          ),
+        )
+      : null;
+  return { eliminates, safeExists, blocked: safeExists === true };
 }
 
 /** Every tile and rotation in `seat`'s hand, with whether it puts the mover out. */
 function options(state: State, seat: Seat): { placed: Placed; eliminates: boolean }[] {
+  const target = faced(state, seat);
   return at(state.hands, seat).flatMap((tileId) =>
     Array.from({ length: ROTATIONS }, (_, rotation) => {
       const placed = { tileId, rotation };
-      return { placed, eliminates: eliminatesSelf(state, seat, placed) };
+      return {
+        placed,
+        eliminates: eliminatesSelf(state.board, state.markers, seat, target, placed),
+      };
     }),
   );
 }
@@ -69,12 +119,15 @@ export function validate(state: State, seat: Seat, action: Action): Ok | GameErr
   if (state.phase !== "tiles") return { code: ERROR_CODES.wrongPhase };
   if (!at(state.hands, seat).includes(action.tileId)) return { code: ERROR_CODES.notInHand };
   const placed = { tileId: action.tileId, rotation: action.rotation };
-  if (
-    state.options.selfElimination === "avoidIfPossible" &&
-    eliminatesSelf(state, seat, placed) &&
-    options(state, seat).some((option) => !option.eliminates)
-  ) {
-    return { code: ERROR_CODES.selfEliminationAvoidable };
-  }
+  const verdict = selfElimination(
+    state.board,
+    state.markers,
+    seat,
+    faced(state, seat),
+    at(state.hands, seat),
+    state.options.selfElimination === "avoidIfPossible",
+    placed,
+  );
+  if (verdict.blocked) return { code: ERROR_CODES.selfEliminationAvoidable };
   return OK;
 }

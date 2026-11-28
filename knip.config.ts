@@ -20,7 +20,11 @@ const config: KnipConfig = {
       project: ["*.{ts,js,mjs}"],
       // Installed game packages: named in instance.config.ts and imported only by the generated,
       // git-ignored registry and client import map (02 §7.3), which knip doesn't read.
-      ignoreDependencies: ["@your-move/game-example", "@your-move/game-words"],
+      ignoreDependencies: [
+        "@your-move/game-example",
+        "@your-move/game-paths",
+        "@your-move/game-words",
+      ],
     },
     "apps/node": {
       project: ["src/**/*.ts", "scripts/**/*.ts"],

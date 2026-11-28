@@ -6,6 +6,34 @@ import type { Page } from "@playwright/test";
 
 import { expect } from "./fixtures.js";
 
+/**
+ * With `SHOTS_DIR` set, saves a full-page screenshot of the page as `name.png` there; otherwise
+ * nothing. Playwright inserts an inline <style> to take a screenshot, which the page's CSP rightly
+ * refuses and reports; those reports are not the page's, so they aren't counted.
+ */
+export async function shot(page: Page, name: string): Promise<void> {
+  const dir = process.env["SHOTS_DIR"];
+  if (dir === undefined) return;
+  const ignore = (on: boolean) =>
+    page.evaluate((value) => {
+      (window as unknown as { __ignoreCsp?: boolean }).__ignoreCsp = value;
+      return new Promise((done) => setTimeout(done, 0));
+    }, on);
+  await ignore(true);
+  await page.screenshot({ path: `${dir}/${name}.png`, fullPage: true });
+  await ignore(false);
+}
+
+/** `shot` in the light theme and again in the dark one (the page follows the device's setting). */
+export async function shotBothThemes(page: Page, name: string): Promise<void> {
+  if (process.env["SHOTS_DIR"] === undefined) return;
+  await page.emulateMedia({ colorScheme: "light" });
+  await shot(page, `${name}-light`);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await shot(page, `${name}-dark`);
+  await page.emulateMedia({ colorScheme: "light" });
+}
+
 /** Long enough for a page's poll or refetch to bring another person's move. */
 export const FAR = { timeout: 20_000 };
 

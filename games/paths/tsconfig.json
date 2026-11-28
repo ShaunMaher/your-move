@@ -1,10 +1,11 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist",
-    "tsBuildInfoFile": "dist/.tsbuildinfo"
-  },
-  "include": ["src"],
-  "references": [{ "path": "../../packages/sdk" }, { "path": "../../packages/testkit" }]
+  // Solution file: the engine (built to dist/, no DOM library), the client (built to dist/, with
+  // the DOM) and the package's own config files (type-checked only), so all are type-checked and
+  // lintable (11 §2).
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.engine.json" },
+    { "path": "./tsconfig.client.json" },
+    { "path": "./tsconfig.config.json" }
+  ]
 }

@@ -3,7 +3,7 @@
  * every test fails on a Content-Security-Policy violation (07 §4). `friend` is a second person's
  * page, for tests where two people play.
  */
-import { test as base, expect, type Page, type TestInfo } from "@playwright/test";
+import { test as base, expect, type Browser, type Page, type TestInfo } from "@playwright/test";
 
 import { WARMUP_TIMEOUT_MS } from "./budgets.js";
 
@@ -58,8 +58,42 @@ function withoutScreenshotNoise(violations: Violation[], testInfo: TestInfo): Vi
   );
 }
 
+/** The device settings a person's context takes, as the project and the test's `use` give them. */
+interface Device {
+  readonly baseURL: string | undefined;
+  readonly viewport: { width: number; height: number } | null | undefined;
+  readonly userAgent: string | undefined;
+  readonly deviceScaleFactor: number | undefined;
+  readonly isMobile: boolean | undefined;
+  readonly hasTouch: boolean | undefined;
+}
+
+/** A page in a context of its own with the given device settings, and its CSP check. */
+async function openPlayer(
+  browser: Browser,
+  device: Device,
+  testInfo: TestInfo,
+): Promise<{ page: Page; violations: () => Promise<Violation[]>; close: () => Promise<void> }> {
+  const { baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch } = device;
+  const context = await browser.newContext({
+    ...(baseURL === undefined ? {} : { baseURL }),
+    ...(viewport === undefined ? {} : { viewport }),
+    ...(userAgent === undefined ? {} : { userAgent }),
+    ...(deviceScaleFactor === undefined ? {} : { deviceScaleFactor }),
+    ...(isMobile === undefined ? {} : { isMobile }),
+    ...(hasTouch === undefined ? {} : { hasTouch }),
+  });
+  const page = await context.newPage();
+  const collect = await trackCspViolations(page);
+  return {
+    page,
+    violations: async () => withoutScreenshotNoise(await collect(), testInfo),
+    close: () => context.close(),
+  };
+}
+
 export const test = base.extend<
-  { cspViolations: Violation[]; friend: Page },
+  { cspViolations: Violation[]; friend: Page; crowd: Page[] },
   { browserWarmup: undefined }
 >({
   /**
@@ -102,23 +136,44 @@ export const test = base.extend<
    * project's device settings, for tests where two people play each other. It fails the test on a
    * Content-Security-Policy violation like the first.
    */
-  friend: async ({ browser }, use, testInfo) => {
-    const { baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch } =
-      testInfo.project.use;
-    const context = await browser.newContext({
-      ...(baseURL === undefined ? {} : { baseURL }),
-      ...(viewport === undefined ? {} : { viewport }),
-      ...(userAgent === undefined ? {} : { userAgent }),
-      ...(deviceScaleFactor === undefined ? {} : { deviceScaleFactor }),
-      ...(isMobile === undefined ? {} : { isMobile }),
-      ...(hasTouch === undefined ? {} : { hasTouch }),
-    });
-    const page = await context.newPage();
-    const collect = await trackCspViolations(page);
-    await use(page);
-    const violations = withoutScreenshotNoise(await collect(), testInfo);
-    await context.close();
+  friend: async (
+    { browser, baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch },
+    use,
+    testInfo,
+  ) => {
+    const device = { baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch };
+    const player = await openPlayer(browser, device, testInfo);
+    await use(player.page);
+    const violations = await player.violations();
+    await player.close();
     expect(violations, "Content-Security-Policy violations (second player)").toEqual([]);
+  },
+  /**
+   * Two more people, for games of four (the paths game's e2e, alpha A24): each a page in a context
+   * of its own, like `friend`, with the same device settings (the test's `use` included, so a
+   * phone test gets touch in every context). Every context is closed and every page's
+   * Content-Security-Policy violations collected before the one expectation, so a failure in one
+   * never hides another's.
+   */
+  crowd: async (
+    { browser, baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch },
+    use,
+    testInfo,
+  ) => {
+    const device = { baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch };
+    const players = [
+      await openPlayer(browser, device, testInfo),
+      await openPlayer(browser, device, testInfo),
+    ];
+    await use(players.map((player) => player.page));
+    const found: Violation[][] = [];
+    for (const player of players) {
+      found.push(await player.violations());
+      await player.close().catch(() => undefined);
+    }
+    expect(found.flat(), "Content-Security-Policy violations (third and fourth players)").toEqual(
+      [],
+    );
   },
 });
 
