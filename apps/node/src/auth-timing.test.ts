@@ -54,7 +54,9 @@
  * address's per-address and instance counters are real rows, the hidden one's the long-lived
  * `silent` row: an insert against an update, 06 §6.6's recorded residual); two planted SELECTs
  * +3.88% to +4.08%. One planted SELECT is about 2.5% of a creation, under the bound, so the power
- * check plants two (ADR 0006 addendum).
+ * check plants two (ADR 0006 addendum). Alpha A20 added a known account with email nudges on (its
+ * invitation is mailed after the response, like the unknown arm's invite email): one run on
+ * 2026-11-28, +0.26% against unknown (known +0.08%, two planted SELECTs +3.35% in the same run).
  *
  * A join-link lookup refused for a block with a member vs one refused because the game is full
  * (alpha A18, 06 §6.8): the same design, one joiner looking up a fresh lobby of the same shape each
