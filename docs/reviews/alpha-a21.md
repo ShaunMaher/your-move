@@ -27,3 +27,5 @@ gated (S-5), the Turnstile sentence waits for enforcement (P-6), and S-6 is acce
 | A21-P-12, A21-P-13, A21-P-14 | Fixed. | `tests/e2e/src/onboarding.spec.ts`, `onboarding.test.ts`, `config/parse.ts` |
 | A21-P-16 | Recorded: a `displayName`-only request no longer completes onboarding (as 05 always said), and existing users are asked for the age confirmation once. | commit `e47ad67` |
 | A21-P2-2 to A21-P2-5 | Fixed. | 05, 08 §4, 09 §1, 10 |
+
+After sign-off, the MR pipeline found one load-dependent test: the re-prompt's arrival focus asserted synchronously after `findByRole`, which 11 §4 forbids. The owner fixed it with `waitFor` (`apps/web/src/App.test.tsx`, commit `130abb4`).
