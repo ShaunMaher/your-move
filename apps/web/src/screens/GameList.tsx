@@ -12,7 +12,7 @@ import { type CatalogGame, type GameSummary, listGames } from "../game-api.js";
 import { opponentNames, type Section, sectionOf, textOf } from "../game-text.js";
 import { GameIcon } from "../GameIcon.js";
 import { Link } from "../router.js";
-import { useRefresh } from "../use-refresh.js";
+import { useRefresh, useRestored } from "../use-refresh.js";
 import { Problem } from "./Problem.js";
 
 const POLL_MS = 15_000;
@@ -84,6 +84,10 @@ export function GameList({ api, onSessionLost }: GameListProps) {
   });
   /** The newest hidden-invitations request: an older answer arriving later is dropped. */
   const hiddenRequest = useRef(0);
+  /** The newest list request: an answer asked for before a restore (or a newer request) is dropped. */
+  const listRequest = useRef(0);
+  /** Bumped when the page is frozen: a "Show more" asked for before then is a page of the old list. */
+  const epoch = useRef(0);
   const [types, setTypes] = useState<ReadonlyMap<string, CatalogGame>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const loading = useRef(false);
@@ -100,6 +104,8 @@ export function GameList({ api, onSessionLost }: GameListProps) {
   const refresh = useCallback(() => {
     if (loading.current) return;
     loading.current = true;
+    listRequest.current += 1;
+    const asked = listRequest.current;
     hiddenRequest.current += 1;
     const mine = hiddenRequest.current;
     void listGames(api, undefined, "hidden").then((result) => {
@@ -108,6 +114,7 @@ export function GameList({ api, onSessionLost }: GameListProps) {
       }
     });
     void listGames(api).then((result) => {
+      if (asked !== listRequest.current) return;
       loading.current = false;
       if (!mounted.current) return;
       if (result.ok) {
@@ -140,10 +147,29 @@ export function GameList({ api, onSessionLost }: GameListProps) {
 
   useRefresh(refresh, POLL_MS);
 
+  // A page restored from the back-forward cache shows the list as it was frozen: drop it and
+  // fetch again (07 §4).
+  const freeze = () => {
+    epoch.current += 1;
+    listRequest.current += 1;
+    hiddenRequest.current += 1;
+    loading.current = false;
+    expanded.current = false;
+    setGames(null);
+    setMore(null);
+    setHidden({ games: [], full: false });
+  };
+  useRestored(() => {
+    freeze();
+    refresh();
+  }, freeze);
+
   function showMore() {
     if (more === null) return;
+    const asked = epoch.current;
     void listGames(api, more).then((result) => {
-      if (!mounted.current) return;
+      // The page was frozen and restored meanwhile: this is a page of the old list.
+      if (!mounted.current || asked !== epoch.current) return;
       if (!result.ok) {
         setError("Couldn't load more games.");
         return;

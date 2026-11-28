@@ -33,7 +33,7 @@ import { forgetJoinLink, peekJoinLink } from "../join-link-handoff.js";
 import { rememberPushOffered, shouldOfferPush } from "../push.js";
 import { PushOffer } from "../PushOffer.js";
 import { navigate, Link } from "../router.js";
-import { useRefresh, useVisible } from "../use-refresh.js";
+import { useRefresh, useRestored, useVisible } from "../use-refresh.js";
 import { openWordList } from "../word-lists.js";
 import { Frame, type RematchFailure } from "./Frame.js";
 import type { MadeLink } from "./JoinLinkPanel.js";
@@ -153,6 +153,8 @@ export function Game({
   const visible = useVisible();
   /** The newest game the screen has shown: an older answer arriving late must not replace it. */
   const newest = useRef(-1);
+  /** Bumped when the page is restored: an answer asked for before then is dropped, however late. */
+  const generation = useRef(0);
 
   const apply = useCallback((answer: GameWithView) => {
     const next = adapt(answer);
@@ -192,14 +194,17 @@ export function Game({
         return;
       }
       fetching.current = true;
+      const mine = generation.current;
       try {
         do {
           again.current = false;
           const result = await getGame(api, id);
+          // The page was restored meanwhile: the refetch it started owns the screen.
+          if (mine !== generation.current) return;
           settle(result);
         } while (wantsAnother() && mounted.current);
       } finally {
-        fetching.current = false;
+        if (mine === generation.current) fetching.current = false;
       }
     },
     [api, id, settle],
@@ -218,6 +223,24 @@ export function Game({
     setLoad({ status: "loading" });
     void refetch(true);
   }
+
+  /**
+   * A page restored from the back-forward cache shows what it showed when it was frozen: drop it
+   * and fetch the game again, so an old view never comes back on screen (07 §4, 02 §3).
+   */
+  const freeze = useCallback(() => {
+    generation.current += 1;
+    fetching.current = false;
+    again.current = false;
+    newest.current = -1;
+    setNotice(null);
+    setLoad({ status: "loading" });
+  }, []);
+  const restore = useCallback(() => {
+    freeze();
+    void refetch();
+  }, [freeze, refetch]);
+  useRestored(restore, freeze);
 
   const game = load.status === "ready" ? load.game : null;
   const gameType = game?.gameType ?? null;
@@ -273,14 +296,18 @@ export function Game({
   const submit = useCallback(
     async (action: unknown): Promise<SubmitResult> => {
       if (game === null) throw new Error("no game");
+      const asked = generation.current;
       const result = await submitAction(api, id, game.version, action);
+      // The page was frozen and restored while the request was out: its answer is the board's to
+      // hear, but it must not put a view on a screen the restore has cleared.
+      const current = asked === generation.current;
       if (result.ok) {
-        apply({ game: result.data.game, view: result.data.view });
+        if (current) apply({ game: result.data.game, view: result.data.view });
         return { ok: true, game: adapt(result.data).game, view: result.data.view };
       }
       if (result.status === 0) throw new Error("offline");
       if (result.status === 401) onSessionLost();
-      if (MOVED_ON.has(result.code)) void refetch(true);
+      if (current && MOVED_ON.has(result.code)) void refetch(true);
       return {
         ok: false,
         error: {

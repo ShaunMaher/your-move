@@ -99,6 +99,10 @@ expire (7 days at most). Nothing needs configuring. Lookups and joins are limite
 person and 60 an hour per client address (`LIMIT_JOIN_LINK_USER_HOUR`, `LIMIT_JOIN_LINK_IP_HOUR`),
 and a creator makes at most 20 links a day (`LIMIT_JOIN_LINKS_CREATED_USER_DAY`). The per-address
 limit needs the real client address, as sign-in does (`TRUST_PROXY`, 08 §4.1).
+An operator whose people share an address (a school, a carrier's NAT) should raise
+`LIMIT_JOIN_LINK_IP_HOUR`: families joining one game from one network can reach 60 an hour. A wrong
+`TRUST_PROXY` makes every request come from the proxy's address, which turns this limit into an
+instance-wide cap of 60 an hour for everyone. The default stays 60.
 
 The Cloudflare Tunnel compose file is below; the Caddy one arrives in M4 (09 §4).
 
@@ -427,17 +431,28 @@ unsharded run's games; every check that plays no game runs in each shard. Each s
 per package, the games and combinations it played, the whole run's number of combinations and a
 fingerprint of their list, which is the same in every shard of one run. A newly installed game is
 covered without a CI change, but re-measure the shards when one is installed and raise the count
-if a shard would run much past 20 minutes.
+if the slowest would take longer than about 20 minutes on the runner (the fit below).
 
-Measured locally (16-thread developer laptop, 2026-11-29, shards run side by side), as an upper
-estimate with pairs installed too: the four shards took 328, 338, 336 and 336 s, and three would
-take 445, 502 and 376 s. Without pairs, as installed today, the four take 136, 134, 96 and 82 s.
-The shared runner took about 2.3× a laptop's time for the paths game's full kit (`test` grew
-634 s when it was installed, against 281 s locally), so with pairs each of the four should take
-about 13 minutes on the runner, plus its workspace install, where three would come close to 20.
-More shards would each add an install and, since jobs queue for the runner's concurrency, little
-wall time. The shards share one `timeout` (30 minutes), a margin over that estimate, provisional
-until it is set from the first pipeline that runs them (ADR 0004). The jobs keep `TMPDIR` on tmpfs
+Measured, with pairs installed (alpha A26, 2026-11-29; a 16-thread developer laptop, shards run one
+after another): four shards took 276, 292, 283 and 286 s, and eight took 162, 189, 187, 208, 116, 98,
+99 and 83 s (mean 143 s). The options and seat counts of each game fall unevenly on the shards (words
+has two combinations, paths 35, pairs 20, the example game 16), so shards differ by 2×. The first real
+run of the shards on the runner (pipeline 82926, without pairs, four shards at once) took 891, 880, 688
+and 649 s against about 136, 134, 92–96 and 80–82 s locally. That fits **runner ≈ 303 s + 4.3 × local**
+(it predicts 888, 879, 699 and 647 s): a fixed cost per shard (the workspace install and the builds)
+plus kit work at about 4.3×, run beside `test`, the e2e jobs and the builds. The earlier 2.3× came from
+one `test` job growing 634 s against 281 s locally, which was not concurrent kit work. On that fit,
+four shards with pairs would take about 26 minutes each (303 + 4.3 × 292 s), so `test:games` runs
+**8** shards, chosen because the split is uneven: the slowest, 208 s locally, is about 20 minutes on
+the fit, and the shared `timeout` is 35 minutes, provisional until set from the first pipeline that
+runs them (ADR 0004). Each shard also pays the fixed cost, so more shards give diminishing returns
+(six would put the slowest nearer 25 minutes).
+**Open:** only four shards were seen running together. Whether the runner runs eight at once is
+unproven and is the operator's runner setting (`concurrent` in its `config.toml`); with fewer slots
+the shards queue and the wall time grows to about 8 ÷ slots × 20 minutes. About 4 or more is advisable
+for this 4-core VM. Re-measure when a game is installed: keep the slowest local shard near 200 s or
+less. The `test` job itself took 1,951 s in pipeline 82926, without `games:verify`, inside its
+40-minute timeout. The jobs keep `TMPDIR` on tmpfs
 as `test` does, and the publish jobs need every shard.
 
 The `test` job keeps its scratch files (temporary SQLite databases,

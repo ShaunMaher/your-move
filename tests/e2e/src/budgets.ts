@@ -108,3 +108,20 @@ export const ADD_PLAYER_TEST_TIMEOUT_MS = 90_000;
  * then set from that.
  */
 export const PATHS_TEST_TIMEOUT_MS = 150_000;
+
+/**
+ * The pairs game's three-person test (pairs.spec.ts, alpha A26, 10 §Pairs game): three sign-ins, a
+ * join link used twice, Start, a perfect-memory double playing a 4 × 5 game on three pages until
+ * one player has resigned mid-turn and the others have found every pair (dozens of card turns,
+ * each answered by the server and each followed by a refresh of the three pages), then the end.
+ * PROVISIONAL: 14-20 s locally (ADR 0004 has the figures); to be re-measured on the CI runner from
+ * the first pipeline that runs it, and then set from that.
+ */
+export const PAIRS_TEST_TIMEOUT_MS = 180_000;
+
+/**
+ * The pairs layout test (pairs.spec.ts, alpha A26): four sign-ins and eight games, each created
+ * with a join link, joined and started, with the board measured on every player's page. The
+ * same provisional status as `PAIRS_TEST_TIMEOUT_MS`.
+ */
+export const PAIRS_LAYOUT_TEST_TIMEOUT_MS = 240_000;

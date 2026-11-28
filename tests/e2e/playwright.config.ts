@@ -81,6 +81,10 @@ export default defineConfig({
       LIMIT_OTP_REQUEST_IP_HOUR: "10000",
       LIMIT_OTP_VERIFY_IP_HOUR: "10000",
       LIMIT_NEW_ACCOUNTS_IP_DAY: "10000",
+      // The join-link specs (paths, pairs) redeem dozens of links from this one address and a few
+      // accounts in an hour (60 per IP and 30 per user by default).
+      LIMIT_JOIN_LINK_IP_HOUR: "10000",
+      LIMIT_JOIN_LINK_USER_HOUR: "10000",
     },
   },
 });

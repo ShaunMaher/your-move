@@ -2,7 +2,7 @@
  * Test helpers for the pairs package: a source that refuses draws and a state builder for rules
  * tables. Never imported by the engine, client or manifest, and left out of the published files.
  */
-import type { RandomSource, Seat } from "@your-move/sdk";
+import type { GameEnvelope, RandomSource, Seat } from "@your-move/sdk";
 
 import { gridOf, type Action, type GridId, type Options } from "./engine/schemas.js";
 import type { LastMiss, Out, State } from "./engine/state.js";
@@ -68,4 +68,42 @@ export function allMatchedBut(
 /** The flip of card index `card` on a grid of `columns` columns. */
 export function flipAt(card: number, columns = gridOf(OPTIONS.grid).columns): Action {
   return { type: "flip", row: Math.floor(card / columns), column: card % columns };
+}
+
+/** A minimal active-game envelope (05 §Common types) with the given display names. */
+export function envelope(
+  names: readonly (string | null)[],
+  yourSeat: number | null,
+  fields: Partial<GameEnvelope> = {},
+): GameEnvelope {
+  return {
+    id: "g1",
+    gameType: "pairs",
+    gameVersion: 1,
+    options: OPTIONS,
+    status: "active",
+    version: 3,
+    endReason: null,
+    turnTimeoutDays: 3,
+    seatOrder: "join",
+    aiAssistance: "off",
+    available: true,
+    resources: [],
+    players: names.map((displayName, seat) => ({
+      seat,
+      userId: displayName === null ? null : `u${String(seat)}`,
+      displayName,
+      kind: "human",
+      state: "playing",
+      isYou: seat === yourSeat,
+      isCreator: seat === 0,
+    })),
+    yourSeat,
+    toAct: [0],
+    yourTurn: yourSeat === 0,
+    yourInvitation: null,
+    createdAt: 0,
+    lastActionAt: null,
+    ...fields,
+  };
 }

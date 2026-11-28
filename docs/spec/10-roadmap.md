@@ -411,9 +411,11 @@ with its own review, as paths was built (A22, A24):
   checks each distinct view once per step, `games:verify` is sharded, and a `test:games` CI job
   runs it (review A25-P-1: with pairs installed the full kit took 27 minutes locally; the kit's
   game counts stay as 02 §6 fixes them). Alpha chores 12 did this; the shards cover every
-  installed game, so installing pairs adds no CI job, but this slice re-measures the shards with
-  pairs installed and raises `test:games`'s `parallel` count if one would run past about
-  20 minutes (11 §9, docs/deploy.md "CI runners"). A later chores slice takes the stronger
+  installed game, so installing pairs adds no CI job, but this slice re-measured the shards with
+  pairs installed. The first runner measurement (pipeline 82926) fits runner ≈ 303 s + 4.3 × local, so
+  `test:games` now runs 8 shards (slowest 208 s locally, mean 143 s, about 20 minutes on the fit) with
+  a 35-minute timeout; that the runner runs eight at once is unproven (11 §9, docs/deploy.md "CI
+  runners"). Alpha A26 built this client slice. A later chores slice takes the stronger
   `hiddenFromEveryone` check (review A25-S2-1, 02 §6.3): under the flag, the summary and the
   `validate` and `preview` answers a seat to act gets must depend only on the view, which the kit
   checks with a per-combo map keyed by the view JSON, the seat and the action (keys hashed, the
