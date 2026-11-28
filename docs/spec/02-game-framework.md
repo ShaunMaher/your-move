@@ -547,7 +547,11 @@ plays exactly these hooks, so a game that needs a dictionary supplies one throug
      (it survives JSON and Zod, so a key order that follows hidden state is a leak);
    - the perturbation isn't vacuous: for a module with `hiddenInformation: true`, at least half of
      the samples taken while `result()` is null must change **some other viewer's view** (seat
-     `w ≠ v`, or the public view), so reordering a deck while hands are hidden doesn't count. Only
+     `w ≠ v`, or the public view), so reordering a deck while hands are hidden doesn't count. In
+     full mode the share is counted for each option input and seat count on its own, so no
+     combination hides behind the others and a shard of the run (below) judges each as the whole
+     run does; in fast mode, where a combination may have only three games, it is counted over the
+     rules version. Only
      a module that declares **`test.hiddenFromEveryone: true`** is counted by whether `s'`
      differs from `s` instead (it requires `hiddenInformation: true`). The flag means exactly
      this: **while the game is in progress, every seat and the public get the same view**
@@ -637,7 +641,12 @@ The kit has two modes: **fast**, 300 games per rules version spread evenly over 
 and seat counts (rounded up, at least 3 per combination), run by `pnpm build` and the Docker build through
 `pnpm games:verify --fast` (`games:verify`, fast or full, never runs in a deploy job, §7.3); and
 **full**, 1000 games per option input and seat count, run in CI's test stage and in each game
-package's own CI.
+package's own CI. A full run may be split into **shards** (`pnpm games:verify --shard <i>/<n>`,
+which CI runs as parallel jobs, 11 §9): the kit numbers the combinations it plays (rules version,
+option input, seat count, in order), combination `k` belongs to shard `k mod n + 1`, and its games
+use seeds that depend only on `k`, so each shard plays and checks its combinations exactly as the
+whole run does and the `n` shards together play the whole run's games. The checks that play no game
+(the manifest and the static checks of §6.1) run in every shard. The fast kit is never sharded.
 
 The kit itself is tested against deliberately **broken fixture modules** (one leaks hidden state
 into a view, one into an error detail, one into a record, one into the public view; one leaks only
