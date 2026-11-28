@@ -2,10 +2,14 @@
  * The lobby's join-link controls, for its creator (07 §1, 06 §6.8): whether a link works and until
  * when, create, rotate and revoke, and the link itself shown once, right after it is made, with
  * Share and Copy. The URL is never fetched again: the server returns it only when it makes one.
+ * While a link works, making a new one or turning it off is confirmed first: either stops the
+ * link already shared.
  */
 import { useState } from "react";
 
+import { Dialog } from "../Dialog.js";
 import type { GameEnvelope } from "../game-api.js";
+import { linkUntil } from "../text.js";
 
 /** What making a link answered: its URL, or what went wrong. */
 export type MadeLink = { readonly url: string } | { readonly problem: string };
@@ -20,22 +24,18 @@ interface JoinLinkPanelProps {
   readonly onProblem: (message: string | null) => void;
 }
 
-const until = new Intl.DateTimeFormat(undefined, {
-  day: "numeric",
-  month: "short",
-  hour: "numeric",
-  minute: "2-digit",
-});
-
 export function JoinLinkPanel({ link, fresh, onCreate, onRevoke, onProblem }: JoinLinkPanelProps) {
   const [url, setUrl] = useState<string | null>(fresh);
   const [pending, setPending] = useState<"create" | "revoke" | null>(null);
   const [copied, setCopied] = useState(false);
+  /** Which change to a working link is being confirmed. */
+  const [confirming, setConfirming] = useState<"create" | "revoke" | null>(null);
   const active = link?.active === true;
   const canShare = typeof navigator.share === "function";
 
   async function create() {
     if (pending !== null) return;
+    setConfirming(null);
     setPending("create");
     onProblem(null);
     setCopied(false);
@@ -47,6 +47,7 @@ export function JoinLinkPanel({ link, fresh, onCreate, onRevoke, onProblem }: Jo
 
   async function revoke() {
     if (pending !== null) return;
+    setConfirming(null);
     setPending("revoke");
     onProblem(null);
     const failure = await onRevoke();
@@ -123,7 +124,7 @@ export function JoinLinkPanel({ link, fresh, onCreate, onRevoke, onProblem }: Jo
       )}
       <p>
         {active && link.expiresAt !== null
-          ? `Link active until ${until.format(new Date(link.expiresAt))}.`
+          ? `Link active until ${linkUntil(link.expiresAt)}.`
           : "There's no join link for this game."}
       </p>
       <p className="hint">
@@ -136,7 +137,10 @@ export function JoinLinkPanel({ link, fresh, onCreate, onRevoke, onProblem }: Jo
           type="button"
           className={active ? "button secondary" : "button"}
           disabled={pending !== null}
-          onClick={() => void create()}
+          onClick={() => {
+            if (active) setConfirming("create");
+            else void create();
+          }}
         >
           {pending === "create"
             ? "Making a link…"
@@ -149,12 +153,47 @@ export function JoinLinkPanel({ link, fresh, onCreate, onRevoke, onProblem }: Jo
             type="button"
             className="button secondary"
             disabled={pending !== null}
-            onClick={() => void revoke()}
+            onClick={() => {
+              setConfirming("revoke");
+            }}
           >
             {pending === "revoke" ? "Turning it off…" : "Turn the link off"}
           </button>
         ) : null}
       </div>
+      {confirming === null ? null : (
+        <Dialog
+          title={confirming === "create" ? "Make a new link?" : "Turn the link off?"}
+          dismissible
+          onClose={() => {
+            setConfirming(null);
+          }}
+        >
+          <p>
+            {confirming === "create"
+              ? "The link you've shared will stop working; you'll get a new one to share instead."
+              : "The link you've shared will stop working. Nobody who joined is removed."}
+          </p>
+          <div className="row">
+            <button
+              type="button"
+              className="button danger"
+              onClick={() => void (confirming === "create" ? create() : revoke())}
+            >
+              {confirming === "create" ? "Make a new link" : "Turn it off"}
+            </button>
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => {
+                setConfirming(null);
+              }}
+            >
+              Keep this link
+            </button>
+          </div>
+        </Dialog>
+      )}
     </section>
   );
 }

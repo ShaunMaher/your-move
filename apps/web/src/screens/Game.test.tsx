@@ -154,8 +154,58 @@ describe("the creator's join link and Remove (alpha A18, 07 §1)", () => {
       },
     });
     fireEvent.click(await screen.findByRole("button", { name: "Turn the link off" }));
+    // Asked first: the link already shared stops working.
+    const keep = screen.getByRole("dialog", { name: "Turn the link off?" });
+    fireEvent.click(within(keep).getByRole("button", { name: "Keep this link" }));
+    expect(calls.filter((call) => call.method === "DELETE")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Turn the link off" }));
+    const dialog = screen.getByRole("dialog", { name: "Turn the link off?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Turn it off" }));
     expect(await screen.findByText("There's no join link for this game.")).toBeDefined();
     expect(calls.filter((call) => call.method === "DELETE")).toHaveLength(1);
+  });
+
+  it("asks before making a new link while one works, and makes one at once when none does", async () => {
+    const { calls } = open({
+      "GET /api/v1/games/g1": json({ game: linked(true), view: null }),
+      "POST /api/v1/games/g1/join-link": json({ url: URL_SHOWN, expiresAt: 1 }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Make a new link" }));
+    const dialog = screen.getByRole("dialog", { name: "Make a new link?" });
+    expect(dialog.textContent).toContain("will stop working");
+    expect(posts(calls, "join-link")).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Make a new link" }));
+    expect(await screen.findByLabelText(/Share this link/u)).toBeDefined();
+    expect(posts(calls, "join-link")).toHaveLength(1);
+  });
+
+  it("says how many of the seats have joined (A18-P-9)", async () => {
+    const three = (joined: number) =>
+      lobby({
+        seats: 4,
+        joinLink: { active: true, expiresAt: 1 },
+        players: [
+          player({ seat: null, state: "joined", playerId: "p-sam" }),
+          ...Array.from({ length: joined - 1 }, (_, i) =>
+            alex({
+              seat: null,
+              state: "joined",
+              playerId: `p-${String(i)}`,
+              displayName: `P${String(i)}`,
+            }),
+          ),
+        ],
+      });
+    open({ "GET /api/v1/games/g1": json({ game: three(3), view: null }) });
+    expect(
+      await screen.findByText("3 of 4 joined: you can start now, or wait for more."),
+    ).toBeDefined();
+    cleanup();
+    open({ "GET /api/v1/games/g1": json({ game: three(4), view: null }) });
+    expect(await screen.findByText("Everyone is here. Start when you're ready.")).toBeDefined();
+    cleanup();
+    open({ "GET /api/v1/games/g1": json({ game: three(1), view: null }) });
+    expect(await screen.findByText("Waiting for players to join.")).toBeDefined();
   });
 
   it("says when too many links were made today", async () => {

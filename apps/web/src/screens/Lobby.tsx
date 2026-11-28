@@ -101,12 +101,15 @@ export function Lobby({
     setRemoving(null);
   }
 
+  const seats = game.seats;
   const status = isCreator
-    ? joined < 2
-      ? game.joinLink?.active === true
-        ? "Waiting for players to join."
-        : "Waiting for the other players to accept."
-      : "Everyone is here. Start when you're ready."
+    ? seats !== undefined && joined >= seats
+      ? "Everyone is here. Start when you're ready."
+      : joined >= 2
+        ? `${String(joined)} of ${String(seats ?? joined)} joined: you can start now, or wait for more.`
+        : game.joinLink?.active === true
+          ? "Waiting for players to join."
+          : "Waiting for the other players to accept."
     : invited
       ? `${creator === undefined ? "Someone" : seatLabel(creator)} invited you to play.`
       : joinedNotCreator

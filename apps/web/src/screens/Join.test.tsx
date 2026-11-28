@@ -65,6 +65,34 @@ describe("the landing page", () => {
     expect(posts(calls, "/api/v1/join")).toHaveLength(0);
   });
 
+  it("shows the turn order", async () => {
+    open({ "POST /api/v1/join/lookup": json({ game: { ...PREVIEW, seatOrder: "random" } }) });
+    expect(await screen.findByText("Random, drawn at the start")).toBeDefined();
+    cleanup();
+    open();
+    expect(await screen.findByText("The order players joined")).toBeDefined();
+  });
+
+  it("tells someone already in the game so, and opens it instead of joining (A18-P-7)", async () => {
+    const { calls } = open({
+      "POST /api/v1/join/lookup": json({ game: { ...PREVIEW, youAreIn: true } }),
+    });
+    expect(await screen.findByText("You're in this game.")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Join" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open the game" }));
+    expect(window.location.pathname).toBe("/g/g7");
+    expect(keptJoinToken()).toBeNull();
+    expect(posts(calls, "/api/v1/join")).toHaveLength(0);
+  });
+
+  it("forgets the link on Not now (A18-S-6)", async () => {
+    const { calls } = open();
+    fireEvent.click(await screen.findByRole("button", { name: "Not now" }));
+    expect(window.location.pathname).toBe("/");
+    expect(keptJoinToken()).toBeNull();
+    expect(posts(calls, "/api/v1/join")).toHaveLength(0);
+  });
+
   it("joins on the tap, forgets the token and opens the game", async () => {
     const { calls } = open({ "POST /api/v1/join": json({ game: envelope({ id: "g7" }) }) });
     fireEvent.click(await screen.findByRole("button", { name: "Join" }));

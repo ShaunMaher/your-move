@@ -150,16 +150,18 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
   const nameOf = (userId: string): string =>
     recent?.find((player) => player.userId === userId)?.displayName ?? "";
 
+  /** A link is asked for only while a seat is left for it (picks may fill every seat). */
+  const asksLink = withLink && seats - 1 - picked.length > 0;
   /** The addresses to invite: every field, or with a link only the ones filled in. */
-  const invitedEmails = withLink ? emails.filter((email) => email !== "") : emails;
+  const invitedEmails = asksLink ? emails.filter((email) => email !== "") : emails;
 
   function checkPlayers(event: SyntheticEvent) {
     event.preventDefault();
     const typed = emails.map((email) => email.trim().toLowerCase());
-    const filled = withLink ? typed.filter((email) => email !== "") : typed;
+    const filled = asksLink ? typed.filter((email) => email !== "") : typed;
     if (filled.some((email) => !looksLikeEmail(email))) {
       setProblem(
-        withLink
+        asksLink
           ? "Check the addresses, or leave a field empty for the join link to fill."
           : "Enter an email address for each player.",
       );
@@ -190,7 +192,7 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
         ...picked.map((userId) => ({ userId })),
         ...invitedEmails.map((email) => ({ email })),
       ],
-      ...(withLink ? { joinLink: true } : {}),
+      ...(asksLink ? { joinLink: true } : {}),
     });
     if (result.ok) {
       const path = `/g/${encodeURIComponent(result.data.game.id)}`;
@@ -429,11 +431,11 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
           <p>
             A {chosen.name} game for {String(seats)} players.
             {invitedEmails.length === 0
-              ? withLink
+              ? asksLink
                 ? ""
                 : " It starts as soon as you create it, unless someone you picked has asked to be invited instead."
               : ` Check the ${invitedEmails.length === 1 ? "address" : "addresses"}: we never say whether an address has an account, so a typo would send your invitation to someone else.`}
-            {withLink
+            {asksLink
               ? " You'll get a join link for the open seats to share; the game waits for you to press Start."
               : ""}
           </p>

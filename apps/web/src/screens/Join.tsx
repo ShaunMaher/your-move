@@ -13,6 +13,7 @@ import { joinGame, type JoinPreview, lookUpJoinLink } from "../game-api.js";
 import { GameIcon } from "../GameIcon.js";
 import { captureJoinFragment, clearJoinToken, keptJoinToken } from "../join-token.js";
 import { Link, navigate } from "../router.js";
+import { linkUntil } from "../text.js";
 import { Page } from "./Page.js";
 import { Problem } from "./Problem.js";
 
@@ -29,13 +30,6 @@ type Load =
   | { readonly status: "limited" }
   | { readonly status: "failed"; readonly offline: boolean }
   | { readonly status: "ready"; readonly game: JoinPreview };
-
-const until = new Intl.DateTimeFormat(undefined, {
-  day: "numeric",
-  month: "short",
-  hour: "numeric",
-  minute: "2-digit",
-});
 
 function gamePath(id: string): string {
   return `/g/${encodeURIComponent(id)}`;
@@ -190,6 +184,12 @@ export function Join({ api, appName, onSessionLost }: JoinProps) {
           <dd>{game.players.map((player) => player.displayName ?? "Deleted player").join(", ")}</dd>
           <dt>Open seats</dt>
           <dd>{String(game.openSeats)}</dd>
+          <dt>Turn order</dt>
+          <dd>
+            {game.seatOrder === "random"
+              ? "Random, drawn at the start"
+              : "The order players joined"}
+          </dd>
           <dt>Turn time</dt>
           <dd>
             {String(game.turnTimeoutDays)} {game.turnTimeoutDays === 1 ? "day" : "days"} a move
@@ -203,28 +203,56 @@ export function Join({ api, appName, onSessionLost }: JoinProps) {
           <dt>AI assistance</dt>
           <dd>{game.aiAssistance === "allowed" ? "Allowed: moves by AI are marked" : "Off"}</dd>
           <dt>Link works until</dt>
-          <dd>{until.format(new Date(game.expiresAt))}</dd>
+          <dd>{linkUntil(game.expiresAt)}</dd>
         </dl>
       </section>
-      <p>
-        If you join, {creator} and the other players will see your name. The game starts when{" "}
-        {creator} starts it.
-      </p>
-      <Problem id="join-problem" message={problem} />
-      <div className="row">
-        <button
-          type="button"
-          className="button"
-          disabled={pending}
-          aria-describedby="join-problem"
-          onClick={() => void join(game)}
-        >
-          {pending ? "Joining…" : "Join"}
-        </button>
-        <Link to="/" className="button secondary">
-          Not now
-        </Link>
-      </div>
+      {game.youAreIn === true ? (
+        <>
+          <p role="status">You&apos;re in this game.</p>
+          <div className="row">
+            <button
+              type="button"
+              className="button"
+              onClick={() => {
+                clearJoinToken();
+                navigate(gamePath(game.id), { replace: true });
+              }}
+            >
+              Open the game
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p>
+            If you join, {creator} and the other players will see your name. The game starts when{" "}
+            {creator} starts it.
+          </p>
+          <Problem id="join-problem" message={problem} />
+          <div className="row">
+            <button
+              type="button"
+              className="button"
+              disabled={pending}
+              aria-describedby="join-problem"
+              onClick={() => void join(game)}
+            >
+              {pending ? "Joining…" : "Join"}
+            </button>
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => {
+                // Not joining: the link is forgotten, so nobody later in this tab is offered it.
+                clearJoinToken();
+                navigate("/");
+              }}
+            >
+              Not now
+            </button>
+          </div>
+        </>
+      )}
     </Page>
   );
 }

@@ -265,6 +265,29 @@ describe("people you've played (alpha A12, 07 §1.1)", () => {
     });
   });
 
+  it("asks for no link once picks fill every seat, even with the toggle left on (A18-P-1)", async () => {
+    const { calls } = withRecent(json(RECENT));
+    await toPlayers();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Add a join link for the open seats" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Bob/u }));
+    expect(
+      screen.queryByRole("checkbox", { name: "Add a join link for the open seats" }),
+    ).toBeNull();
+    click("Review");
+    expect(screen.queryByText(/You'll get a join link/u)).toBeNull();
+    expect(screen.getByText(/starts as soon as you create it/u)).toBeDefined();
+    click("Create game");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/g/g9");
+    });
+    expect(calls.find((call) => call.method === "POST")?.body).toEqual({
+      gameType: "words",
+      options: CATALOG_GAME.defaults,
+      seats: 2,
+      invitees: [{ userId: "u-bob" }],
+    });
+  });
+
   it("gives the seat back to an address when unpicked", async () => {
     withRecent(json(RECENT));
     await toPlayers();

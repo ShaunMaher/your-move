@@ -33,6 +33,18 @@ const playedDate = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
 });
 
+const untilDate = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  month: "short",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+/** When a join link stops working (07 §1), in the device's locale. */
+export function linkUntil(at: number): string {
+  return untilDate.format(new Date(at));
+}
+
 /** "last played <date>" for a past opponent (07 §1.1), in the device's locale. */
 export function lastPlayed(at: number): string {
   return `last played ${playedDate.format(new Date(at))}`;
