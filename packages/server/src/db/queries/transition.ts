@@ -53,7 +53,7 @@ export function guardedInsert<T extends SQLiteTable>(
 }
 
 /** No block in either direction between the two users (04 invariant 6). */
-function unblocked(a: string, b: string): SQL {
+export function unblocked(a: string, b: string): SQL {
   return sql`NOT EXISTS (SELECT 1 FROM ${blocks} WHERE (${blocks.blockerId} = ${a} AND ${blocks.blockedId} = ${b}) OR (${blocks.blockerId} = ${b} AND ${blocks.blockedId} = ${a}))`;
 }
 

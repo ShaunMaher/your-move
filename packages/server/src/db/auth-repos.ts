@@ -6,7 +6,7 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 
 import { type Database, runBatch } from "./database.js";
-import { guardedInsert } from "./queries/transition.js";
+import { guardedInsert, unblocked } from "./queries/transition.js";
 import type {
   ApiTokenRepo,
   AuthEventRepo,
@@ -181,6 +181,28 @@ export function userRepo(db: Database): UserRepo {
           updatedAt,
         })
         .where(eq(users.emailId, emailId));
+    },
+    async addPastOpponents(a, b, lastFinishedAt) {
+      // Both accounts still exist and neither is being deleted (04 §Account deletion removes its
+      // pairs and must not see one come back), and no block either way (04 invariant 6), checked
+      // in the statements that write, so a block written meanwhile is never crossed.
+      const live = (id: string) =>
+        sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${id} AND ${users.deletionRequestedAt} IS NULL)`;
+      const guard = sql`${live(a)} AND ${live(b)} AND ${unblocked(a, b)}`;
+      const pair = (userId: string, otherId: string) =>
+        guardedInsert(
+          db,
+          pastOpponents,
+          { userId, otherId, lastFinishedAt },
+          guard,
+        ).onConflictDoUpdate({
+          target: [pastOpponents.userId, pastOpponents.otherId],
+          // A pair that exists keeps the later of its time and this one (05 `add-player`).
+          set: {
+            lastFinishedAt: sql`max(${pastOpponents.lastFinishedAt}, excluded.last_finished_at)`,
+          },
+        });
+      await runBatch(db, [pair(a, b), pair(b, a)]);
     },
     async hasPastOpponent(userId) {
       const row = await db

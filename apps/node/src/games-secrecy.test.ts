@@ -463,6 +463,7 @@ async function readEverything(gameId: string, players: readonly Player[], strang
     ["POST", "/api/v1/games/:id/remove-seat", { expectedVersion: 0, playerId: "x" }],
     ["POST", "/api/v1/games/:id/join-link", {}],
     ["DELETE", "/api/v1/games/:id/join-link", undefined],
+    ["POST", "/api/v1/games/:id/add-player", { userId: players[0]?.id ?? "x" }],
   ] as const) {
     const answer = await hit(stranger, method, template, { id: gameId }, body);
     expect([answer.status, answer.json.error?.code], template).toEqual([404, "NOT_FOUND"]);
@@ -1067,6 +1068,67 @@ describe("route-wide secrecy (04 invariant 4)", () => {
       expect(moved.status, moved.text).toBe(200);
     }
     await readEverything(game, players, stranger);
+  });
+
+  it("a link game finished (alpha A19): the creator's question, the add and the rematch after it", async () => {
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    const stranger = await signUp(h, "Stranger");
+    const made = await hit(
+      a,
+      "POST",
+      "/api/v1/games",
+      {},
+      { gameType: "example", invitees: [], joinLink: true },
+    );
+    expect(made.status, made.text).toBe(201);
+    const game = made.json.game?.id ?? "";
+    gamesInPlay.push(game);
+    const token = /#([A-Za-z0-9_-]{22})"/u.exec(made.text)?.[1] ?? "";
+    expect((await hit(b, "POST", "/api/v1/join", {}, { token })).status).toBe(200);
+    expect((await transition(game, a, "start")).json.game?.status).toBe("active");
+    const players = [a, b];
+    for (let step = 0; step < 200 && stored(game).status === "active"; step++) {
+      await readEverything(game, players, stranger);
+      expect(await unchangedByHiddenState(game, players)).toBe(2);
+      const now = (await hit(a, "GET", "/api/v1/games/:id", { id: game })).json;
+      const seat = now.game?.toAct[0];
+      const player = playerAt(now, seat, players);
+      const { view } = (await hit(player, "GET", "/api/v1/games/:id", { id: game })).json;
+      const card = (view as ExampleView).seats[seat ?? 0]?.hand?.[0];
+      const moved = await hit(
+        player,
+        "POST",
+        "/api/v1/games/:id/actions",
+        { id: game },
+        { expectedVersion: now.game?.version, action: { card } },
+      );
+      expect(moved.status, moved.text).toBe(200);
+    }
+    expect(stored(game).status).toBe("finished");
+    await readEverything(game, players, stranger);
+    // Only the creator is asked, and the answer is a bare 204.
+    const asked = await hit(a, "GET", "/api/v1/games/:id", { id: game });
+    expect(asked.text).toContain(`"canAddPlayers":[{"userId":"${b.id}","displayName":"Bo"}]`);
+    expect((await hit(b, "GET", "/api/v1/games/:id", { id: game })).text).not.toContain(
+      "canAddPlayers",
+    );
+    const added = await hit(
+      a,
+      "POST",
+      "/api/v1/games/:id/add-player",
+      { id: game },
+      { userId: b.id },
+    );
+    expect([added.status, added.text]).toEqual([204, ""]);
+    await readEverything(game, players, stranger);
+    h.advance(HOUR);
+    const again = await hit(a, "POST", "/api/v1/games/:id/rematch", { id: game }, {});
+    expect(again.status, again.text).toBe(201);
+    const next = again.json.game?.id ?? "";
+    gamesInPlay.push(next);
+    await readEverything(next, players, stranger);
+    expect(await unchangedByHiddenState(next, players)).toBe(2);
   });
 
   it("perturbation can fail: a body that showed one hidden tile would differ", async () => {

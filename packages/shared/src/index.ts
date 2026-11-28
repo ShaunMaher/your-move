@@ -33,6 +33,8 @@ export {
 export {
   acceptInvitationRoute,
   ActionResultSchema,
+  addPlayerRoute,
+  AddPlayerBodySchema,
   cancelGameRoute,
   CatalogSchema,
   catalogRoute,

@@ -276,6 +276,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/games/{id}/add-player": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Add a link joiner to your players
+     * @description The creator of a `finished` game answers yes to "Add <name> to your players?" for someone in its `canAddPlayers`: you and that player become past opponents (both ways, never the other players), so either of you can pick the other for a game or a rematch. Not a transition: the game's `version` is unchanged. `204` also when repeated, and when a block exists between you either way, which writes nothing and answers the same, so the answer never says whether there is one (06 §6.9).
+     */
+    post: operations["addPlayer"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/players/recent": {
     parameters: {
       query?: never;
@@ -837,6 +857,10 @@ export interface components {
       )[];
       /** @description Create a join link for the seats left open (06 §6.8). Its URL is in the response, the only time it is shown; the game then waits for your Start. */
       joinLink?: boolean;
+    };
+    AddPlayerRequest: {
+      /** @description The player to add: a `userId` from the finished game's `canAddPlayers`. */
+      userId: string;
     };
     RecentPlayers: {
       players: {
@@ -2479,6 +2503,103 @@ export interface operations {
         };
       };
       /** @description Too many games or game writes (`RATE_LIMITED`); nothing is created. */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  addPlayer: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AddPlayerRequest"];
+      };
+    };
+    responses: {
+      /** @description Answered: added, already added, or a silent no-op. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, you're not its creator, it isn't `finished`, or that player didn't join it through a link and act in it (`NOT_FOUND`, the same in every case). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
       429: {
         headers: {
           [name: string]: unknown;

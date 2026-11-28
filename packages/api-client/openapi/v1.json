@@ -524,6 +524,19 @@
         "required": ["gameType", "invitees"],
         "additionalProperties": false
       },
+      "AddPlayerRequest": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "The player to add: a `userId` from the finished game's `canAddPlayers`."
+          }
+        },
+        "required": ["userId"],
+        "additionalProperties": false
+      },
       "RecentPlayers": {
         "type": "object",
         "properties": {
@@ -2263,6 +2276,87 @@
           },
           "429": {
             "description": "Too many games or game writes (`RATE_LIMITED`); nothing is created.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/add-player": {
+      "post": {
+        "operationId": "addPlayer",
+        "x-scope": "games:create",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Add a link joiner to your players",
+        "description": "The creator of a `finished` game answers yes to \"Add <name> to your players?\" for someone in its `canAddPlayers`: you and that player become past opponents (both ways, never the other players), so either of you can pick the other for a game or a rematch. Not a transition: the game's `version` is unchanged. `204` also when repeated, and when a block exists between you either way, which writes nothing and answers the same, so the answer never says whether there is one (06 §6.9).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/AddPlayerRequest" } }
+          }
+        },
+        "responses": {
+          "204": { "description": "Answered: added, already added, or a silent no-op." },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, you're not its creator, it isn't `finished`, or that player didn't join it through a link and act in it (`NOT_FOUND`, the same in every case).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many game writes (`RATE_LIMITED`).",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
             }

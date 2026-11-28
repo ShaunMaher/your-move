@@ -113,6 +113,11 @@ export interface PresentInput {
   readonly describeResource: (kind: "dictionary", id: string) => ResourceMeta | undefined;
   /** A finished game's rematch as the viewer sees it ({@link rematchOf}); null if it has none. */
   readonly rematch?: GameEnvelope["rematch"];
+  /**
+   * Which of the game's {@link addableRows} are already the viewer's past opponents (04
+   * `past_opponents`), for `canAddPlayers`; read only for the creator of a finished game.
+   */
+  readonly pastOpponents?: ReadonlySet<string>;
   /** The game's join link, live or expired, if it has one. */
   readonly joinLink: JoinLinkTimes | null;
   /** The time the envelope is for (whether the link is still live). */
@@ -228,6 +233,42 @@ export function rematchOf(rematch: RematchRead, now: number): GameEnvelope["rema
   return { gameId: game.id, you };
 }
 
+/**
+ * The players the creator of a finished game may add to their players (05 `canAddPlayers` and
+ * `add-player`, 06 §6.9, alpha A19), whether or not they already are: seated rows that joined
+ * through a link and acted, whose account still exists, in seat order; none unless the viewer is
+ * the creator and acted too, since a pair needs both to have acted. Blocks never change it, so
+ * the question reveals none (06 §6.9).
+ */
+export function addableRows(
+  game: Pick<GameRecord, "status">,
+  players: readonly GamePlayerRecord[],
+  viewer: GamePlayerRecord,
+): GamePlayerRecord[] {
+  if (game.status !== "finished" || viewer.joinedVia !== "creator" || viewer.actedOnce !== 1) {
+    return [];
+  }
+  return players
+    .filter(
+      (row) =>
+        row.seat !== null &&
+        row.joinedVia === "join_link" &&
+        row.actedOnce === 1 &&
+        row.userId !== null,
+    )
+    .sort((a, b) => (a.seat ?? 0) - (b.seat ?? 0));
+}
+
+/** The envelope's `canAddPlayers`: the {@link addableRows} who aren't yet past opponents. */
+function canAddPlayersOf(input: PresentInput): NonNullable<GameEnvelope["canAddPlayers"]> {
+  const known = input.pastOpponents ?? new Set<string>();
+  return addableRows(input.game, input.players, input.viewer).flatMap((row) => {
+    const user = row.userId === null ? undefined : input.users.get(row.userId);
+    if (user === undefined || user.displayName === null || known.has(user.id)) return [];
+    return [{ userId: user.id, displayName: user.displayName }];
+  });
+}
+
 /** The seats in `toAct`, and whether the viewer's is one of them. */
 export function turnOf(
   players: readonly GamePlayerRecord[],
@@ -275,6 +316,10 @@ export function envelope(input: PresentInput): GameEnvelope {
     // The creator's own lobby only: whether its link works, never the link itself (05).
     ...(viewer.joinedVia === "creator" && game.status === "lobby"
       ? { joinLink: joinLinkOf(input.joinLink, input.now) }
+      : {}),
+    // The creator of a finished game only (05, alpha A19).
+    ...(viewer.joinedVia === "creator" && game.status === "finished"
+      ? { canAddPlayers: canAddPlayersOf(input) }
       : {}),
     // Finished games only, and only ever to their players: nobody else reads a finished game.
     ...(game.status === "finished" ? { rematch: input.rematch ?? null } : {}),

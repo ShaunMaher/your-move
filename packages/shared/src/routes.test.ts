@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   acceptInvitationRoute,
+  addPlayerRoute,
   API_V1,
   cancelGameRoute,
   ClientConfigSchema,
@@ -88,6 +89,7 @@ describe("the game routes' documented errors (A2 review P-11)", () => {
     cancelGameRoute,
     markSeenRoute,
     rematchRoute,
+    addPlayerRoute,
   ];
 
   it("documents 429 on every rate-limited write", () => {
@@ -98,7 +100,8 @@ describe("the game routes' documented errors (A2 review P-11)", () => {
 
   it("names GAME_UNAVAILABLE wherever an orphaned game is refused", () => {
     for (const route of writes.filter(
-      (route) => route !== createGameRoute && route !== markSeenRoute,
+      // Adding a player reads no engine: it answers the same for an orphaned game.
+      (route) => route !== createGameRoute && route !== markSeenRoute && route !== addPlayerRoute,
     )) {
       const conflict = (route.responses as Record<string, { description: string } | undefined>)[
         "409"
