@@ -70,7 +70,10 @@ function useSettingSave<T>(
   return { pending, error, change };
 }
 
-/** The email nudges toggle (03 §7): saved at once, shown as the server's answer. */
+/**
+ * The email nudges toggle (03 §7; since alpha A20 it covers the invitation email too, 06 §6.2):
+ * saved at once, shown as the server's answer.
+ */
 function EmailNudges({
   api,
   me,
@@ -92,11 +95,11 @@ function EmailNudges({
           aria-describedby="email-nudges-help email-nudges-problem"
           onChange={(event) => void change(event.target.checked)}
         />
-        Email me when it&apos;s my turn
+        Email me when I&apos;m invited or it&apos;s my turn
       </label>
       <p id="email-nudges-help">
-        When a game has waited a day for your move, we&apos;ll email you, at most once a day for
-        each game. Every email has a link to turn this off.
+        We&apos;ll email you once for each new invitation, and when a game has waited a day for your
+        move, at most once a day for each game. Every email has a link to turn this off.
       </p>
       <Problem id="email-nudges-problem" message={error} />
     </section>

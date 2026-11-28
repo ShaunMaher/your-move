@@ -20,7 +20,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-const LABEL = "Email me when it's my turn";
+const LABEL = "Email me when I'm invited or it's my turn";
 
 function routes(patch: Parameters<typeof fakeApi>[0][string]) {
   return fakeApi({
