@@ -290,8 +290,8 @@ test:games:
   extends: [.pnpm, .every-pipeline]
   needs: [validate]
   # Sized from local measurements (docs/deploy.md "CI runners", 2026-11-29): with words, paths
-  # and pairs installed, four shards took 328-338 s each on a developer laptop (three took up to
-  # 502 s), and the shared runner took about 2.3x a laptop's time for the paths game's full kit
+  # and pairs installed, an upper estimate, four shards took 328-338 s each on a developer laptop
+  # (three took up to 502 s; without pairs the four take 82-136 s), and the shared runner took about 2.3x a laptop's time for the paths game's full kit
   # (its job grew 634 s against 281 s locally), so about 13 minutes each here, under the 20 that
   # a shard should stay within. More shards would each add a workspace install and, with jobs
   # queueing for the runner, little wall time.

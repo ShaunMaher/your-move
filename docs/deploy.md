@@ -423,17 +423,22 @@ runs it. The job's first step fails at once with a clear message if the runner's
 installed game, 02 §6) in `parallel:` shards, `--shard "$CI_NODE_INDEX/$CI_NODE_TOTAL"`. Shard `i`
 of `n` plays the option set and seat count combinations numbered `i-1`, `i-1+n`, … of every
 installed game, with the seeds an unsharded run uses, so together the shards play exactly the
-unsharded run's games; every check that plays no game runs in each shard. A newly installed game
-is covered without a CI change, but re-measure the shards when one is installed and raise the
-count if a shard would run much past 20 minutes. Measured locally (16-thread developer laptop,
-2026-11-29, shards run side by side) with words, paths and pairs installed, the four shards took
-328, 338, 336 and 336 s; three shards would take 445, 502 and 376 s. The shared runner took about
-2.3× a laptop's time for the paths game's full kit (`test` grew 634 s when it was installed,
-against 281 s locally), so each of the four should take about 13 minutes on the runner, plus its
-workspace install, where three would come close to 20. More shards would each add an install and, since jobs queue for the runner's
-concurrency, little wall time. The shards' `timeout` (30 minutes) is a margin over that estimate,
-to be set from the first pipeline that runs them (ADR 0004). The jobs keep `TMPDIR` on tmpfs as
-`test` does, and the publish jobs need every shard.
+unsharded run's games; every check that plays no game runs in each shard. Each shard's log gives,
+per package, the games and combinations it played, the whole run's number of combinations and a
+fingerprint of their list, which is the same in every shard of one run. A newly installed game is
+covered without a CI change, but re-measure the shards when one is installed and raise the count
+if a shard would run much past 20 minutes.
+
+Measured locally (16-thread developer laptop, 2026-11-29, shards run side by side), as an upper
+estimate with pairs installed too: the four shards took 328, 338, 336 and 336 s, and three would
+take 445, 502 and 376 s. Without pairs, as installed today, the four take 136, 134, 96 and 82 s.
+The shared runner took about 2.3× a laptop's time for the paths game's full kit (`test` grew
+634 s when it was installed, against 281 s locally), so with pairs each of the four should take
+about 13 minutes on the runner, plus its workspace install, where three would come close to 20.
+More shards would each add an install and, since jobs queue for the runner's concurrency, little
+wall time. The shards share one `timeout` (30 minutes), a margin over that estimate, provisional
+until it is set from the first pipeline that runs them (ADR 0004). The jobs keep `TMPDIR` on tmpfs
+as `test` does, and the publish jobs need every shard.
 
 The `test` job keeps its scratch files (temporary SQLite databases,
 bundles) on tmpfs: `TMPDIR` points into `/dev/shm`. On the shared amd64 runner the disk is shared
