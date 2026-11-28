@@ -72,11 +72,14 @@ export function Privacy({ config }: PrivacyProps) {
         </p>
         <p>
           The app loads nothing from other companies: no adverts, analytics, tracking, or outside
-          fonts or scripts. The operator&apos;s hosting and network providers handle your
-          connection, including your network address, to deliver it.
+          fonts or scripts.
           {config.turnstileSiteKey === undefined
             ? null
             : " The one exception: to stop automated abuse, the sign-in screen may show a check from Cloudflare Turnstile, which then receives your network address and information about your browser."}
+        </p>
+        <p>
+          The operator&apos;s hosting and network providers handle your connection, including your
+          network address, to deliver it.
         </p>
       </section>
 
