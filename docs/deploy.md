@@ -92,6 +92,14 @@ where every typed address counts, existing players' included; 3 in 30 days to an
 nothing is sent, and the instance cap logs one `INVITE_EMAILS_GLOBAL_DAY` alert a day while it is
 reached.
 
+A lobby's creator can also make a join link, `PUBLIC_URL/join#<token>`, to share in a group chat
+(06 §6.8). The token is in the URL's fragment, which browsers never send, so it reaches no proxy,
+tunnel or server log; the server stores only its SHA-256, and the sweep deletes links once they
+expire (7 days at most). Nothing needs configuring. Lookups and joins are limited to 30 an hour per
+person and 60 an hour per client address (`LIMIT_JOIN_LINK_USER_HOUR`, `LIMIT_JOIN_LINK_IP_HOUR`),
+and a creator makes at most 20 links a day (`LIMIT_JOIN_LINKS_CREATED_USER_DAY`). The per-address
+limit needs the real client address, as sign-in does (`TRUST_PROXY`, 08 §4.1).
+
 The Cloudflare Tunnel compose file is below; the Caddy one arrives in M4 (09 §4).
 
 ## Email through Gmail
