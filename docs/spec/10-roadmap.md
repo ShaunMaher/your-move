@@ -386,8 +386,7 @@ tests are green in CI.
 ## M7 — Accounts for children (pending Q20)
 - Scope decided by Q20 (e.g. adult-managed profiles without email, device sign-in codes issued by the
   adult, restricted capabilities; see the household-profiles proposal below). Requires a privacy
-  review first. (The minimum-age confirmation
-  and parent-account guidance ship in M4.)
+  review first. (The minimum-age confirmation and parent-account guidance ship in M4.)
 
 ### Proposal: household profiles (2026-11-28, not decided)
 Recorded for the privacy review; nothing here is committed until Q20 (b) is decided. Everything
@@ -408,8 +407,8 @@ below is proposed.
   open-signup domain (a public webmail provider) would allow everyone, so such entries would be
   refused or warned about.
 - **Join links:** a child profile could join only a game whose creator its allow-list permits.
-- **Activity log for the adult:** every invitation, game, and player the child meets, readable by the
-  household's adult profiles, with a stated retention.
+- **Activity log for the adult:** every invitation, game, and player the child meets would be logged,
+  readable by the household's adult profiles, with a stated retention.
 - **Open points for the privacy review:** consent and age assurance for the adult under the laws
   that apply (for example Australia's Children's Online Privacy Code, the UK Age Appropriate Design
   Code, COPPA); what the activity log keeps and for how long, and what other players' details it
@@ -482,7 +481,9 @@ anyone could scroll back. A design that keeps it:
   hidden layout, so they reach players through `view` (02 §2.1 rule 5), never history.
 - The view would show matched pairs, the cards turned so far this turn and, until the next seat
   turns its first card, the previous turn's unmatched pair. After that those faces are gone from
-  every view, so remembering them is the game.
+  every view, so remembering them is the game. A seat that resigns or times out mid-turn turns its
+  first card back down. With 3 or more seats only the next seat is sure to see a pair; the others see
+  it only if they look before that seat's first flip (accepted).
 - Screenshots defeat this; that's accepted for a family game.
 
 #### Grid race: a real-time word race made turn-based (idea, 2026-11-28)
@@ -499,7 +500,9 @@ all playing seats, so their clocks start together and give the round a common de
   valid grid can call. A seat leaves `toAct` once it has acted.
 - When every seat has acted the round ends and its calls apply in action order: each one makes every
   seat draw a tile. The first call the pool can't serve ends the game and its caller wins; the rest
-  are ranked by tiles left over. (Open: whether action order or seat order is the fairer tiebreak.)
+  are ranked by tiles left over. (Open: whether action order or seat order is the fairer tiebreak,
+  how ties in tiles left break, whether a swap needs 3 tiles in the pool, and that seats out of the
+  game don't draw.)
 - **Framework gap:** an overdue seat times out of the game (02 §4: `onTimeout`, `timed_out`), which
   is too harsh for a missed round. This game would need the module to choose a softer outcome, such
   as the seat passing that round and staying in, which is a change to 02 §4 to design with turn
