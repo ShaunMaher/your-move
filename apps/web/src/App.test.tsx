@@ -717,6 +717,7 @@ describe("a join link through sign-in and onboarding (06 §6.8, 07 §1)", () => 
     await waitFor(() => {
       expect(window.location.pathname).toBe("/join");
     });
+    seen.push(window.location.href);
     expect(calls.filter((call) => call.path === "/api/v1/join/lookup")).toHaveLength(1);
     expect(calls.filter((call) => call.path === "/api/v1/join")).toHaveLength(0);
     expect(keptJoinToken()).toBe(TOKEN);
