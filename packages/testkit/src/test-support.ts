@@ -457,6 +457,46 @@ export function brokenFixtures(): Record<string, { property: string; engines: ()
         test: { ...toy.test, hiddenFromEveryone: true },
       })),
     },
+    "sets hiddenFromEveryone with different hands and a deck-only perturbHidden": {
+      // The shape of review M1a P2-1: the non-vacuity count alone passed it, as the state changes.
+      property: "secrecy",
+      engines: variant((toy) => ({
+        ...toy,
+        test: {
+          ...toy.test,
+          hiddenFromEveryone: true,
+          perturbHidden: (s) => ({ ...s, deck: [...s.deck].reverse() }),
+        },
+      })),
+    },
+    "sets hiddenFromEveryone while its views differ only late in the game": {
+      // One view for everyone until two cards are left, then each seat's own: checked every step.
+      property: "secrecy",
+      engines: variant((toy) => ({
+        ...toy,
+        view: (s, v) =>
+          s.hands.flat().length <= 2 ? { ...toy.view(s, null), peek: v } : toy.view(s, null),
+        test: { ...toy.test, hiddenFromEveryone: true },
+      })),
+    },
+    "sets hiddenFromEveryone while a summary leaks the next seat's hand": {
+      // One view for everyone, but each seat's summary names the next seat's hand (A25-S-1); the
+      // deck-only perturbation never changes a summary, so only the flag's check catches it.
+      property: "secrecy",
+      engines: variant((toy) => ({
+        ...toy,
+        view: (s) => toy.view(s, null),
+        summary: (s, v) => ({
+          headline: [v === null ? "Scores" : (s.hands[(v + 1) % s.seats] ?? []).join(",")],
+          scores: [...s.scores],
+        }),
+        test: {
+          ...toy.test,
+          hiddenFromEveryone: true,
+          perturbHidden: (s) => ({ ...s, deck: [...s.deck].reverse() }),
+        },
+      })),
+    },
     "has a no-op perturbHidden": {
       property: "secrecy",
       engines: variant((toy) => ({ ...toy, test: { ...toy.test, perturbHidden: (s) => s } })),

@@ -505,14 +505,53 @@ describe("runKit's static checks", () => {
     ).toMatch(/changed another viewer's view in only 0 of/u);
   });
 
+  const view = (who: string): string =>
+    `hiddenFromEveryone is set, but ${who} gets a different view from seat 0 while the game is in progress`;
   it.each([
-    ["sets hiddenFromEveryone while its seats see different hands", "seat 1"],
-    ["sets hiddenFromEveryone while the public's view differs from the seats'", "the public"],
-  ])("checks hiddenFromEveryone at every step: a module that %s fails", (name, who) => {
+    ["sets hiddenFromEveryone while its seats see different hands", view("seat 1")],
+    ["sets hiddenFromEveryone while the public's view differs from the seats'", view("the public")],
+    ["sets hiddenFromEveryone with different hands and a deck-only perturbHidden", view("seat 1")],
+    ["sets hiddenFromEveryone while its views differ only late in the game", view("seat 1")],
+    [
+      "sets hiddenFromEveryone while a summary leaks the next seat's hand",
+      "hiddenFromEveryone is set, but seat 1, which isn't to act, gets a different summary from the public while the game is in progress",
+    ],
+  ])("checks hiddenFromEveryone at every step: a module that %s fails", (name, message) => {
     const report = runKit(brokenFixtures()[name]?.engines() ?? {}, { mode: "fast", games: 3 });
+    expect(report.failures.map((f) => f.message)).toContain(message);
+  });
+
+  it("reads hiddenFromEveryone once per rules version, so a hook can't take the claim back", () => {
+    const toy = toyGame();
+    let reads = 0;
+    const test = {
+      ...toy.test,
+      // Claims the flag when first asked, and denies it on every later read.
+      get hiddenFromEveryone() {
+        reads += 1;
+        return reads === 1;
+      },
+    };
+    const report = runKit(asEngines({ ...toy, test }), { mode: "fast", games: 3 });
+    expect(reads).toBe(1);
     expect(report.failures.map((f) => f.message)).toContain(
-      `hiddenFromEveryone is set, but ${who} gets a different view from seat 0 while the game is in progress`,
+      "hiddenFromEveryone is set, but seat 1 gets a different view from seat 0 while the game is in progress",
     );
+  });
+
+  it("lets the seats to act get their own summary under hiddenFromEveryone", () => {
+    const toy = toyGame();
+    // One view for everyone; the summary says "your turn" to the seat to act only.
+    const report = runKit(
+      asEngines({
+        ...toy,
+        view: (s) => toy.view(s, null),
+        summary: (s, v) => ({ headline: [v === s.turn ? "Your turn" : "Playing"] }),
+        test: { ...toy.test, hiddenFromEveryone: true },
+      }),
+      { mode: "fast", games: 10 },
+    );
+    expect(report.failures).toEqual([]);
   });
 
   it("refuses hiddenFromEveryone without hiddenInformation", () => {

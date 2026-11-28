@@ -219,13 +219,14 @@ export interface GameTestHooks<Options, State, Action> {
   readonly publicRandomness?: boolean;
   /**
    * True if, while the game is in progress, every seat and the public get the same view
-   * (identical JSON, key order included; summaries may differ), so nothing is hidden from one
-   * viewer that another sees: e.g. a game whose only hidden information is the deck order, or the
-   * pairs game's face-down cards. The kit checks this at every step of every game and fails the
-   * module on any two viewers whose views differ; its non-vacuity check then counts perturbations
-   * that change the state, rather than ones that change another viewer's view (02 §6.3). Keep
-   * per-viewer conveniences ("your turn") out of the view: they belong in `summary` or come from
-   * the envelope. Requires `hiddenInformation`; never set it for a game with hidden hands.
+   * (identical JSON, key order included), and every seat not in `toAct` the same summary as the
+   * public, so nothing is hidden from one viewer that another sees: e.g. a game whose only hidden
+   * information is the deck order, or the pairs game's face-down cards. The kit checks both at
+   * every step of every game and fails the module otherwise; its non-vacuity check then counts
+   * perturbations that change the state, rather than ones that change another viewer's view
+   * (02 §6.3). Only the seats to act may get their own summary ("your turn"); other per-viewer
+   * conveniences (which seat is yours) come from the envelope. Requires `hiddenInformation`;
+   * never set it for a game with hidden hands.
    */
   readonly hiddenFromEveryone?: boolean;
   /**
