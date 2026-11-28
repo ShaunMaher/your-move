@@ -106,7 +106,7 @@ generated `_headers` file for static assets (03 §9). One shared definition gene
 | Join-link lookups and joins per user (the joiner's limits only, never the creator's) | 30 / h | `429` |
 | Join-link lookups and joins per IP (bucketed) | 60 / h | `429` |
 | Join-link creations per user | 20 / day | `429` |
-| Any authenticated write per user | 300 / min | `429` |
+| Any authenticated write per user (every game write, the push subscription routes, `PATCH /api/v1/me` and `POST /api/v1/me/under-age`) | 300 / min | `429` |
 | **"It's your turn" email nudges instance-wide** (alpha A6, `LIMIT_NUDGE_EMAILS_PER_DAY`) | 150 / day: at most the cap per UTC day, up to twice the cap in any 24 hours (a sliding window over fixed UTC days; sized in §4.2) | silent: the sweep stops and claims nothing more, the rest wait for a later run; only claimed nudges count, and a claimed nudge whose count goes over the cap (only when two runs overlap) isn't sent; alert once per UTC day (03 §7) |
 | "It's your turn" email nudges per recipient (alpha A6, `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`) | 10 / day: about the cap per UTC day, up to about twice the cap in any 24 hours | silent: that recipient's other due nudges wait unclaimed; only claimed nudges count (03 §7) |
 | Requests per API token | 120 / min, 10,000 / day (the account's limits apply too) | `429` |
@@ -244,8 +244,9 @@ provider with a larger quota.
 
 - Collect only: email, display name, the age-confirmation time (and the `MIN_AGE` then in force),
   game data, uploaded word lists and their rights attestations, session metadata (user agent;
-  HMAC'd IP in audit events), and a device's push subscription while notifications are on (04
-  `push_subscriptions`). The privacy page (`/privacy`, 07 §1) describes only what the instance
+  HMAC'd IP in audit events), a device's push subscription while notifications are on (04
+  `push_subscriptions`), and the `emailId` HMAC of addresses that must not be emailed (04
+  `email_suppressions`: unsubscribed, bounced, complained, or an under-age exit). The privacy page (`/privacy`, 07 §1) describes only what the instance
   actually keeps and does: a retention step or feature that isn't built yet is not claimed there
   (alpha A21).
 - Minimum age `MIN_AGE` (default 13) confirmed at onboarding (06 §5). The privacy page states it,
@@ -253,7 +254,8 @@ provider with a larger quota.
   market the service to children. A privacy review is required before any child accounts (Q20,
   roadmap M7).
 - No third-party scripts, analytics, fonts or CDNs in the client (sole optional exception:
-  Turnstile, when the operator enables it — disclosed on the privacy page).
+  Turnstile, when the operator enables it — disclosed on the privacy page once its enforcement
+  ships; until then startup refuses its keys, alpha A21 review P-6).
 - Emails are never shown to other players except: the invitee sees the inviter's email in the
   invite email (disclosed to the inviter beforehand), and the creator sees the addresses they typed
   themselves until those seats are accepted.
