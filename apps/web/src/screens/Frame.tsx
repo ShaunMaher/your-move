@@ -99,12 +99,10 @@ type Addable = NonNullable<GameEnvelope["canAddPlayers"]>[number];
  */
 function AddPlayers({
   asked,
-  added,
   onAdd,
   onNotNow,
 }: {
   readonly asked: readonly Addable[];
-  readonly added: readonly string[];
   readonly onAdd: (person: Addable) => Promise<string | null>;
   readonly onNotNow: (person: Addable) => void;
 }) {
@@ -139,6 +137,11 @@ function AddPlayers({
                   type="button"
                   className="button"
                   disabled={pending !== null}
+                  aria-label={
+                    pending === person.userId
+                      ? `Adding ${person.displayName}…`
+                      : `Add ${person.displayName}`
+                  }
                   aria-describedby="add-player-problem"
                   onClick={() => void add(person)}
                 >
@@ -148,6 +151,7 @@ function AddPlayers({
                   type="button"
                   className="button secondary"
                   disabled={pending !== null}
+                  aria-label={`Not now about ${person.displayName}`}
                   onClick={() => {
                     setProblem(null);
                     onNotNow(person);
@@ -161,11 +165,6 @@ function AddPlayers({
         </div>
       )}
       <Problem id="add-player-problem" message={problem} />
-      <div role="status">
-        {added.map((name) => (
-          <p key={name}>Added {name} to your players.</p>
-        ))}
-      </div>
     </>
   );
 }
@@ -255,9 +254,12 @@ function Results({
   /** Whose question Not now hid on this screen. */
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const listed = game.canAddPlayers ?? [];
-  // Still to add: the line under Rematch names them, and a Rematch refused for them asks again.
+  // Still to add: a Rematch refused for want of them asks again.
   const needed = listed.filter((person) => !added.has(person.userId));
+  // Still asked: the line under Rematch names only these, so Not now silences it (A19-P-1).
   const asked = needed.filter((person) => !hidden.has(person.userId));
+  const creator = game.players.find((player) => player.isCreator);
+  const youCreated = creator?.isYou === true;
   async function add(person: Addable): Promise<string | null> {
     const failure = await onAddPlayer(person.userId);
     if (failure === null) setAdded((now) => new Map(now).set(person.userId, person.displayName));
@@ -266,7 +268,13 @@ function Results({
   async function rematchOrAsk(): Promise<string | null> {
     const failure = await onRematch();
     if (failure === null) return null;
-    if (failure.code !== "INVALID_INVITEES" || needed.length === 0) return failure.message;
+    if (failure.code !== "INVALID_INVITEES") return failure.message;
+    if (!youCreated) {
+      // Perhaps they joined by link and weren't added: only the creator can add them (06 §6.11).
+      const name = creator?.displayName ?? null;
+      return `You can't start this rematch yet. Ask ${name ?? "the game's creator"} to start it, or to add you to their players.`;
+    }
+    if (needed.length === 0) return failure.message;
     setHidden(new Set());
     return "Add them to your players first, then press Rematch again.";
   }
@@ -302,24 +310,31 @@ function Results({
           ))}
         </ol>
       ) : null}
-      {/* Only while there is someone to ask about or something to say: a live region each. */}
-      {game.status === "finished" && (listed.length > 0 || added.size > 0) ? (
+      {/* Only while there is someone to ask about: it brings a live region of its own. */}
+      {game.status === "finished" && listed.length > 0 ? (
         <AddPlayers
           asked={asked}
-          added={[...added.values()]}
           onAdd={add}
           onNotNow={(person) => {
             setHidden((now) => new Set(now).add(person.userId));
           }}
         />
       ) : null}
+      {/* Mounted for the creator from the start, so each confirmation is announced (A19-P-4). */}
+      {game.status === "finished" && game.canAddPlayers !== undefined ? (
+        <div role="status">
+          {[...added.values()].map((name) => (
+            <p key={name}>Added {name} to your players.</p>
+          ))}
+        </div>
+      ) : null}
       {game.status === "finished" && game.rematch !== undefined ? (
         <RematchButton
           label={rematch}
           onRematch={rematchOrAsk}
           needs={
-            game.rematch === null && needed.length > 0
-              ? `To rematch, first add ${namesText(needed.map((person) => person.displayName))} to your players.`
+            game.rematch === null && asked.length > 0
+              ? `To rematch, first add ${namesText(asked.map((person) => person.displayName))} to your players.`
               : null
           }
         />

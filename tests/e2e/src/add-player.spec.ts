@@ -2,7 +2,8 @@
  * Adding a link joiner to your players (alpha A19, 07 §1, 05 `add-player`, 06 §6.9): Ann makes a
  * words game with a join link, Bob joins through it, and both play a move before Ann resigns. A
  * link joiner is never paired automatically, so the finished screen asks Ann "Add Bob to your
- * players?" and says a rematch needs it; Rematch refused for want of it says so. Ann adds Bob, and
+ * players?" and says a rematch needs it; after Not now it says nothing, and Rematch refused for
+ * want of it says so and asks again. Ann adds Bob, and
  * Rematch then starts the next game, which Bob opens from his own finished screen.
  */
 import { ADD_PLAYER_TEST_TIMEOUT_MS } from "./budgets.js";
@@ -58,16 +59,18 @@ test("after a link game the creator adds the joiner to their players, and Rematc
   await expect(question).toBeVisible();
   await expect(results.getByText("To rematch, first add Bob to your players.")).toBeVisible();
   await expectAccessible(ann);
-  await question.getByRole("button", { name: "Not now" }).click();
+  await question.getByRole("button", { name: "Not now about Bob" }).click();
   await expect(question).toHaveCount(0);
+  await expect(results.getByText(/To rematch, first add/u)).toHaveCount(0);
   await results.getByRole("button", { name: "Rematch" }).click();
   await expect(
     results.getByText("Add them to your players first, then press Rematch again."),
   ).toBeVisible(FAR);
   await expect(question).toBeVisible();
+  await expect(results.getByText("To rematch, first add Bob to your players.")).toBeVisible();
 
   // Ann says yes: the question gives way, and Rematch starts the next game with Bob in it.
-  await question.getByRole("button", { name: "Add" }).click();
+  await question.getByRole("button", { name: "Add Bob" }).click();
   await expect(results.getByText("Added Bob to your players.")).toBeVisible(FAR);
   await expect(question).toHaveCount(0);
   await expect(results.getByText(/To rematch, first add/u)).toHaveCount(0);

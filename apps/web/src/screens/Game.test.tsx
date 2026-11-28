@@ -1192,7 +1192,7 @@ describe("adding link joiners to your players (07 §1, alpha A19)", () => {
     ).toBe("rematch-needs rematch-problem");
     const asked = question("Bob");
     if (asked === null) throw new Error("no question about Bob");
-    fireEvent.click(within(asked).getByRole("button", { name: "Add" }));
+    fireEvent.click(within(asked).getByRole("button", { name: "Add Bob" }));
     expect(await within(card).findByText("Added Bob to your players.")).toBeDefined();
     expect(posts(calls, "add-player")).toEqual([
       expect.objectContaining({ body: { userId: "u2" } }),
@@ -1217,7 +1217,7 @@ describe("adding link joiners to your players (07 §1, alpha A19)", () => {
     const card = await results();
     const asked = question("Bob");
     if (asked === null) throw new Error("no question about Bob");
-    fireEvent.click(within(asked).getByRole("button", { name: "Add" }));
+    fireEvent.click(within(asked).getByRole("button", { name: "Add Bob" }));
     expect(await within(card).findByText("Added Bob to your players.")).toBeDefined();
     expect(question("Bob")).toBeNull();
     expect(within(card).queryByText(/To rematch, first add/u)).toBeNull();
@@ -1235,14 +1235,14 @@ describe("adding link joiners to your players (07 §1, alpha A19)", () => {
     await results();
     const asked = question("Bob");
     if (asked === null) throw new Error("no question about Bob");
-    fireEvent.click(within(asked).getByRole("button", { name: "Add" }));
-    const busy = await within(asked).findByRole("button", { name: "Adding…" });
+    fireEvent.click(within(asked).getByRole("button", { name: "Add Bob" }));
+    const busy = await within(asked).findByRole("button", { name: "Adding Bob…" });
     expect(busy.hasAttribute("disabled")).toBe(true);
     // One answer at a time: the other question waits too.
     const other = question("Di");
     expect(
       within(other ?? document.body)
-        .getByRole("button", { name: "Add" })
+        .getByRole("button", { name: "Add Di" })
         .hasAttribute("disabled"),
     ).toBe(true);
     answer(problem(404, "NOT_FOUND"));
@@ -1259,7 +1259,9 @@ describe("adding link joiners to your players (07 §1, alpha A19)", () => {
       "POST /api/v1/games/g1/add-player": problem(401, "UNAUTHENTICATED"),
     });
     await results();
-    fireEvent.click(within(question("Bob") ?? document.body).getByRole("button", { name: "Add" }));
+    fireEvent.click(
+      within(question("Bob") ?? document.body).getByRole("button", { name: "Add Bob" }),
+    );
     await waitFor(() => {
       expect(lost).toHaveBeenCalled();
     });
@@ -1272,11 +1274,14 @@ describe("adding link joiners to your players (07 §1, alpha A19)", () => {
     });
     const card = await results();
     fireEvent.click(
-      within(question("Bob") ?? document.body).getByRole("button", { name: "Not now" }),
+      within(question("Bob") ?? document.body).getByRole("button", { name: "Not now about Bob" }),
     );
     expect(question("Bob")).toBeNull();
-    // The line under Rematch still says what a rematch needs.
-    expect(within(card).getByText("To rematch, first add Bob to your players.")).toBeDefined();
+    // Not now silences the instruction under Rematch too (A19-P-1).
+    expect(within(card).queryByText(/To rematch, first add/u)).toBeNull();
+    expect(
+      within(card).getByRole("button", { name: "Rematch" }).getAttribute("aria-describedby"),
+    ).toBe("rematch-problem");
     fireEvent.click(within(card).getByRole("button", { name: "Rematch" }));
     await waitFor(() => {
       expect(screen.getByText("Add them to your players first, then press Rematch again.").id).toBe(
@@ -1284,6 +1289,54 @@ describe("adding link joiners to your players (07 §1, alpha A19)", () => {
       );
     });
     expect(question("Bob")).not.toBeNull();
+    expect(within(card).getByText("To rematch, first add Bob to your players.")).toBeDefined();
+  });
+
+  it("names the creator to another player refused with INVALID_INVITEES (A19-P-2)", async () => {
+    const asJoiner = (creatorName: string | null) =>
+      finished(undefined, {
+        players: [
+          player({ rank: 1, isYou: false, isCreator: true, displayName: creatorName }),
+          alex({ rank: 2, isYou: true, displayName: "Bob" }),
+        ],
+      });
+    for (const [creatorName, text] of [
+      [
+        "Sam",
+        "You can't start this rematch yet. Ask Sam to start it, or to add you to their players.",
+      ],
+      [
+        null,
+        "You can't start this rematch yet. Ask the game's creator to start it, or to add you to their players.",
+      ],
+    ] as const) {
+      open({
+        "GET /api/v1/games/g1": asJoiner(creatorName),
+        "POST /api/v1/games/g1/rematch": problem(400, "INVALID_INVITEES"),
+      });
+      const card = await results();
+      expect(within(card).queryByRole("group")).toBeNull();
+      fireEvent.click(within(card).getByRole("button", { name: "Rematch" }));
+      expect((await screen.findByRole("alert")).textContent).toBe(text);
+      cleanup();
+    }
+  });
+
+  it("keeps the status region in the page from the start, so a confirmation is announced (A19-P-4)", async () => {
+    open({
+      "GET /api/v1/games/g1": () => finished([bob]),
+      "POST /api/v1/games/g1/add-player": noContent,
+    });
+    const card = await results();
+    const status = within(card).getByRole("status");
+    expect(status.textContent).toBe("");
+    fireEvent.click(
+      within(question("Bob") ?? document.body).getByRole("button", { name: "Add Bob" }),
+    );
+    await waitFor(() => {
+      expect(status.textContent).toBe("Added Bob to your players.");
+    });
+    expect(within(card).getByRole("status")).toBe(status);
   });
 
   it("asks nothing when there is no one to add, or for another player", async () => {
