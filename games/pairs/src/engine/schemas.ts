@@ -6,6 +6,8 @@
  */
 import { z } from "@your-move/sdk/schema";
 
+import { at } from "./at.js";
+
 /** The game type id; matches the manifest (02 §7.2). */
 export const GAME_TYPE = "pairs";
 
@@ -106,7 +108,7 @@ export type CardState = Card["state"];
 
 /** Whether a list of numbers is strictly ascending, so also distinct. */
 const ascending = (values: readonly number[]): boolean =>
-  values.slice(1).every((value, i) => value > (values[i] as number));
+  values.every((value, i) => i === 0 || value > at(values, i - 1));
 
 const perSeat = <T extends z.ZodType>(item: T) => z.array(item).min(PLAYERS.min).max(PLAYERS.max);
 
