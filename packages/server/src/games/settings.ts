@@ -1,7 +1,8 @@
 /**
  * The game parts of `users.settings` (04): the remembered options per game type and the last game
- * type (05 §Remembered options), `whoCanAddMe` (06 §6.2), and whether email nudges are on (03 §7). The column is JSON; anything unreadable counts as unset. Writes
- * go through `UserRepo.rememberGameOptions`, which changes only these keys in SQL.
+ * type (05 §Remembered options), `whoCanAddMe` (06 §6.2), and whether email nudges are on (03 §7).
+ * The column is JSON; anything unreadable counts as unset. Writes go through
+ * `UserRepo.rememberGameOptions`, which changes only these keys in SQL.
  */
 const MAX_REMEMBERED_BYTES = 4096;
 

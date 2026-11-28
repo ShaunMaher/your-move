@@ -98,8 +98,8 @@ function EmailNudges({
         Email me when I&apos;m invited or it&apos;s my turn
       </label>
       <p id="email-nudges-help">
-        We&apos;ll email you once for each new invitation, and when a game has waited a day for your
-        move, at most once a day for each game. Every email has a link to turn this off.
+        We&apos;ll usually email you about a new invitation, and when a game has waited a day for
+        your move, at most once a day for each game. Every email has a link to turn this off.
       </p>
       <Problem id="email-nudges-problem" message={error} />
     </section>

@@ -121,7 +121,7 @@ export interface LimitResult {
 }
 
 /** The effective allowance for a limit (`LIMIT_<NAME>` or the default). */
-function limitOf(config: LimitConfig, name: LimitName): number {
+export function limitOf(config: LimitConfig, name: LimitName): number {
   return config.limits[name] ?? LIMITS[name].limit;
 }
 

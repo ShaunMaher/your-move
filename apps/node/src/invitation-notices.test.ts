@@ -376,6 +376,40 @@ describe("the generic invitation push (06 §6.2, 03 §7)", () => {
   });
 });
 
+describe("the inbound cap counts live invitations (06 §6.7, review A20-S-1, F-17)", () => {
+  it("lobbies three strangers created and cancelled use none of the target's slots: a real invitation is normal, pushed and mailed", async () => {
+    harness();
+    const bo = await signUp(h, "Bo");
+    const phone = await device(bo);
+    h.setTime(Date.UTC(2026, 0, 5, 1));
+    for (const name of ["Tom", "Tim", "Tod"]) {
+      const throwaway = await seasoned(name);
+      const { game } = await invite(throwaway, bo.email);
+      expect((await transition(h, throwaway, game.id, "cancel")).status).toBe(200);
+    }
+    // Nudges on only now: strangers' invitations to a nudged user would spend its per-address
+    // email cap, which is accepted residual F-24 (the push still arrives). The cancelled lobbies'
+    // push went to the first; a new UTC day frees the push, but not, before this fix, the slots.
+    await nudgesOn(bo);
+    h.setTime(Date.UTC(2026, 0, 6, 0, 30));
+    const ada = await seasoned("Ada");
+    const { game } = await invite(ada, bo.email);
+    expect(deliveryOf(game.id, bo.id)).toBe("normal");
+    expect((await received(phone)).at(-1)).toEqual(INVITATION);
+    expect((await invitationEmailsTo(bo.email)).at(-1)?.subject).toBe(
+      "Ada invited you to play Words on Family Games",
+    );
+  });
+
+  it("three live invitations from strangers today still make the fourth hidden", async () => {
+    harness();
+    const bo = await signUp(h, "Bo");
+    for (const name of ["Tom", "Tim", "Tod"]) await invite(await seasoned(name), bo.email);
+    const { game } = await invite(await seasoned("Ada"), bo.email);
+    expect(deliveryOf(game.id, bo.id)).toBe("hidden");
+  });
+});
+
 describe("the invitation email to a user with email nudges on (06 §6.2)", () => {
   it("says who invited them to what, with the nudges unsubscribe, and nothing of the game", async () => {
     harness();
@@ -503,6 +537,26 @@ describe("the invitation email to a user with email nudges on (06 §6.2)", () =>
     ]).toEqual([1, 1, 0]);
   });
 
+  it("reaches an address that once unsubscribed from invites once its holder turns nudges on; a bounce still stops it (review A20-P-3)", async () => {
+    harness();
+    const ada = await seasoned("Ada");
+    const [unsubscribed, bounced] = [freshEmail(), freshEmail()];
+    await suppress(unsubscribed, "unsubscribed");
+    await suppress(bounced, "bounced");
+    const players = [await signUp(h, "Una", unsubscribed), await signUp(h, "Bea", bounced)];
+    for (const player of players) {
+      await nudgesOn(player);
+      await invite(ada, player.email);
+      h.advance(HOUR);
+    }
+    expect(
+      await Promise.all(players.map(async (p) => (await invitationEmailsTo(p.email)).length)),
+    ).toEqual([1, 0]);
+    expect(h.query("SELECT reason FROM email_suppressions ORDER BY reason")).toEqual([
+      { reason: "bounced" },
+    ]);
+  });
+
   it("is never sent on a claim: the seat's one email was its invite email", async () => {
     harness();
     const ada = await seasoned("Ada");
@@ -550,6 +604,45 @@ const shape = (body: unknown) =>
       .replace(/"invitedAs":"[^"]*"/gu, '"invitedAs":"<address>"')
       .replace(/"(createdAt|lastActionAt)":[0-9]+/gu, '"$1":0'),
   ) as unknown;
+
+describe("a rematch's invitations (05 rematch, review A20-P-4)", () => {
+  it("a pick that becomes an invitation gets the push and, with nudges on, the email, once each", async () => {
+    harness();
+    const ada = await signUp(h, "Ada");
+    const cy = await signUp(h, "Cy");
+    const phone = await device(cy);
+    pastOpponents(ada, cy);
+    const game = await createGame(h, ada, { gameType: "example", invitees: [{ userId: cy.id }] });
+    // Finished as if played out: the rematch reads only its setup.
+    const final = { view: null, summary: { headline: [] } };
+    h.exec(
+      "UPDATE games SET status = 'finished', ended_at = ?, final_views = ? WHERE id = ?",
+      now(),
+      JSON.stringify({ seats: [final, final], public: final }),
+      game.id,
+    );
+    h.exec("UPDATE game_players SET acted_once = 1 WHERE game_id = ?", game.id);
+    await h.drain();
+    const pushesBefore = (await received(phone)).length;
+    // Cy now adds nobody at once: the rematch seats Cy as an invitation.
+    h.exec(`UPDATE users SET settings = '{"whoCanAddMe":"nobody"}' WHERE id = ?`, cy.id);
+    await nudgesOn(cy);
+    const asked = await call<{ game: { id: string; status: string } }>(
+      h,
+      ada,
+      "POST",
+      `/api/v1/games/${game.id}/rematch`,
+      {},
+    );
+    expect(asked.status).toBe(201);
+    expect(asked.body.game.status).toBe("lobby");
+    expect((await received(phone)).slice(pushesBefore)).toEqual([INVITATION]);
+    const mails = await invitationEmailsTo(cy.email);
+    expect(mails.map((mail) => mail.subject)).toEqual([
+      "Ada invited you to play Example on Family Games",
+    ]);
+  });
+});
 
 describe("Q3: every typed address alike, with the invitation's push and email (06 §6.1, 08 T4)", () => {
   it("answers, reads, writes and schedules the same whether the address is pushed to, mailed, neither, suppressed, capped, hidden or blocked", async () => {

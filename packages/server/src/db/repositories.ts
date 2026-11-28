@@ -108,7 +108,9 @@ export interface UserRepo {
    * Sets `settings.emailNudges`, leaving every other key as it is now in the database.
    * `users.email_id` (04) is set exactly while nudges are on: turning them on records the
    * address's `emailId`, which a `nudges` unsubscribe token looks the account up by (05 §Email
-   * links); turning them off clears it. Suppressions are left alone.
+   * links); turning them off clears it. Turning them on also deletes that address's own
+   * `unsubscribed` suppression, if it has one (its holder's opt-in, alpha A20 review P-3), and
+   * leaves a `bounced` or `complained` one alone.
    */
   setEmailNudges(id: string, change: EmailNudgesChange): Promise<void>;
   /** Sets `settings.theme` (07 §5), leaving every other key as it is now in the database. */
@@ -567,7 +569,37 @@ export interface InviteClaim extends ClaimableSeat {
   readonly inert: boolean;
 }
 
+/** One address a creation counts the inbound cap for (06 §6.7): its `emailId` and its user. */
+interface InboundTarget {
+  readonly emailHash: string;
+  /** The onboarded user the address belongs to, or a placeholder matching no one. */
+  readonly userId: string;
+}
+
+/** What {@link InviteRepo.receivedSince} counts for one target. */
+interface InboundCount {
+  /** Invitations from the creator, whatever their delivery but `inert`. */
+  readonly fromCreator: number;
+  /** `normal` invitations from anyone. */
+  readonly total: number;
+}
+
 export interface InviteRepo {
+  /**
+   * The inbound cap's counts (06 §6.7, alpha A20 review S-1), one per target, in its order: the
+   * `invites` rows for its address in games created after `since`, from creators who aren't past
+   * opponents of its user, that still count. An invitation stops counting when its lobby ended
+   * unplayed (`cancelled`, `expired`, or `declined` by someone else) or its seat was `removed`; the
+   * target's own decline keeps it counting, and so does a game that started. An `inert` seat never
+   * counts. A row is matched to its seat by id (04 `invites.id`); an older row whose id matches no
+   * seat counts unless its lobby ended unplayed. Reads only: the same statement for every target,
+   * whatever it resolves to, in one batch.
+   */
+  receivedSince(
+    creatorId: string,
+    since: number,
+    targets: readonly InboundTarget[],
+  ): Promise<InboundCount[]>;
   /**
    * Up to `limit` email-invite seats typed as `email` that could be claimed now (06 §6.4): an
    * `invited` row with no user and a delivery other than `inert`, in a `lobby` game created after

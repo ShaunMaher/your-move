@@ -292,6 +292,11 @@ export function invitationMessage(appName: string): PushMessage {
  * UTC day each: the per-recipient counter is taken only for a recipient with a live subscription,
  * after the subscriptions are read, so a day's push isn't spent on someone with no device. It runs
  * in the background only, so nothing a creator sees reads or writes the counter (Q3).
+ *
+ * The counter is taken before delivery, on purpose (review A20-S-5, P-7): one atomic count decides
+ * the day's push, so two invitations racing can't both send, and nothing about the outcome is
+ * written back. So a send that fails, or a recipient cut by the per-request cap of 40, has still
+ * used up that day's push; the invitation itself is in their list either way.
  */
 export async function sendInvitationPushes(
   platform: Platform,

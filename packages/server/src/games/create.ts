@@ -29,7 +29,7 @@ import { isGameError, type GameError, type OptionsContext } from "@your-move/sdk
 import type { CreateGameBodySchema } from "@your-move/shared";
 
 import { normaliseAddress, type NormalisedEmail } from "../accounts/email.js";
-import { checkLimits, type LimitCheck } from "../auth/limits.js";
+import { checkLimits, type LimitCheck, limitOf } from "../auth/limits.js";
 import { emailId, type Subkeys } from "../crypto/subkeys.js";
 import type { NewGamePlayer, UserRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
@@ -181,18 +181,16 @@ function getsInvitationEmail(user: UserRecord): boolean {
 
 /** Stands in for "no user" in the past-opponent lookup, so it runs the same for every address. */
 const NO_USER = "";
-/** The `rate_limits` key that counts what isn't counted for real: written, never read (06 §3.2). */
-const SILENT = "silent";
+const DAY = 86_400_000;
 
 /**
  * The inbound invitation cap (06 §6.7, 08 T20): a user receives at most 1 invitation a day from
  * any one creator who isn't a past opponent, and 3 a day in total from such creators; over the cap
- * the invitation is `hidden`. Counted in `rate_limits` keyed by the target's `emailId` (per
- * creator: creator and `emailId`), so it is counted, with the same lookups and writes, for every
- * typed address whatever it resolves to (Q3): a past opponent's invitation adds nothing to the
- * counters, and one already over the per-creator cap adds nothing to the total; each adds 1 to the
- * never-read `silent` key instead, so every address writes the same rows (06 §3.2: an upsert adding
- * 0 writes nothing and is measurably quicker). The creator's response is the same either way.
+ * the invitation is `hidden`. Counted from the live `invites` rows of the last day for the target's
+ * `emailId` (alpha A20 review S-1, F-17): a lobby that ended unplayed or a seat its creator
+ * removed stops counting, so throwaway lobbies can't push a real invitation into *Hidden*. The same
+ * read for every typed address whatever it resolves to (Q3), with a placeholder user for an
+ * address that has none; nothing is written. The creator's response is the same either way.
  * Returns each address's delivery.
  */
 async function inboundDelivery(
@@ -204,38 +202,27 @@ async function inboundDelivery(
 ): Promise<("normal" | "hidden")[]> {
   if (emailIds.length === 0) return [];
   const { repos, config } = deps.platform;
-  const pastOpponents = new Set(
-    await repos.users.pastOpponentsOf(
+  const targets = emailIds.map((emailHash, i) => ({
+    emailHash,
+    userId: invitable[i]?.id ?? NO_USER,
+  }));
+  const [opponents, received] = await Promise.all([
+    repos.users.pastOpponentsOf(
       creator.id,
-      invitable.map((user) => user?.id ?? NO_USER),
+      targets.map((target) => target.userId),
     ),
-  );
-  const strangers = invitable.map((user) => user === null || !pastOpponents.has(user.id));
-  const perCreator = await checkLimits(
-    repos,
-    config,
-    now,
-    emailIds.map((hash, i) => ({
-      name: "INVITATIONS_RECEIVED_PAIR_DAY",
-      key: strangers[i] === true ? `${creator.id}:${hash}` : SILENT,
-      amount: 1,
-    })),
-  );
-  const total = await checkLimits(
-    repos,
-    config,
-    now,
-    emailIds.map((hash, i) => ({
-      name: "INVITATIONS_RECEIVED_DAY",
-      key: strangers[i] === true && perCreator[i]?.exceeded !== true ? hash : SILENT,
-      amount: 1,
-    })),
-  );
-  return emailIds.map((_hash, i) =>
-    strangers[i] === true && (perCreator[i]?.exceeded === true || total[i]?.exceeded === true)
+    repos.invites.receivedSince(creator.id, now - DAY, targets),
+  ]);
+  const pastOpponents = new Set(opponents);
+  const perCreator = limitOf(config, "INVITATIONS_RECEIVED_PAIR_DAY");
+  const total = limitOf(config, "INVITATIONS_RECEIVED_DAY");
+  return targets.map((target, i) => {
+    const counts = received[i] ?? { fromCreator: 0, total: 0 };
+    const stranger = target.userId === NO_USER || !pastOpponents.has(target.userId);
+    return stranger && (counts.fromCreator >= perCreator || counts.total >= total)
       ? "hidden"
-      : "normal",
-  );
+      : "normal";
+  });
 }
 
 /** A created game: its id, the past opponents added to it at once, and its invitations' notices. */
@@ -421,7 +408,8 @@ export async function createGame(
     return {
       email,
       emailId,
-      inviteId: crypto.randomUUID(),
+      // The seat's own id, so the inbound cap can tell a live invitation from one removed (04).
+      inviteId: row.id,
       seat: user === null ? "emailInvite" : "invitation",
       mailable: normal && (user === null ? invitable[i] === null : getsInvitationEmail(user)),
     };

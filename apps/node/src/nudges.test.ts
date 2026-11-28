@@ -151,7 +151,7 @@ describe("the emailNudges setting (PATCH /api/v1/me)", () => {
     ]);
   });
 
-  it("turning nudges on keeps an unsubscribed row, which doesn't stop nudges; a bounce does (A6-S2-1)", async () => {
+  it("turning nudges on lifts the holder's own unsubscribed row, never a bounce, which still stops nudges (A6-S2-1, A20-P-3)", async () => {
     h = gameHarness();
     const { ada, bo } = await started({});
     const keys = await deriveSubkeys(h.platform.config.appSecret);
@@ -168,7 +168,6 @@ describe("the emailNudges setting (PATCH /api/v1/me)", () => {
     await setNudges(bo, true);
     expect(h.query("SELECT reason FROM email_suppressions ORDER BY reason")).toEqual([
       { reason: "bounced" },
-      { reason: "unsubscribed" },
     ]);
     h.setTime(T0 + DAY);
     expect((await h.sweep()).nudges).toMatchObject({ due: 1, sent: 1 });

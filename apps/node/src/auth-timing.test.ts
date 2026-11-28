@@ -442,15 +442,91 @@ describe("enumeration parity: timing of creating a game with a typed address (06
     },
   };
 
-  /** An address that already had its 3 invitations today: the next stranger's is `hidden`. */
+  /** Each harness's filler lobbies, open and cancelled, holding earlier invitations. */
+  const fillerLobbies = new WeakMap<Harness, Map<string, { gameId: string; creatorId: string }>>();
+  const fillerLobby = async (harness: Harness, status: "lobby" | "cancelled" = "lobby") => {
+    const lobbies =
+      fillerLobbies.get(harness) ?? new Map<string, { gameId: string; creatorId: string }>();
+    fillerLobbies.set(harness, lobbies);
+    const known = lobbies.get(status);
+    if (known !== undefined) return known;
+    const creatorId = crypto.randomUUID();
+    await harness.platform.repos.users.create({
+      id: creatorId,
+      email: normaliseAddress(`filler-${creatorId}@example.org`),
+      displayName: "Filler",
+      onboardedAt: T0,
+      createdAt: T0,
+      updatedAt: T0,
+    });
+    const gameId = crypto.randomUUID();
+    await harness.platform.repos.games.create(
+      {
+        id: gameId,
+        gameType: "words",
+        gameVersion: 1,
+        options: JSON.stringify({}),
+        status,
+        createdBy: creatorId,
+        seats: 2,
+        turnTimeoutDays: 3,
+        seatOrder: "join",
+        aiAssistance: "off",
+        lastActionAt: T0,
+        createdAt: T0,
+        updatedAt: T0,
+      },
+      [
+        {
+          id: crypto.randomUUID(),
+          userId: creatorId,
+          state: "joined",
+          joinedVia: "creator",
+          joinedAt: T0,
+        },
+      ],
+    );
+    const lobby = { gameId, creatorId };
+    lobbies.set(status, lobby);
+    return lobby;
+  };
+
+  /** Three earlier invitations of the address in the filler lobby of that status. */
+  const invitedThrice = async (harness: Harness, email: string, status: "lobby" | "cancelled") => {
+    const { gameId, creatorId } = await fillerLobby(harness, status);
+    const hash = await emailIdFor(harness, email);
+    for (let n = 0; n < 3; n++) {
+      harness.exec(
+        "INSERT INTO invites (id, game_id, inviter_id, email_hash, sent_at, expires_at) VALUES (?, ?, ?, ?, NULL, ?)",
+        crypto.randomUUID(),
+        gameId,
+        creatorId,
+        hash,
+        T0 + 14 * DAY,
+      );
+    }
+  };
+
+  /**
+   * An address whose three earlier invitations were in a lobby since cancelled: they no longer
+   * count (06 §6.7, alpha A20 review S-1), so its seat is `normal` and mailed, read alike.
+   */
+  const cancelledArm: Arm = {
+    make: async (harness, i) => {
+      const email = await unknownArm.make(harness, i);
+      await invitedThrice(harness, email, "cancelled");
+      return email;
+    },
+  };
+
+  /**
+   * An address that already had its 3 invitations today, in a live lobby (06 §6.7 counts live
+   * `invites` rows, alpha A20 review S-1): the next stranger's is `hidden`.
+   */
   const hiddenArm: Arm = {
     make: async (harness, i) => {
       const email = await unknownArm.make(harness, i);
-      harness.exec(
-        "INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, 3)",
-        `INVITATIONS_RECEIVED_DAY:${await emailIdFor(harness, email)}`,
-        Math.floor(T0 / DAY) * DAY,
-      );
+      await invitedThrice(harness, email, "lobby");
       return email;
     },
   };
@@ -476,6 +552,7 @@ describe("enumeration parity: timing of creating a game with a typed address (06
     ["known with nudges on vs unknown", nudgedArm],
     ["suppressed vs unknown", suppressedArm],
     ["hidden vs unknown", hiddenArm],
+    ["earlier invitations cancelled vs unknown", cancelledArm],
   ] as const) {
     it(
       `POST /api/v1/games with one typed address: ${label}`,
@@ -493,7 +570,7 @@ describe("enumeration parity: timing of creating a game with a typed address (06
         // The unknown arm's every invite email was sent; the nudged arm's invitation emails too.
         expect(
           h.query("SELECT count(*) AS n FROM invites WHERE sent_at IS NOT NULL")[0]?.["n"],
-        ).toBe(label.includes("nudges") ? 2 * PAIRS : PAIRS);
+        ).toBe(label.includes("nudges") || label.includes("cancelled") ? 2 * PAIRS : PAIRS);
         report(`create ${label}`, result);
         expectIndistinguishable(result);
       },

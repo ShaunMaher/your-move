@@ -7,9 +7,9 @@
 import { and, asc, eq, gt, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 
 import type { NormalisedEmail } from "../accounts/email.js";
-import type { Database } from "./database.js";
+import { type Database, runBatch } from "./database.js";
 import type { InviteRepo } from "./repositories.js";
-import { gamePlayers, games, invites, users } from "./schema.js";
+import { gamePlayers, games, invites, pastOpponents, users } from "./schema.js";
 
 /** No row of game `gameId` holds user `userId` (SQL operands): the "no other row" guard. */
 function holdsNoRow(gameId: unknown, userId: unknown) {
@@ -33,6 +33,35 @@ function claimableSeat(createdAfter: number) {
 
 export function inviteRepo(db: Database): InviteRepo {
   return {
+    async receivedSince(creatorId, since, targets) {
+      const statements = targets.map((target) =>
+        db
+          .select({
+            fromCreator: sql<number>`coalesce(sum(CASE WHEN ${invites.inviterId} = ${creatorId} THEN 1 ELSE 0 END), 0)`,
+            total: sql<number>`coalesce(sum(CASE WHEN ${gamePlayers.id} IS NULL OR ${gamePlayers.delivery} = 'normal' THEN 1 ELSE 0 END), 0)`,
+          })
+          .from(invites)
+          .innerJoin(games, eq(games.id, invites.gameId))
+          .leftJoin(gamePlayers, eq(gamePlayers.id, invites.id))
+          .where(
+            and(
+              eq(invites.emailHash, target.emailHash),
+              gt(games.createdAt, since),
+              sql`${invites.inviterId} NOT IN (SELECT ${pastOpponents.otherId} FROM ${pastOpponents} WHERE ${pastOpponents.userId} = ${target.userId})`,
+              sql`(${gamePlayers.id} IS NULL OR ${gamePlayers.delivery} <> 'inert')`,
+              sql`(${gamePlayers.state} = 'declined' OR (coalesce(${gamePlayers.state}, '') <> 'removed' AND ${games.status} NOT IN ('cancelled', 'expired', 'declined')))`,
+            ),
+          ),
+      );
+      const results = (await runBatch(db, statements)) as {
+        fromCreator: number | null;
+        total: number | null;
+      }[][];
+      return targets.map((_target, i) => {
+        const [row] = results[i] ?? [];
+        return { fromCreator: row?.fromCreator ?? 0, total: row?.total ?? 0 };
+      });
+    },
     async claimable(email, createdAfter, limit) {
       return db
         .select({ playerId: gamePlayers.id, gameId: gamePlayers.gameId })

@@ -8,15 +8,22 @@ import type { Context } from "hono";
 import { wasAlerted } from "../email/sender.js";
 import type { Platform } from "../platform.js";
 
+/**
+ * Logs a failed background task by class, unless its provider already logged its own alert for
+ * this failure (09 §2).
+ */
+export function logBackgroundFailure(platform: Platform, error: unknown): void {
+  if (wasAlerted(error)) return;
+  platform.log.error("background task failed", {
+    errorClass: error instanceof Error ? error.name : typeof error,
+  });
+}
+
 export function background(c: Context, platform: Platform, task: () => Promise<unknown>): void {
   const run = new Promise((resolve) => setTimeout(resolve, 0))
     .then(task)
     .catch((error: unknown) => {
-      // A provider that already logged its own alert for this failure is not logged again (09 §2).
-      if (wasAlerted(error)) return;
-      platform.log.error("background task failed", {
-        errorClass: error instanceof Error ? error.name : typeof error,
-      });
+      logBackgroundFailure(platform, error);
     });
   let context: { waitUntil(promise: Promise<unknown>): void } | null = null;
   try {

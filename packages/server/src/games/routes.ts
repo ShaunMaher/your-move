@@ -36,9 +36,8 @@ import { checkLimits, type LimitName } from "../auth/limits.js";
 import { requireSession } from "../auth/require-session.js";
 import type { Subkeys } from "../crypto/subkeys.js";
 import type { GamePlayerRecord, GameWriteSet, LoadedGame, UserRecord } from "../db/repositories.js";
-import { wasAlerted } from "../email/sender.js";
 import { ApiError } from "../http/api-error.js";
-import { background } from "../http/background.js";
+import { background, logBackgroundFailure } from "../http/background.js";
 import type { AppEnv, Platform } from "../platform.js";
 import { sendAddedPushes, sendNewInvitationPushes, sendTransitionPushes } from "../push/notify.js";
 import { createGame, type InvitationNotices } from "./create.js";
@@ -415,20 +414,22 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
 
   /**
    * A new game's invitation notices (06 §6.2, §6.3), in one background task whatever they carry
-   * (Q3): the invite and invitation emails, and the generic invitation push. Neither waits on the
-   * other's failure; each failure is logged by class, as `background` logs one.
+   * (Q3): first the invite and invitation emails, then the generic invitation push. In that order
+   * (alpha A20 review S-2, P-1): the instance cap's alert and day stop, the sends and `sent_at` are
+   * written before the push spends any of a Worker invocation's statements, so the F-20 stop is
+   * never the statement that fails. A failure of either is logged by class and doesn't stop the
+   * other.
    */
   const sendInvitationNotices = async (gameId: string, notices: InvitationNotices) => {
-    const outcomes = await Promise.allSettled([
-      sendInviteMail(platform, notices.mail),
-      sendNewInvitationPushes(platform, { gameId, invited: notices.invited }),
-    ]);
-    for (const outcome of outcomes) {
-      if (outcome.status === "fulfilled" || wasAlerted(outcome.reason)) continue;
-      const reason: unknown = outcome.reason;
-      platform.log.error("background task failed", {
-        errorClass: reason instanceof Error ? reason.name : typeof reason,
-      });
+    try {
+      await sendInviteMail(platform, notices.mail);
+    } catch (error) {
+      logBackgroundFailure(platform, error);
+    }
+    try {
+      await sendNewInvitationPushes(platform, { gameId, invited: notices.invited });
+    } catch (error) {
+      logBackgroundFailure(platform, error);
     }
   };
 
