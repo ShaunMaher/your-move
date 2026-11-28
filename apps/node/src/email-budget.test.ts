@@ -36,10 +36,14 @@ const COUNTED: Readonly<
       accountDeletedEmail: "takeOtpEmailRoom",
     },
   },
-  // INVITE_EMAILS_GLOBAL_DAY.
+  // INVITE_EMAILS_GLOBAL_DAY: the invite email and, since alpha A20, the invitation email to a
+  // user with email nudges on (06 §6.2), through the same tiers.
   "packages/server/src/games/invite-mail.ts": {
     sends: 1,
-    templates: { invitationEmail: '"INVITE_EMAILS_GLOBAL_DAY"' },
+    templates: {
+      invitationEmail: '"INVITE_EMAILS_GLOBAL_DAY"',
+      invitationNudgeEmail: '"INVITE_EMAILS_GLOBAL_DAY"',
+    },
   },
   // NUDGE_EMAILS_PER_DAY.
   "packages/server/src/sweep/nudges.ts": {
@@ -81,7 +85,12 @@ function found(): Record<string, { sends: number; templates: Record<string, numb
 describe("the outbound email budget's guard (08 §4.2)", () => {
   it("finds the templates", () => {
     expect(templateNames).toEqual(
-      expect.arrayContaining(["signInCodeEmail", "invitationEmail", "nudgeEmail"]),
+      expect.arrayContaining([
+        "signInCodeEmail",
+        "invitationEmail",
+        "invitationNudgeEmail",
+        "nudgeEmail",
+      ]),
     );
   });
 

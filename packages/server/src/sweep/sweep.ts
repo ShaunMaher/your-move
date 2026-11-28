@@ -72,7 +72,7 @@ export function createSweep(options: SweepOptions): Sweep {
       expireOverdueLobbiesStep(platform.repos, started, options.lobbiesPerRun),
     );
     const claims = await step("claims", () =>
-      claimPendingInvites(platform.repos, platform.now().getTime(), options.claimsPerRun),
+      claimPendingInvites(platform, platform.now().getTime(), options.claimsPerRun),
     );
     const joinLinks = await step("joinLinks", () =>
       platform.repos.joinLinks.deleteExpired(platform.now().getTime(), options.joinLinksPerRun),

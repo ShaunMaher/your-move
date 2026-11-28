@@ -1,6 +1,6 @@
 /**
  * The game parts of `users.settings` (04): the remembered options per game type and the last game
- * type (05 §Remembered options), and `whoCanAddMe` (06 §6.2). The column is JSON; anything unreadable counts as unset. Writes
+ * type (05 §Remembered options), `whoCanAddMe` (06 §6.2), and whether email nudges are on (03 §7). The column is JSON; anything unreadable counts as unset. Writes
  * go through `UserRepo.rememberGameOptions`, which changes only these keys in SQL.
  */
 const MAX_REMEMBERED_BYTES = 4096;
@@ -28,6 +28,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function whoCanAddMeOf(settings: string): "pastOpponents" | "nobody" {
   return read(settings)["whoCanAddMe"] === "nobody" ? "nobody" : "pastOpponents";
+}
+
+/**
+ * Whether the user has email nudges on (03 §7): `settings.emailNudges` is exactly `true`, as the
+ * nudge sweep reads it in SQL. It also decides the invitation email (06 §6.2, alpha A20).
+ */
+export function emailNudgesOf(settings: string): boolean {
+  return read(settings)["emailNudges"] === true;
 }
 
 /** The remembered option input for a game type, if any. */

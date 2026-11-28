@@ -190,3 +190,37 @@ export function invitationEmail(to: NormalisedEmail, context: InvitationContext)
     listUnsubscribe: context.unsubscribeUrl,
   };
 }
+
+export interface InvitationNudgeContext {
+  readonly appName: string;
+  readonly publicUrl: string;
+  /** The inviter's display name ("New player" if unset). */
+  readonly inviterName: string;
+  /** The game type's display name, from its manifest. */
+  readonly gameName: string;
+  readonly settingsUrl: string;
+  readonly unsubscribeUrl: string;
+}
+
+/**
+ * The invitation email to a user with email nudges on (06 §6.2, alpha A20): a fixed template
+ * whose only user-chosen text is the inviter's display name. It says who invited them to which
+ * game type and where the invitation waits, and nothing else: never the game's id, options,
+ * state or other players, nor any address (08 T18). Category `nudges`, with that unsubscribe link
+ * and headers (05 §Email links).
+ */
+export function invitationNudgeEmail(
+  to: NormalisedEmail,
+  context: InvitationNudgeContext,
+): EmailMessage {
+  const { appName, inviterName, gameName } = context;
+  const subject = `${inviterName} invited you to play ${gameName} on ${appName}`;
+  const paragraphs: Paragraph[] = [
+    `${subject}.`,
+    { text: "Accept or decline it in your list of games:", href: context.publicUrl },
+    `You're getting this because you turned on email nudges in ${appName}: one email for each new invitation, and a reminder when a game has waited a day for your move.`,
+    { text: "Turn them off in Settings:", href: context.settingsUrl },
+    { text: "Or unsubscribe with one click:", href: context.unsubscribeUrl },
+  ];
+  return { ...message(to, subject, paragraphs), listUnsubscribe: context.unsubscribeUrl };
+}

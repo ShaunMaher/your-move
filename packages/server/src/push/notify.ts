@@ -3,8 +3,10 @@
  * 08 T18; alpha A8): "your turn" to every seat whose clock the transition started, and "game over"
  * to every seated player when a game that reached `active` ends — never to the person whose
  * request made the transition, who is looking at it. A lobby transition sends nothing: lobby
- * endings never push, and the invitation push is M4's (02 §4). A past opponent added to a new game
- * at once gets "<creator> added you to a game" (alpha A12, 06 §6.2), sent by the create route.
+ * endings never push (02 §4). A past opponent added to a new game at once gets "<creator> added
+ * you to a game" (alpha A12, 06 §6.2), sent by the create route; a new invitation, the generic
+ * "You have a new game invitation." at most once a day (alpha A20), sent by the create route and
+ * by claims.
  *
  * The text is built only from the public `describe` text and display names (T18): no state, no
  * options, no scores beyond what `describe` says, no addresses. Runs in the background after the
@@ -12,6 +14,7 @@
  */
 import { formatText, type Text } from "@your-move/sdk";
 
+import { countInFixedWindow } from "../auth/limits.js";
 import { liveSessionCutoffs } from "../auth/session.js";
 import type { GamePlayerRecord, GameWriteSet, LoadedGame, UserRecord } from "../db/repositories.js";
 import { NEW_PLAYER_NAME, namesBySeat, playerName, seatedRows } from "../games/names.js";
@@ -279,26 +282,97 @@ export async function sendAddedPushes(platform: Platform, event: AddedToGame): P
   });
 }
 
+/** The generic invitation push (06 §6.2, T18): it names nobody, not even the game. */
+export function invitationMessage(appName: string): PushMessage {
+  return { title: appName, body: "You have a new game invitation.", url: "/", tag: "invitation" };
+}
+
+/**
+ * Sends the generic invitation push to each recipient (06 §6.2, alpha A20), at most one a fixed
+ * UTC day each: the per-recipient counter is taken only for a recipient with a live subscription,
+ * after the subscriptions are read, so a day's push isn't spent on someone with no device. It runs
+ * in the background only, so nothing a creator sees reads or writes the counter (Q3).
+ */
+export async function sendInvitationPushes(
+  platform: Platform,
+  recipientIds: readonly string[],
+): Promise<void> {
+  if (!platform.push.enabled) return;
+  const recipients = [...new Set(recipientIds)];
+  if (recipients.length === 0) return;
+  await deliver(platform, recipients, async (reachable) => {
+    const allowed = await countInFixedWindow(
+      platform.repos,
+      platform.config,
+      "INVITATION_PUSHES_USER_DAY",
+      reachable,
+      platform.now().getTime(),
+    );
+    const message = invitationMessage(platform.config.appName);
+    return new Map(
+      reachable.flatMap((userId, i) => (allowed[i] === true ? [[userId, message]] : [])),
+    );
+  });
+}
+
+/** A new game's invitations to users (06 §6.2), as the create route reports them. */
+export interface InvitedToGame {
+  readonly gameId: string;
+  /** The users seated with a `normal` invitation, in request order. */
+  readonly invited: readonly string[];
+}
+
+/**
+ * Sends the invitation push for a new game's invitations. It reads the game as it is now, like the
+ * "added you" push: nothing once the lobby has ended, and only to invitees whose row is still a
+ * `normal` invitation, so whoever declined or was removed in between hears nothing.
+ */
+export async function sendNewInvitationPushes(
+  platform: Platform,
+  event: InvitedToGame,
+): Promise<void> {
+  if (!platform.push.enabled || event.invited.length === 0) return;
+  const loaded = await platform.repos.games.load(event.gameId);
+  if (loaded?.game.status !== "lobby") return;
+  const stillInvited = new Set(
+    loaded.players.flatMap((row) =>
+      row.userId !== null && row.state === "invited" && row.delivery === "normal"
+        ? [row.userId]
+        : [],
+    ),
+  );
+  await sendInvitationPushes(
+    platform,
+    event.invited.filter((userId) => stillInvited.has(userId)),
+  );
+}
+
 /**
  * Sends each recipient's message to every live subscription they have, at most
  * {@link MAX_PUSHES_PER_TRANSITION} in all, interleaved by recipient. The messages are built only
- * when there is a subscription to send to.
+ * when there is a subscription to send to, from the recipients who have one; a recipient left out
+ * of the messages gets nothing and takes none of the places.
  */
 async function deliver(
   platform: Platform,
   recipientIds: readonly string[],
-  messagesFor: () => ReadonlyMap<string, PushMessage> | Promise<ReadonlyMap<string, PushMessage>>,
+  messagesFor: (
+    reachable: readonly string[],
+  ) => ReadonlyMap<string, PushMessage> | Promise<ReadonlyMap<string, PushMessage>>,
 ): Promise<void> {
   const { repos, log, push } = platform;
-  const subscriptions = interleaveByRecipient(
+  const live = interleaveByRecipient(
     await repos.pushSubscriptions.forUsers(
       recipientIds,
       liveSessionCutoffs(platform.now().getTime()),
     ),
     recipientIds,
   );
-  if (subscriptions.length === 0) return;
-  const messages = await messagesFor();
+  if (live.length === 0) return;
+  const messages = await messagesFor(
+    recipientIds.filter((id) => live.some((row) => row.userId === id)),
+  );
+  const subscriptions = live.filter((row) => messages.has(row.userId));
   if (subscriptions.length > MAX_PUSHES_PER_TRANSITION) {
     log.warn("push: more subscriptions than one transition sends to", {
       subscriptions: subscriptions.length,

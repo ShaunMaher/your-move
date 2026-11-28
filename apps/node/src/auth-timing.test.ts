@@ -453,8 +453,25 @@ describe("enumeration parity: timing of creating a game with a typed address (06
     },
   };
 
+  /**
+   * A known, onboarded account with email nudges on (`email_id` set): its invitation is mailed
+   * the invitation email after the response, like the unknown arm's invite email (alpha A20).
+   */
+  const nudgedArm: Arm = {
+    make: async (harness, i) => {
+      const email = await knownArm.make(harness, i);
+      harness.exec(
+        `UPDATE users SET settings = '{"emailNudges":true}', email_id = ? WHERE email = ?`,
+        await emailIdFor(harness, email),
+        email,
+      );
+      return email;
+    },
+  };
+
   for (const [label, arm] of [
     ["known vs unknown", knownArm],
+    ["known with nudges on vs unknown", nudgedArm],
     ["suppressed vs unknown", suppressedArm],
     ["hidden vs unknown", hiddenArm],
   ] as const) {
@@ -471,9 +488,10 @@ describe("enumeration parity: timing of creating a game with a typed address (06
             h.query("SELECT count(*) AS n FROM game_players WHERE delivery = 'hidden'")[0]?.["n"],
           ).toBe(PAIRS);
         }
+        // The unknown arm's every invite email was sent; the nudged arm's invitation emails too.
         expect(
           h.query("SELECT count(*) AS n FROM invites WHERE sent_at IS NOT NULL")[0]?.["n"],
-        ).toBe(PAIRS);
+        ).toBe(label.includes("nudges") ? 2 * PAIRS : PAIRS);
         report(`create ${label}`, result);
         expectIndistinguishable(result);
       },

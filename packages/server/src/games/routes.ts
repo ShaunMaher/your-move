@@ -36,11 +36,12 @@ import { checkLimits, type LimitName } from "../auth/limits.js";
 import { requireSession } from "../auth/require-session.js";
 import type { Subkeys } from "../crypto/subkeys.js";
 import type { GamePlayerRecord, GameWriteSet, LoadedGame, UserRecord } from "../db/repositories.js";
+import { wasAlerted } from "../email/sender.js";
 import { ApiError } from "../http/api-error.js";
 import { background } from "../http/background.js";
 import type { AppEnv, Platform } from "../platform.js";
-import { sendAddedPushes, sendTransitionPushes } from "../push/notify.js";
-import { createGame } from "./create.js";
+import { sendAddedPushes, sendNewInvitationPushes, sendTransitionPushes } from "../push/notify.js";
+import { createGame, type InvitationNotices } from "./create.js";
 import { expireIfOverdue, expireOverdueLobbies, loadCurrent } from "./expiry.js";
 import { sendInviteMail } from "./invite-mail.js";
 import { joinUrl } from "./join-links.js";
@@ -413,16 +414,44 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
   // Creating and listing ------------------------------------------------------------------------
 
   /**
-   * What follows creating a game (05 Created): the start at creation when every seat was filled
-   * by past opponents added at once, and their "added you" push. Returns the creator's envelope.
+   * A new game's invitation notices (06 §6.2, §6.3), in one background task whatever they carry
+   * (Q3): the invite and invitation emails, and the generic invitation push. Neither waits on the
+   * other's failure; each failure is logged by class, as `background` logs one.
+   */
+  const sendInvitationNotices = async (gameId: string, notices: InvitationNotices) => {
+    const outcomes = await Promise.allSettled([
+      sendInviteMail(platform, notices.mail),
+      sendNewInvitationPushes(platform, { gameId, invited: notices.invited }),
+    ]);
+    for (const outcome of outcomes) {
+      if (outcome.status === "fulfilled" || wasAlerted(outcome.reason)) continue;
+      const reason: unknown = outcome.reason;
+      platform.log.error("background task failed", {
+        errorClass: reason instanceof Error ? reason.name : typeof reason,
+      });
+    }
+  };
+
+  /**
+   * What follows creating a game (05 Created): the invitation notices, the start at creation when
+   * every seat was filled by past opponents added at once, and their "added you" push. Returns the
+   * creator's envelope.
    */
   const afterCreate = async (
     c: Context<AppEnv>,
     user: UserRecord,
-    created: { readonly gameId: string; readonly added: readonly string[] },
+    created: {
+      readonly gameId: string;
+      readonly added: readonly string[];
+      readonly invitations: InvitationNotices | null;
+    },
     rematch: boolean,
   ) => {
-    const { gameId, added } = created;
+    const { gameId, added, invitations } = created;
+    if (invitations !== null) {
+      // One task whenever an address was typed or a pick invited, whatever it sends (Q3).
+      background(c, platform, () => sendInvitationNotices(gameId, invitations));
+    }
     if (added.length > 0) {
       try {
         await startIfFull(gameId, user);
@@ -454,11 +483,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       body,
     );
     if (created === null) throw new Error("a game that isn't a rematch is always created");
-    const { invitations, joinToken } = created;
-    if (invitations !== null) {
-      // One task whenever an address was typed, whatever it sends (Q3, 06 §6.3).
-      background(c, platform, () => sendInviteMail(platform, invitations));
-    }
+    const { joinToken } = created;
     const game = await afterCreate(c, user, created, false);
     // The link's URL is shown here and on a rotation only (06 §6.8).
     return c.json(

@@ -11,8 +11,11 @@ import type { Platform } from "../platform.js";
 import {
   addedMessage,
   interleaveByRecipient,
+  invitationMessage,
   type PushedTransition,
   pushMessage,
+  sendInvitationPushes,
+  sendNewInvitationPushes,
   sendTransitionPushes,
   transitionPushes,
 } from "./notify.js";
@@ -458,5 +461,99 @@ describe("sendTransitionPushes and the per-transition cap (A8-R2-3)", () => {
     for (const userId of ids.slice(1)) {
       expect(sentTo.filter((endpoint) => endpoint.includes(`/${userId}-`)).length).toBe(8);
     }
+  });
+});
+
+describe("the invitation push (alpha A20, 06 §6.2, T18)", () => {
+  it("names nobody and opens the game list, one notification for every invitation", () => {
+    expect(invitationMessage("G")).toEqual({
+      title: "G",
+      body: "You have a new game invitation.",
+      url: "/",
+      tag: "invitation",
+    });
+  });
+
+  /** A platform whose recipients `withDevice` have one subscription each; what it did. */
+  function fakePlatform(withDevice: readonly string[], loaded: LoadedGame | null = null) {
+    const sentTo: string[] = [];
+    const counted: string[] = [];
+    const platform = {
+      repos: {
+        pushSubscriptions: {
+          forUsers: (ids: readonly string[]) =>
+            Promise.resolve(
+              ids
+                .filter((id) => withDevice.includes(id))
+                .map((userId) => ({
+                  id: `sub-${userId}`,
+                  userId,
+                  sessionId: "s",
+                  endpoint: `https://fcm.googleapis.com/fcm/send/${userId}`,
+                  p256dh: "p",
+                  auth: "a",
+                  createdAt: T0,
+                  lastSuccessAt: null,
+                })),
+            ),
+          delivered: () => Promise.resolve(),
+          delete: () => Promise.resolve(),
+        },
+        rateLimits: {
+          // Each recipient's first count of the day is 1; "pushed" already had today's.
+          hit: (hits: readonly { key: string }[]) => {
+            counted.push(...hits.map((hit) => hit.key));
+            return Promise.resolve(
+              hits.map((hit) => ({ current: hit.key.endsWith(":pushed") ? 2 : 1, previous: 0 })),
+            );
+          },
+        },
+        games: { load: () => Promise.resolve(loaded) },
+      },
+      push: {
+        enabled: true,
+        send: (target: { endpoint: string }) => {
+          sentTo.push(target.endpoint.split("/").at(-1) ?? "");
+          return Promise.resolve({ kind: "delivered" as const });
+        },
+      },
+      config: { appName: "G", limits: {} },
+      now: () => new Date(T0),
+      log: { warn: () => undefined, info: () => undefined },
+    } as unknown as Platform;
+    return { platform, sentTo, counted };
+  }
+
+  it("counts the day's push only for a recipient with a device, and sends it only to the first of the day", async () => {
+    const { platform, sentTo, counted } = fakePlatform(["bob", "pushed"]);
+    await sendInvitationPushes(platform, ["bob", "cara", "pushed", "bob"]);
+    expect(counted).toEqual([
+      "INVITATION_PUSHES_USER_DAY:bob",
+      "INVITATION_PUSHES_USER_DAY:pushed",
+    ]);
+    expect(sentTo).toEqual(["bob"]);
+  });
+
+  it("re-reads the game: only rows still a normal invitation in a lobby", async () => {
+    const lobby: LoadedGame = {
+      game: game("lobby"),
+      players: [
+        row("alice", { state: "joined", joinedVia: "creator" }),
+        row("bob", { state: "invited", joinedVia: null }),
+        row("cara", { state: "declined", joinedVia: null }),
+        row("dan", { state: "invited", joinedVia: null, delivery: "hidden" }),
+        row("eve", { state: "invited", joinedVia: null, delivery: "inert" }),
+      ],
+      joinLink: null,
+    };
+    const everyone = ["alice", "bob", "cara", "dan", "eve"];
+    const open = fakePlatform(everyone, lobby);
+    await sendNewInvitationPushes(open.platform, { gameId: "game-1", invited: everyone });
+    expect(open.sentTo).toEqual(["bob"]);
+
+    const ended = fakePlatform(everyone, { ...lobby, game: game("cancelled") });
+    await sendNewInvitationPushes(ended.platform, { gameId: "game-1", invited: ["bob"] });
+    expect(ended.sentTo).toEqual([]);
+    expect(ended.counted).toEqual([]);
   });
 });
