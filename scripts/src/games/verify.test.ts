@@ -17,7 +17,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import type { CheckedPackage } from "./inputs.js";
 import { loadGames, type LoadedGame } from "./load.js";
 import { nodeModulesResolver, packageFileProblems } from "./packages.js";
-import { resolveWorkspaceRange, verifyGames } from "./verify.js";
+import { parseShard, resolveWorkspaceRange, verifyGames, type KitPlayed } from "./verify.js";
 import { workspacePackageDirs } from "./workspace.js";
 
 /**
@@ -60,6 +60,23 @@ async function verifyAsWorkspace(name: string): Promise<string[]> {
     workspaceDirs: new Set([realpathSync(join(FIXTURES, "node_modules", name))]),
   });
 }
+
+describe("parseShard (--shard)", () => {
+  it.each([
+    ["1/1", { index: 1, count: 1 }],
+    ["2/4", { index: 2, count: 4 }],
+    ["4/4", { index: 4, count: 4 }],
+  ])("reads %s", (text, shard) => {
+    expect(parseShard(text)).toEqual(shard);
+  });
+
+  it.each(["0/4", "5/4", "1/0", "1", "1/4/2", "a/4", " 1/4", "1.5/4", "-1/4", "01/4"])(
+    "refuses %s",
+    (text) => {
+      expect(parseShard(text)).toMatch(/^--shard must be <index>\/<count>/u);
+    },
+  );
+});
 
 describe("games:verify", () => {
   it("passes a well-formed package that reaches only the SDK, Zod, React and its own files", async () => {
@@ -418,6 +435,55 @@ describe("games:verify with the test kit", () => {
     expect(text).toMatch(/game-kitbad\/dist\/engine\/index\.js:\d+: .*Date/u);
     expect(text).toMatch(/kit (termination|turns) \(rules version 1, 2 seats, seed \d+\)/u);
   });
+
+  it("checks only the package --only names, and still every type id", async () => {
+    const options = {
+      rootDir: FIXTURES,
+      games: await load("@fixture/game-kit", "@fixture/game-kitbad"),
+      sdkVersion: "1.2.0",
+      sdkDir: SDK_DIR,
+      workspaceDirs: new Set<string>(),
+      kit: "fast" as const,
+    };
+    const checked: CheckedPackage[] = [];
+    expect(await verifyGames({ ...options, only: "counter", checked })).toEqual([]);
+    expect(checked.map((pkg) => pkg.name)).toEqual(["@fixture/game-kit"]);
+    expect((await verifyGames({ ...options, only: "counterbad" })).join("\n")).toMatch(
+      /@fixture\/game-kitbad: kit /u,
+    );
+    expect(await verifyGames({ ...options, only: "nosuch" })).toEqual([
+      "--only nosuch: no installed game has that type",
+    ]);
+  });
+
+  it("plays one shard of the full kit with --shard, and every shard together plays the whole run", async () => {
+    const games = await load("@fixture/game-kit");
+    const run = async (shard?: { index: number; count: number }) => {
+      const played: KitPlayed[] = [];
+      const problems = await verifyGames({
+        rootDir: FIXTURES,
+        games,
+        sdkVersion: "1.2.0",
+        sdkDir: SDK_DIR,
+        workspaceDirs: new Set(),
+        kit: "full",
+        ...(shard === undefined ? {} : { shard }),
+        played,
+      });
+      expect(problems).toEqual([]);
+      return played;
+    };
+    const [whole] = await run();
+    const shards = [await run({ index: 1, count: 2 }), await run({ index: 2, count: 2 })].flat();
+    expect(whole?.combos).toBeGreaterThan(1);
+    expect(shards.map((shard) => shard.combos)).toEqual([
+      Math.ceil((whole?.combos ?? 0) / 2),
+      Math.floor((whole?.combos ?? 0) / 2),
+    ]);
+    expect(shards.reduce((sum, shard) => sum + shard.games, 0)).toBe(whole?.games);
+    // A measured budget (ADR 0004): two full kit runs of the fixture take about 0.7 s on a
+    // developer machine; CPU-bound tests have run up to 100x slower on the shared CI runner.
+  }, 120_000);
 
   it("reports engines the kit can't run", async () => {
     const problems = await verifyGames({
