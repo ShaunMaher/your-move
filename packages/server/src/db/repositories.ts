@@ -268,7 +268,7 @@ export interface JoinLinkTimes {
 }
 
 /** A join link to store: the SHA-256 of its token (never the token) and its times (04). */
-export interface NewJoinLink extends JoinLinkTimes {
+interface NewJoinLink extends JoinLinkTimes {
   readonly tokenHash: string;
 }
 
@@ -574,7 +574,7 @@ export interface InviteRepo {
 }
 
 /** The join link a token's hash names (04 `join_links`): its game and times. */
-export interface FoundJoinLink extends JoinLinkTimes {
+interface FoundJoinLink extends JoinLinkTimes {
   readonly gameId: string;
 }
 

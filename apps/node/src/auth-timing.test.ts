@@ -56,10 +56,16 @@
  * +3.88% to +4.08%. One planted SELECT is about 2.5% of a creation, under the bound, so the power
  * check plants two (ADR 0006 addendum).
  *
+ * A join-link lookup refused for a block with a member vs one refused because the game is full
+ * (alpha A18, 06 §6.8): the same design, one joiner looking up a fresh lobby of the same shape each
+ * time. Measured on the same laptop, 600 pairs, three consecutive runs on 2026-11-28 (median
+ * request about 0.95 ms): −0.53% to +0.23%; one planted SELECT on the blocked path +6.23% to
+ * +6.77%.
+ *
  * Because this is a measurement, it needs a quiet machine (ADR 0006). CI runs this file only in
  * its own `test:timing` job, never alongside the rest of the suite. A coder runs it locally before
- * handing off any change to the sign-in paths or to creating a game with typed addresses: about
- * 70 s here.
+ * handing off any change to the sign-in paths, to creating a game with typed addresses or to the
+ * join-link lookup: about 75 s here.
  */
 import { performance } from "node:perf_hooks";
 import { setImmediate } from "node:timers/promises";
@@ -69,6 +75,7 @@ import {
   emailId as emailIdOf,
   normaliseAddress,
   type Repositories,
+  toBase64Url,
 } from "@your-move/server";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -506,5 +513,133 @@ describe("enumeration parity: timing of creating a game with a typed address (06
       expect(result.shift).toBeGreaterThan(BOUND);
     },
     CREATE_TIMEOUT_MS,
+  );
+});
+
+describe("block parity: timing of a join-link lookup (06 §6.8)", () => {
+  /** One joiner looks up every link, so the joiner's own hourly limit is raised out of the way. */
+  const RAISED = { LIMIT_JOIN_LINK_USER_HOUR: "1000000" };
+
+  /** A fresh 22-character token, and its SHA-256 as stored (04 `join_links`). */
+  const freshToken = async (): Promise<{ token: string; hash: string }> => {
+    const token = toBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+    const digest = new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)),
+    );
+    return { token, hash: Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("") };
+  };
+
+  /**
+   * Lobbies of the same shape for both arms, written directly (no creation caps): the creator and
+   * one joined member, with a live link. `blocked`: three seats, one open, the member has blocked
+   * the joiner. Otherwise two seats, both held: full. Both answer the same `404`.
+   */
+  const lobbyArm = (creatorId: string, memberId: string, seats: 2 | 3): Arm => ({
+    make: async (harness) => {
+      const { token, hash } = await freshToken();
+      await harness.platform.repos.games.create(
+        {
+          id: crypto.randomUUID(),
+          gameType: "words",
+          gameVersion: 1,
+          options: JSON.stringify({}),
+          status: "lobby",
+          createdBy: creatorId,
+          seats,
+          turnTimeoutDays: 3,
+          seatOrder: "join",
+          aiAssistance: "off",
+          lastActionAt: T0,
+          createdAt: T0,
+          updatedAt: T0,
+        },
+        [
+          {
+            id: crypto.randomUUID(),
+            userId: creatorId,
+            state: "joined",
+            joinedVia: "creator",
+            joinedAt: T0,
+          },
+          {
+            id: crypto.randomUUID(),
+            userId: memberId,
+            state: "joined",
+            joinedVia: "join_link",
+            joinedAt: T0,
+          },
+        ],
+        { joinLink: { tokenHash: hash, createdAt: T0, expiresAt: T0 + 7 * DAY } },
+      );
+      return token;
+    },
+  });
+
+  const setUp = async (harness: Harness) => {
+    const [creator, blocker, bystander, joiner] = [
+      await signUp(harness, "Creator"),
+      await signUp(harness, "Blocker"),
+      await signUp(harness, "Bystander"),
+      await signUp(harness, "Joiner"),
+    ];
+    harness.exec(
+      "INSERT INTO blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)",
+      blocker.id,
+      joiner.id,
+      T0,
+    );
+    const lookups = (token: string, from: string) =>
+      harness.request(
+        "POST",
+        "/api/v1/join/lookup",
+        { token },
+        { ip: from, cookie: joiner.cookie },
+      );
+    const blockedArm = lobbyArm(creator.id, blocker.id, 3);
+    const fullArm = lobbyArm(creator.id, bystander.id, 2);
+    // Both arms really are refused, and alike: not a vacuous comparison.
+    for (const arm of [blockedArm, fullArm]) {
+      const answer = await lookups(await arm.make(harness, -1), ip(300_000));
+      expect([answer.status, await answer.json()]).toEqual([
+        404,
+        { error: { code: "NOT_FOUND", message: "Not found." } },
+      ]);
+    }
+    return { lookups, blockedArm, fullArm };
+  };
+
+  it(
+    "POST /api/v1/join/lookup: a block with a member vs a full game",
+    async () => {
+      h = gameHarness(RAISED);
+      const { lookups, blockedArm, fullArm } = await setUp(h);
+      const result = await compare(h, lookups, blockedArm, fullArm);
+      report("join lookup blocked vs full", result);
+      expectIndistinguishable(result);
+    },
+    HEAVY_TIMEOUT_MS,
+  );
+
+  it(
+    "has power: one extra indexed SELECT on the blocked path is detected",
+    async () => {
+      const oneMoreSelect = (repos: Repositories): Repositories => ({
+        ...repos,
+        users: {
+          ...repos.users,
+          async blocksAmong(ids) {
+            const pairs = await repos.users.blocksAmong(ids);
+            if (pairs.length > 0) await repos.users.findById(ids[0] ?? "");
+            return pairs;
+          },
+        },
+      });
+      h = gameHarness(RAISED, { wrapRepos: oneMoreSelect });
+      const { lookups, blockedArm, fullArm } = await setUp(h);
+      const result = await compare(h, lookups, blockedArm, fullArm);
+      report("join lookup with a planted SELECT", result);
+      expect(result.shift).toBeGreaterThan(BOUND);
+    },
+    HEAVY_TIMEOUT_MS,
   );
 });

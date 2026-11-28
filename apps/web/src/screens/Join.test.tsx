@@ -47,7 +47,7 @@ function open(routes: Parameters<typeof fakeApi>[0] = {}) {
   return { ...fake, lost };
 }
 
-const posts = (calls: readonly { method: string; path: string }[], path: string) =>
+const posts = (calls: readonly { method: string; path: string; body: unknown }[], path: string) =>
   calls.filter((call) => call.method === "POST" && call.path === path);
 
 describe("the landing page", () => {
@@ -59,9 +59,9 @@ describe("the landing page", () => {
     expect(screen.getByText("3 days a move")).toBeDefined();
     expect(screen.getByText("ENABLE")).toBeDefined();
     expect(screen.getByText(/starts when Ada starts it/u)).toBeDefined();
-    expect(
-      posts(calls, "/api/v1/join/lookup").map((call) => (call as { body: unknown }).body),
-    ).toEqual([{ token: TOKEN }]);
+    expect(posts(calls, "/api/v1/join/lookup").map((call) => call.body)).toEqual([
+      { token: TOKEN },
+    ]);
     expect(posts(calls, "/api/v1/join")).toHaveLength(0);
   });
 
@@ -131,7 +131,7 @@ describe("the landing page", () => {
       expect(posts(calls, "/api/v1/join/lookup")).toHaveLength(2);
     });
     expect(window.location.hash).toBe("");
-    expect((posts(calls, "/api/v1/join/lookup")[1] as { body: unknown }).body).toEqual({
+    expect(posts(calls, "/api/v1/join/lookup")[1]?.body).toEqual({
       token: other,
     });
   });

@@ -10,7 +10,7 @@
 const KEY = "ym.join";
 /** What the entry may hold: the path and fragment of a join link (07 §1), nothing else. */
 const VALUE = /^\/join#([A-Za-z0-9_-]{22})$/u;
-export const JOIN_PATH = "/join";
+const JOIN_PATH = "/join";
 
 let inMemory: string | null = null;
 

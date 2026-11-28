@@ -809,10 +809,7 @@ export const joinLookupRoute = createRoute({
   },
 });
 
-export const JoinedGameSchema = z
-  .object({ game: GameEnvelopeSchema })
-  .strict()
-  .openapi("JoinedGame");
+const JoinedGameSchema = z.object({ game: GameEnvelopeSchema }).strict().openapi("JoinedGame");
 
 export const joinRoute = createRoute({
   operationId: "joinGame",
