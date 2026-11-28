@@ -14,6 +14,9 @@ const fast: KitOptions = {
   resources,
   manifest: toyManifest,
   cpuClock: threadCpuClock().now,
+  // The reference budget, named: CI sets KIT_CPU_BUDGET_MS, which a kit run reads when it is
+  // given none (02 §6.6), and these tests are about the check, not the host.
+  cpuBudgetMs: 5,
 };
 
 describe("runKit on a correct module", () => {
@@ -425,7 +428,10 @@ describe("runKit's static checks", () => {
     let now = 0;
     const racing = () => (now += 100);
     expect(
-      cpuMessages(runKit(asEngines(toyGame()), { mode: "fast", games: 1, cpuClock: racing })),
+      cpuMessages(
+        // The budget is named: CI's KIT_CPU_BUDGET_MS would otherwise set it (02 §6.6).
+        runKit(asEngines(toyGame()), { mode: "fast", games: 1, cpuBudgetMs: 5, cpuClock: racing }),
+      ),
     ).toMatch(/over the 5 ms budget at the 99th percentile/u);
   });
 
@@ -433,7 +439,16 @@ describe("runKit's static checks", () => {
     const cpuClock = threadCpuClock().now;
     const tooSlow = brokenFixtures()["is too slow on its worst case"]?.engines() ?? {};
     expect(
-      cpuMessages(runKit(tooSlow, { mode: "fast", games: 1, stopAtFirstFailure: true, cpuClock })),
+      cpuMessages(
+        runKit(tooSlow, {
+          mode: "fast",
+          games: 1,
+          stopAtFirstFailure: true,
+          // Named, so CI's KIT_CPU_BUDGET_MS doesn't set it (02 §6.6).
+          cpuBudgetMs: 5,
+          cpuClock,
+        }),
+      ),
     ).toMatch(/over the 5 ms budget at the 99th percentile/u);
     expect(runKit(asEngines(toyGame()), { mode: "fast", games: 1, cpuClock }).failures).toEqual([]);
   });

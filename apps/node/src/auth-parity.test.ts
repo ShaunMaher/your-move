@@ -10,6 +10,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createHarness, type Harness, PROD_ENV } from "./test-harness.js";
 
+// Measured, not guessed (ADR 0004): 0.8 s alone on a developer machine for 501 requests; it hit
+// Vitest's 5 s default in a loaded full run and on the shared CI runner (pipeline 82898).
+const DAY_CAP_TIMEOUT_MS = 30_000;
+
 let h: Harness | null = null;
 afterEach(() => {
   h?.close();
@@ -293,42 +297,48 @@ describe("enumeration parity: responses and work (06 §3.2, 05 §Auth & account)
     expect(refused[0]?.calls.length).toBeLessThan(none[0]?.calls.length ?? 0);
   });
 
-  it("the instance-wide day cap sends exactly 500 codes, and the 501st is answered like the rest (08 §4.2, Q3)", async () => {
-    // One client, with the per-IP and hourly limits out of the way: only the day cap binds. Every
-    // send is recorded (the capture keeps only the latest 200).
-    const sentTo: string[] = [];
-    h = createHarness(
-      { ...PROD_ENV, LIMIT_OTP_REQUEST_IP_HOUR: "100000", LIMIT_OTP_EMAIL_GLOBAL_HOUR: "100000" },
-      {
-        wrapSender: (capture) => ({
-          send: (message) => {
-            sentTo.push(message.to);
-            return capture.send(message);
-          },
-        }),
-      },
-    );
-    const harness = h;
-    const shapes = [];
-    for (let i = 0; i < 501; i++) {
-      const response = await harness.request(
-        "POST",
-        "/api/v1/auth/otp/request",
-        { email: `person${String(i)}@example.org` },
-        { ip: "10.0.8.1" },
+  it(
+    "the instance-wide day cap sends exactly 500 codes, and the 501st is answered like the rest (08 §4.2, Q3)",
+    async () => {
+      // One client, with the per-IP and hourly limits out of the way: only the day cap binds. Every
+      // send is recorded (the capture keeps only the latest 200).
+      const sentTo: string[] = [];
+      h = createHarness(
+        { ...PROD_ENV, LIMIT_OTP_REQUEST_IP_HOUR: "100000", LIMIT_OTP_EMAIL_GLOBAL_HOUR: "100000" },
+        {
+          wrapSender: (capture) => ({
+            send: (message) => {
+              sentTo.push(message.to);
+              return capture.send(message);
+            },
+          }),
+        },
       );
-      shapes.push({
-        status: response.status,
-        body: await response.text(),
-        headers: [...response.headers.entries()].sort(),
-      });
-    }
-    await harness.emails(); // lets the background sends finish
-    expect(sentTo).toHaveLength(500);
-    expect(new Set(sentTo).size).toBe(500);
-    expect(sentTo).not.toContain("person500@example.org");
-    for (const shape of shapes) expect(shape).toEqual(shapes[0]);
-    expect(shapes[500]?.status).toBe(202);
-    expect(harness.logs.filter((line) => line["alert"] === "OTP_EMAIL_GLOBAL_DAY")).toHaveLength(1);
-  });
+      const harness = h;
+      const shapes = [];
+      for (let i = 0; i < 501; i++) {
+        const response = await harness.request(
+          "POST",
+          "/api/v1/auth/otp/request",
+          { email: `person${String(i)}@example.org` },
+          { ip: "10.0.8.1" },
+        );
+        shapes.push({
+          status: response.status,
+          body: await response.text(),
+          headers: [...response.headers.entries()].sort(),
+        });
+      }
+      await harness.emails(); // lets the background sends finish
+      expect(sentTo).toHaveLength(500);
+      expect(new Set(sentTo).size).toBe(500);
+      expect(sentTo).not.toContain("person500@example.org");
+      for (const shape of shapes) expect(shape).toEqual(shapes[0]);
+      expect(shapes[500]?.status).toBe(202);
+      expect(harness.logs.filter((line) => line["alert"] === "OTP_EMAIL_GLOBAL_DAY")).toHaveLength(
+        1,
+      );
+    },
+    DAY_CAP_TIMEOUT_MS,
+  );
 });
