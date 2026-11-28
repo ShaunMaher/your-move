@@ -16,9 +16,11 @@ const SAMPLES = { fast: 100, full: 300 } as const;
  * Back-to-back runs per sample; the sample is their median. A run the host preempted or paused for
  * garbage collection is slow on its own (a full `pnpm test`, 16 threads busy, showed single 9 ms
  * runs of a 0.5 ms p99 input), while code slow on most calls is slow in most runs. The median,
- * not the fastest: a module slow on two calls in three must fail (CH8-S-1).
+ * not the fastest, so a module slow on two calls in three fails (CH8-S-1); of five, not three, so
+ * two slow runs in one sample are filtered too (a median of three still failed the paths engine
+ * once under two full parallel `pnpm test` runs at once).
  */
-const REPETITIONS = 3;
+const REPETITIONS = 5;
 /** Runs on one side of the budget that decide a sample: a majority of its runs. */
 const MAJORITY = Math.floor(REPETITIONS / 2) + 1;
 
@@ -32,7 +34,7 @@ const MAJORITY = Math.floor(REPETITIONS / 2) + 1;
  *
  * A sample stops as soon as a majority of its runs are on one side of the budget, which decides its
  * median. For a module whose cost doesn't depend on earlier calls, that doesn't change the result,
- * and a fast module costs about two runs per sample. An over-budget sample is reported by the
+ * and a fast module costs about three runs per sample. An over-budget sample is reported by the
  * fastest of its over-budget runs: its median if all its runs were taken, a lower bound otherwise.
  *
  * A worst case must be a real move of its combination: a game with that many seats, its seat in

@@ -402,7 +402,7 @@ Developer machines keep the real 5 ms budget, enforced by every local `pnpm test
 `pnpm games:verify` (and local Docker builds), so a slow engine still fails there. Measured on a
 developer laptop (2026-11-24), the words engine's worst cases take 0.02 ms median and under 0.1 ms
 at the 99th percentile; budget failures on the runner are pauses (garbage collection, a busy
-host), not engine cost. Each sample the kit times is the median of three back-to-back runs, which
+host), not engine cost. Each sample the kit times is the median of five back-to-back runs, which
 filters most single pauses out (02 §6.6), but a host loaded enough to slow most runs still needs
 the calibrated budget. Revisit the value when the runner changes.
 

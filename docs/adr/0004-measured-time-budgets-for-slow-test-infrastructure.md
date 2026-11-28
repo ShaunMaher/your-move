@@ -46,14 +46,15 @@ hangs slow to fail and would blur what the tests are measuring.
   - CI sets one calibrated value (20 ms, 4×) for every kit run.
   - Developer machines keep 5 ms, so every local `pnpm test` and `games:verify` enforces the real
     budget.
-  - Each timed sample is the median of three back-to-back runs (02 §6.6, added 2026-11-28): a
+  - Each timed sample is the median of five back-to-back runs (02 §6.6, added 2026-11-28): a
     full parallel `pnpm test` on a developer machine still produced single 9 ms runs of an input
     whose 99th percentile is 0.5 ms, and a preempted run is slow alone while code slow on most
     calls is slow in most runs. The median, not the fastest run, so that a module slow on two calls
-    in three still fails. This is a measurement of code cost, not a retry: for a module whose cost
-    doesn't depend on earlier calls, the verdict is that of always timing all three runs of every
-    sample (the kit stops a sample once two runs decide its median), and the allowance and early
-    stop over samples are unchanged.
+    in three still fails; of five, because a median of three still failed the paths engine under
+    two full parallel test runs at once, where two slow runs landed in one sample. This is a measurement of
+    code cost, not a retry: for a module whose cost doesn't depend on earlier calls, the verdict is
+    that of always timing all five runs of every sample (the kit stops a sample once three runs
+    decide its median), and the allowance and early stop over samples are unchanged.
 - **Diagnosability:** when a job fails because of the runner, it prints the runner's CPU model,
   load and memory, so slow infrastructure is visible rather than guessed at.
 
