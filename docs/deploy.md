@@ -386,13 +386,13 @@ the ordinary `test` job; the separate arm64 `test:worker` job they needed while 
 Caches are kept per architecture (`CACHE_ARCH`); `test:timing` writes the arm64 ones.
 
 `test:timing` (the statistical sign-in timing suite, ADR 0006) measures on the arm64 runner, after
-this pipeline's other arm64 jobs. Jobs of other pipelines can still share that runner while it
+this pipeline's other arm64 job (the arm64 image build). Jobs of other pipelines can still share that runner while it
 measures unless the runner's concurrency is 1; that is the operator's runner setting (`concurrent`
 in its `config.toml`), and the repository doesn't record it. A shifted measurement on a busy runner
 is a reason to re-measure, not to retry (ADR 0006).
 
 The game kit's CPU budget (08 T25) is measured on the host running the kit, and the shared amd64
-runner (a `qemu64` VM, 2–3× slower than a developer laptop, often running several pipelines at
+runner (a VM 2–3× slower than a developer laptop, often running several pipelines at
 once) can't hold the 5 ms reference budget reliably. CI therefore sets one calibrated budget,
 `KIT_CPU_BUDGET_MS` (20 ms, 4× the reference; a whole number from 1 to 50), in `.gitlab-ci.yml`'s
 global variables, and every kit run in CI uses it: the testkit's `runKit` reads it whenever it
@@ -403,9 +403,14 @@ Developer machines keep the real 5 ms budget, enforced by every local `pnpm test
 `pnpm games:verify` (and local Docker builds), so a slow engine still fails there. Measured on a
 developer laptop (2026-11-24), the words engine's worst cases take 0.02 ms median and under 0.1 ms
 at the 99th percentile; budget failures on the runner are pauses (garbage collection, a busy
-host), not engine cost. Revisit the value when the runner changes.
+host), not engine cost. Revisit the value when the runner changes. Re-measured after the CPU model changed to
+`host-passthrough` (pipelines 82752 and 82775, 2026-11-28): the speed is unchanged, so the budget stays.
 
-The `test` job keeps their scratch files (temporary SQLite databases,
+The `test` job has an explicit `timeout` of 40 minutes (ADR 0004): it took 1273–1291 s on the
+shared amd64 runner before the workerd tests joined it, which adds about 3 minutes, and the job's
+first step fails at once with a clear message if the runner's CPU lacks SSE4.2.
+
+The `test` job keeps its scratch files (temporary SQLite databases,
 bundles) on tmpfs: `TMPDIR` points into `/dev/shm`. On the shared amd64 runner the disk is shared
 with other jobs' image builds, and an fsync there can stall for hundreds of ms: tests that open a
 real database file (each committing a dozen or more times while migrating) took 4–19 s instead of

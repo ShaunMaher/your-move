@@ -56,8 +56,8 @@ typed addresses too; the file now takes about 70 s on a developer laptop.
 
 ## Consequences
 
-- One more job per pipeline, on the arm64 runner, starting only after its other arm64 work (the arm64 image build). The
-  pipeline takes longer by the suite's runtime there.
+- One more job per pipeline, on the arm64 runner, starting only after its other arm64 work (the
+  arm64 image build). The pipeline takes longer by the suite's runtime there.
 - A change that slows one sign-in path relative to another still fails a merge request: the
   deterministic checks fail in `test`, or the measured shift fails in `test:timing`.
 - The bounds and time limits are numbers someone measured on one machine. When the runner or the

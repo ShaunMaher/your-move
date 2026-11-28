@@ -240,10 +240,20 @@ test:
   stage: test
   extends: [.pnpm, .every-pipeline]
   needs: [validate]
+  # Measured, not guessed (ADR 0004): `test` took 1273-1291 s on the shared amd64 runner
+  # (pipelines 82752 and 82775, before the workerd tests joined it; the runner did not stop them at
+  # the 20-minute default, so its enforcement is looser than the setting), and the D1 suite and
+  # Worker contract suite add about 3 minutes there (test:worker took 151-173 s on arm64). 40
+  # minutes leaves headroom for a loaded runner and stays under the hour at which a hung job
+  # should be investigated. docs/deploy.md "CI runners".
+  timeout: 40 minutes
   variables:
     # Wrangler's own log file goes where the artifacts can keep it.
     WRANGLER_LOG_PATH: $CI_PROJECT_DIR/reports/wrangler-logs
   script:
+    # workerd (the Worker and D1 contract suites, the gmail redirect test) fails at isolate
+    # bootstrap with an empty error on a CPU without SSE4.2: say so up front.
+    - grep -qw sse4_2 /proc/cpuinfo || { echo "runner lacks SSE4.2 (x86-64-v2), which workerd needs - see docs/deploy.md CI runners"; exit 1; }
     - *tmp-in-memory
     # Unit, integration, property, component and API contract tests, the workerd ones included
     # (the Worker half of the contract suite, the D1 repository contract suite, the gmail redirect
@@ -276,7 +286,7 @@ test:
 # pipelines, other work skewed it and it failed. So it runs on the arm64 runner after this
 # pipeline's other arm64 job (build:image:arm64) has finished, so none of this
 # pipeline's own work runs beside it. The stage only satisfies `needs` (a job may need only earlier
-# stages); `needs` sets when it starts, and it downloads neither job's artifacts. Required: on a
+# stages); `needs` sets when it starts, and it downloads none of its artifacts. Required: on a
 # quiet runner it passes, and a failure is re-measured, never retried (ADR 0006).
 test:timing:
   stage: e2e
@@ -294,11 +304,13 @@ test:timing:
         files: [pnpm-lock.yaml]
       paths: [.pnpm-store]
       policy: pull-push
+      when: always
     - key:
         prefix: mise-$CACHE_ARCH
         files: [mise.lock]
       paths: [.mise]
       policy: pull-push
+      when: always
   script:
     # The harness's databases are files: on tmpfs, disk stalls don't land in the measurements.
     - *tmp-in-memory
