@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { FACES } from "./faces.js";
 import { catalog, resolveOptions } from "./options.js";
-import { catalogSchema, GRIDS, optionsSchema } from "./schemas.js";
+import { catalogSchema, ERROR_CODES, GRID_IDS, GRIDS, optionsSchema, PLAYERS } from "./schemas.js";
 
 describe("resolveOptions (pairs §7)", () => {
   it.each([
@@ -73,6 +73,7 @@ describe("catalog (pairs §7)", () => {
       { ...value, grid: { ...value.grid, values: ["4x4", "4x4", "5x6", "6x6"] } },
       { ...value, grid: { ...value.grid, values: ["4x4", "4x5", "5x6"] } },
       { ...value, grid: { ...value.grid, default: "5x4" } },
+      { ...value, grid: { ...value.grid, default: "6x6" } },
       { ...value, faces: 17 },
     ]) {
       expect(catalogSchema.safeParse(changed).success).toBe(false);
@@ -84,6 +85,7 @@ describe("catalog (pairs §7)", () => {
     expect(value.grids[0]).not.toBe(GRIDS[0]);
     expect(Object.isFrozen(GRIDS)).toBe(true);
     for (const grid of GRIDS) expect(Object.isFrozen(grid)).toBe(true);
+    for (const table of [GRID_IDS, PLAYERS, ERROR_CODES]) expect(Object.isFrozen(table)).toBe(true);
     expect(Object.isFrozen(FACES)).toBe(true);
     for (const face of FACES) expect(Object.isFrozen(face)).toBe(true);
   });

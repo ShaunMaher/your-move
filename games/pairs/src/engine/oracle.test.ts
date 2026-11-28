@@ -168,8 +168,8 @@ function play(
 }
 
 // A measured budget (ADR 0004), not Vitest's 5 s default: each grid's games take up to 1.8 s alone
-// and about 7 s within a full `pnpm test` on a 16-thread developer machine (2026-11-29). The shared
-// qemu64 CI runner ran the paths kit test about 2.3× slower than this machine, so 300 s is ample.
+// and about 19 s within a full `pnpm test` on a 16-thread developer machine (2026-11-29). The CI
+// runner is about 2.3× slower (see kit.test.ts), so 300 s is ample.
 describe("invariants and the oracle of shown faces (pairs §8.1, §10)", { timeout: 300_000 }, () => {
   it.each(GRIDS.map((grid) => grid.id))(
     "hold at every step of random games with exits on %s",

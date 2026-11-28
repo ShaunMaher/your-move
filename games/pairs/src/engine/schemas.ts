@@ -12,7 +12,7 @@ import { at } from "./at.js";
 export const GAME_TYPE = "pairs";
 
 /** Seat-count bounds for every grid (pairs §7). */
-export const PLAYERS = { min: 2, max: 6 } as const;
+export const PLAYERS = Object.freeze({ min: 2, max: 6 } as const);
 
 /** The default turn timeout (pairs §7). */
 export const DEFAULT_TURN_TIMEOUT_DAYS = 3;
@@ -21,9 +21,9 @@ export const DEFAULT_TURN_TIMEOUT_DAYS = 3;
 export const FACE_COUNT = 18;
 
 /** The grid ids, columns × rows (pairs §1). */
-export const GRID_IDS = ["4x4", "4x5", "5x6", "6x6"] as const;
+export const GRID_IDS = Object.freeze(["4x4", "4x5", "5x6", "6x6"] as const);
 export type GridId = (typeof GRID_IDS)[number];
-export const DEFAULT_GRID: GridId = "4x5";
+export const DEFAULT_GRID = "4x5" satisfies GridId;
 
 /** One grid: its size, its pairs and its move limit `4 × pairs²` (pairs §1, §6). */
 export interface Grid {
@@ -152,7 +152,6 @@ export const recordSchema = z.discriminatedUnion("type", [
 ]);
 export type PublicRecord = z.infer<typeof recordSchema>;
 
-/** This module's part of `GET /api/v1/catalog` (pairs §7): exactly the four grids. */
 /** One grid of the catalog, every value pinned. */
 const catalogGrid = (g: Grid) =>
   z
@@ -165,6 +164,7 @@ const catalogGrid = (g: Grid) =>
     })
     .strict();
 
+/** This module's part of `GET /api/v1/catalog` (pairs §7): exactly the four grids. */
 export const catalogSchema = z
   .object({
     grid: z
@@ -175,7 +175,7 @@ export const catalogSchema = z
           z.literal(GRIDS[2].id),
           z.literal(GRIDS[3].id),
         ]),
-        default: gridId,
+        default: z.literal(DEFAULT_GRID),
       })
       .strict(),
     grids: z.tuple([
@@ -193,7 +193,7 @@ export type Catalog = z.infer<typeof catalogSchema>;
 export const configSchema = z.object({}).strict();
 
 /** Every code the module returns; none is reserved and none carries a detail but options' (02 §2.2, pairs §7, §8.3). */
-export const ERROR_CODES = {
+export const ERROR_CODES = Object.freeze({
   /** `resolveOptions`: the input isn't an object. */
   optionsNotObject: "OPTIONS_NOT_OBJECT",
   /** `resolveOptions`: a key that isn't an option. */
@@ -206,4 +206,4 @@ export const ERROR_CODES = {
   outOfRange: "OUT_OF_RANGE",
   /** `validate`: the card is matched, or is the turn's first card. */
   cardFaceUp: "CARD_FACE_UP",
-} as const;
+} as const);

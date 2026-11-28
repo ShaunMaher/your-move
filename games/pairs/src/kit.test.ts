@@ -38,7 +38,12 @@ function traced(): { engines: GameEngines; games: Played[]; samples: Samples } {
   const def = engines[1];
   const games: Played[] = [];
   const samples: Samples = new Map(GRIDS.map((grid) => [grid.id, new Map<string, number>()]));
-  /** Each state seen, by its JSON: the game it belongs to, and whether a seat left on the way. */
+  /**
+   * Each state seen, by its JSON: the game it belongs to, and whether a seat left on the way. It
+   * keeps every state of the run, side branches included (about 600 MB at its peak), which the
+   * test host can afford (review A25-P2-4, left as it is). If it can't, keep only main-line states:
+   * drop a game's entries once its ending is recorded, since no later transition can come first.
+   */
   const lines = new Map<string, { game: Played; anyoneLeft: boolean }>();
   /** Follows a transition from `state` to `next`, if `state` is on a known line of play. */
   const trace = (state: State, next: State, leaves: boolean): void => {
@@ -91,10 +96,11 @@ function traced(): { engines: GameEngines; games: Played[]; samples: Samples } {
   return { engines: { 1: wrapped }, games, samples };
 }
 
-// A measured budget (ADR 0004), not Vitest's 5 s default: the fast run plays its 300 games, every
-// seat count from 2 to 6 on each grid, in about 24 s alone and about 71 s within `pnpm test` with
-// coverage on a 16-thread developer machine (2026-11-29). The shared qemu64 CI runner ran the
-// paths kit test about 2.3× slower than this machine, so 600 s leaves a wide margin.
+// A measured budget (ADR 0004), not Vitest's 5 s default: the one traced fast run plays its 300
+// games, every seat count from 2 to 6 on each grid, in about 27 s alone and about 95 s within
+// `pnpm test` with coverage on a 16-thread developer machine (2026-11-29). The slowdown factor for
+// the shared qemu64 CI runner, about 2.3×, is how much CI's `test` job grew when paths was
+// installed (+634 s) against paths' full kit run locally (281 s); 600 s leaves a wide margin.
 const TIMEOUT_MS = 600_000;
 
 describe("the generic test kit (02 §6) and its coverage (pairs §10)", () => {
@@ -134,6 +140,12 @@ describe("the generic test kit (02 §6) and its coverage (pairs §10)", () => {
     },
   );
 
+  // A statistical property, checked on the kit's own seeds: on 5x6 about 1–2 % of sampled states
+  // qualify (3 of 210 today), so a kit change that reseeds or resamples finds none there about 2 %
+  // of the time (review A25-P2-5). If that happens, read the annotation: a share near the usual is
+  // bad luck, and the remedy is to count the samples of a second traced fast run with its `seed`
+  // moved past the first run's games, not to drop the check; a share far lower means the kit's
+  // sampling changed, and pairs §10 needs a look.
   it.for(GRIDS.map((grid) => grid.id))(
     "samples in-progress states with at most 4 hidden cards on %s",
     (grid, { annotate }) => {
