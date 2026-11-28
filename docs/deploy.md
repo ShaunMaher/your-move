@@ -403,8 +403,15 @@ Developer machines keep the real 5 ms budget, enforced by every local `pnpm test
 `pnpm games:verify` (and local Docker builds), so a slow engine still fails there. Measured on a
 developer laptop (2026-11-24), the words engine's worst cases take 0.02 ms median and under 0.1 ms
 at the 99th percentile; budget failures on the runner are pauses (garbage collection, a busy
-host), not engine cost. Revisit the value when the runner changes. Re-measured after the CPU model changed to
-`host-passthrough` (pipelines 82752 and 82775, 2026-11-28): the speed is unchanged, so the budget stays.
+host), not engine cost. Since 2026-11-28 every Node kit run times in the thread's CPU time and
+takes the median of five runs per sample (02 §6.6), so a busy host no longer counts against a
+game; half of the calibration's reason is gone. (That clock's resolution is the kernel's:
+microseconds where it accounts CPU time precisely, otherwise one scheduler tick of 1–4 ms, coarse
+against a 5 ms budget but not biased; on a 20 ms budget it hardly matters.) The other half stands: CPU time on the runner
+is still 2–3× a laptop's (re-measured after its CPU model changed to `host-passthrough`, pipelines
+82752 and 82775, 2026-11-28: the speed is unchanged), so the 5 ms reference doesn't fit it, and inside a VM a vCPU the
+hypervisor takes away may still be charged to the running thread. The value stays 20 ms;
+revisit it when the runner changes.
 
 The `test` job has an explicit `timeout` of 40 minutes (ADR 0004): it took 1273–1291 s on the
 shared amd64 runner before the workerd tests joined it, which adds about 3 minutes, and the job's

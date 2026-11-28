@@ -46,6 +46,25 @@ hangs slow to fail and would blur what the tests are measuring.
   - CI sets one calibrated value (20 ms, 4×) for every kit run.
   - Developer machines keep 5 ms, so every local `pnpm test` and `games:verify` enforces the real
     budget.
+  - Each timed sample is the median of five back-to-back runs (02 §6.6, added 2026-11-28): a
+    full parallel `pnpm test` on a developer machine still produced single 9 ms runs of an input
+    whose 99th percentile is 0.5 ms, and a preempted run is slow alone while code slow on most
+    calls is slow in most runs. The median, not the fastest run, so that a module slow on two calls
+    in three still fails; of five, because a median of three still failed the paths engine under
+    two full parallel test runs at once, where two slow runs landed in one sample. This is a
+    measurement of code cost, not a retry: for a module whose cost doesn't depend on earlier
+    calls, the verdict is that of always timing all five runs of every sample (the kit stops a
+    sample once three runs decide its median), and the allowance and early stop over samples are
+    unchanged.
+  - The kit times the runs in **CPU time** where the host offers it (02 §6.6, added 2026-11-28):
+    with three test suites and an e2e run sharing a 16-thread machine (load average 14–26), a
+    median of five still failed the paths engine, whose inputs cost 0.1–0.3 ms at the median,
+    because single runs waited 8–28 ms for a core. A wall clock counts that wait; 08 T25 is about
+    per-call CPU. `runKit` takes the clock as an option (default `performance.now()`, so the
+    testkit stays Web-standard), and every Node caller passes this thread's CPU time. The median
+    stays: garbage collection and JIT pauses on the calling thread are CPU time too. CPU time
+    doesn't count a blocked thread, which is safe only because engines can't reach a blocking or
+    concurrent primitive (02 §7.5's globals allow-list).
 - **Diagnosability:** when a job fails because of the runner, it prints the runner's CPU model,
   load and memory, so slow infrastructure is visible rather than guessed at.
 

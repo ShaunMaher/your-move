@@ -20,7 +20,7 @@ import { CPU_BUDGET_VARIABLE, readCpuBudget } from "@your-move/testkit";
 import { writeVerifiedFiles, type CheckedPackage } from "../games/inputs.js";
 import { loadGames, loadInstanceConfig } from "../games/load.js";
 import { nodeModulesResolver } from "../games/packages.js";
-import { verifyGames } from "../games/verify.js";
+import { kitClock, verifyGames } from "../games/verify.js";
 import { buildWorkspaceGames, workspacePackageDirs } from "../games/workspace.js";
 import { fail, ROOT_DIR, run } from "./cli.js";
 
@@ -58,6 +58,6 @@ run("games:verify", async () => {
   if (problems.length > 0) fail("games:verify", problems);
   writeVerifiedFiles(ROOT_DIR, checked);
   console.log(
-    `games:verify (${mode} kit${cpuBudgetMs === undefined ? "" : `, CPU budget ${String(cpuBudgetMs)} ms`}): ${String(loaded.games.length)} game package(s) OK against SDK ${sdkVersion}`,
+    `games:verify (${mode} kit${cpuBudgetMs === undefined ? "" : `, CPU budget ${String(cpuBudgetMs)} ms`}, timed by ${kitClock.source}): ${String(loaded.games.length)} game package(s) OK against SDK ${sdkVersion}`,
   );
 });

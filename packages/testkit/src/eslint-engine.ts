@@ -19,6 +19,11 @@ import globals from "globals";
  * `self`), `Promise` (engines are synchronous), locale- or GC-dependent behaviour (`Intl`,
  * `WeakRef`, `FinalizationRegistry`) and `Proxy`.
  *
+ * `Atomics`, `SharedArrayBuffer`, `Worker` and `WebAssembly` must stay out: the kit's CPU budget
+ * (02 §6.6, 08 T25) times engines in the calling thread's CPU time, which doesn't count a thread
+ * that blocks (`Atomics.wait`) or hands work to another, so an engine able to reach them could pass
+ * the budget and still stall the server.
+ *
  * @public
  */
 export const ENGINE_GLOBALS: readonly string[] = [

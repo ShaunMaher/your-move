@@ -10,15 +10,34 @@ import type { KitOptions } from "./types.js";
 
 /** Untimed runs first, so the timed ones measure warm code rather than the JIT. */
 const WARM_UP_RUNS = 10;
-/** Timed runs per `worstCase` input. */
-const RUNS = { fast: 100, full: 300 } as const;
+/** Timed samples per `worstCase` input. */
+const SAMPLES = { fast: 100, full: 300 } as const;
+/**
+ * Back-to-back runs per sample; the sample is their median. A run the host preempted or paused for
+ * garbage collection is slow on its own (a full `pnpm test`, 16 threads busy, showed single 9 ms
+ * runs of a 0.5 ms p99 input), while code slow on most calls is slow in most runs. The median,
+ * not the fastest, so a module slow on two calls in three fails (CH8-S-1); of five, not three, so
+ * two slow runs in one sample are filtered too (a median of three still failed the paths engine
+ * once under two full parallel `pnpm test` runs at once).
+ */
+const REPETITIONS = 5;
+/** Runs on one side of the budget that decide a sample: a majority of its runs. */
+const MAJORITY = Math.floor(REPETITIONS / 2) + 1;
 
 /**
  * The CPU budget (02 §6.6, 08 T25): `validate` + `preview` + `apply` on each `worstCase` input,
- * timed over many runs on the host running the kit, after warm-up runs; the 99th percentile must
- * stay within the budget (`cpuBudgetMs`, default 5 ms). The slowest 1 % of runs are dropped, so a
- * single garbage-collection pause doesn't fail a correct module, and timing stops as soon as more
- * runs than that are over budget, so a slow module fails quickly.
+ * timed on the host running the kit with `cpuClock` (CPU time where the caller passes a CPU clock,
+ * such as `threadCpuClock()`, otherwise `performance.now()`), after warm-up runs. Each timed sample
+ * is the median of `REPETITIONS` back-to-back runs on fresh copies of the state and the action, and
+ * the 99th percentile of the samples must stay within the budget (`cpuBudgetMs`, default 5 ms). The
+ * median still matters with a CPU clock: garbage collection and JIT pauses on the calling thread
+ * are CPU time too. The slowest 1 % of samples are dropped, and timing stops as soon as more
+ * samples than that are over budget, so a slow module fails quickly.
+ *
+ * A sample stops as soon as a majority of its runs are on one side of the budget, which decides its
+ * median. For a module whose cost doesn't depend on earlier calls, that doesn't change the result,
+ * and a fast module costs about three runs per sample. An over-budget sample is reported by the
+ * fastest of its over-budget runs: its median if all its runs were taken, a lower bound otherwise.
  *
  * A worst case must be a real move of its combination: a game with that many seats, its seat in
  * `toAct` and its action valid; and a playable seat count must have at least one, or the check
@@ -38,9 +57,11 @@ export function checkCpu(
     report.fail("cpu", `cpuBudgetMs must be a positive number; it is ${String(budget)}`, where);
     return;
   }
-  const runs = RUNS[kitOptions.mode];
-  // Runs allowed over budget: those above the 99th percentile.
-  const allowed = runs - Math.ceil(runs * 0.99);
+  // CPU time where the caller passes a CPU clock, otherwise wall time (02 §6.6).
+  const clock = kitOptions.cpuClock ?? (() => performance.now());
+  const samples = SAMPLES[kitOptions.mode];
+  // Samples allowed over budget: those above the 99th percentile.
+  const allowed = samples - Math.ceil(samples * 0.99);
   let returned: unknown;
   try {
     returned = def.test.worstCase(options, seats, seededRandom(seed));
@@ -75,24 +96,40 @@ export function checkCpu(
         report.fail("cpu", `${at}: the action doesn't validate (${verdict.code})`, where);
         continue;
       }
+      /**
+       * One run of the three calls on fresh copies of the state and the action (a module can't
+       * carry anything from one run to the next on them), in milliseconds.
+       */
+      const time = (rngSeed: number): number => {
+        const copy = jsonClone(state);
+        const move = jsonClone(action);
+        const start = clock();
+        def.validate(copy, seat, move, resources);
+        def.preview?.(copy, seat, move, resources);
+        def.apply(copy, seat, move, seededRandom(rngSeed));
+        return clock() - start;
+      };
+      for (let run = 0; run < WARM_UP_RUNS; run += 1) time(run);
       let over = 0;
       let slowest = 0;
-      for (let run = 0; run < WARM_UP_RUNS + runs && over <= allowed; run += 1) {
-        const copy = jsonClone(state);
-        const start = performance.now();
-        def.validate(copy, seat, action, resources);
-        def.preview?.(copy, seat, action, resources);
-        def.apply(copy, seat, action, seededRandom(run));
-        const time = performance.now() - start;
-        if (run >= WARM_UP_RUNS && time > budget) {
+      for (let sample = 0; sample < samples && over <= allowed; sample += 1) {
+        // Every run of a sample does the same work, with a random seed no warm-up run used.
+        let within = 0;
+        const overRuns: number[] = [];
+        while (within < MAJORITY && overRuns.length < MAJORITY) {
+          const ms = time(WARM_UP_RUNS + sample);
+          if (ms > budget) overRuns.push(ms);
+          else within += 1;
+        }
+        if (overRuns.length >= MAJORITY) {
           over += 1;
-          slowest = Math.max(slowest, time);
+          slowest = Math.max(slowest, Math.min(...overRuns));
         }
       }
       if (over > allowed) {
         report.fail(
           "cpu",
-          `${at} is over the ${String(budget)} ms budget at the 99th percentile (${String(over)} runs over, up to ${slowest.toFixed(2)} ms)`,
+          `${at} is over the ${String(budget)} ms budget at the 99th percentile (${String(over)} samples over, the slowest at least ${slowest.toFixed(2)} ms; a sample is the median of ${String(REPETITIONS)} runs)`,
           where,
         );
       }

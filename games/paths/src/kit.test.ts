@@ -1,4 +1,5 @@
 import { runKit } from "@your-move/testkit";
+import { threadCpuClock } from "@your-move/testkit/cpu-clock";
 import { describe, expect, it } from "vitest";
 
 import { engines } from "./engine/index.js";
@@ -12,7 +13,8 @@ describe("the generic test kit (02 §6)", { timeout: 300_000 }, () => {
   it("passes the paths engine at every seat count from 2 to 8, under each option input", () => {
     // The option sets played come from the engine's own `test.optionInputs` hook, and every seat
     // count `players` allows (2 to 8, so 2, 3, 5 and 8 among them, 10 §M5).
-    const report = runKit(engines, { mode: "fast", manifest });
+    // The CPU budget is timed in this thread's CPU time, not wall time (02 §6.6).
+    const report = runKit(engines, { mode: "fast", manifest, cpuClock: threadCpuClock().now });
     expect(report.failures).toEqual([]);
     expect(report.games).toBeGreaterThanOrEqual(300);
   });

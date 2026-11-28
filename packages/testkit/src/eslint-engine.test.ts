@@ -163,6 +163,28 @@ describe("engineEslintConfig", () => {
     expect(messages(code).join("\n")).toMatch(/by name \(a member, call or new\), not as a value/u);
   });
 
+  // 08 T25 relies on this: the kit times engines in CPU time (02 §6.6), which doesn't count a
+  // blocked thread, so an engine must not reach anything that blocks or runs elsewhere (CH8-S2-1).
+  it.each([
+    [
+      "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10)",
+      /Atomics is not on the engine globals allow-list/u,
+    ],
+    ["const { wait } = Atomics", /Atomics is not on the engine globals allow-list/u],
+    ["Atomics?.wait", /Atomics is not on the engine globals allow-list/u],
+    ["new SharedArrayBuffer(4)", /SharedArrayBuffer is not on the engine globals allow-list/u],
+    ["new Worker('worker.js')", /'Worker' is not defined/u],
+    ["new WebAssembly.Memory({ initial: 1, shared: true })", /'WebAssembly' is not defined/u],
+  ])("refuses a blocking or concurrent primitive: %s", (code, expected) => {
+    expect(messages(code).join("\n")).toMatch(expected);
+  });
+
+  it("keeps blocking and concurrent primitives off the allow-list", () => {
+    for (const name of ["Atomics", "SharedArrayBuffer", "Worker", "WebAssembly"]) {
+      expect(ENGINE_GLOBALS).not.toContain(name);
+    }
+  });
+
   it("refuses an aliased global the allow-list leaves off, whatever the form", () => {
     expect(messages("export const s = [1].map(Function);").join("\n")).toMatch(
       /'Function' is not defined|Function is not on/u,
