@@ -277,10 +277,39 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    list with an in-app badge and a realtime update, plus a generic push that names nobody ("You have a new game invitation"), at most one per recipient per day — never
    the inviter's display name, the game or anything else they chose. If I have email nudges on,
    I get at most one email per invitation: a fixed "<Display Name> invited you to play <game name>"
-   template, sent via `waitUntil` when the invitation is created (or claimed), category `nudges`
+   template, sent via `waitUntil` when the invitation is created (a claim sends only the push,
+   below), category `nudges`
    (unsubscribe turns nudges off), counted toward the instance-wide invite-email cap (08 §4), never
    for `hidden` or `inert` invitations. I accept (`joined`) or decline; the invitation screen also
    offers **Block**. Invitations expire with the lobby.
+
+   Precisely (alpha A20). An invitation here is a `normal` `invited` row with a `user_id`: a typed
+   address of an onboarded user, a past opponent picked when their `whoCanAddMe` is `nobody` or the
+   game allows AI assistance (02 §4), or a claimed email-invite seat (§6.4).
+   - **The push** is sent in the background after the response, on alpha A8's sender (03 §7): body
+     "You have a new game invitation.", `url` `/` (the game list, where *Invitations* are), `tag`
+     `invitation`, so one notification stands for however many arrived. It reads the game when it
+     is sent and pushes only to invitees whose row is still a `normal` invitation in a `lobby`. The
+     daily limit is a counter per recipient in the fixed UTC day (`INVITATION_PUSHES_USER_DAY`,
+     08 §4), taken in the background only for a recipient with a live subscription and only the
+     first one in the day is sent; nothing in the request reads or writes it, so it says nothing
+     to a creator (Q3).
+   - **The email** (`invitationNudgeEmail`) goes only to an onboarded human with
+     `settings.emailNudges` true and `email_id` set, not suspended or being deleted, whose address
+     has no `email_suppressions` row of any reason (an `unsubscribed` row is the address's own
+     "don't send me invites", which this email is). Subject and first line: "<Display Name>
+     invited you to play <game name> on <APP_NAME>"; then a link to `PUBLIC_URL` (the invitation is
+     in the game list), why it was sent, and the Settings link and the `nudges` one-click
+     unsubscribe with its headers (05 §Email links); never the game's id, options, state or other
+     players, nor any address. For a typed address it is built, counted and scheduled exactly like
+     the invite email (§6.3, §6.6): "may be mailed" in §6.6's tiers covers this email too, so it is
+     sent only when the inviter's caps, the per-address cap and the instance-wide cap all passed,
+     and `invites.sent_at` records it. A picked invitee isn't a typed address: it counts nothing
+     toward the inviter's caps, and the shared caps under its real keys (its `email_id`) only when
+     it may be mailed, the `silent` counter otherwise, so the work doesn't depend on its setting.
+   - A claim (§6.4) sends the push, never the email: the seat's one email was the invite email
+     decided when the game was created (§6.3), so "at most one email per invitation" holds and no
+     cap is passed twice.
 3. Email-invite seats: `game_players.invite_email` set, `user_id` NULL, state `invited`. The game
    stays in `lobby` until all seats are joined or the creator starts it (02 §4). The invite email
    uses a fixed template, with no user-supplied free text other than display name:
@@ -326,8 +355,9 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    09 §3; review A17-S-5); the sweep's claim step claims any beyond that on its next runs (03 §8),
    so an address with more seats than the cap gets the rest within a sweep or a few. A claim that fails there is logged by error
    class and never fails onboarding; the sweep claims it later. A lobby at or past its expiry is
-   never claimed into (it is about to expire, 02 §4). A claim sends nothing: the generic
-   invitation push and the invitation email to users with nudges on (§6.2) are M4's.
+   never claimed into (it is about to expire, 02 §4). A claim that makes a `normal` invitation
+   sends the claimant the generic invitation push (§6.2; alpha A20), in the background after the
+   onboarding response or from the sweep, and never the invitation email.
 5. Lobbies expire 14 days after creation → `expired`. When an email seat reaches any terminal
    state (accepted, game expired/cancelled/started without it, removed or declined), `invite_email`
    is cleared — we don't retain addresses the creator typed (the `invites` table keeps only the
@@ -337,7 +367,7 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
      email whatever it turns out to be, so the limit reveals nothing. Over the limit the
      whole request is `429` and nothing is created.
    - **Invite emails** (to email-invite seats: no account, or one that hasn't finished
-     onboarding): per inviter 5 / day and 20 / 30 days;
+     onboarding; and, since alpha A20, the invitation email to a user with nudges on, §6.2): per inviter 5 / day and 20 / 30 days;
      accounts younger than 7 days **that have not yet completed a game** (have no past-opponent
      row, §6.9: a finished game in which both players acted) get 2 / day; per target
      address 3 invite emails / 30 days across all inviters (counted in `rate_limits` keyed by the
@@ -352,7 +382,8 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
         nothing from them. Inviting existing players by address therefore uses up the inviter's
         invite-email allowance too;
      2. the **shared** caps (per target address, instance-wide) count under their real keys only an
-        address that may be mailed (an email-invite seat with `normal` delivery, not suppressed)
+        address that may be mailed (an email-invite seat with `normal` delivery, not suppressed;
+        since alpha A20 also a `normal` invitation of a user who gets the invitation email, §6.2)
         and passed the inviter's caps; every other address adds 1 to the never-read `silent`
         counter of each instead (§3.2), so addresses that would never be mailed can't spend another
         address's or the instance's budget;

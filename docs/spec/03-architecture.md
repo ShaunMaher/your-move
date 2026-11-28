@@ -323,10 +323,21 @@ filesystems are unsupported for the database anyway).
   when it is sent: nothing once the game has ended (a decline that won the race with the start ends
   a two-seat lobby), and only to added players still `joined` or `playing`. A start at creation that
   fails is logged by error class and leaves the created lobby, which the `201` shows; the push is
-  scheduled either way. Invitations still send nothing until M4's generic invitation push.
+  scheduled either way.
+- **The invitation push (alpha A20).** A create (or rematch) request that seats a `normal`
+  invitation with a user (06 §6.2) sends, from the one background task it schedules for its
+  invitations whatever they are (with the invite emails, 06 §6.3), "You have a new game
+  invitation." to each such invitee: `url` `/`, `tag` `invitation`, never naming the creator or
+  the game; it reads the game when it is sent and pushes only to rows still a `normal` invitation
+  in a `lobby`. A claim that makes a `normal` invitation (06 §6.4) sends the same push to the
+  claimant, after the onboarding response or from the sweep's claim step. At most one per
+  recipient in a fixed UTC day: the per-recipient counter `INVITATION_PUSHES_USER_DAY` (08 §4) is
+  taken in the background, after the subscriptions are read and only for a recipient who has a
+  live one, so it is never read or written by the request a creator sees. TTL, urgency, the
+  live-session rule, the cap of 40, the delivery marks and deletions are as above.
 - Optional email nudge (default off, per-user setting): "It's your turn" after 24 h idle, max one
-  per game per day; and at most one email per normal invitation, sent when it's created or claimed
-  (06 §6.2), not by the sweep. Precisely (alpha A6): the sweep nudges a `playing` seat of an
+  per game per day; and at most one email per normal invitation, sent when it's created (06 §6.2; alpha
+  A20), never by the sweep or a claim. Precisely (alpha A6): the sweep nudges a `playing` seat of an
   `active` game whose `to_act_since` is at least 24 h old ("idle": in `toAct` that long without
   acting) and whose `last_nudged_at` is unset or at least 24 h old, if its user is a human with
   `settings.emailNudges` true, onboarded, not suspended or being deleted, whose `email_id` is set
