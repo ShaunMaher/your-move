@@ -443,6 +443,20 @@ export function brokenFixtures(): Record<string, { property: string; engines: ()
             : toy.view(s, v),
       })),
     },
+    "sets hiddenFromEveryone while its seats see different hands": {
+      // Each seat sees its own hand, so the flag is false; the kit checks it at every step (02 §6.3).
+      property: "secrecy",
+      engines: variant((toy) => ({ ...toy, test: { ...toy.test, hiddenFromEveryone: true } })),
+    },
+    "sets hiddenFromEveryone while the public's view differs from the seats'": {
+      // Every seat sees the same view, but the public's differs: the flag covers every viewer.
+      property: "secrecy",
+      engines: variant((toy) => ({
+        ...toy,
+        view: (s, v) => (v === null ? toy.view(s, null) : { ...toy.view(s, null), peek: "seated" }),
+        test: { ...toy.test, hiddenFromEveryone: true },
+      })),
+    },
     "has a no-op perturbHidden": {
       property: "secrecy",
       engines: variant((toy) => ({ ...toy, test: { ...toy.test, perturbHidden: (s) => s } })),

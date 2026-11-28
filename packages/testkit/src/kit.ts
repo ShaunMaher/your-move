@@ -162,9 +162,10 @@ class Kit extends Reporter {
 
     for (let step = 0; ; step += 1) {
       const toAct = this.turns(def, state, seats, out, where);
-      this.observeViews(def, state, seats, where, observe);
+      const views = this.observeViews(def, state, seats, where, observe);
       const finished = this.call("schema", "result", where, () => def.result(state)) !== null;
       if (finished) break;
+      this.sameForEveryone(def, views, where);
       if (step >= limit) {
         this.fail(
           "termination",
@@ -497,14 +498,15 @@ class Kit extends Reporter {
 
   // --- views ---------------------------------------------------------------------------------
 
+  /** Checks every viewer's view and summary against their schemas; returns the views' JSON. */
   private observeViews(
     def: AnyGameDefinition,
     state: unknown,
     seats: number,
     where: Where,
     observe?: (o: Observation) => void,
-  ): void {
-    for (const viewer of viewers(seats)) {
+  ): string[] {
+    return viewers(seats).map((viewer) => {
       const view = this.call("schema", "view", where, () => def.view(state, viewer));
       this.check(
         def.viewSchema.safeParse(view).success,
@@ -519,8 +521,27 @@ class Kit extends Reporter {
         `summary for ${String(viewer)} isn't a ListSummary`,
         where,
       );
-      observe?.(`view ${String(viewer)} ${canonical(view)} ${canonical(summary)}`);
-    }
+      const json = canonical(view);
+      observe?.(`view ${String(viewer)} ${json} ${canonical(summary)}`);
+      return json;
+    });
+  }
+
+  /**
+   * A module that sets `hiddenFromEveryone` gives every seat and the public the same view while the
+   * game is in progress (identical JSON, key order included), at every step (02 §6.3).
+   */
+  private sameForEveryone(def: AnyGameDefinition, views: readonly string[], where: Where): void {
+    if (def.test.hiddenFromEveryone !== true) return;
+    const differs = views.findIndex((view) => view !== views[0]);
+    if (differs < 0) return;
+    const who = differs === views.length - 1 ? "the public" : `seat ${String(differs)}`;
+    this.check(
+      false,
+      "secrecy",
+      `hiddenFromEveryone is set, but ${who} gets a different view from seat 0 while the game is in progress`,
+      where,
+    );
   }
 
   // --- secrecy (02 §6.3) ---------------------------------------------------------------------

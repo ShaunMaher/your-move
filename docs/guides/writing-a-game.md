@@ -327,9 +327,13 @@ The `test` object drives the generic kit (02 §6):
   For `null`, everything hidden from the public. Keep the state's key order (build the new state
   from the old one, as `{ ...state, deck }` does): views are compared key order included. The kit
   counts a perturbation only if it changes what some _other_ viewer sees (another seat's hand,
-  say), and at least half of them must. If no seat ever sees your hidden information (only the deck
-  order is hidden), set `hiddenFromEveryone: true`, and the kit counts perturbations that change
-  the state instead. **The kit can't tell if your perturbation stops covering a hidden part**: a
+  say), and at least half of them must. If every seat and the public always get the same view
+  while the game is in progress (identical JSON: only the deck order is hidden, say, or the
+  face-down cards of `pairs`), set `hiddenFromEveryone: true`, and the kit counts perturbations
+  that change the state instead. The flag means exactly that the views are the same, and the kit
+  checks it at every step of every game: keep per-viewer conveniences such as "your turn" out of
+  the view (put them in `summary`; the envelope already says who the viewer is and who is to act),
+  or the kit fails the module. Never set it for a game with hidden hands. **The kit can't tell if your perturbation stops covering a hidden part**: a
   hook that leaves the deck alone passes as long as hands change, and the secrecy check then never
   tests the deck. Write a test that it changes every hidden part (paths'
   `kit-hooks.test.ts` checks that the deck order itself changes for the public viewer, for a

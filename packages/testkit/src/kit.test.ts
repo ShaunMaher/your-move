@@ -483,13 +483,11 @@ describe("runKit's static checks", () => {
 
   it("counts a deck-only perturbation by the state only when the module says no seat sees its hidden information", () => {
     const toy = toyGame();
-    // Every hand is public, so the deck order is the only hidden information.
+    // Every hand is public, so the deck order is the only hidden information, and every viewer
+    // gets the same view (the public's, with every hand), as the flag requires (02 §6.3).
     const deckOnly = (hiddenFromEveryone?: boolean) => ({
       ...toy,
-      view: (s: Parameters<typeof toy.view>[0], v: number | null) => ({
-        ...toy.view(s, v),
-        peek: s.hands,
-      }),
+      view: (s: Parameters<typeof toy.view>[0]) => ({ ...toy.view(s, null), peek: s.hands }),
       test: {
         ...toy.test,
         perturbHidden: (s: Parameters<typeof toy.view>[0]) => ({
@@ -505,6 +503,16 @@ describe("runKit's static checks", () => {
         .failures.map((f) => f.message)
         .join("\n"),
     ).toMatch(/changed another viewer's view in only 0 of/u);
+  });
+
+  it.each([
+    ["sets hiddenFromEveryone while its seats see different hands", "seat 1"],
+    ["sets hiddenFromEveryone while the public's view differs from the seats'", "the public"],
+  ])("checks hiddenFromEveryone at every step: a module that %s fails", (name, who) => {
+    const report = runKit(brokenFixtures()[name]?.engines() ?? {}, { mode: "fast", games: 3 });
+    expect(report.failures.map((f) => f.message)).toContain(
+      `hiddenFromEveryone is set, but ${who} gets a different view from seat 0 while the game is in progress`,
+    );
   });
 
   it("refuses hiddenFromEveryone without hiddenInformation", () => {

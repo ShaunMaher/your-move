@@ -640,8 +640,8 @@ one repeats a secret choice in its record, and one a rare secret choice; one has
 `setup`; one is nondeterministic; one never terminates, with a small and with a large
 `maxActions`; one leaves `toAct` non-empty after the end; one keeps hidden state in a module-level
 variable shared between games; one has an empty and one an illegal `worstCase`; one sets
-`hiddenFromEveryone` while its seats see different hands): the kit MUST fail each one, in fast
-mode.
+`hiddenFromEveryone` while its seats see different hands, and one sets it while every seat sees the
+same view but the public's differs): the kit MUST fail each one, in fast mode.
 
 The framework, not the kit, enforces that only seats in `toAct` may act (05 `/actions`).
 
