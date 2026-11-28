@@ -546,7 +546,7 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
             id,
           );
 
-        it("may block a past opponent, someone sharing any game row, or someone already blocked", async () => {
+        it("may block a past opponent, someone already blocked, or an attributable co-player", async () => {
           const [a, past, shared, stranger, blocked] = [
             await human(),
             await human(),
@@ -555,11 +555,12 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
             await human(),
           ];
           await pair(a, past);
-          // A finished game whose rows are kept in any state: `dropped` here.
+          // A finished game in which `shared` joined: their row has been joined, so it counts in
+          // either direction, the creator's included.
           const game = newGame({ status: "finished", createdBy: a });
           await repos.games.create(game, [
             player({ userId: a, joinedVia: "creator", seat: 0, state: "out" }),
-            player({ userId: shared, state: "dropped", joinedAt: null }),
+            player({ userId: shared, seat: 1, state: "out" }),
           ]);
           await block(a, blocked);
           const agent = crypto.randomUUID();
@@ -579,6 +580,106 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
           expect(await repos.users.canBlock(a, a)).toBe(false);
           expect(await repos.users.canBlock(a, agent)).toBe(false);
           expect(await repos.users.canBlock(a, crypto.randomUUID())).toBe(false);
+        });
+
+        it("never counts a row the viewer can't attribute (A23-S-1)", async () => {
+          const [creator, typed, declined, picked, someone] = [
+            await human(),
+            await human(),
+            await human(),
+            await human(),
+            await human(),
+          ];
+          const lobby = newGame({ status: "lobby", createdBy: creator, seats: 5 });
+          await repos.games.create(lobby, [
+            player({ userId: creator, joinedVia: "creator" }),
+            // A typed address resolved to a user, open or declined: never the creator's to block.
+            player({
+              userId: typed,
+              state: "invited",
+              joinedAt: null,
+              inviteEmail: address(typed),
+            }),
+            player({ userId: declined, state: "declined", joinedAt: null }),
+            // The creator's open pick: theirs to block.
+            player({ userId: picked, state: "invited", joinedAt: null }),
+          ]);
+          expect(await repos.users.canBlock(creator, typed)).toBe(false);
+          expect(await repos.users.canBlock(creator, declined)).toBe(false);
+          expect(await repos.users.canBlock(creator, picked)).toBe(true);
+          // Each invitee sees the creator, who has joined.
+          expect(await repos.users.canBlock(typed, creator)).toBe(true);
+          // An inert invitation was never seen: its holder can't block through it.
+          const inertHolder = await human();
+          const other = newGame({ status: "lobby", createdBy: someone });
+          await repos.games.create(other, [
+            player({ userId: someone, joinedVia: "creator" }),
+            player({ userId: inertHolder, state: "invited", joinedAt: null, delivery: "inert" }),
+          ]);
+          expect(await repos.users.canBlock(inertHolder, someone)).toBe(false);
+        });
+
+        it("holds a transition back while a block lies between its actor and a joined member (A23-S-4)", async () => {
+          const [host, joiner, guest] = [await human(), await human(), await human()];
+          const game = newGame({ status: "lobby", createdBy: host, seats: 3 });
+          const guestRow = player({ userId: guest, state: "invited", joinedAt: null });
+          await repos.games.create(game, [
+            player({ userId: host, joinedVia: "creator" }),
+            player({ userId: joiner, joinedVia: "invitation" }),
+            guestRow,
+          ]);
+          await block(joiner, guest);
+          const accept = {
+            game: { updatedAt: T0 + 1 },
+            updatePlayers: [{ id: guestRow.id, set: { state: "joined" as const, joinedAt: T0 } }],
+            requireUnblocked: { userId: guest },
+          };
+          expect(await repos.games.applyTransition(game.id, 0, accept)).toBe("stale");
+          expect((await repos.games.load(game.id))?.players[2]?.state).toBe("invited");
+          // The host has no block with anyone joined: their transition goes through.
+          expect(
+            await repos.games.applyTransition(game.id, 0, {
+              game: { updatedAt: T0 + 2 },
+              requireUnblocked: { userId: host },
+            }),
+          ).toBe("ok");
+        });
+
+        it("makes the person blocked's open invitations in the blocker's lobbies inert, and no version moves", async () => {
+          const [blocker, other, host] = [await human(), await human(), await human()];
+          const shared = newGame({ status: "lobby", createdBy: host, seats: 4 });
+          const hostRow = player({ userId: host, joinedVia: "creator" });
+          const otherRow = player({ userId: other, state: "invited", joinedAt: null });
+          await repos.games.create(shared, [
+            hostRow,
+            player({ userId: blocker, state: "invited", joinedAt: null, delivery: "hidden" }),
+            otherRow,
+          ]);
+          // A lobby the blocker isn't in, and one where their own row is inert: untouched.
+          const apart = newGame({ status: "lobby", createdBy: host });
+          await repos.games.create(apart, [
+            player({ userId: host, joinedVia: "creator" }),
+            player({ userId: other, state: "invited", joinedAt: null }),
+          ]);
+          const unseen = newGame({ status: "lobby", createdBy: host, seats: 3 });
+          await repos.games.create(unseen, [
+            player({ userId: host, joinedVia: "creator" }),
+            player({ userId: blocker, state: "invited", joinedAt: null, delivery: "inert" }),
+            player({ userId: other, state: "invited", joinedAt: null, delivery: "hidden" }),
+          ]);
+          await repos.users.block(blocker, other, T0);
+          const delivery = async (gameId: string) =>
+            (
+              await target.sql(
+                "SELECT delivery FROM game_players WHERE game_id = ? AND user_id = ?",
+                gameId,
+                other,
+              )
+            )[0]?.["delivery"];
+          expect(await delivery(shared.id)).toBe("inert");
+          expect(await delivery(apart.id)).toBe("normal");
+          expect(await delivery(unseen.id)).toBe("hidden");
+          expect((await repos.games.get(shared.id))?.version).toBe(0);
         });
 
         it("writes a block with its pair's past opponents deleted both ways, once", async () => {
@@ -711,15 +812,46 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
             ],
             { createdAt: T0 - 10 },
           );
-          expect(await repos.games.blockableLobbies(viewer, other, T0 - 1, 10)).toEqual([
+          // A third party's lobby both have joined: listed. The viewer's hidden invitation is a
+          // member row: listed. A game type this build doesn't run: never listed.
+          const thirds = await lobby(
+            [
+              player({ userId: third, joinedVia: "creator" }),
+              player({ userId: viewer, joinedVia: "invitation" }),
+              player({ userId: other, joinedVia: "invitation" }),
+            ],
+            at(9),
+          );
+          const hidden = await lobby(
+            [
+              player({ userId: other, joinedVia: "creator" }),
+              player({ userId: viewer, state: "invited", joinedAt: null, delivery: "hidden" }),
+            ],
+            at(10),
+          );
+          await lobby(
+            [
+              player({ userId: viewer, joinedVia: "creator" }),
+              player({ userId: other, joinedVia: "invitation" }),
+            ],
+            { ...at(11), gameType: "uninstalled" },
+          );
+          const installed = [{ gameType: "contract", gameVersion: 1 }];
+          const window = (limit: number) => ({ createdAfter: T0 - 1, installed, limit });
+          expect(await repos.games.blockableLobbies(viewer, other, window(10))).toEqual([
             joined,
             picked,
             theirs,
+            thirds,
+            hidden,
           ]);
-          expect(await repos.games.blockableLobbies(viewer, other, T0 - 1, 2)).toEqual([
+          expect(await repos.games.blockableLobbies(viewer, other, window(2))).toEqual([
             joined,
             picked,
           ]);
+          expect(
+            await repos.games.blockableLobbies(viewer, other, { ...window(10), installed: [] }),
+          ).toEqual([]);
         });
       });
 

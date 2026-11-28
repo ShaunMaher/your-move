@@ -226,6 +226,10 @@ that work on both runtimes, plus SMTP for Node only.
   that fall due in a day; lazy expiry (03 §8) still expires each one the moment anyone involved
   comes back, and nothing accepts or starts an overdue lobby, so the backlog only delays clearing
   typed addresses (F-16's residual); re-measure at the first Workers deployment (10).
+  Each nudge also makes one provider subrequest (the `gmail` provider one more per run for its
+  token). A run with a failed step or a failed nudge ends the invocation as failed (not retried),
+  so it shows in the trigger's history. Re-measure the per-invocation cost at the first Workers
+  deployment (10).
 - **Requests that do several statements per address (alpha A17 review S-5).** Counted the same
   conservative way (every statement of a batch, the session's refresh included):
   - `POST /api/v1/games` with `n` typed addresses: 25 statements plus 17 per address (the caps,
@@ -255,16 +259,18 @@ that work on both runtimes, plus SMTP for Node only.
     (1): a just-onboarded user has no subscription yet (06 §6.4), so the counter, marks and
     deletions are not a normal-case cost.
     Node claims up to 50 per request.
-  - `POST /api/v1/blocks` (alpha A23): about 8 statements (the session, the write limit, who may
-    be blocked, the block with the past-opponent deletion, the list of shared lobbies) plus about
-    6 per lobby it changes (the game's load, 3, and the Remove or Decline transition, 2–3 for a
-    two-seat lobby, more when a decline ends a lobby with typed addresses), so the Worker changes
-    at most 6 lobbies per call (44) and Node 50; a repeat changes any left, and the accept, join
-    and start checks keep the pair apart in them meanwhile (06 §6.10). A lost race retries a
-    lobby's transition from its load, at most three more times. Each nudge also makes one provider subrequest (the `gmail` provider
-  one more per run for its token). A run with a failed step or a failed nudge ends the invocation
-  as failed (not retried), so it shows in the trigger's history. Re-measure the per-invocation
-  cost at the first Workers deployment (10).
+  - `POST /api/v1/blocks` (alpha A23): about 9 statements (the session, the write limit, who may
+    be blocked, the block with the past-opponent deletion and the `inert` update in one batch, the
+    list of shared lobbies) plus about 6 per lobby it changes (the game's load, 3, and the Remove
+    or Decline transition, 2–3 for a two-seat lobby, more when a decline ends a lobby with typed
+    addresses), so the Worker changes at most 6 lobbies per call: about 45 when nothing races.
+    Each lost race retries a lobby from its load (about 6 more, at most three times), so the worst
+    case, every lobby losing every race, is about 150, three times the Free plan's 50 (review
+    A23-S-8). It
+    fails safe: the block and the `inert` update are written first, in one batch; a request that
+    runs out of statements leaves only some lobby effects unwritten, which the lobby's next Start or
+    Accept writes (02 §4 step 1) and a repeat of the block retries, idempotently. Node changes up
+    to 50 lobbies per call.
 - Web Push (alpha A8) runs in the `waitUntil` of the request whose transition it reports: one
   subrequest per subscription, at most 40 per transition (inside the Free plan's 50 subrequests
   per invocation), and four D1 statements however many devices (the subscriptions, the names,

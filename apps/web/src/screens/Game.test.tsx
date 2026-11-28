@@ -304,16 +304,19 @@ describe("the lobby", () => {
     expect(posts(calls, "start")[0]?.body).toEqual({ expectedVersion: 2 });
   });
 
-  it("explains a start that is too early, and refetches when the game moved on", async () => {
+  it("explains a start that is too early, and refetches: a block's effect may have been written", async () => {
     const { calls } = open({
       "GET /api/v1/games/g1": json({ game: lobby(), view: null }),
       "POST /api/v1/games/g1/start": problem(409, "NOT_ENOUGH_PLAYERS"),
     });
     fireEvent.click(await screen.findByRole("button", { name: "Start game" }));
     expect((await screen.findByRole("alert")).textContent).toContain("Wait for the other players");
-    expect(
-      calls.filter((call) => call.method === "GET" && call.path === "/api/v1/games/g1"),
-    ).toHaveLength(1);
+    // 02 §4 step 1 (A23-S-3): the refused Start may have written a blocker's Decline or Remove.
+    await waitFor(() => {
+      expect(
+        calls.filter((call) => call.method === "GET" && call.path === "/api/v1/games/g1"),
+      ).toHaveLength(2);
+    });
   });
 
   it("asks before cancelling, then shows the cancelled game", async () => {
@@ -404,17 +407,19 @@ describe("the lobby", () => {
       "GET /api/v1/games/g1": json({ game: invited(), view: null }),
       "POST /api/v1/blocks": new Response(null, { status: 204 }),
     });
-    fireEvent.click(await screen.findByRole("button", { name: "Block" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Block Robin" }));
     const dialog = await screen.findByRole("dialog", { name: "Block Robin?" });
+    expect(dialog.textContent).toContain("You'll decline this invitation.");
     expect(dialog.textContent).toContain("They won't be able to add you to games or invite you");
+    expect(dialog.textContent).toContain("any invitation they have to a game you're in stops");
     expect(dialog.textContent).toContain("Games you're already playing carry on.");
-    expect(dialog.textContent).toContain("They won't be told.");
+    expect(dialog.textContent).toContain("They won't be told, but you'll no longer be on each");
     expect(dialog.textContent).toContain("You can unblock them in Settings.");
     // Cancel changes nothing.
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(calls.filter((call) => call.path === "/api/v1/blocks")).toHaveLength(0);
-    click("Block");
+    click("Block Robin");
     const again = await screen.findByRole("dialog", { name: "Block Robin?" });
     fireEvent.click(within(again).getByRole("button", { name: "Block" }));
     await waitFor(() => {
@@ -430,17 +435,40 @@ describe("the lobby", () => {
       "GET /api/v1/games/g1": json({ game: invited(), view: null }),
       "POST /api/v1/blocks": problem(429, "RATE_LIMITED"),
     });
-    fireEvent.click(await screen.findByRole("button", { name: "Block" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Block Robin" }));
     const dialog = await screen.findByRole("dialog", { name: "Block Robin?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Block" }));
     expect((await screen.findByRole("alert")).textContent).toContain("Wait a minute");
     expect(window.location.pathname).toBe("/g/g1");
   });
 
-  it("offers Block only on an invitation", async () => {
+  it("offers the creator Block of no one", async () => {
     open({ "GET /api/v1/games/g1": json({ game: lobby(), view: null }) });
     await screen.findByRole("heading", { level: 1, name: "Words lobby" });
-    expect(screen.queryByRole("button", { name: "Block" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Block/u })).toBeNull();
+  });
+
+  it("lets a joined player who isn't the creator block the creator, and leave (A23-P-1)", async () => {
+    const added = lobby({
+      players: [
+        player({ seat: null, state: "joined", isYou: false, displayName: "Robin" }),
+        player({ seat: null, state: "joined", isCreator: false }),
+      ],
+    });
+    const { calls } = open({
+      "GET /api/v1/games/g1": json({ game: added, view: null }),
+      "POST /api/v1/blocks": new Response(null, { status: 204 }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Block Robin" }));
+    const dialog = await screen.findByRole("dialog", { name: "Block Robin?" });
+    expect(dialog.textContent).toContain("You'll leave this game.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Block" }));
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/");
+    });
+    expect(calls.filter((call) => call.path === "/api/v1/blocks")).toEqual([
+      expect.objectContaining({ method: "POST", body: { userId: "u1" } }),
+    ]);
   });
 
   it("lets a player who was added (joined, not the creator) decline, and goes home (A12-P-4)", async () => {

@@ -28,9 +28,9 @@ test("an invitee blocks the inviter from the invitation, then unblocks her in Se
   const invitations = bob.getByRole("region", { name: /Invitations/u });
   await invitations.getByRole("link", { name: /Words with Ann/u }).click(FAR);
   await expect(bob.getByRole("heading", { level: 1 })).toHaveText("Words lobby");
-  await bob.getByRole("button", { name: "Block" }).click();
+  await bob.getByRole("button", { name: "Block Ann" }).click();
   const dialog = bob.getByRole("dialog", { name: "Block Ann?" });
-  await expect(dialog).toContainText("They won't be told.");
+  await expect(dialog).toContainText("They won't be told");
   await expect(dialog).toContainText("Games you're already playing carry on.");
   await expectAccessible(bob);
   await dialog.getByRole("button", { name: "Block" }).click();

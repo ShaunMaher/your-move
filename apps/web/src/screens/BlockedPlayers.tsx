@@ -24,6 +24,10 @@ export function BlockedPlayers({ api, onSessionLost }: BlockedPlayersProps) {
   const [problem, setProblem] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<BlockedPlayer | null>(null);
   const [pending, setPending] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  /** What the last unblock did, announced (A23-P-12). */
+  const [done, setDone] = useState<string | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -52,9 +56,11 @@ export function BlockedPlayers({ api, onSessionLost }: BlockedPlayersProps) {
   }, [api, showFirst]);
 
   async function showMore() {
-    if (next === null) return;
+    if (next === null || loadingMore) return;
+    setLoadingMore(true);
     const result = await listBlocks(api, next);
     if (!mounted.current) return;
+    setLoadingMore(false);
     if (!result.ok) {
       if (result.status === 401) onSessionLost();
       else setProblem("Couldn't load more. Try again.");
@@ -68,6 +74,7 @@ export function BlockedPlayers({ api, onSessionLost }: BlockedPlayersProps) {
     if (pending) return;
     setPending(true);
     setProblem(null);
+    setDone(null);
     const result = await unblockPlayer(api, player.userId);
     if (!mounted.current) return;
     setPending(false);
@@ -75,6 +82,9 @@ export function BlockedPlayers({ api, onSessionLost }: BlockedPlayersProps) {
     // Already unblocked (another device) is as good as done.
     if (result.ok || result.status === 404) {
       showFirst(await listBlocks(api));
+      // The row that had focus is gone: focus goes to the section, and the change is announced.
+      setDone(`Unblocked ${nameOf(player)}.`);
+      heading.current?.focus();
       return;
     }
     if (result.status === 401) {
@@ -92,7 +102,10 @@ export function BlockedPlayers({ api, onSessionLost }: BlockedPlayersProps) {
 
   return (
     <section className="card stack" aria-labelledby="blocked-heading">
-      <h2 id="blocked-heading">Blocked players</h2>
+      <h2 id="blocked-heading" ref={heading} tabIndex={-1}>
+        Blocked players
+      </h2>
+      <p role="status">{done}</p>
       <p className="hint">
         People you&apos;ve blocked can&apos;t add you to games or invite you, and you won&apos;t be
         put in a game with them. They aren&apos;t told.
@@ -126,8 +139,13 @@ export function BlockedPlayers({ api, onSessionLost }: BlockedPlayersProps) {
         </ul>
       )}
       {next === null ? null : (
-        <button type="button" className="button secondary" onClick={() => void showMore()}>
-          Show more
+        <button
+          type="button"
+          className="button secondary"
+          disabled={loadingMore}
+          onClick={() => void showMore()}
+        >
+          {loadingMore ? "Loading…" : "Show more"}
         </button>
       )}
       <Problem id="blocked-problem" message={problem} />

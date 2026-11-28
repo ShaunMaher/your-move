@@ -1,6 +1,6 @@
 /**
  * A game waiting for its players (07 §1, 02 §4): who is invited and who has joined, Accept,
- * Decline or Block (its creator, alpha A23) for an invitation, Decline for a player already in (a past opponent added them without
+ * Decline or Block (its creator, alpha A23) for an invitation, Decline or Block for a player already in (a past opponent added them without
  * asking, alpha A12, or they joined through the link), and for the creator Start, Cancel, Remove
  * per seat and the join-link controls (alpha A18).
  */
@@ -24,7 +24,7 @@ interface LobbyProps {
   readonly onAction: (action: LobbyAction) => Promise<string | null>;
   /** The creator removes a seat (05 `remove-seat`); what went wrong, or null. */
   readonly onRemove: (playerId: string) => Promise<string | null>;
-  /** An invitee blocks the game's creator (05 §Blocks); what went wrong, or null. */
+  /** An invitee or joined player blocks the game's creator (05 §Blocks); what went wrong, or null. */
   readonly onBlock: (userId: string) => Promise<string | null>;
   readonly onCreateLink: () => Promise<MadeLink>;
   readonly onRevokeLink: () => Promise<string | null>;
@@ -83,8 +83,25 @@ export function Lobby({
   /** In the lobby but not its creator: added by a past opponent, or accepted. Either may decline. */
   const joinedNotCreator = you?.state === "joined" && !isCreator;
   const creator = game.players.find((player) => player.isCreator);
-  /** Who Block blocks: the inviter, while their account exists. */
-  const blockable = invited && creator?.userId != null ? creator : undefined;
+  /**
+   * Who Block blocks: the creator, while their account exists, for anyone else in the lobby, an
+   * invitee or someone who joined (a past opponent may have added them, A23-P-1).
+   */
+  const blockable = (invited || joinedNotCreator) && creator?.userId != null ? creator : undefined;
+  const blockButton =
+    blockable === undefined ? null : (
+      <button
+        type="button"
+        className="button secondary"
+        disabled={pending !== null}
+        aria-label={`Block ${seatLabel(blockable)}`}
+        onClick={() => {
+          setConfirmBlock(true);
+        }}
+      >
+        Block
+      </button>
+    );
   const joined = game.players.filter((player) => player.state === "joined").length;
 
   async function run(action: LobbyAction) {
@@ -200,29 +217,21 @@ export function Lobby({
             >
               {pending === "decline" ? "Declining…" : "Decline"}
             </button>
-            {blockable === undefined ? null : (
-              <button
-                type="button"
-                className="button secondary"
-                disabled={pending !== null}
-                onClick={() => {
-                  setConfirmBlock(true);
-                }}
-              >
-                Block
-              </button>
-            )}
+            {blockButton}
           </>
         ) : null}
         {joinedNotCreator ? (
-          <button
-            type="button"
-            className="button secondary"
-            disabled={pending !== null}
-            onClick={() => void run("decline")}
-          >
-            {pending === "decline" ? "Declining…" : "Decline"}
-          </button>
+          <>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={pending !== null}
+              onClick={() => void run("decline")}
+            >
+              {pending === "decline" ? "Declining…" : "Decline"}
+            </button>
+            {blockButton}
+          </>
         ) : null}
         {isCreator ? (
           <>
@@ -290,13 +299,15 @@ export function Lobby({
           }}
         >
           <p>
-            They won&apos;t be able to add you to games or invite you, and you won&apos;t be put in
-            a game with them. You&apos;ll decline this invitation, and leave other games with them
-            that haven&apos;t started yet (or they&apos;re removed, if you created the game).
+            {invited ? "You'll decline this invitation." : "You'll leave this game."} They
+            won&apos;t be able to add you to games or invite you, and you won&apos;t be put in a
+            game with them. In other games that haven&apos;t started yet, you&apos;ll leave the ones
+            they&apos;ve joined (or they&apos;re removed from games you created), and any invitation
+            they have to a game you&apos;re in stops. Games you&apos;re already playing carry on.
           </p>
           <p>
-            Games you&apos;re already playing carry on. They won&apos;t be told. You can unblock
-            them in Settings.
+            They won&apos;t be told, but you&apos;ll no longer be on each other&apos;s lists of
+            people you&apos;ve played. You can unblock them in Settings.
           </p>
           <div className="row">
             <button

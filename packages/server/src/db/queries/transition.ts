@@ -57,6 +57,11 @@ export function unblocked(a: string, b: string): SQL {
   return sql`NOT EXISTS (SELECT 1 FROM ${blocks} WHERE (${blocks.blockerId} = ${a} AND ${blocks.blockedId} = ${b}) OR (${blocks.blockerId} = ${b} AND ${blocks.blockedId} = ${a}))`;
 }
 
+/** No block in either direction between `userId` and any other `joined` member of the game. */
+function unblockedWithJoined(gameId: string, userId: string): SQL {
+  return sql`NOT EXISTS (SELECT 1 FROM ${gamePlayers} JOIN ${blocks} ON (${blocks.blockerId} = ${userId} AND ${blocks.blockedId} = ${gamePlayers.userId}) OR (${blocks.blockerId} = ${gamePlayers.userId} AND ${blocks.blockedId} = ${userId}) WHERE ${gamePlayers.gameId} = ${gameId} AND ${gamePlayers.state} = 'joined' AND ${gamePlayers.userId} <> ${userId})`;
+}
+
 /** The statements of one transition, statement 1 first. */
 export function transitionStatements(
   db: Database,
@@ -67,6 +72,7 @@ export function transitionStatements(
 ): [Statement, ...Statement[]] {
   const guard = tokenGuard(gameId, token);
   const link = writes.requireJoinLink;
+  const actor = writes.requireUnblocked;
   const first = db
     .update(games)
     .set({ ...writes.game, version: sql`${games.version} + 1`, writeToken: token })
@@ -77,6 +83,7 @@ export function transitionStatements(
         link === undefined
           ? undefined
           : sql`EXISTS (SELECT 1 FROM ${joinLinks} WHERE ${joinLinks.gameId} = ${gameId} AND ${joinLinks.tokenHash} = ${link.tokenHash} AND ${joinLinks.expiresAt} > ${link.now})`,
+        actor === undefined ? undefined : unblockedWithJoined(gameId, actor.userId),
       ),
     )
     .returning({ id: games.id });

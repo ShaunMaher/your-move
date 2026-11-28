@@ -402,22 +402,32 @@ describe("blocked players (07 §1, alpha A23)", () => {
     await waitFor(() => {
       expect(screen.queryByText("Bo")).toBeNull();
     });
+    // The row that had focus is gone: the change is announced and focus is on the section.
+    expect(screen.getByText("Unblocked Bo.").getAttribute("role")).toBe("status");
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Blocked players" }));
     expect(calls.filter((call) => call.method === "DELETE")).toEqual([
       expect.objectContaining({ path: "/api/v1/blocks/u-bo" }),
     ]);
     expect(screen.getByText("A player")).toBeDefined();
   });
 
-  it("pages with Show more", async () => {
+  it("pages with Show more, disabled while a page loads", async () => {
+    let release: (answer: Response) => void = () => undefined;
     const { api } = fakeApi({
       "GET /api/v1/config": json(CONFIG),
       "GET /api/v1/me": json(ME),
       "GET /api/v1/blocks": json({ blocks: [BO], nextCursor: "c1" }),
-      "GET /api/v1/blocks?cursor=c1": json({ blocks: [CY], nextCursor: null }),
+      "GET /api/v1/blocks?cursor=c1": () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
     });
     render(<App api={api} />);
     expect(await screen.findByText("Bo")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    const loading = await screen.findByRole("button", { name: "Loading…" });
+    expect((loading as HTMLButtonElement).disabled).toBe(true);
+    release(json({ blocks: [CY], nextCursor: null }));
     expect(await screen.findByText("A player")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
   });

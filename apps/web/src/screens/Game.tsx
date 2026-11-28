@@ -325,7 +325,9 @@ export function Game({
       }
       if (result.status === 401) onSessionLost();
       if (result.status === 404) setLoad({ status: "missing" });
-      if (MOVED_ON.has(result.code)) void refetch(true);
+      // A Start refused for too few players may first have written a block's outstanding
+      // effect (02 §4 step 1): show the lobby as it now is.
+      if (MOVED_ON.has(result.code) || result.code === "NOT_ENOUGH_PLAYERS") void refetch(true);
       return failureText(
         result.status,
         result.code,

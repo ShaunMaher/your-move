@@ -51,7 +51,7 @@ function pastOpponents(a: Player, b: Player, at = now()): void {
   );
 }
 
-/** `blocker` blocks `blocked` (04 `blocks`; nothing writes one through the API before M4). */
+/** `blocker` blocks `blocked` (04 `blocks`), written directly: none of a real block's other effects. */
 function block(blocker: Player, blocked: Player): void {
   h.exec(
     "INSERT INTO blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)",
@@ -199,7 +199,14 @@ describe("adding a past opponent by userId (06 §6.1, §6.2)", () => {
     ]);
     expect((await getGame(h, b, game.id)).game.yourInvitation).toBe("normal");
     expect((await transition(h, b, game.id, "accept")).body.game.status).toBe("lobby");
-    expect((await transition(h, c, game.id, "accept")).body.game.status).toBe("active");
+    h.advance(1);
+    const started = (await transition(h, c, game.id, "accept")).body.game;
+    expect(started.status).toBe("active");
+    // Seat order `join`: the creator first, then in the order they accepted (02 §4), not the
+    // order picked.
+    expect(
+      [...started.players].sort((x, y) => (x.seat ?? 0) - (y.seat ?? 0)).map((p) => p.userId),
+    ).toEqual([a.id, b.id, c.id]);
   });
 
   it("waits in the lobby while a typed address's seat is open: the picked one joined, the other invited", async () => {

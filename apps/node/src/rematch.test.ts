@@ -252,7 +252,7 @@ describe("the first call creates the rematch (05)", () => {
   it("refuses when another player can no longer be picked, as POST /games does (06 §6.11)", async () => {
     const [a, b] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
     const game = await finished([a, b]);
-    // b blocks a (nothing writes blocks through the API before M4): the pair is gone too.
+    // b blocks a, written directly (05 §Blocks would also delete the pair): the pair is gone too.
     h.exec(
       "INSERT INTO blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)",
       b.id,

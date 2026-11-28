@@ -15,6 +15,7 @@ import {
   isNotNull,
   isNull,
   lt,
+  ne,
   or,
   type SQL,
   sql,
@@ -213,12 +214,30 @@ export function userRepo(db: Database): UserRepo {
                     and(eq(pastOpponents.userId, viewerId), eq(pastOpponents.otherId, otherId)),
                   ),
               ),
+              // A shared game, through a row the viewer can attribute (A23-S-1): joined (the
+              // creator's included), or the viewer's own open pick. Never a typed address's row,
+              // open or not, which would tie the address to the account (Q3); and only where the
+              // viewer's own row was visible to them.
               exists(
                 db
                   .select({ one: sql`1` })
                   .from(mine)
                   .innerJoin(theirs, eq(theirs.gameId, mine.gameId))
-                  .where(and(eq(mine.userId, viewerId), eq(theirs.userId, otherId))),
+                  .where(
+                    and(
+                      eq(mine.userId, viewerId),
+                      eq(theirs.userId, otherId),
+                      or(ne(mine.delivery, "inert"), isNotNull(mine.joinedAt)),
+                      or(
+                        isNotNull(theirs.joinedAt),
+                        and(
+                          eq(mine.joinedVia, "creator"),
+                          eq(theirs.state, "invited"),
+                          isNull(theirs.inviteEmail),
+                        ),
+                      ),
+                    ),
+                  ),
               ),
             ),
           ),
@@ -227,6 +246,7 @@ export function userRepo(db: Database): UserRepo {
       return row !== undefined;
     },
     async block(blockerId, blockedId, createdAt) {
+      const blockerRows = alias(gamePlayers, "blocker_rows");
       await runBatch(db, [
         db.insert(blocks).values({ blockerId, blockedId, createdAt }).onConflictDoNothing(),
         // Never a past-opponent pair with a block either way (04 invariant 6).
@@ -236,6 +256,39 @@ export function userRepo(db: Database): UserRepo {
             or(
               and(eq(pastOpponents.userId, blockerId), eq(pastOpponents.otherId, blockedId)),
               and(eq(pastOpponents.userId, blockedId), eq(pastOpponents.otherId, blockerId)),
+            ),
+          ),
+        // The blocked person's open invitations in the blocker's lobbies go quiet (A23-S-2):
+        // `inert`, as at creation, so to them each is gone as if removed, while everyone else sees
+        // it as before. A row-level update like a claim: no version moves.
+        db
+          .update(gamePlayers)
+          .set({ delivery: "inert" })
+          .where(
+            and(
+              eq(gamePlayers.userId, blockedId),
+              eq(gamePlayers.state, "invited"),
+              inArray(gamePlayers.delivery, ["normal", "hidden"]),
+              inArray(
+                gamePlayers.gameId,
+                db
+                  .select({ id: blockerRows.gameId })
+                  .from(blockerRows)
+                  .innerJoin(games, eq(games.id, blockerRows.gameId))
+                  .where(
+                    and(
+                      eq(blockerRows.userId, blockerId),
+                      eq(games.status, "lobby"),
+                      or(
+                        eq(blockerRows.state, "joined"),
+                        and(
+                          eq(blockerRows.state, "invited"),
+                          inArray(blockerRows.delivery, ["normal", "hidden"]),
+                        ),
+                      ),
+                    ),
+                  ),
+              ),
             ),
           ),
       ]);

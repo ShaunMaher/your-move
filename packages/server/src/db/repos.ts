@@ -325,7 +325,8 @@ function gameRepo(db: Database): GameRepo {
         .limit(limit);
       return rows.map((row) => row.id);
     },
-    async blockableLobbies(viewerId, otherId, createdAfter, limit) {
+    async blockableLobbies(viewerId, otherId, { createdAfter, installed, limit }) {
+      if (installed.length === 0) return [];
       const mine = alias(gamePlayers, "mine");
       const theirs = alias(gamePlayers, "theirs");
       const rows = await db
@@ -337,6 +338,12 @@ function gameRepo(db: Database): GameRepo {
           and(
             eq(games.status, "lobby"),
             gt(games.createdAt, createdAfter),
+            // An orphaned game takes no transition (02 §7.3): it never uses up the call's lobbies.
+            or(
+              ...installed.map((pair) =>
+                and(eq(games.gameType, pair.gameType), eq(games.gameVersion, pair.gameVersion)),
+              ),
+            ),
             // The viewer is a member (04 §Membership): never through an `inert` row, which they
             // can't see.
             or(

@@ -390,12 +390,15 @@ of an auto-join, whatever their `whoCanAddMe`: every human sees the AI seats and
 accepts knowingly (08 T31). At start the framework, in
 the start transition:
 
-1. re-checks blocks between every pair of joined users: if a pair has a block, the member of the
-   pair who joined later is moved to `removed` (realtime only; in joining order, the creator
-   first, so each joined row is checked against those kept before it); if fewer than `min`
-   remain the start fails with `409 NOT_ENOUGH_PLAYERS` and writes nothing (or, for an automatic
-   start, simply doesn't happen); a pair with a block never becomes past opponents later either
-   (built by alpha A23);
+1. re-checks blocks between every pair of joined users, and writes each outstanding block
+   effect (06 §6.10): for a pair with a block, the blocker's own action, exactly as the block
+   would have written it had it reached this lobby — the creator-blocker's Remove of the person
+   blocked, or otherwise the blocker's Decline (the later-joined one's, if both blocked). Never
+   anything a bystander couldn't attribute to the blocker; pairs are taken in joining order until
+   none is left (realtime only). If fewer than `min` then remain, or a Decline ended the lobby,
+   the Start writes those effects and answers `409 NOT_ENOUGH_PLAYERS`; an accept writes them
+   with the acceptance, and an automatic start then doesn't happen. A pair with a block never
+   becomes past opponents later either (built by alpha A23, review S-3);
 2. calls `validateStart(options, joinedCount)`. On failure, Start returns `409 INVALID_SEATS`; an
    automatic start simply doesn't happen, the triggering transition (accept or join) still
    succeeds, and the game waits in the lobby for the creator;

@@ -4,20 +4,19 @@ import { type AnyGameDefinition, OK } from "@your-move/sdk";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import type { GamePlayerRecord, GameRecord } from "../db/repositories.js";
+import type { BlockPair, GamePlayerRecord, GameRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
 import { EngineFault, guardEngine } from "./engine-fault.js";
 import {
   accept as acceptWith,
   blockedBy,
   blockEffect,
-  type Blocked,
   cancel,
   decline,
   endedUnplayed,
   expire,
   type GameContext,
-  isBlockedAccept,
+  isSettled,
   isModuleOutcome,
   isRefusal,
   LOBBY_LIFETIME_MS,
@@ -37,17 +36,21 @@ import {
 import { lastOptionsOf, mergeOptions, rememberedInput, whoCanAddMeOf } from "./settings.js";
 
 /** No blocks among anyone (04 `blocks`). */
-const NO_BLOCKS: Blocked = () => false;
+const NO_BLOCKS: readonly BlockPair[] = [];
 
 /** An accept with no blocks: a write set or a refusal, never a block's decline. */
 function accept(ctx: GameContext, viewer: GamePlayerRecord, now: number) {
   const outcome = acceptWith(ctx, viewer, now, NO_BLOCKS);
-  if (isBlockedAccept(outcome)) throw new Error("an accept with no blocks found one");
+  if (isSettled(outcome)) throw new Error("an accept with no blocks found one");
   return outcome;
 }
 
-const start = (ctx: GameContext, viewer: GamePlayerRecord, now: number) =>
-  startWith(ctx, viewer, now, NO_BLOCKS);
+/** A Start with no blocks: a write set or a refusal, never a block's settlement. */
+function start(ctx: GameContext, viewer: GamePlayerRecord, now: number) {
+  const outcome = startWith(ctx, viewer, now, NO_BLOCKS);
+  if (isSettled(outcome)) throw new Error("a start with no blocks found one");
+  return outcome;
+}
 
 const startAtCreation = (ctx: GameContext, now: number) => startAtCreationWith(ctx, now, NO_BLOCKS);
 
@@ -371,6 +374,7 @@ describe("an automatic start validateStart refuses (02 §4 Start, step 2)", () =
     ) =>
       ({
         id,
+        userId: `u-${id}`,
         state,
         joinedVia,
         joinedAt: state === "joined" ? 1 : null,
@@ -398,6 +402,8 @@ describe("an automatic start validateStart refuses (02 §4 Start, step 2)", () =
           set: { state: "joined", joinedVia: "invitation", joinedAt: 5, inviteEmail: null },
         },
       ],
+      // Written only while no block lies between the accepter and a joined member (A23-S-4).
+      requireUnblocked: { userId: "u-b" },
     });
   });
 });

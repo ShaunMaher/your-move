@@ -19,6 +19,7 @@ import type {
   BlockCursor,
   GamePlayerRecord,
   GameWriteSet,
+  InstalledVersion,
   LoadedGame,
   TransitionResult,
   UserRecord,
@@ -47,6 +48,8 @@ export interface BlockRouteDeps {
   ) => Promise<TransitionResult>;
   /** Lobbies one block changes at most (09 §3): Node 50, the Worker 6. */
   readonly lobbiesPerCall: number;
+  /** The game type and version pairs this build can run (02 §7.3). */
+  readonly installed: readonly InstalledVersion[];
 }
 
 /** The list cursor: the last listed block's `created_at` and blocked user id. */
@@ -100,6 +103,9 @@ export function registerBlockRoutes(app: OpenAPIHono<AppEnv>, deps: BlockRouteDe
       // No push: lobby removals and declines reach the members as realtime only (02 §4).
       if ((await applyAs(loaded, writes, viewer)) === "ok") return;
     }
+    // Every attempt lost a race: the lobby's next Start or Accept writes the same effect (02 §4
+    // step 1), and a repeat of the block retries it.
+    log.warn("block's lobby change kept losing races", { attempts: SERVER_ATTEMPTS });
   };
 
   app.openapi(createBlockRoute, async (c) => {
@@ -109,18 +115,17 @@ export function registerBlockRoutes(app: OpenAPIHono<AppEnv>, deps: BlockRouteDe
     if (!(await repos.users.canBlock(user.id, userId))) throw ApiError.of("NOT_FOUND");
     const at = now();
     await repos.users.block(user.id, userId, at);
-    const lobbies = await repos.games.blockableLobbies(
-      user.id,
-      userId,
-      at - LOBBY_LIFETIME_MS,
-      deps.lobbiesPerCall,
-    );
+    const lobbies = await repos.games.blockableLobbies(user.id, userId, {
+      createdAfter: at - LOBBY_LIFETIME_MS,
+      installed: deps.installed,
+      limit: deps.lobbiesPerCall,
+    });
     for (const gameId of lobbies) {
       try {
         await applyIn(gameId, user.id, userId);
       } catch (error) {
-        // The block stands whatever happened in one lobby (an orphaned game, a lost race): the
-        // accept, join and start checks still keep the pair apart there, and a repeat retries.
+        // The block stands whatever happened in one lobby: the accept, join and start checks
+        // still keep the pair apart there, and a repeat retries.
         log.warn("block's lobby change failed", {
           errorClass:
             error instanceof ApiError

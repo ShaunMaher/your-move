@@ -36,7 +36,13 @@ import { needsOnboarding } from "../accounts/onboarding.js";
 import { checkLimits, type LimitName } from "../auth/limits.js";
 import { requireSession } from "../auth/require-session.js";
 import type { Subkeys } from "../crypto/subkeys.js";
-import type { GamePlayerRecord, GameWriteSet, LoadedGame, UserRecord } from "../db/repositories.js";
+import type {
+  BlockPair,
+  GamePlayerRecord,
+  GameWriteSet,
+  LoadedGame,
+  UserRecord,
+} from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
 import { background, logBackgroundFailure } from "../http/background.js";
 import type { AppEnv, Platform } from "../platform.js";
@@ -49,17 +55,14 @@ import { joinUrl } from "./join-links.js";
 import { registerJoinRoutes } from "./join-routes.js";
 import {
   accept,
-  type Blocked,
-  blockedBy,
-  type BlockedAccept,
   cancel,
   decline,
   endedUnplayed,
   type GameContext,
   lobbyExpiresAt,
-  isBlockedAccept,
   isModuleOutcome,
   isRefusal,
+  isSettled,
   moduleTransition,
   type ModuleOutcome,
   type Refusal,
@@ -67,6 +70,7 @@ import {
   resign,
   rowUserIds,
   SERVER_ATTEMPTS,
+  type Settled,
   start,
   startAtCreation,
 } from "./lifecycle.js";
@@ -271,13 +275,11 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
   };
 
   /**
-   * The blocks among a lobby's users (02 §4: checked on accept and at start); none are read for a
-   * game past its lobby, where no transition checks them.
+   * The blocks among a lobby's users, for the transitions that check them: accept and start (02
+   * §4, A23-P-9). None are read for a game past its lobby, where nothing checks them.
    */
-  const blocksIn = async (loaded: LoadedGame): Promise<Blocked> =>
-    loaded.game.status === "lobby"
-      ? blockedBy(await repos.users.blocksAmong(rowUserIds(loaded.players)))
-      : () => false;
+  const blocksIn = async (loaded: LoadedGame): Promise<BlockPair[]> =>
+    loaded.game.status === "lobby" ? repos.users.blocksAmong(rowUserIds(loaded.players)) : [];
 
   /**
    * Applies a write set from the version it was computed at, with the actor's own unread marker
@@ -348,23 +350,23 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       ctx: GameContext,
       viewer: GamePlayerRecord,
       at: number,
-      blocked: Blocked,
-    ) => GameWriteSet | ModuleOutcome | BlockedAccept | Refusal,
-    gate?: (user: UserRecord) => void,
+      pairs: readonly BlockPair[],
+    ) => GameWriteSet | ModuleOutcome | Settled | Refusal,
+    options: { readonly gate?: (user: UserRecord) => void; readonly blocks?: boolean } = {},
   ) => {
     const user = userOf(c);
-    gate?.(user);
+    options.gate?.(user);
     await limit(user, "WRITES_USER_MINUTE");
     const { loaded, viewer } = await loadMember(gameId, user);
     const ctx = contextOf(loaded);
     if (loaded.game.version !== expectedVersion) throw ApiError.of("STALE_GAME");
-    const outcome = run(ctx, viewer, now(), await blocksIn(loaded));
+    const outcome = run(ctx, viewer, now(), options.blocks === true ? await blocksIn(loaded) : []);
     if (isRefusal(outcome)) throw refusal(outcome);
-    if (isBlockedAccept(outcome)) {
-      // Declined as the holder's own decline would be, then the `404` of a game they can no
-      // longer see (05 `/accept`).
-      await commit(c, loaded, outcome.blockedAccept, viewer, null);
-      throw ApiError.of("NOT_FOUND");
+    if (isSettled(outcome)) {
+      // Written, then refused (05 `/accept`, `/start`): an accept a block declined answers the
+      // `404` of a game they can no longer see; a start whose block effects left too few, 409.
+      await commit(c, loaded, outcome.settle, viewer, null);
+      throw refusal(outcome.then);
     }
     await commit(
       c,
@@ -538,16 +540,16 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
         // `games:create` (05 §Token scopes, 10 M3 acceptance); only sessions reach this today.
         const outcome = accept(contextOf(loaded), viewer, now(), await blocksIn(loaded));
         if (isRefusal(outcome)) throw refusal(outcome);
-        const blocked = isBlockedAccept(outcome);
+        const settled = isSettled(outcome) ? outcome : null;
         try {
-          await commit(c, loaded, blocked ? outcome.blockedAccept : outcome, viewer, null);
+          await commit(c, loaded, settled?.settle ?? (outcome as GameWriteSet), viewer, null);
         } catch (error) {
           const lost = error instanceof ApiError && error.code === "STALE_GAME";
           if (!lost || attempt >= REMATCH_ACCEPT_ATTEMPTS) throw error;
           continue;
         }
         // A block found on accept declined the invitation: the `404` of `/accept` (05).
-        if (blocked) throw ApiError.of("NOT_FOUND");
+        if (settled !== null) throw refusal(settled.then);
       }
       return (await gameWithView(rematchId, user)).game;
     }
@@ -821,13 +823,16 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
   app.openapi(startGameRoute, async (c) => {
     const { id } = c.req.valid("param");
     const { expectedVersion } = c.req.valid("json");
-    return c.json(await memberLifecycle(c, id, expectedVersion, start), 200);
+    return c.json(await memberLifecycle(c, id, expectedVersion, start, { blocks: true }), 200);
   });
 
   app.openapi(acceptInvitationRoute, async (c) => {
     const { id } = c.req.valid("param");
     const { expectedVersion } = c.req.valid("json");
-    return c.json(await memberLifecycle(c, id, expectedVersion, accept, onboarded), 200);
+    return c.json(
+      await memberLifecycle(c, id, expectedVersion, accept, { gate: onboarded, blocks: true }),
+      200,
+    );
   });
 
   app.openapi(declineGameRoute, async (c) => {
@@ -881,6 +886,11 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     contextOf,
     applyAs,
     lobbiesPerCall: options.blockLobbies,
+    installed: registry
+      .all()
+      .flatMap((type) =>
+        type.versions.map((gameVersion) => ({ gameType: type.type, gameVersion })),
+      ),
   });
 
   app.openapi(markSeenRoute, async (c) => {

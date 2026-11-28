@@ -4,6 +4,7 @@
  * alone (Q3), the accept and start checks, active games carrying on, and a rematch's inert
  * invitation. The real app on a real SQLite database with the installed games.
  */
+import type { Repositories } from "@your-move/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -19,9 +20,36 @@ import {
 } from "./games-support.js";
 import { DAY, type Harness } from "./test-harness.js";
 
+/**
+ * Injected faults (A23-P-7, S-4): the next `missBlocks` reads of a lobby's blocks find none, as a
+ * read made just before a block landed would; the next `loseRaces` transitions lose their race.
+ */
+const faults = { missBlocks: 0, loseRaces: 0 };
+const faulty = (repos: Repositories): Repositories => ({
+  ...repos,
+  users: {
+    ...repos.users,
+    blocksAmong: (ids) => {
+      if (faults.missBlocks === 0) return repos.users.blocksAmong(ids);
+      faults.missBlocks -= 1;
+      return Promise.resolve([]);
+    },
+  },
+  games: {
+    ...repos.games,
+    applyTransition: (...args) => {
+      if (faults.loseRaces === 0) return repos.games.applyTransition(...args);
+      faults.loseRaces -= 1;
+      return Promise.resolve("stale");
+    },
+  },
+});
+
 let h: Harness;
 beforeEach(() => {
-  h = gameHarness();
+  faults.missBlocks = 0;
+  faults.loseRaces = 0;
+  h = gameHarness({}, { wrapRepos: faulty });
 });
 afterEach(() => {
   h.close();
@@ -107,16 +135,33 @@ describe("POST /api/v1/blocks: who can be blocked (05 §Blocks)", () => {
     expect((await listBlocks(b)).body).toEqual({ blocks: [], nextCursor: null });
   });
 
-  it("blocks anyone who holds or held any row in a game with you, in any state", async () => {
+  it("blocks someone whose row you can attribute, in any state of the game", async () => {
     const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
-    // b declined a's invitation: the row stays, so a can still block b, and b can block a.
+    // b declined a's invitation: b can still block a, who created (and so joined) the game.
     const declined = await createGame(h, a, { gameType: "words", invitees: [{ email: b.email }] });
     expect((await transition(h, b, declined.id, "decline")).status).toBe(204);
-    expect((await block(a, b)).status).toBe(204);
     expect((await block(b, a)).status).toBe(204);
-    // c holds an open invitation from a: a and c can block each other.
+    // c holds an open invitation from a: c can block a.
     await createGame(h, a, { gameType: "words", invitees: [{ email: c.email }] });
     expect((await block(c, a)).status).toBe(204);
+  });
+
+  it("never through a typed address: a probe by id gets the stranger's 404 (A23-S-1, Q3)", async () => {
+    const [x, prober] = [await signUp(h, "Xan"), await signUp(h, "Pro")];
+    // The prober types x's address, open, then declined by x: neither ties it to x's account.
+    const game = await createGame(h, prober, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: x.email }],
+    });
+    const before = rowsOf(game.id);
+    const open = await block(prober, x);
+    expect([open.status, code(open.body)]).toEqual([404, "NOT_FOUND"]);
+    expect(rowsOf(game.id)).toEqual(before);
+    expect((await transition(h, x, game.id, "decline")).status).toBe(204);
+    const after = await block(prober, x);
+    expect([after.status, code(after.body)]).toEqual([404, "NOT_FOUND"]);
+    expect(h.query("SELECT count(*) AS n FROM blocks")[0]?.["n"]).toBe(0);
   });
 
   it("is 404 for a stranger, yourself, an unknown id and an AI account, writing nothing", async () => {
@@ -140,7 +185,7 @@ describe("POST /api/v1/blocks: who can be blocked (05 §Blocks)", () => {
   it("refuses a bad body (400), a cookie without the Origin (403) and too many writes (429)", async () => {
     h.close();
     // Onboarding's PATCH /api/v1/me is a write too.
-    h = gameHarness({ LIMIT_WRITES_USER_MINUTE: "3" });
+    h = gameHarness({ LIMIT_WRITES_USER_MINUTE: "3" }, { wrapRepos: faulty });
     const [a, b] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
     pastOpponents(a, b);
     expect((await call(h, a, "POST", "/api/v1/blocks", { userId: b.id, x: 1 })).status).toBe(400);
@@ -328,7 +373,7 @@ describe("what a new block changes (06 §6.10)", () => {
     expect(rowsOf(game.id).map((row) => row["state"])).toEqual(["joined", "removed", "invited"]);
   });
 
-  it("leaves a typed invitation alone, so the creator never learns whose address it is (Q3)", async () => {
+  it("makes a typed invitation inert: gone for its holder, unchanged for the creator (S-2, Q3)", async () => {
     const [a, b] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
     pastOpponents(a, b);
     const game = await createGame(h, a, {
@@ -336,22 +381,21 @@ describe("what a new block changes (06 §6.10)", () => {
       seats: 3,
       invitees: [{ email: b.email }],
     });
-    const before = { rows: rowsOf(game.id), version: versionOf(game.id) };
+    const seen = async () => (await getGame(h, a, game.id)).game.players;
+    const before = { players: await seen(), version: versionOf(game.id) };
     expect((await block(a, b)).status).toBe(204);
-    expect({ rows: rowsOf(game.id), version: versionOf(game.id) }).toEqual(before);
-    // The accept check keeps them apart: b's accept is declined and answered 404 (05 `/accept`).
-    const accepted = await transition(h, b, game.id, "accept");
-    expect([accepted.status, code(accepted.body)]).toEqual([404, "NOT_FOUND"]);
-    expect(rowsOf(game.id)[1]).toMatchObject({ state: "declined", invite_email: null });
-    // To the creator it is a decline like any other.
-    expect((await getGame(h, a, game.id)).game.players[1]).toMatchObject({
-      state: "declined",
-      displayName: null,
-      userId: null,
-    });
+    // The creator sees the same row, with no version moved: nothing tells whose address it was.
+    expect({ players: await seen(), version: versionOf(game.id) }).toEqual(before);
+    expect(rowsOf(game.id)[1]).toMatchObject({ state: "invited", delivery: "inert" });
+    // For b it is gone, as if removed: not in the list, and the game is a 404.
+    expect((await call(h, b, "GET", `/api/v1/games/${game.id}`)).status).toBe(404);
+    const listed = await call<{ games: { id: string }[] }>(h, b, "GET", "/api/v1/games");
+    expect(listed.body.games.map((row) => row.id)).not.toContain(game.id);
+    const accepted = await transition(h, b, game.id, "accept", 0);
+    expect(accepted.status).toBe(404);
   });
 
-  it("leaves another player's unjoined invitation alone, so a member never learns who it is", async () => {
+  it("makes another player's invitation inert, so a member never learns who it is", async () => {
     const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
     const game = await createGame(h, a, {
       gameType: "example",
@@ -360,12 +404,16 @@ describe("what a new block changes (06 §6.10)", () => {
     });
     await transition(h, b, game.id, "accept");
     pastOpponents(b, c);
-    const before = { rows: rowsOf(game.id), version: versionOf(game.id) };
+    const seen = async () => (await getGame(h, b, game.id)).game.players;
+    const before = { players: await seen(), version: versionOf(game.id) };
     await block(b, c);
-    expect({ rows: rowsOf(game.id), version: versionOf(game.id) }).toEqual(before);
-    const accepted = await transition(h, c, game.id, "accept");
-    expect(accepted.status).toBe(404);
-    expect(rowsOf(game.id).map((row) => row["state"])).toEqual(["joined", "joined", "declined"]);
+    expect({ players: await seen(), version: versionOf(game.id) }).toEqual(before);
+    expect(rowsOf(game.id).map((row) => [row["state"], row["delivery"]])).toEqual([
+      ["joined", "normal"],
+      ["joined", "normal"],
+      ["invited", "inert"],
+    ]);
+    expect((await call(h, c, "GET", `/api/v1/games/${game.id}`)).status).toBe(404);
   });
 
   it("changes nothing in an active game: it carries on, and no pair is written at its end", async () => {
@@ -383,7 +431,7 @@ describe("what a new block changes (06 §6.10)", () => {
 
   it("changes at most the runtime's number of lobbies a call; a repeat changes the rest", async () => {
     h.close();
-    h = gameHarness({}, { blockLobbies: 1 });
+    h = gameHarness({}, { blockLobbies: 1, wrapRepos: faulty });
     const [a, b] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
     const first = await lobbyWith(a, [b], 3);
     h.advance(1);
@@ -417,31 +465,90 @@ describe("the accept and start checks (02 §4, 05 `/accept`)", () => {
     );
   };
 
-  it("removes the later-joined of a blocked pair at Start and starts with the rest", async () => {
+  const states = (gameId: string) =>
+    rowsOf(gameId).map((row) => [row["user_id"], row["state"], row["removed"]]);
+
+  it.each([
+    ["the blocker's own Decline", "c blocks b", "c"],
+    ["the creator-blocker's Remove", "a blocks c", "a"],
+    ["the Decline of the one who blocked the creator", "b blocks a", "b"],
+  ] as const)("writes %s at Start, and starts with the rest (A23-S-3)", async (_, __, who) => {
     const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
     const game = await lobbyWith(a, [b, c], 4);
-    rawBlock(c, b);
+    if (who === "c") rawBlock(c, b);
+    if (who === "a") rawBlock(a, c);
+    if (who === "b") rawBlock(b, a);
     const started = await transition(h, a, game, "start");
     expect(started.status).toBe(200);
     expect(started.body.game.status).toBe("active");
-    expect(rowsOf(game).map((row) => [row["user_id"], row["state"], row["removed"]])).toEqual([
+    expect(states(game)).toEqual(
+      who === "c"
+        ? [
+            [a.id, "playing", 0],
+            [b.id, "playing", 0],
+            [c.id, "declined", 0],
+          ]
+        : who === "a"
+          ? [
+              [a.id, "playing", 0],
+              [b.id, "playing", 0],
+              [c.id, "removed", 1],
+            ]
+          : [
+              [a.id, "playing", 0],
+              [b.id, "declined", 0],
+              [c.id, "playing", 0],
+            ],
+    );
+  });
+
+  it("settles a chain in joining order: A–B then B–C leaves C in", async () => {
+    const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
+    const game = await lobbyWith(a, [b, c], 4);
+    rawBlock(a, b);
+    rawBlock(b, c);
+    expect((await transition(h, a, game, "start")).body.game.status).toBe("active");
+    expect(states(game)).toEqual([
       [a.id, "playing", 0],
-      [b.id, "playing", 0],
-      [c.id, "removed", 1],
+      [b.id, "removed", 1],
+      [c.id, "playing", 0],
     ]);
   });
 
-  it("refuses Start with NOT_ENOUGH_PLAYERS, writing nothing, when too few would remain", async () => {
+  it("writes the effect and answers NOT_ENOUGH_PLAYERS when too few would remain", async () => {
     const [a, b] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
     const game = await lobbyWith(a, [b], 3);
     rawBlock(a, b);
-    const before = { rows: rowsOf(game), version: versionOf(game) };
+    const before = versionOf(game);
     const started = await transition(h, a, game, "start");
     expect([started.status, code(started.body)]).toEqual([409, "NOT_ENOUGH_PLAYERS"]);
-    expect({ rows: rowsOf(game), version: versionOf(game) }).toEqual(before);
+    expect(states(game)).toEqual([
+      [a.id, "joined", 0],
+      [b.id, "removed", 1],
+    ]);
+    expect(versionOf(game)).toBe(Number(before) + 1);
+    expect(statusOf(game)).toBe("lobby");
   });
 
-  it("applies the re-check to an automatic start on the last accept", async () => {
+  it("ends a lobby a Decline at Start leaves unable to fill, as a decline would", async () => {
+    const [c, d] = [await signUp(h, "Cy"), await signUp(h, "Di")];
+    const lobby = await createGame(h, c, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: d.email }],
+    });
+    await transition(h, d, lobby.id, "accept");
+    rawBlock(d, c);
+    const started = await transition(h, c, lobby.id, "start");
+    expect([started.status, code(started.body)]).toEqual([409, "NOT_ENOUGH_PLAYERS"]);
+    expect(statusOf(lobby.id)).toBe("declined");
+    expect(states(lobby.id)).toEqual([
+      [c.id, "joined", 0],
+      [d.id, "declined", 0],
+    ]);
+  });
+
+  it("writes the effect on an accept, and the automatic start then doesn't happen", async () => {
     const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
     const game = await createGame(h, a, {
       gameType: "example",
@@ -451,11 +558,12 @@ describe("the accept and start checks (02 §4, 05 `/accept`)", () => {
     await transition(h, b, game.id, "accept");
     rawBlock(a, b);
     const accepted = await transition(h, c, game.id, "accept");
-    expect(accepted.body.game.status).toBe("active");
-    expect(rowsOf(game.id).map((row) => row["state"])).toEqual(["playing", "removed", "playing"]);
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.game.status).toBe("lobby");
+    expect(rowsOf(game.id).map((row) => row["state"])).toEqual(["joined", "removed", "joined"]);
   });
 
-  it("declines an accept with a block against any joined member and answers 404", async () => {
+  it("declines an accept with a block against any joined member and answers 404 (backstop)", async () => {
     const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
     const game = await createGame(h, a, {
       gameType: "example",
@@ -468,10 +576,84 @@ describe("the accept and start checks (02 §4, 05 `/accept`)", () => {
     expect([accepted.status, code(accepted.body)]).toEqual([404, "NOT_FOUND"]);
     expect(rowsOf(game.id).map((row) => row["state"])).toEqual(["joined", "joined", "declined"]);
   });
+
+  it("holds back an accept that raced a block: nothing written, and the retry is refused (A23-S-4)", async () => {
+    const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
+    const game = await createGame(h, a, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: b.email }, { email: c.email }],
+    });
+    await transition(h, b, game.id, "accept");
+    rawBlock(b, c);
+    const before = { rows: rowsOf(game.id), version: versionOf(game.id) };
+    // The accept's own read of blocks misses the block, as if it landed just after: the guard in
+    // the accept's batch still holds it back.
+    faults.missBlocks = 1;
+    const raced = await transition(h, c, game.id, "accept");
+    expect([raced.status, code(raced.body)]).toEqual([409, "STALE_GAME"]);
+    expect({ rows: rowsOf(game.id), version: versionOf(game.id) }).toEqual(before);
+    const again = await transition(h, c, game.id, "accept");
+    expect([again.status, code(again.body)]).toEqual([404, "NOT_FOUND"]);
+  });
+
+  it("holds back a link join that raced a block, and the join's retry refuses it (A23-S-4)", async () => {
+    const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
+    const game = await lobbyWith(a, [b], 3);
+    const link = await call<{ url: string }>(h, a, "POST", `/api/v1/games/${game}/join-link`, {});
+    const token = new URL(link.body.url).hash.slice(1);
+    rawBlock(b, c);
+    const before = rowsOf(game);
+    // The join's first read misses the block; its batch's guard makes it stale, and the retry's
+    // read finds the block: the same 404 as any refusal.
+    faults.missBlocks = 1;
+    const joined = await call(h, c, "POST", "/api/v1/join", { token });
+    expect([joined.status, code(joined.body)]).toEqual([404, "NOT_FOUND"]);
+    expect(rowsOf(game)).toEqual(before);
+  });
 });
 
-describe("a rematch's inert invitation (Q29, 06 §6.11)", () => {
-  it("shows its holder no place in the rematch, while the others see them invited", async () => {
+describe("a block's leftovers converge (A23-S-3)", () => {
+  it("a lobby past the per-call cap gets the blocker's own Decline at its Start, never the blocked's removal", async () => {
+    h.close();
+    h = gameHarness({}, { blockLobbies: 1, wrapRepos: faulty });
+    const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
+    const first = await lobbyWith(a, [b, c], 4);
+    h.advance(1);
+    const second = await lobbyWith(a, [b, c], 4);
+    await block(b, c);
+    expect(rowsOf(first).map((row) => row["state"])).toEqual(["joined", "declined", "joined"]);
+    expect(rowsOf(second).map((row) => row["state"])).toEqual(["joined", "joined", "joined"]);
+    expect((await transition(h, a, second, "start")).body.game.status).toBe("active");
+    expect(rowsOf(second).map((row) => [row["user_id"], row["state"], row["removed"]])).toEqual([
+      [a.id, "playing", 0],
+      [b.id, "declined", 0],
+      [c.id, "playing", 0],
+    ]);
+  });
+
+  it("a lobby the blocker owns gets their Remove at an accept", async () => {
+    h.close();
+    h = gameHarness({}, { blockLobbies: 1, wrapRepos: faulty });
+    const [b, c, d] = [await signUp(h, "Bo"), await signUp(h, "Cy"), await signUp(h, "Di")];
+    const first = await lobbyWith(b, [c], 3);
+    h.advance(1);
+    const second = await createGame(h, b, {
+      gameType: "example",
+      seats: 4,
+      invitees: [{ email: c.email }, { email: d.email }],
+    });
+    await transition(h, c, second.id, "accept");
+    await block(b, c);
+    expect(rowsOf(first)[1]?.["state"]).toBe("removed");
+    expect(rowsOf(second.id)[1]?.["state"]).toBe("joined");
+    expect((await transition(h, d, second.id, "accept")).status).toBe(200);
+    expect(rowsOf(second.id).map((row) => row["state"])).toEqual(["joined", "removed", "joined"]);
+  });
+});
+
+describe("a block in a rematch's accept (05 `/rematch`, A23-P-7)", () => {
+  it("declines the invitation and answers 404 when a block with a joined member is found", async () => {
     const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
     const game = await createGame(h, a, {
       gameType: "example",
@@ -481,8 +663,7 @@ describe("a rematch's inert invitation (Q29, 06 §6.11)", () => {
     for (const other of [b, c]) await transition(h, other, game.id, "accept");
     await playExampleToEnd(h, game.id, [a, b, c]);
     h.advance(DAY);
-    expect((await block(b, c)).status).toBe(204);
-    const made = await call<{ game: { id: string; players: { state: string }[] } }>(
+    const made = await call<{ game: { id: string } }>(
       h,
       a,
       "POST",
@@ -490,19 +671,40 @@ describe("a rematch's inert invitation (Q29, 06 §6.11)", () => {
       {},
     );
     expect(made.status).toBe(201);
-    const later = rowsOf(made.body.game.id).find((row) => row["delivery"] === "inert");
-    expect(later).toBeDefined();
-    const holder = later?.["user_id"] === b.id ? b : c;
-    const other = holder === b ? c : b;
-    expect((await getGame(h, holder, game.id)).game.rematch).toEqual({
-      gameId: made.body.game.id,
-      you: "none",
-    });
-    expect((await getGame(h, other, game.id)).game.rematch?.you).toBe("invited");
-    expect(made.body.game.players.map((player) => player.state)).toEqual([
-      "joined",
-      "invited",
-      "invited",
-    ]);
+    // A block racing the invitation's delivery: b's invitation is still normal.
+    h.exec(
+      "INSERT INTO blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)",
+      a.id,
+      b.id,
+      now(),
+    );
+    const answer = await call(h, b, "POST", `/api/v1/games/${game.id}/rematch`, {});
+    expect([answer.status, code(answer.body)]).toEqual([404, "NOT_FOUND"]);
+    expect(rowsOf(made.body.game.id).find((row) => row["user_id"] === b.id)?.["state"]).toBe(
+      "declined",
+    );
+  });
+});
+
+describe("a block's lobby changes that keep losing races (A23-P-7, P-16)", () => {
+  it("retries a lost race and writes the effect", async () => {
+    const [a, b] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
+    const game = await lobbyWith(a, [b], 3);
+    faults.loseRaces = 2;
+    expect((await block(a, b)).status).toBe(204);
+    expect(rowsOf(game)[1]?.["state"]).toBe("removed");
+  });
+
+  it("stops after its attempts, logs it, and still answers 204; the Start then writes it", async () => {
+    const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
+    const game = await lobbyWith(a, [b, c], 4);
+    faults.loseRaces = 4;
+    expect((await block(a, b)).status).toBe(204);
+    expect(rowsOf(game)[1]?.["state"]).toBe("joined");
+    expect(h.logs.some((line) => line["msg"] === "block's lobby change kept losing races")).toBe(
+      true,
+    );
+    expect((await transition(h, a, game, "start")).body.game.status).toBe("active");
+    expect(rowsOf(game)[1]?.["state"]).toBe("removed");
   });
 });

@@ -4,10 +4,8 @@
  */
 import { createRoute, z } from "@hono/zod-openapi";
 
-import { ErrorResponseSchema } from "./errors.js";
+import { errors } from "./error-responses.js";
 import { API_V1 } from "./routes.js";
-
-const errorContent = { "application/json": { schema: ErrorResponseSchema } } as const;
 
 /** Routes that need the session cookie (the `sessionCookie` scheme the server registers). */
 const SESSION = [{ sessionCookie: [] }];
@@ -20,18 +18,6 @@ export const SESSION_COOKIE_SCHEME = {
   description:
     "The session cookie set by `POST /api/v1/auth/otp/verify` (`sid` in local-dev mode, 06 §4).",
 } as const;
-
-/** Error responses by status, each with the shared error body (05 §Errors). */
-function errors<const T extends Readonly<Record<number, string>>>(
-  descriptions: T,
-): { [K in keyof T]: { description: string; content: typeof errorContent } } {
-  return Object.fromEntries(
-    Object.entries(descriptions).map(([status, description]) => [
-      status,
-      { description, content: errorContent },
-    ]),
-  ) as { [K in keyof T]: { description: string; content: typeof errorContent } };
-}
 
 const REQUEST_ERRORS = {
   400: "Invalid request (`BAD_REQUEST`).",

@@ -118,7 +118,7 @@ const removeSeat = async (creator: Player, gameId: string, playerId: string) => 
   });
 };
 
-/** `blocker` blocks `blocked` (04 `blocks`; nothing writes one through the API before M4). */
+/** `blocker` blocks `blocked` (04 `blocks`), written directly: none of a real block's other effects. */
 function block(blocker: Player, blocked: Player): void {
   h.exec(
     "INSERT INTO blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)",

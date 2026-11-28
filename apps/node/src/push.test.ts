@@ -494,6 +494,32 @@ describe("the push to a past opponent added to a new game (alpha A12, 06 §6.2)"
   });
 });
 
+describe("blocks send no push (06 §6.10, 02 §4 Lobby notifications, A23-P-7)", () => {
+  it("removes and declines in lobbies, and makes an invitation inert, all without a push", async () => {
+    const [ada, bo, cy] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
+    const phones = [await device(), await device(), await device()];
+    await subscribe(ada, phones[0] ?? (await device()));
+    await subscribe(bo, phones[1] ?? (await device()));
+    await subscribe(cy, phones[2] ?? (await device()));
+    const lobby = await createGame(h, ada, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: bo.email }, { email: cy.email }],
+    });
+    const accepted = await call(h, bo, "POST", `/api/v1/games/${lobby.id}/accept`, {
+      expectedVersion: lobby.version,
+    });
+    expect(accepted.status).toBe(200);
+    await h.drain();
+    sent.length = 0;
+    // Ada removes Bo by blocking him; Cy's invitation is declined by her own block of Ada.
+    expect((await call(h, ada, "POST", "/api/v1/blocks", { userId: bo.id })).status).toBe(204);
+    expect((await call(h, cy, "POST", "/api/v1/blocks", { userId: ada.id })).status).toBe(204);
+    await h.drain();
+    expect(sent).toEqual([]);
+  });
+});
+
 describe("the auto-join push when the start at creation goes wrong (A12-P-1, P-11, S-4)", () => {
   /** A harness whose repositories run `before` ahead of the start at creation's transition. */
   function harnessAroundStart(before: () => Promise<void>) {

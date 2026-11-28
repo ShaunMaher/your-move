@@ -119,14 +119,20 @@ export interface UserRepo {
   blocksAmong(userIds: readonly string[]): Promise<BlockPair[]>;
   /**
    * Whether `viewerId` may block `otherId` (05 §Blocks): another human account that is a past
-   * opponent of the viewer (04 `past_opponents`), or holds or held any `game_players` row, in any
-   * state, in a game where the viewer also has a row, or whom the viewer already blocks (so a
-   * repeat is the same answer). Never the viewer and never an AI account.
+   * opponent of the viewer (04 `past_opponents`) or already blocked by them (a repeat is the same
+   * answer), or that shares a game with the viewer through a row the viewer can attribute (A23-S-1):
+   * one that has been joined, or, when the viewer created the game, an open pick (`invited` with
+   * `invite_email` NULL). The viewer's own row there must have been visible to them (not an `inert`
+   * invitation they never saw). A typed address's row, open or not, never counts: otherwise the
+   * answer would tie an address to an account (Q3). Never the viewer and never an AI account.
    */
   canBlock(viewerId: string, otherId: string): Promise<boolean>;
   /**
-   * Records `blockerId`'s block of `blockedId` (an existing one keeps its `created_at`) and deletes
-   * the pair's `past_opponents` rows both ways, in one atomic batch (04 invariant 6).
+   * Records `blockerId`'s block of `blockedId` (an existing one keeps its `created_at`), deletes
+   * the pair's `past_opponents` rows both ways (04 invariant 6), and makes `inert` every open
+   * invitation (`invited`, `normal` or `hidden`) `blockedId` holds in a `lobby` where `blockerId`
+   * is a member (06 §6.10, A23-S-2), in one atomic batch. That last is a row-level update like a
+   * claim: no game's version moves, and the creator and other members see the row as before.
    */
   block(blockerId: string, blockedId: string, createdAt: number): Promise<void>;
   /** Deletes `blockerId`'s block of `blockedId`; true if there was one. Nothing else changes. */
@@ -428,6 +434,12 @@ export interface GameWriteSet {
    * revoked, rotated or expired meanwhile makes the transition `stale`, so it is judged again.
    */
   readonly requireJoinLink?: { readonly tokenHash: string; readonly now: number };
+  /**
+   * A precondition of the transition itself (A23-S-4): it happens only while no block, in either
+   * direction, lies between this user and any `joined` member of the game. An accept or a link
+   * join racing a new block makes the transition `stale`, so it is judged again.
+   */
+  readonly requireUnblocked?: { readonly userId: string };
 }
 
 /** `stale`: another transition changed the game since `expectedVersion`; nothing was written. */
@@ -582,8 +594,12 @@ export interface GameRepo {
   blockableLobbies(
     viewerId: string,
     otherId: string,
-    createdAfter: number,
-    limit: number,
+    window: {
+      readonly createdAfter: number;
+      /** Only games of these type and version pairs: an orphaned one takes no transition (02 §7.3). */
+      readonly installed: readonly InstalledVersion[];
+      readonly limit: number;
+    },
   ): Promise<string[]>;
   /** How many `lobby`/`active` games the user created (05 `TOO_MANY_GAMES`). */
   countLiveCreated(userId: string): Promise<number>;
@@ -764,7 +780,7 @@ export interface NudgeWindow {
 }
 
 /** A game type and one rules version of it that this build installs (02 §7.3). */
-interface InstalledVersion {
+export interface InstalledVersion {
   readonly gameType: string;
   readonly gameVersion: number;
 }

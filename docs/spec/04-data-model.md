@@ -101,7 +101,7 @@ At most 3 *live* challenges per (email, purpose); issuing a 4th burns the oldest
 | state | TEXT | `invited` · `joined` · `declined` · `left` · `removed` (lobby) · `playing` · `out` (seated, active/finished) · `dropped` (unfilled invitation at start); `declined`/`left`/`removed`/`dropped` rows stay after start with `seat` NULL (02 §4) |
 | out_reason | TEXT NULL | `eliminated` · `resigned` · `timed_out` · `declined` (out before a first action; never ranked, 02 §4) · `cancelled` (operator cancel of an active game, 02 §4) |
 | joined_via | TEXT NULL | `creator` · `added` (auto-joined past opponent) · `invitation` (accepted — including an invited user who joins through the link, 02 §4) · `email_invite` · `join_link` |
-| delivery | TEXT NOT NULL DEFAULT 'normal' | for `invited` rows: `normal` · `hidden` (over the target's inbound cap, 06 §6.7: shown only in their collapsed *Hidden invitations*, no notification) · `inert` (blocked pair, a typed address that resolves to a user already added in the same request, or an email-invite seat whose address took the under-age exit: never delivered, never claimable, never accepted, `user_id` NULL for the latter two, 06 §6.1, §5). The creator sees all three the same way (Q3) |
+| delivery | TEXT NOT NULL DEFAULT 'normal' | for `invited` rows: `normal` · `hidden` (over the target's inbound cap, 06 §6.7: shown only in their collapsed *Hidden invitations*, no notification) · `inert` (blocked pair, a typed address that resolves to a user already added in the same request, an email-invite seat whose address took the under-age exit, or an open invitation whose holder was later blocked by a member of the lobby: never delivered, never claimable, never accepted, `user_id` NULL for the second and third, 06 §6.1, §5, §6.10) The creator sees all three the same way (Q3) |
 | removed_at | INTEGER NULL | when the creator removed this seat. A removed row never comes back through any join link, rotated or new (06 §6.8) |
 | joined_at | INTEGER NULL | for `seat_order = join`, and "who joined later" in the start-time block check (02 §4). A row with `joined_at` NULL never exposes a display name or user id in any response (05 §Common types) |
 | to_act | INTEGER NOT NULL DEFAULT 0 | 1 if this seat is in `toAct` — denormalised for "your turn" queries; updated in the same transition |
@@ -211,9 +211,11 @@ to sign in).
 ### `blocks`
 | blocker_id | blocked_id | created_at |  PK(blocker_id, blocked_id), both FK → users ON DELETE CASCADE.
 
-Written and deleted only by their blocker, through 05 §Blocks (alpha A23); inserting one deletes
-the pair's `past_opponents` rows both ways in the same batch (invariant 6). Never for an AI
-account, whose owner's blocks apply (02 §9.2).
+Written by their blocker through 05 §Blocks (alpha A23) and deleted by them there, or with either
+account (the foreign keys cascade, §Account deletion); inserting one deletes the pair's
+`past_opponents` rows both ways and makes the person blocked's open invitations in the blocker's
+lobbies `inert`, in the same batch (invariant 6, 06 §6.10). Never for an AI account, whose owner's
+blocks apply (02 §9.2).
 
 ### `push_subscriptions`
 | Column | Type | Notes |
