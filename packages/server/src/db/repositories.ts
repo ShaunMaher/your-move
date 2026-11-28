@@ -125,10 +125,11 @@ export interface UserRepo {
    */
   hasPastOpponent(userId: string): Promise<boolean>;
   /**
-   * Deletes an account that holds no game rows (04 §Account deletion steps 1, 3, 4 and 5): its
-   * sessions and API tokens, its OTP challenges, blocks and past-opponent rows, the
-   * `account_deleted` event (written while the row still exists), then the user row, whose
-   * foreign keys null the remaining references. One atomic batch, so it is safe to repeat.
+   * Deletes an account (04 §Account deletion steps 1, 3, 4 and 5): its sessions and API tokens,
+   * its OTP challenges, blocks and past-opponent rows, the join links of the lobbies it created
+   * (alpha A18: the lobby itself is cancelled by step 2, M4), the `account_deleted` event
+   * (written while the row still exists), then the user row, whose foreign keys null the
+   * remaining references. One atomic batch, so it is safe to repeat.
    */
   deleteAccount(user: { id: string; email: NormalisedEmail }, event: NewAuthEvent): Promise<void>;
 }
@@ -442,13 +443,13 @@ export interface GameRepo {
    * writes anything only while `finishedId` is a `finished` game whose link is NULL or names a
    * game that ended unplayed ({@link UNPLAYED}), which it replaces. True if it did; false if it wrote nothing, so of several calls racing for one
    * finished game exactly one creates a game and the others leave no row behind. Not a
-   * transition: the finished game's `version` is unchanged.
+   * transition: the finished game's `version` is unchanged. A rematch never has a join link (05).
    */
   createRematch(
     finishedId: string,
     game: NewGame,
     players: readonly NewGamePlayer[],
-    extras?: NewGameExtras,
+    extras?: Omit<NewGameExtras, "joinLink">,
   ): Promise<boolean>;
   /** The game row, secret columns included (the core decides what leaves the server). */
   get(id: string): Promise<GameRecord | null>;
@@ -599,8 +600,11 @@ export interface JoinLinkRepo {
   revoke(gameId: string): Promise<void>;
   /** The link whose token has this SHA-256, live or expired; null if there is none. */
   find(tokenHash: string): Promise<FoundJoinLink | null>;
-  /** Deletes every link whose `expires_at` is at or before `now` (03 §8); returns how many. */
-  deleteExpired(now: number): Promise<number>;
+  /**
+   * Deletes up to `limit` links whose `expires_at` is at or before `now`, those expired longest
+   * first (03 §8); returns how many.
+   */
+  deleteExpired(now: number, limit: number): Promise<number>;
 }
 
 /** A seat whose user may be sent an "It's your turn" email (03 §7). */

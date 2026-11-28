@@ -26,6 +26,8 @@ export interface SweepOptions {
   readonly claimsPerRun: number;
   /** Overdue lobbies one run expires at most (03 §8); bounded the same way (09 §3). */
   readonly lobbiesPerRun: number;
+  /** Expired join links one run deletes at most (03 §8): one statement however many (09 §3). */
+  readonly joinLinksPerRun: number;
 }
 
 /** What one run did; a step that failed reports null. */
@@ -73,7 +75,7 @@ export function createSweep(options: SweepOptions): Sweep {
       claimPendingInvites(platform.repos, platform.now().getTime(), options.claimsPerRun),
     );
     const joinLinks = await step("joinLinks", () =>
-      platform.repos.joinLinks.deleteExpired(platform.now().getTime()),
+      platform.repos.joinLinks.deleteExpired(platform.now().getTime(), options.joinLinksPerRun),
     );
     const nudges = await step("nudges", () =>
       sendDueNudges({ platform, registry, keys, perRun: options.nudgesPerRun }),

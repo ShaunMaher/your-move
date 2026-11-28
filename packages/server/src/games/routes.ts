@@ -15,12 +15,9 @@ import {
   cancelGameRoute,
   catalogRoute,
   createGameRoute,
-  createJoinLinkRoute,
   declineGameRoute,
   getGameRoute,
   historyRoute,
-  joinLookupRoute,
-  joinRoute,
   listGamesRoute,
   markSeenRoute,
   previewRoute,
@@ -28,15 +25,13 @@ import {
   rematchRoute,
   removeSeatRoute,
   resignGameRoute,
-  revokeJoinLinkRoute,
   rulesRoute,
   startGameRoute,
   submitActionRoute,
 } from "@your-move/shared";
 import type { Context } from "hono";
 
-import { clientBucketsOf } from "../auth/client-buckets.js";
-import { checkLimits, type LimitCheck, type LimitName } from "../auth/limits.js";
+import { checkLimits, type LimitName } from "../auth/limits.js";
 import { requireSession } from "../auth/require-session.js";
 import type { Subkeys } from "../crypto/subkeys.js";
 import type { GamePlayerRecord, GameWriteSet, LoadedGame, UserRecord } from "../db/repositories.js";
@@ -47,14 +42,8 @@ import { sendAddedPushes, sendTransitionPushes } from "../push/notify.js";
 import { createGame } from "./create.js";
 import { expireIfOverdue, expireOverdueLobbies, loadCurrent } from "./expiry.js";
 import { sendInviteMail } from "./invite-mail.js";
-import {
-  hashJoinToken,
-  isJoinToken,
-  joinUrl,
-  linkTimes,
-  newJoinToken,
-  previewOf,
-} from "./join-links.js";
+import { joinUrl } from "./join-links.js";
+import { registerJoinRoutes } from "./join-routes.js";
 import {
   accept,
   cancel,
@@ -64,8 +53,6 @@ import {
   lobbyExpiresAt,
   isModuleOutcome,
   isRefusal,
-  joinVerdict,
-  joinWrites,
   moduleTransition,
   type ModuleOutcome,
   type Refusal,
@@ -82,7 +69,6 @@ import {
   plainText,
   type PresentInput,
   rematchOf,
-  resourcesOf,
   shownUserIds,
   summaryOf,
   turnOf,
@@ -106,8 +92,6 @@ const ENDED_LISTED_MS = 7 * DAY;
 const REMATCH_ACCEPT_ATTEMPTS = 3;
 /** Creating a rematch whose guarded insert lost, with no live rematch to show, is tried twice. */
 const REMATCH_CREATE_ATTEMPTS = 2;
-/** A join is tried once and retried up to 3 times when another transition wins (03 §5.2). */
-const JOIN_ATTEMPTS = 4;
 
 export interface GameRouteOptions {
   readonly platform: Platform;
@@ -167,10 +151,6 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     recentPlayersRoute,
     rematchRoute,
     removeSeatRoute,
-    createJoinLinkRoute,
-    revokeJoinLinkRoute,
-    joinLookupRoute,
-    joinRoute,
   ]) {
     // Registered for the method only, so the public rules route under /games/types is unaffected.
     app.on(route.method.toUpperCase(), honoPath(route.path), session);
@@ -657,7 +637,10 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
                 byYou: member.seat !== null && last.seat === member.seat,
               },
         lastActionAt: game.lastActionAt,
-        unread: member.delivery !== "hidden" && game.version > member.lastSeenVersion,
+        // Only an open hidden invitation never badges; once accepted, the game is like any other.
+        unread:
+          !(member.state === "invited" && member.delivery === "hidden") &&
+          game.version > member.lastSeenVersion,
         version: game.version,
       };
     });
@@ -790,147 +773,16 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     );
   });
 
-  // Join links (06 §6.8, 05 §Join links, alpha A18) -----------------------------------------------
-
-  /** The game's creator, in the game; anyone else in it is `403`, anyone outside it `404`. */
-  const loadAsCreator = async (gameId: string, user: UserRecord) => {
-    const member = await loadMember(gameId, user);
-    if (member.viewer.joinedVia !== "creator") throw ApiError.of("NOT_ALLOWED");
-    return member;
-  };
-
-  app.openapi(createJoinLinkRoute, async (c) => {
-    const user = userOf(c);
-    await limit(user, "WRITES_USER_MINUTE");
-    const { id } = c.req.valid("param");
-    const { loaded } = await loadAsCreator(id, user);
-    const at = now();
-    if (loaded.game.status !== "lobby" || at >= lobbyExpiresAt(loaded.game)) {
-      throw ApiError.of("WRONG_STATUS");
-    }
-    await limit(user, "JOIN_LINKS_CREATED_USER_DAY");
-    const token = newJoinToken();
-    const times = linkTimes(loaded.game, at);
-    // Only while still a lobby: a start or another ending meanwhile leaves no link behind.
-    const written = await repos.joinLinks.put(id, {
-      tokenHash: await hashJoinToken(token),
-      ...times,
-    });
-    if (!written) throw ApiError.of("WRONG_STATUS");
-    return c.json({ url: joinUrl(config.publicUrl, token), expiresAt: times.expiresAt }, 200);
-  });
-
-  app.openapi(revokeJoinLinkRoute, async (c) => {
-    const user = userOf(c);
-    await limit(user, "WRITES_USER_MINUTE");
-    const { id } = c.req.valid("param");
-    await loadAsCreator(id, user);
-    // Whatever the game's status: a lobby that ended or started has no link left anyway.
-    await repos.joinLinks.revoke(id);
-    return c.body(null, 204);
-  });
-
-  /**
-   * The joiner's own limits (08 §4), counted for every lookup and join whatever it answers, before
-   * the token is looked at: per user and per IP bucket, never the creator's. A request without a
-   * client address is `400`, as on every route with a per-IP limit (08 §4.1).
-   */
-  const joinLimits = async (c: Context<AppEnv>, user: UserRecord, write: boolean) => {
-    const buckets = await clientBucketsOf(platform, c, await options.keys());
-    if (buckets === null) throw ApiError.of("BAD_REQUEST");
-    const checks: LimitCheck[] = [
-      { name: "JOIN_LINK_USER_HOUR", key: user.id, amount: 1 },
-      ...buckets.ipBuckets.map((bucket): LimitCheck => ({
-        name: "JOIN_LINK_IP_HOUR",
-        key: bucket.hash,
-        amount: 1,
-        multiplier: bucket.multiplier,
-      })),
-      ...(write ? [{ name: "WRITES_USER_MINUTE" as const, key: user.id, amount: 1 }] : []),
-    ];
-    const results = await checkLimits(repos, config, now(), checks);
-    if (results.some((result) => result.exceeded)) throw ApiError.of("RATE_LIMITED");
-  };
-
-  /**
-   * What the token offers the user now (06 §6.8): the link, the game as it stands and the verdict.
-   * The same reads for every live link whatever the verdict turns out to be, the block check
-   * included (one placeholder per row without a user), so the work never says which rule refused
-   * (Q3). Anything but a live link's token is the same `404`.
-   */
-  const resolveJoin = async (token: string, user: UserRecord) => {
-    if (!isJoinToken(token)) throw ApiError.of("NOT_FOUND");
-    const tokenHash = await hashJoinToken(token);
-    const link = await repos.joinLinks.find(tokenHash);
-    if (link === null) throw ApiError.of("NOT_FOUND");
-    const at = now();
-    const loaded = await loadCurrent(repos, link.gameId, user.id, at);
-    if (loaded === null) throw ApiError.of("NOT_FOUND");
-    const pairs = await repos.users.blocksAmong([
-      user.id,
-      ...loaded.players.map((row) => row.userId ?? ""),
-    ]);
-    const blocked = pairs.some((pair) => pair.blockerId === user.id || pair.blockedId === user.id);
-    const verdict = joinVerdict(loaded.game, loaded.players, link, {
-      userId: user.id,
-      blocked,
-      now: at,
-    });
-    return { link, tokenHash, loaded, verdict, at };
-  };
-
-  app.openapi(joinLookupRoute, async (c) => {
-    const user = userOf(c);
-    onboarded(user);
-    await joinLimits(c, user, false);
-    const { link, loaded, verdict } = await resolveJoin(c.req.valid("json").token, user);
-    if (verdict.kind === "refused") throw ApiError.of("NOT_FOUND");
-    const joinedIds = loaded.players.flatMap((row) =>
-      row.state === "joined" && row.userId !== null ? [row.userId] : [],
-    );
-    const [gameResources, users] = await Promise.all([
-      repos.games.resources(loaded.game.id),
-      repos.users.findByIds(joinedIds),
-    ]);
-    const game = previewOf({
-      game: loaded.game,
-      players: loaded.players,
-      users: new Map(users.map((found) => [found.id, found])),
-      resources: resourcesOf({ resources: gameResources, describeResource }),
-      link,
-    });
-    return c.json({ game }, 200);
-  });
-
-  app.openapi(joinRoute, async (c) => {
-    const user = userOf(c);
-    onboarded(user);
-    await joinLimits(c, user, true);
-    const { token } = c.req.valid("json");
-    // A server-started transition: a lost race reloads and judges again (03 §5.2), so a seat
-    // that filled meanwhile is the same `404` as a full game.
-    for (let attempt = 1; ; attempt++) {
-      const { loaded, verdict, at, tokenHash } = await resolveJoin(token, user);
-      if (verdict.kind === "refused") throw ApiError.of("NOT_FOUND");
-      if (verdict.kind === "member") throw ApiError.of("ALREADY_JOINED");
-      // An orphaned game takes no one new: `409 GAME_UNAVAILABLE`, as every transition (02 §7.3).
-      contextOf(loaded);
-      const writes = {
-        ...joinWrites(loaded.game, verdict, {
-          userId: user.id,
-          newRowId: crypto.randomUUID(),
-          now: at,
-        }),
-        // Only through the link as it was judged: one revoked, rotated or expired meanwhile makes
-        // the join stale, and the retry finds the link gone (T24).
-        requireJoinLink: { tokenHash, now: at },
-      };
-      // No push: joins reach the other members as realtime invalidations only (02 §4).
-      const result = await repos.games.applyTransition(loaded.game.id, loaded.game.version, writes);
-      if (result === "ok")
-        return c.json({ game: (await gameWithView(loaded.game.id, user)).game }, 200);
-      if (attempt >= JOIN_ATTEMPTS) throw ApiError.of("STALE_GAME");
-    }
+  registerJoinRoutes(app, {
+    platform,
+    keys: options.keys,
+    userOf,
+    onboarded,
+    limit,
+    loadMember,
+    contextOf,
+    gameWithView,
+    describeResource,
   });
 
   app.openapi(markSeenRoute, async (c) => {

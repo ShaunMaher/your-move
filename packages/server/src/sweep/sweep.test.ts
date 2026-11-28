@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { testPlatform } from "../test-support.js";
 import { createSweep } from "./sweep.js";
 
-const PER_RUN = { nudgesPerRun: 10, claimsPerRun: 10, lobbiesPerRun: 10 };
+const PER_RUN = { nudgesPerRun: 10, claimsPerRun: 10, lobbiesPerRun: 10, joinLinksPerRun: 10 };
 
 describe("sweep", () => {
   it("logs each failing step by class, reports it as null, runs the rest and never rejects", async () => {

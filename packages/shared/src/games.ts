@@ -704,7 +704,7 @@ export const createJoinLinkRoute = createRoute({
   tags: ["Games"],
   summary: "Create or rotate the lobby's join link",
   description:
-    "Creator only, in the lobby. Replaces any link the game has (the old one stops working, and people removed while it was live may use the new one). Anyone signed in with the link sees the game type, options and the joined players' names, and can take an open seat; the game then waits for your Start. Changes no game state, so the game's `version` stays the same. Takes no input: an empty body or `{}`.",
+    "Creator only, in the lobby. Replaces any link the game has (the old one stops working; nobody removed from the lobby, or who declined, comes back through any link). Anyone signed in with the link sees the game type, options and the joined players' names, and can take an open seat; the game then waits for your Start. Changes no game state, so the game's `version` stays the same. Takes no input: an empty body or `{}`.",
   request: { params: GameId, body: { required: false, content: json(EmptyObjectSchema) } },
   responses: {
     200: { description: "The new link.", content: json(JoinLinkSchema) },
@@ -740,16 +740,19 @@ export const revokeJoinLinkRoute = createRoute({
 
 export const JoinTokenBodySchema = z
   .object({
-    token: z.string().max(64).openapi({
-      description:
-        "The join link's fragment, as given. Any value that isn't a live link's token is the same `404`.",
-    }),
+    token: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{22}$/u)
+      .openapi({
+        description:
+          "The join link's fragment, as given: 22 base64url characters (anything else is `400 BAD_REQUEST`). A well-formed token that isn't a live link's is the same `404`.",
+      }),
   })
   .strict()
   .openapi("JoinTokenRequest");
 
 const JOIN_404 =
-  "The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or were removed while this link was live (`NOT_FOUND`, the same in every case).";
+  "The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or the creator removed you (`NOT_FOUND`, the same in every case).";
 
 export const JoinPreviewSchema = z
   .object({
@@ -774,6 +777,9 @@ export const JoinPreviewSchema = z
         ),
         openSeats: z.number().int().min(0),
         expiresAt: z.number().int().openapi({ description: "When the link stops working." }),
+        youAreIn: z.literal(true).optional().openapi({
+          description: "Present when you've already joined the game: open it instead of joining.",
+        }),
       })
       .strict()
       .openapi({

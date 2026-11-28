@@ -18,6 +18,9 @@ export const NODE_CLAIMS_PER_RUN = 100;
 /** Overdue lobbies one Node sweep run expires at most (03 §8, alpha A17). */
 export const NODE_LOBBIES_PER_RUN = 100;
 
+/** Expired join links one Node sweep run deletes at most (03 §8, alpha A18). */
+export const NODE_JOIN_LINKS_PER_RUN = 1000;
+
 export interface Sweeper {
   /** Stops scheduling runs and settles once a run in progress has finished. */
   stop(): Promise<void>;

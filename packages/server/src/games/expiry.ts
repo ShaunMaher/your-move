@@ -7,11 +7,9 @@
  * involved comes back. Expiry is a transition like any other (03 §5.2).
  */
 import type { LoadedGame, Repositories } from "../db/repositories.js";
-import { expire, LOBBY_LIFETIME_MS } from "./lifecycle.js";
+import { expire, LOBBY_LIFETIME_MS, SERVER_ATTEMPTS as ATTEMPTS } from "./lifecycle.js";
 import { memberRow } from "./present.js";
 
-/** Server-started transitions retry this often on `stale` (03 §5.2). */
-const ATTEMPTS = 3;
 /** At most this many of one user's overdue lobbies are expired per request; the rest next time. */
 const OVERDUE_BATCH = 20;
 

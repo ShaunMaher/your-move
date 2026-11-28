@@ -57,11 +57,11 @@ describe("claimSeat", () => {
     });
   });
 
-  it("gives up after 3 attempts", async () => {
+  it("gives up after one try and 3 retries (03 §5.2)", async () => {
     const { fake, claims, loads } = repos(0);
     expect(await claimSeat(fake, seat, claimant, NOW)).toBe(false);
-    expect(loads()).toBe(3);
-    expect(claims).toHaveLength(3);
+    expect(loads()).toBe(4);
+    expect(claims).toHaveLength(4);
   });
 
   it("claims nothing into a lobby at its expiry, and never calls the claim", async () => {

@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { address } from "./auth-contract.js";
 import type { GameWriteSet, NewGame, Repositories } from "./repositories.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -194,17 +195,72 @@ export function joinLinkRepositoryContract(target: () => JoinLinkTarget): void {
       expect(await rowCount(expired.gameId)).toBe(1);
     });
 
-    it("are swept once expired: at or before the time given, never a live one", async () => {
-      const cutoff = LATER + 30 * DAY;
-      const expired = await lobby({
-        tokenHash: freshHash(),
-        createdAt: LATER,
-        expiresAt: cutoff - 1,
-      });
-      const due = await lobby({ tokenHash: freshHash(), createdAt: LATER, expiresAt: cutoff });
-      const live = await lobby({ tokenHash: freshHash(), createdAt: LATER, expiresAt: cutoff + 1 });
-      expect(await repos().joinLinks.deleteExpired(cutoff)).toBeGreaterThanOrEqual(2);
-      expect(await rowsOf(expired.gameId)).toEqual([]);
+    it("go with the account of the lobby's creator, and only of lobbies it created (A18-S-1)", async () => {
+      const id = crypto.randomUUID();
+      const email = address(id);
+      await repos().users.create({ id, email, createdAt: LATER, updatedAt: LATER });
+      const withLink = async (joinedVia: "creator" | "join_link", status: NewGame["status"]) => {
+        const game = newGame(status);
+        const tokenHash = freshHash();
+        await repos().games.create(
+          game,
+          [
+            {
+              id: crypto.randomUUID(),
+              userId: joinedVia === "creator" ? id : null,
+              state: "joined",
+              joinedVia: "creator",
+              joinedAt: LATER,
+            },
+            ...(joinedVia === "join_link"
+              ? [
+                  {
+                    id: crypto.randomUUID(),
+                    userId: id,
+                    state: "joined" as const,
+                    joinedVia,
+                    joinedAt: LATER,
+                  },
+                ]
+              : []),
+          ],
+          { joinLink: { tokenHash, createdAt: LATER, expiresAt: LATER + DAY } },
+        );
+        return game.id;
+      };
+      const created = await withLink("creator", "lobby");
+      const joined = await withLink("join_link", "lobby");
+      const bystander = await lobby();
+      await repos().users.deleteAccount(
+        { id, email },
+        { userId: id, type: "account_deleted", ipHash: null, createdAt: LATER },
+      );
+      expect(await rowsOf(created)).toEqual([]);
+      expect(await rowsOf(joined)).toHaveLength(1);
+      expect(await rowsOf(bystander.gameId)).toHaveLength(1);
+      // The lobby stays (its cancel is 04's step 2, M4); its creator row has no user any more.
+      const players = await target().sql(
+        "SELECT user_id FROM game_players WHERE game_id = ? AND joined_via = 'creator'",
+        created,
+      );
+      expect(players).toEqual([{ user_id: null }]);
+    });
+
+    it("are swept once expired, longest expired first, at most the limit a run", async () => {
+      const cutoff = LATER + 1000 * DAY;
+      // Every earlier link of the shared database out of the way first.
+      await repos().joinLinks.deleteExpired(cutoff - 10, 1_000_000);
+      const at = (expiresAt: number) =>
+        lobby({ tokenHash: freshHash(), createdAt: LATER, expiresAt });
+      const oldest = await at(cutoff - 3);
+      const older = await at(cutoff - 2);
+      const due = await at(cutoff);
+      const live = await at(cutoff + 1);
+      expect(await repos().joinLinks.deleteExpired(cutoff, 2)).toBe(2);
+      expect(await rowsOf(oldest.gameId)).toEqual([]);
+      expect(await rowsOf(older.gameId)).toEqual([]);
+      expect(await rowsOf(due.gameId)).toHaveLength(1);
+      expect(await repos().joinLinks.deleteExpired(cutoff, 10)).toBe(1);
       expect(await rowsOf(due.gameId)).toEqual([]);
       expect(await rowsOf(live.gameId)).toHaveLength(1);
     });

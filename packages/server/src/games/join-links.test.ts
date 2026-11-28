@@ -7,7 +7,7 @@ import { type AnyGameDefinition, OK } from "@your-move/sdk";
 import { describe, expect, it } from "vitest";
 
 import type { GamePlayerRecord, GameRecord, JoinLinkTimes } from "../db/repositories.js";
-import { hashJoinToken, isJoinToken, joinUrl, linkTimes, newJoinToken } from "./join-links.js";
+import { hashJoinToken, joinUrl, linkTimes, newJoinToken } from "./join-links.js";
 import {
   accept,
   cancel,
@@ -174,16 +174,21 @@ describe("joinVerdict (06 §6.8)", () => {
     expect(verdict([creator, row("b", state)], { userId: "u-b" })).toEqual({ kind: "refused" });
   });
 
-  it("refuses someone removed while this link was live, and re-admits one removed before it", () => {
-    const during = row("b", "removed", { removedAt: LINK.createdAt });
-    expect(verdict([creator, during], { userId: "u-b" })).toEqual({ kind: "refused" });
-    const later = row("b", "removed", { removedAt: LINK.createdAt + 5 });
-    expect(verdict([creator, later], { userId: "u-b" })).toEqual({ kind: "refused" });
-    const before = row("b", "removed", { removedAt: LINK.createdAt - 1 });
-    expect(verdict([creator, before], { userId: "u-b" })).toEqual({ kind: "rejoin", row: before });
-    // Re-admitted only into an open seat.
-    const full = [creator, before, row("c", "joined"), row("d", "invited")];
-    expect(verdict(full, { userId: "u-b" })).toEqual({ kind: "refused" });
+  it("never lets back someone the creator removed, through this link or any later one (A18-S-3)", () => {
+    for (const removedAt of [LINK.createdAt - DAY, LINK.createdAt, LINK.createdAt + 5]) {
+      const removed = row("b", "removed", { removedAt });
+      expect(verdict([creator, removed], { userId: "u-b", game: lobby(4) })).toEqual({
+        kind: "refused",
+      });
+    }
+  });
+
+  it("refuses every link of a lobby whose creator's account was deleted (A18-S-1)", () => {
+    const orphaned = row("a", "joined", { joinedVia: "creator", userId: null });
+    expect(verdict([orphaned])).toEqual({ kind: "refused" });
+    expect(verdict([orphaned, row("b", "invited")], { userId: "u-b" })).toEqual({
+      kind: "refused",
+    });
   });
 
   it("refuses a blocked invitee and a blocked removed row too", () => {
@@ -239,25 +244,17 @@ describe("joinWrites (05 POST /api/v1/join)", () => {
     expect(writes.insertPlayers).toBeUndefined();
   });
 
-  it("re-admits a removed row on that row, as a link join", () => {
-    const removed = row("b", "removed", { removedAt: 1, delivery: "hidden" });
-    const writes = joinWrites(
+  it("accepts exactly as the Accept button does", () => {
+    const invitation = row("b", "invited", { inviteEmail: "b@example.org", delivery: "hidden" });
+    const byButton = accept(ctxOf(lobby(3), [creator, invitation], null), invitation, NOW);
+    const byLink = joinWrites(
       game,
-      { kind: "rejoin", row: removed },
+      { kind: "accept", row: invitation },
       { userId: "u-b", newRowId: "n", now: NOW },
     );
-    expect(writes.updatePlayers?.[0]).toEqual({
-      id: "b",
-      set: {
-        state: "joined",
-        joinedVia: "join_link",
-        joinedAt: NOW,
-        removedAt: null,
-        inviteEmail: null,
-        delivery: "normal",
-        lastSeenVersion: 8,
-      },
-    });
+    const { lastSeenVersion, ...set } = byLink.updatePlayers?.[0]?.set ?? {};
+    expect(lastSeenVersion).toBe(8);
+    expect(isRefusal(byButton) ? null : byButton.updatePlayers?.[0]?.set).toEqual(set);
   });
 
   it("never starts the game, writes nothing to the game but the time, and leaves the link", () => {
@@ -370,18 +367,7 @@ describe("join-link tokens (08 T24)", () => {
   it("are 128 random bits as 22 base64url characters, a new one each time", () => {
     const tokens = new Set(Array.from({ length: 50 }, () => newJoinToken()));
     expect(tokens.size).toBe(50);
-    for (const token of tokens) expect(isJoinToken(token)).toBe(true);
-  });
-
-  it.each([
-    "",
-    "short",
-    "a".repeat(23),
-    "a".repeat(21) + "=",
-    "a".repeat(21) + "/",
-    "a".repeat(21) + "+",
-  ])("refuses the shape %j", (value) => {
-    expect(isJoinToken(value)).toBe(false);
+    for (const token of tokens) expect(token).toMatch(/^[A-Za-z0-9_-]{22}$/u);
   });
 
   it("are stored only as their SHA-256 (the known digest of a fixed input)", async () => {

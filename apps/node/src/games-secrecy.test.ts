@@ -1018,7 +1018,7 @@ describe("route-wide secrecy (04 invariant 4)", () => {
     expect((await join(b)).status).toBe(200);
     await readEverything(game, [a, b], stranger);
 
-    // A removal while the link is live keeps b out; a rotation lets b back in.
+    // A removal keeps b out, through this link and a rotated one; c takes the seat instead.
     const row = h.query(
       "SELECT id FROM game_players WHERE game_id = ? AND user_id = ?",
       game,
@@ -1040,15 +1040,15 @@ describe("route-wide secrecy (04 invariant 4)", () => {
     const rotated = await hit(a, "POST", "/api/v1/games/:id/join-link", { id: game }, {});
     expect(rotated.status).toBe(200);
     token = tokenOf(rotated.text);
-    expect((await join(b)).status).toBe(200);
-    expect((await join(c)).status).toBe(404);
-    await readEverything(game, [a, b], stranger);
+    expect((await join(b)).status).toBe(404);
+    expect((await join(c)).status).toBe(200);
+    await readEverything(game, [a, c], stranger);
 
     // Revoked: the typed address's seat stays, and the creator starts the game with who joined.
     expect((await hit(a, "DELETE", "/api/v1/games/:id/join-link", { id: game })).status).toBe(204);
-    expect((await lookup(c)).status).toBe(404);
+    expect((await lookup(b)).status).toBe(404);
     expect((await transition(game, a, "start")).json.game?.status).toBe("active");
-    const players = [a, b];
+    const players = [a, c];
     for (let step = 0; step < 3 && stored(game).status === "active"; step++) {
       await readEverything(game, players, stranger);
       expect(await unchangedByHiddenState(game, players)).toBe(2);

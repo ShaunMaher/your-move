@@ -507,7 +507,7 @@ export interface paths {
     put?: never;
     /**
      * Create or rotate the lobby's join link
-     * @description Creator only, in the lobby. Replaces any link the game has (the old one stops working, and people removed while it was live may use the new one). Anyone signed in with the link sees the game type, options and the joined players' names, and can take an open seat; the game then waits for your Start. Changes no game state, so the game's `version` stays the same. Takes no input: an empty body or `{}`.
+     * @description Creator only, in the lobby. Replaces any link the game has (the old one stops working; nobody removed from the lobby, or who declined, comes back through any link). Anyone signed in with the link sees the game type, options and the joined players' names, and can take an open seat; the game then waits for your Start. Changes no game state, so the game's `version` stays the same. Takes no input: an empty body or `{}`.
      */
     post: operations["createJoinLink"];
     /**
@@ -751,6 +751,7 @@ export interface components {
         seatOrder: "join" | "random";
         /** @enum {string} */
         aiAssistance: "off" | "allowed";
+        seats?: number;
         available: boolean;
         resources: {
           /** @enum {string} */
@@ -916,6 +917,7 @@ export interface components {
         seatOrder: "join" | "random";
         /** @enum {string} */
         aiAssistance: "off" | "allowed";
+        seats?: number;
         available: boolean;
         resources: {
           /** @enum {string} */
@@ -1009,6 +1011,7 @@ export interface components {
         seatOrder: "join" | "random";
         /** @enum {string} */
         aiAssistance: "off" | "allowed";
+        seats?: number;
         available: boolean;
         resources: {
           /** @enum {string} */
@@ -1132,10 +1135,15 @@ export interface components {
         openSeats: number;
         /** @description When the link stops working. */
         expiresAt: number;
+        /**
+         * @description Present when you've already joined the game: open it instead of joining.
+         * @enum {boolean}
+         */
+        youAreIn?: true;
       };
     };
     JoinTokenRequest: {
-      /** @description The join link's fragment, as given. Any value that isn't a live link's token is the same `404`. */
+      /** @description The join link's fragment, as given: 22 base64url characters (anything else is `400 BAD_REQUEST`). A well-formed token that isn't a live link's is the same `404`. */
       token: string;
     };
     JoinedGame: {
@@ -1153,6 +1161,7 @@ export interface components {
         seatOrder: "join" | "random";
         /** @enum {string} */
         aiAssistance: "off" | "allowed";
+        seats?: number;
         available: boolean;
         resources: {
           /** @enum {string} */
@@ -3858,7 +3867,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or were removed while this link was live (`NOT_FOUND`, the same in every case). */
+      /** @description The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or the creator removed you (`NOT_FOUND`, the same in every case). */
       404: {
         headers: {
           [name: string]: unknown;
@@ -3954,7 +3963,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or were removed while this link was live (`NOT_FOUND`, the same in every case). */
+      /** @description The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or the creator removed you (`NOT_FOUND`, the same in every case). */
       404: {
         headers: {
           [name: string]: unknown;

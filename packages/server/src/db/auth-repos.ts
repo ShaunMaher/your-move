@@ -21,6 +21,9 @@ import {
   apiTokens,
   authEvents,
   blocks,
+  gamePlayers,
+  games,
+  joinLinks,
   otpChallenges,
   pastOpponents,
   rateLimits,
@@ -202,6 +205,24 @@ export function userRepo(db: Database): UserRepo {
         db
           .delete(pastOpponents)
           .where(or(eq(pastOpponents.userId, user.id), eq(pastOpponents.otherId, user.id))),
+        // The links of the lobbies the user created (alpha A18): before the users row goes, while
+        // the creator row still names the user. Cancelling those lobbies is step 2's (04, M4).
+        db.delete(joinLinks).where(
+          inArray(
+            joinLinks.gameId,
+            db
+              .select({ gameId: gamePlayers.gameId })
+              .from(gamePlayers)
+              .innerJoin(games, eq(games.id, gamePlayers.gameId))
+              .where(
+                and(
+                  eq(gamePlayers.userId, user.id),
+                  eq(gamePlayers.joinedVia, "creator"),
+                  eq(games.status, "lobby"),
+                ),
+              ),
+          ),
+        ),
         guardedInsert(
           db,
           authEvents,

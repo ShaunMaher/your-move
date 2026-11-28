@@ -21,6 +21,7 @@ describe("workerRuntime", () => {
       nudgesPerRun: 2,
       claimsPerRun: 1,
       lobbiesPerRun: 1,
+      joinLinksPerRun: 100,
     });
   });
 });

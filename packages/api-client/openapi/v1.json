@@ -339,6 +339,7 @@
               "turnTimeoutDays": { "type": "integer", "minimum": 1, "maximum": 30 },
               "seatOrder": { "type": "string", "enum": ["join", "random"] },
               "aiAssistance": { "type": "string", "enum": ["off", "allowed"] },
+              "seats": { "type": "integer", "minimum": 1 },
               "available": { "type": "boolean" },
               "resources": {
                 "type": "array",
@@ -681,6 +682,7 @@
               "turnTimeoutDays": { "type": "integer", "minimum": 1, "maximum": 30 },
               "seatOrder": { "type": "string", "enum": ["join", "random"] },
               "aiAssistance": { "type": "string", "enum": ["off", "allowed"] },
+              "seats": { "type": "integer", "minimum": 1 },
               "available": { "type": "boolean" },
               "resources": {
                 "type": "array",
@@ -856,6 +858,7 @@
               "turnTimeoutDays": { "type": "integer", "minimum": 1, "maximum": 30 },
               "seatOrder": { "type": "string", "enum": ["join", "random"] },
               "aiAssistance": { "type": "string", "enum": ["off", "allowed"] },
+              "seats": { "type": "integer", "minimum": 1 },
               "available": { "type": "boolean" },
               "resources": {
                 "type": "array",
@@ -1097,7 +1100,12 @@
                 }
               },
               "openSeats": { "type": "integer", "minimum": 0 },
-              "expiresAt": { "type": "integer", "description": "When the link stops working." }
+              "expiresAt": { "type": "integer", "description": "When the link stops working." },
+              "youAreIn": {
+                "type": "boolean",
+                "enum": [true],
+                "description": "Present when you've already joined the game: open it instead of joining."
+              }
             },
             "required": [
               "id",
@@ -1124,8 +1132,8 @@
         "properties": {
           "token": {
             "type": "string",
-            "maxLength": 64,
-            "description": "The join link's fragment, as given. Any value that isn't a live link's token is the same `404`."
+            "pattern": "^[A-Za-z0-9_-]{22}$/u",
+            "description": "The join link's fragment, as given: 22 base64url characters (anything else is `400 BAD_REQUEST`). A well-formed token that isn't a live link's is the same `404`."
           }
         },
         "required": ["token"],
@@ -1150,6 +1158,7 @@
               "turnTimeoutDays": { "type": "integer", "minimum": 1, "maximum": 30 },
               "seatOrder": { "type": "string", "enum": ["join", "random"] },
               "aiAssistance": { "type": "string", "enum": ["off", "allowed"] },
+              "seats": { "type": "integer", "minimum": 1 },
               "available": { "type": "boolean" },
               "resources": {
                 "type": "array",
@@ -3219,7 +3228,7 @@
         "security": [{ "sessionCookie": [] }],
         "tags": ["Games"],
         "summary": "Create or rotate the lobby's join link",
-        "description": "Creator only, in the lobby. Replaces any link the game has (the old one stops working, and people removed while it was live may use the new one). Anyone signed in with the link sees the game type, options and the joined players' names, and can take an open seat; the game then waits for your Start. Changes no game state, so the game's `version` stays the same. Takes no input: an empty body or `{}`.",
+        "description": "Creator only, in the lobby. Replaces any link the game has (the old one stops working; nobody removed from the lobby, or who declined, comes back through any link). Anyone signed in with the link sees the game type, options and the joined players' names, and can take an open seat; the game then waits for your Start. Changes no game state, so the game's `version` stays the same. Takes no input: an empty body or `{}`.",
         "parameters": [
           {
             "schema": {
@@ -3417,7 +3426,7 @@
             }
           },
           "404": {
-            "description": "The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or were removed while this link was live (`NOT_FOUND`, the same in every case).",
+            "description": "The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or the creator removed you (`NOT_FOUND`, the same in every case).",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
             }
@@ -3489,7 +3498,7 @@
             }
           },
           "404": {
-            "description": "The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or were removed while this link was live (`NOT_FOUND`, the same in every case).",
+            "description": "The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or the creator removed you (`NOT_FOUND`, the same in every case).",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
             }

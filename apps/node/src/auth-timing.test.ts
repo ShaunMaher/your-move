@@ -79,7 +79,7 @@ import {
 } from "@your-move/server";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { gameHarness, signUp } from "./games-support.js";
+import { gameHarness, sha256Hex, signUp } from "./games-support.js";
 import { createHarness, DAY, type Harness, PROD_ENV, T0 } from "./test-harness.js";
 
 /** Pairs measured per comparison: each pair is one request of each arm. */
@@ -523,10 +523,7 @@ describe("block parity: timing of a join-link lookup (06 §6.8)", () => {
   /** A fresh 22-character token, and its SHA-256 as stored (04 `join_links`). */
   const freshToken = async (): Promise<{ token: string; hash: string }> => {
     const token = toBase64Url(crypto.getRandomValues(new Uint8Array(16)));
-    const digest = new Uint8Array(
-      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)),
-    );
-    return { token, hash: Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("") };
+    return { token, hash: await sha256Hex(token) };
   };
 
   /**

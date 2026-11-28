@@ -385,8 +385,9 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     );
     if (outcome === "limited") return fail(c, 429, "RATE_LIMITED");
     if (outcome === "invalid") return fail(c, 400, "INVALID_CODE");
-    // 04 §Account deletion. Game steps (resign, cancel, leave) join with games in M3; until then
-    // no account holds game rows.
+    // 04 §Account deletion. Its game steps (resign, cancel, leave) are M4's: until then a deleted
+    // user's game rows lose their user, and the lobbies they created lose their join links in the
+    // same batch (alpha A18), so no one joins a lobby whose creator has gone.
     await repos.users.deleteAccount(
       { id: active.user.id, email },
       {

@@ -17,17 +17,9 @@ import { lobbyExpiresAt, openSeats } from "./lifecycle.js";
 /** A link works for 7 days at most, and never past its lobby's expiry (06 §6.8, 04). */
 const LINK_LIFETIME_MS = 7 * 86_400_000;
 
-/** A token as the web page sends it: 16 bytes, unpadded base64url. */
-const TOKEN = /^[A-Za-z0-9_-]{22}$/u;
-
 /** A fresh 128-bit token, from WebCrypto. */
 export function newJoinToken(): string {
   return toBase64Url(crypto.getRandomValues(new Uint8Array(16)));
-}
-
-/** Whether a value has a token's shape; anything else is the same `404` as an unknown token. */
-export function isJoinToken(value: string): boolean {
-  return TOKEN.test(value);
 }
 
 /** SHA-256 of the token, hex: the only form stored (04 `join_links.token_hash`). */
@@ -61,6 +53,8 @@ export interface JoinPreview {
   readonly players: { displayName: string | null; kind: "human" | "agent" }[];
   readonly openSeats: number;
   readonly expiresAt: number;
+  /** Present when the viewer has already joined (05): the page offers to open the game. */
+  readonly youAreIn?: true;
 }
 
 /**
@@ -74,6 +68,7 @@ export function previewOf(input: {
   readonly users: ReadonlyMap<string, UserRecord>;
   readonly resources: GameEnvelope["resources"];
   readonly link: JoinLinkTimes;
+  readonly youAreIn: boolean;
 }): JoinPreview {
   const { game, players, users, link } = input;
   const joined = players.filter((row) => row.state === "joined");
@@ -95,5 +90,6 @@ export function previewOf(input: {
     })),
     openSeats: openSeats(game, players),
     expiresAt: link.expiresAt,
+    ...(input.youAreIn ? { youAreIn: true as const } : {}),
   };
 }

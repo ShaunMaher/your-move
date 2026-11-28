@@ -120,6 +120,7 @@ export const gameEnvelopeSchema = z.object({
   turnTimeoutDays: z.number().int().min(1).max(30),
   seatOrder: z.enum(["join", "random"]),
   aiAssistance: z.enum(["off", "allowed"]),
+  seats: z.number().int().min(1).optional(),
   available: z.boolean(),
   resources: z.array(gameResourceSchema),
   players: z.array(gamePlayerSchema),

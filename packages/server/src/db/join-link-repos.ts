@@ -4,7 +4,7 @@
  * only, never the game row (05), and only while the game is a lobby. Written once over the shared
  * schema and run by either adapter's {@link Database}.
  */
-import { eq, lte, sql } from "drizzle-orm";
+import { asc, eq, inArray, lte, sql } from "drizzle-orm";
 
 import type { Database } from "./database.js";
 import { guardedInsert } from "./queries/transition.js";
@@ -44,10 +44,16 @@ export function joinLinkRepo(db: Database): JoinLinkRepo {
         .get();
       return row ?? null;
     },
-    async deleteExpired(now) {
+    async deleteExpired(now, limit) {
+      const due = db
+        .select({ gameId: joinLinks.gameId })
+        .from(joinLinks)
+        .where(lte(joinLinks.expiresAt, now))
+        .orderBy(asc(joinLinks.expiresAt), asc(joinLinks.gameId))
+        .limit(limit);
       const rows = await db
         .delete(joinLinks)
-        .where(lte(joinLinks.expiresAt, now))
+        .where(inArray(joinLinks.gameId, due))
         .returning({ gameId: joinLinks.gameId });
       return rows.length;
     },

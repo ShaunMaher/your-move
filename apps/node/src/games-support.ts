@@ -49,6 +49,14 @@ export interface Player {
   readonly name: string;
 }
 
+/** SHA-256 of a string, hex: how a join-link token is stored (04 `join_links.token_hash`). */
+export async function sha256Hex(text: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)),
+  );
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 let counter = 0;
 
 /** A new address, unique within the run. */

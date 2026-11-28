@@ -245,9 +245,8 @@ function joinLinkOf(
   link: JoinLinkTimes | null,
   now: number,
 ): NonNullable<GameEnvelope["joinLink"]> {
-  return link !== null && linkLive(link, now)
-    ? { active: true, expiresAt: link.expiresAt }
-    : { active: false, expiresAt: null };
+  const expiresAt = linkLive(link, now) ? (link?.expiresAt ?? null) : null;
+  return { active: expiresAt !== null, expiresAt };
 }
 
 /** The game envelope for one member (05 §Common types). */
@@ -265,6 +264,7 @@ export function envelope(input: PresentInput): GameEnvelope {
     turnTimeoutDays: game.turnTimeoutDays,
     seatOrder: game.seatOrder,
     aiAssistance: game.aiAssistance,
+    seats: game.seats,
     available: engineOf(input) !== undefined,
     resources: resourcesOf(input),
     players: visiblePlayers(input),

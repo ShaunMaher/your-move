@@ -127,9 +127,6 @@ function gameRepo(db: Database): GameRepo {
         ...(extras.invites ?? []).map((invite) =>
           guardedInsert(db, invites, { ...invite, gameId: game.id }, open),
         ),
-        ...(extras.joinLink === undefined
-          ? []
-          : [guardedInsert(db, joinLinks, { ...extras.joinLink, gameId: game.id }, open)]),
         db
           .update(games)
           .set({ rematchGameId: game.id })

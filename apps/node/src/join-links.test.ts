@@ -20,6 +20,7 @@ import {
   type Player,
   signUp,
   transition,
+  sha256Hex,
 } from "./games-support.js";
 import { DAY, HOUR, type Harness } from "./test-harness.js";
 
@@ -41,6 +42,7 @@ interface Preview {
     readonly players: readonly { displayName: string | null; kind: string }[];
     readonly openSeats: number;
     readonly expiresAt: number;
+    readonly youAreIn?: true;
   } & Record<string, unknown>;
 }
 
@@ -163,12 +165,8 @@ describe("creating, rotating and revoking a link (05, 06 §6.8)", () => {
   it("is stored only as the token's SHA-256", async () => {
     const a = await signUp(h, "Ada");
     const { gameId, token } = await linkedLobby(a);
-    const digest = new Uint8Array(
-      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)),
-    );
-    const hex = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
     expect(h.query("SELECT token_hash FROM join_links WHERE game_id = ?", gameId)).toEqual([
-      { token_hash: hex },
+      { token_hash: await sha256Hex(token) },
     ]);
     const everything = JSON.stringify(
       ["join_links", "games", "game_players", "rate_limits"].map((table) =>
@@ -293,6 +291,33 @@ describe("creating, rotating and revoking a link (05, 06 §6.8)", () => {
     h.advance(2 * DAY);
     expect((await makeLink(a, gameId)).status).toBe(200);
   });
+
+  it("counts a creation only when the link was written (A18-P-10)", async () => {
+    let refuse = false;
+    h.close();
+    h = gameHarness(
+      {},
+      {
+        wrapRepos: (repos) => ({
+          ...repos,
+          joinLinks: {
+            ...repos.joinLinks,
+            put: (...args) => (refuse ? Promise.resolve(false) : repos.joinLinks.put(...args)),
+          },
+        }),
+      },
+    );
+    const a = await signUp(h, "Ada");
+    const created = await createGame(h, a, { gameType: "example", invitees: [] });
+    refuse = true;
+    for (let i = 0; i < 25; i++) {
+      const lost = await makeLink(a, created.id);
+      expect([lost.status, code(lost.body)]).toEqual([409, "WRONG_STATUS"]);
+    }
+    refuse = false;
+    for (let i = 0; i < 20; i++) expect((await makeLink(a, created.id)).status).toBe(200);
+    expect((await makeLink(a, created.id)).status).toBe(429);
+  });
 });
 
 describe("the lookup and the join (05 §Join links)", () => {
@@ -336,16 +361,50 @@ describe("the lookup and the join (05 §Join links)", () => {
     expect(creatorView.game.players.map((p) => p.displayName)).toEqual(["Ada", null, "Bo"]);
   });
 
-  it("answers a second join, or the creator's own, with ALREADY_JOINED; their lookup still shows it", async () => {
+  it("answers a second join, or the creator's own, with ALREADY_JOINED; their lookup says they're in", async () => {
     const a = await signUp(h, "Ada");
     const b = await signUp(h, "Bo");
+    const c = await signUp(h, "Cy");
     const { token } = await linkedLobby(a, { seats: 3 });
+    expect((await lookup(b, token)).body.game).not.toHaveProperty("youAreIn");
     await join(b, token);
     for (const who of [a, b]) {
-      expect((await lookup(who, token)).status).toBe(200);
+      const seen = await lookup(who, token);
+      expect([seen.status, seen.body.game.youAreIn]).toEqual([200, true]);
       const again = await join(who, token);
       expect([again.status, code(again.body)]).toEqual([409, "ALREADY_JOINED"]);
     }
+    expect((await lookup(c, token)).body.game).not.toHaveProperty("youAreIn");
+  });
+
+  it("answers STALE_GAME only once every retry has lost a race (03 §5.2: one try, 3 retries)", async () => {
+    let tries = 0;
+    h.close();
+    h = gameHarness(
+      {},
+      {
+        wrapRepos: (repos) => ({
+          ...repos,
+          games: {
+            ...repos.games,
+            applyTransition: (gameId, version, writes) => {
+              if (writes.requireJoinLink === undefined) {
+                return repos.games.applyTransition(gameId, version, writes);
+              }
+              tries += 1;
+              return Promise.resolve("stale" as const);
+            },
+          },
+        }),
+      },
+    );
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    const { gameId, token } = await linkedLobby(a);
+    const answer = await join(b, token);
+    expect([answer.status, code(answer.body)]).toEqual([409, "STALE_GAME"]);
+    expect(tries).toBe(4);
+    expect(rowOf(gameId, b.id)).toBeUndefined();
   });
 
   it("is the same 404 once the game is full, has started or was cancelled", async () => {
@@ -362,15 +421,26 @@ describe("the lookup and the join (05 §Join links)", () => {
     expect(await lookup(b, token)).toEqual({ status: 404, body: NOT_FOUND });
   });
 
-  it("refuses any value but a live link's token with the same 404, and an over-long one as a bad request", async () => {
+  it("refuses a well-formed token that isn't a live link's with the same 404, and any other shape as a bad request", async () => {
     const a = await signUp(h, "Ada");
     const b = await signUp(h, "Bo");
     await linkedLobby(a);
-    for (const token of ["", "nope", "A".repeat(22), "A".repeat(64), "../../etc/passwd"]) {
+    for (const token of ["A".repeat(22), "_-".repeat(11)]) {
       expect(await lookup(b, token)).toEqual({ status: 404, body: NOT_FOUND });
       expect(await join(b, token)).toEqual({ status: 404, body: NOT_FOUND });
     }
-    expect((await lookup(b, "A".repeat(65))).status).toBe(400);
+    for (const token of [
+      "",
+      "nope",
+      "A".repeat(21),
+      "A".repeat(23),
+      "A".repeat(21) + "=",
+      "../../etc/passwd",
+      "A".repeat(65),
+    ]) {
+      expect((await lookup(b, token)).status).toBe(400);
+      expect((await join(b, token)).status).toBe(400);
+    }
   });
 
   it("needs a signed-in, onboarded user", async () => {
@@ -402,6 +472,34 @@ describe("the lookup and the join (05 §Join links)", () => {
     ]);
   });
 
+  it("an accepted hidden invitation badges like any other game, by link or by Accept (A18-P-2)", async () => {
+    const a = await signUp(h, "Ada");
+    const [b, c, d] = [await signUp(h, "Bo"), await signUp(h, "Cy"), await signUp(h, "Di")];
+    const { gameId, token } = await linkedLobby(a, {
+      seats: 4,
+      invitees: [{ email: b.email }, { email: c.email }],
+    });
+    h.exec(
+      "UPDATE game_players SET delivery = 'hidden' WHERE game_id = ? AND user_id IN (?, ?)",
+      gameId,
+      b.id,
+      c.id,
+    );
+    expect((await join(b, token)).status).toBe(200);
+    expect((await transition(h, c, gameId, "accept")).status).toBe(200);
+    // Someone else's join moves the game on: both see it unread.
+    expect((await join(d, token)).status).toBe(200);
+    for (const who of [b, c]) {
+      const listed = await call<{ games: { id: string; unread: boolean }[] }>(
+        h,
+        who,
+        "GET",
+        "/api/v1/games",
+      );
+      expect(listed.body.games.find((game) => game.id === gameId)?.unread).toBe(true);
+    }
+  });
+
   it("never accepts an inert invitation: its holder gets the 404", async () => {
     const a = await signUp(h, "Ada");
     const b = await signUp(h, "Bo");
@@ -431,28 +529,29 @@ describe("no re-entry (06 §6.8)", () => {
     expect(await join(b, fresh)).toEqual({ status: 404, body: NOT_FOUND });
   });
 
-  it("after a removal while the link was live, until a rotation re-admits them", async () => {
+  it("after a removal, through any link: the same one, a rotated one, or a new one after a revoke or expiry (A18-S-3)", async () => {
     const a = await signUp(h, "Ada");
     const b = await signUp(h, "Bo");
     const { gameId, token } = await linkedLobby(a, { seats: 3 });
     await join(b, token);
-    const rowId = rowOf(gameId, b.id)?.["id"];
     expect((await removeSeat(a, gameId, await playerIdOf(a, gameId, b.id))).status).toBe(200);
     expect(rowOf(gameId, b.id)).toMatchObject({ state: "removed", removed_at: now() });
-    expect(await lookup(b, token)).toEqual({ status: 404, body: NOT_FOUND });
-    expect(await join(b, token)).toEqual({ status: 404, body: NOT_FOUND });
-    h.advance(1);
-    const fresh = tokenOf((await makeLink(a, gameId)).body.url);
-    expect((await join(b, fresh)).status).toBe(200);
-    expect(rowOf(gameId, b.id)).toMatchObject({
-      id: rowId,
-      state: "joined",
-      joined_via: "join_link",
-      removed_at: null,
-    });
+    const refused = async (link: string) => {
+      expect(await lookup(b, link)).toEqual({ status: 404, body: NOT_FOUND });
+      expect(await join(b, link)).toEqual({ status: 404, body: NOT_FOUND });
+    };
+    await refused(token);
+    h.advance(HOUR);
+    await refused(tokenOf((await makeLink(a, gameId)).body.url));
+    await revoke(a, gameId);
+    h.advance(HOUR);
+    await refused(tokenOf((await makeLink(a, gameId)).body.url));
+    h.advance(7 * DAY);
+    await refused(tokenOf((await makeLink(a, gameId)).body.url));
+    expect(rowOf(gameId, b.id)).toMatchObject({ state: "removed" });
   });
 
-  it("lets in someone removed before the link was made", async () => {
+  it("after a removal before any link was made", async () => {
     const a = await signUp(h, "Ada");
     const b = await signUp(h, "Bo");
     const created = await createGame(h, a, {
@@ -466,8 +565,23 @@ describe("no re-entry (06 §6.8)", () => {
     expect((await removeSeat(a, created.id, playerId ?? "")).status).toBe(200);
     h.advance(1);
     const token = tokenOf((await makeLink(a, created.id)).body.url);
-    expect((await join(b, token)).status).toBe(200);
-    expect(rowOf(created.id, b.id)).toMatchObject({ state: "joined", joined_via: "join_link" });
+    expect(await join(b, token)).toEqual({ status: 404, body: NOT_FOUND });
+  });
+
+  it("refuses every link of a lobby whose creator's account was deleted (A18-S-1)", async () => {
+    const a = await signUp(h, "Ada");
+    const b = await signUp(h, "Bo");
+    const { gameId, token } = await linkedLobby(a, { seats: 3 });
+    expect((await lookup(b, token)).status).toBe(200);
+    // What the deletion batch leaves until its game steps exist (04): the creator row without a
+    // user. The batch also deletes the link (the repository contract); this is the second guard.
+    h.exec(
+      "UPDATE game_players SET user_id = NULL WHERE game_id = ? AND user_id = ?",
+      gameId,
+      a.id,
+    );
+    expect(await lookup(b, token)).toEqual({ status: 404, body: NOT_FOUND });
+    expect(await join(b, token)).toEqual({ status: 404, body: NOT_FOUND });
   });
 });
 

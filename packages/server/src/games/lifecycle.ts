@@ -423,14 +423,16 @@ export function accept(
   ) {
     return { refused: "WRONG_STATUS" };
   }
-  return withStart(
-    ctx,
-    {
-      id: viewer.id,
-      set: { state: "joined", joinedVia: "invitation", joinedAt: now, inviteEmail: null },
-    },
-    now,
-  );
+  return withStart(ctx, { id: viewer.id, set: acceptedSet(now) }, now);
+}
+
+/**
+ * What accepting an invitation sets on its row, by the Accept button or by joining through a link
+ * (06 §6.8): joined, as an invitation, its typed address cleared (06 §6.5). The row keeps its
+ * `delivery`, which only an open invitation uses (05 `unread`).
+ */
+function acceptedSet(now: number): GamePlayerUpdate {
+  return { state: "joined", joinedVia: "invitation", joinedAt: now, inviteEmail: null };
 }
 
 /** Every row's typed address cleared: the lobby reached a terminal state (06 §6.5). */
@@ -439,6 +441,12 @@ function clearAddresses(players: readonly GamePlayerRecord[], except?: string) {
     .filter((row) => row.inviteEmail !== null && row.id !== except)
     .map((row) => ({ id: row.id, set: { inviteEmail: null } }));
 }
+
+/**
+ * Transitions the server starts itself (joins, the sweep, lazy expiry, claims) try once and, on
+ * `stale`, reload and retry up to 3 times (03 §5.2): 4 attempts in all.
+ */
+export const SERVER_ATTEMPTS = 4;
 
 /** Lobbies expire 14 days after creation, not extended by joins (02 §4); `invites` with them. */
 export const LOBBY_LIFETIME_MS = 14 * DAY;
@@ -607,8 +615,6 @@ export type JoinVerdict =
   | { readonly kind: "member" }
   /** Holds a `normal` or `hidden` invitation: joining accepts it, open seat or not. */
   | { readonly kind: "accept"; readonly row: GamePlayerRecord }
-  /** Was removed before this link was made: joining takes a seat again on the same row. */
-  | { readonly kind: "rejoin"; readonly row: GamePlayerRecord }
   /** Holds no row: joining takes an open seat on a new one. */
   | { readonly kind: "seat" };
 
@@ -634,22 +640,21 @@ export function joinVerdict(
   if (game.status !== "lobby" || now >= lobbyExpiresAt(game) || !linkLive(link, now)) {
     return refused;
   }
+  // A lobby whose creator's account was deleted takes no one new (its link went with them too).
+  const creator = players.find((row) => row.joinedVia === "creator");
+  if (creator?.userId == null) return refused;
   const own = players.find((row) => row.userId === userId);
   if (own?.state === "joined") return { kind: "member" };
   if (blocked) return refused;
   if (own !== undefined) {
-    if (own.state === "invited") {
-      // An inert row is never accepted (its block, or its being a duplicate, stays hidden).
-      return own.delivery === "inert" ? refused : { kind: "accept", row: own };
-    }
-    // Removed before this link was made: rotating a link re-admits (04 `removed_at`). Declined,
-    // left and every other state: never back through a link.
-    const readmitted =
-      own.state === "removed" && own.removedAt !== null && own.removedAt < link.createdAt;
-    if (!readmitted) return refused;
+    // An inert row is never accepted (its block, or its being a duplicate, stays hidden). Declined,
+    // left and removed rows never come back through any link, a rotated or new one included: the
+    // creator can still invite a removed person by address or as a past opponent (06 §6.8).
+    return own.state === "invited" && own.delivery !== "inert"
+      ? { kind: "accept", row: own }
+      : refused;
   }
-  if (openSeats(game, players) === 0) return refused;
-  return own === undefined ? { kind: "seat" } : { kind: "rejoin", row: own };
+  return openSeats(game, players) === 0 ? refused : { kind: "seat" };
 }
 
 /**
@@ -659,7 +664,7 @@ export function joinVerdict(
  */
 export function joinWrites(
   game: GameRecord,
-  verdict: Extract<JoinVerdict, { kind: "accept" | "rejoin" | "seat" }>,
+  verdict: Extract<JoinVerdict, { kind: "accept" | "seat" }>,
   input: { readonly userId: string; readonly newRowId: string; readonly now: number },
 ): GameWriteSet {
   const { userId, newRowId, now } = input;
@@ -670,34 +675,7 @@ export function joinWrites(
       return {
         ...base,
         updatePlayers: [
-          {
-            id: verdict.row.id,
-            set: {
-              state: "joined",
-              joinedVia: "invitation",
-              joinedAt: now,
-              inviteEmail: null,
-              lastSeenVersion: seen,
-            },
-          },
-        ],
-      };
-    case "rejoin":
-      return {
-        ...base,
-        updatePlayers: [
-          {
-            id: verdict.row.id,
-            set: {
-              state: "joined",
-              joinedVia: "join_link",
-              joinedAt: now,
-              removedAt: null,
-              inviteEmail: null,
-              delivery: "normal",
-              lastSeenVersion: seen,
-            },
-          },
+          { id: verdict.row.id, set: { ...acceptedSet(now), lastSeenVersion: seen } },
         ],
       };
     case "seat":
