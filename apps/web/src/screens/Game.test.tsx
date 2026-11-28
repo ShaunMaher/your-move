@@ -304,19 +304,16 @@ describe("the lobby", () => {
     expect(posts(calls, "start")[0]?.body).toEqual({ expectedVersion: 2 });
   });
 
-  it("explains a start that is too early, and refetches: a block's effect may have been written", async () => {
+  it("explains a start that is too early, and refetches when the game moved on", async () => {
     const { calls } = open({
       "GET /api/v1/games/g1": json({ game: lobby(), view: null }),
       "POST /api/v1/games/g1/start": problem(409, "NOT_ENOUGH_PLAYERS"),
     });
     fireEvent.click(await screen.findByRole("button", { name: "Start game" }));
     expect((await screen.findByRole("alert")).textContent).toContain("Wait for the other players");
-    // 02 §4 step 1 (A23-S-3): the refused Start may have written a blocker's Decline or Remove.
-    await waitFor(() => {
-      expect(
-        calls.filter((call) => call.method === "GET" && call.path === "/api/v1/games/g1"),
-      ).toHaveLength(2);
-    });
+    expect(
+      calls.filter((call) => call.method === "GET" && call.path === "/api/v1/games/g1"),
+    ).toHaveLength(1);
   });
 
   it("asks before cancelling, then shows the cancelled game", async () => {
@@ -411,7 +408,7 @@ describe("the lobby", () => {
     const dialog = await screen.findByRole("dialog", { name: "Block Robin?" });
     expect(dialog.textContent).toContain("You'll decline this invitation.");
     expect(dialog.textContent).toContain("They won't be able to add you to games or invite you");
-    expect(dialog.textContent).toContain("any invitation they have to a game you're in stops");
+    expect(dialog.textContent).toContain("any invitation they have to a game you've joined stops");
     expect(dialog.textContent).toContain("Games you're already playing carry on.");
     expect(dialog.textContent).toContain("They won't be told, but you'll no longer be on each");
     expect(dialog.textContent).toContain("You can unblock them in Settings.");

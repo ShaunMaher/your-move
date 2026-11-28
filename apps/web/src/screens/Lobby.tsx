@@ -303,7 +303,8 @@ export function Lobby({
             won&apos;t be able to add you to games or invite you, and you won&apos;t be put in a
             game with them. In other games that haven&apos;t started yet, you&apos;ll leave the ones
             they&apos;ve joined (or they&apos;re removed from games you created), and any invitation
-            they have to a game you&apos;re in stops. Games you&apos;re already playing carry on.
+            they have to a game you&apos;ve joined stops. Games you&apos;re already playing carry
+            on.
           </p>
           <p>
             They won&apos;t be told, but you&apos;ll no longer be on each other&apos;s lists of

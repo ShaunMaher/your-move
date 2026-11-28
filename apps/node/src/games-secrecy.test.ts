@@ -883,57 +883,62 @@ describe("route-wide secrecy (04 invariant 4)", () => {
     },
   );
 
-  it("words: real plays, a swap, previews and a resignation", async () => {
-    const players = [await signUp(h, "Ada"), await signUp(h, "Bo")];
-    const [a, b] = players as [Player, Player];
-    const stranger = await signUp(h, "Stranger");
-    const game = await created(a, { gameType: "words", invitees: [{ email: b.email }] });
-    await readEverything(game, players, stranger);
-    await transition(game, b, "accept");
-    const toAct = async () => {
-      const now = (await hit(a, "GET", "/api/v1/games/:id", { id: game })).json;
-      return playerAt(now, now.game?.toAct[0], players);
-    };
-    const step = async () => {
+  // Like the example game's: about 0.8 s alone, over 5 s on a busy machine (A23 round 1).
+  it(
+    "words: real plays, a swap, previews and a resignation",
+    { timeout: FULL_GAME_TIMEOUT_MS },
+    async () => {
+      const players = [await signUp(h, "Ada"), await signUp(h, "Bo")];
+      const [a, b] = players as [Player, Player];
+      const stranger = await signUp(h, "Stranger");
+      const game = await created(a, { gameType: "words", invitees: [{ email: b.email }] });
       await readEverything(game, players, stranger);
-      expect(await unchangedByHiddenState(game, players)).toBe(2);
-    };
+      await transition(game, b, "accept");
+      const toAct = async () => {
+        const now = (await hit(a, "GET", "/api/v1/games/:id", { id: game })).json;
+        return playerAt(now, now.game?.toAct[0], players);
+      };
+      const step = async () => {
+        await readEverything(game, players, stranger);
+        expect(await unchangedByHiddenState(game, players)).toBe(2);
+      };
 
-    await step();
-    // The opening: almost every rack spells a word across the centre; one that doesn't passes,
-    // and the later turns make up the plays.
-    let played = (await playAWord(game, await toAct())) ? 1 : 0;
-    await step();
-    // A swap: its record says how many tiles, never which.
-    const swapper = await toAct();
-    const rack =
-      ((await hit(swapper, "GET", "/api/v1/games/:id", { id: game })).json.view as WordsView)
-        .yourRack ?? [];
-    const swapped = await hit(
-      swapper,
-      "POST",
-      "/api/v1/games/:id/actions",
-      { id: game },
-      {
-        expectedVersion: await version(game, swapper),
-        action: { type: "swap", tiles: rack.slice(0, 3) },
-      },
-    );
-    expect(swapped.status, swapped.text).toBe(200);
-    await step();
-    // Then words through the tiles on the board, until a second one is played.
-    for (let turn = 0; turn < 8 && played < 2; turn++) {
-      if (await playAWord(game, await toAct())) played += 1;
       await step();
-    }
-    expect(played).toBe(2);
-    const resigned = await transition(game, await toAct(), "resign");
-    expect(resigned.json.game?.status).toBe("finished");
-    await readEverything(game, players, stranger);
-    await hit(a, "GET", "/api/v1/games/types/:type/rules", { type: "words" });
-    // A member's own final view is theirs to see; only another seat's is a secret.
-    expect((await hit(b, "GET", "/api/v1/games/:id", { id: game })).json.view).not.toBeNull();
-  });
+      // The opening: almost every rack spells a word across the centre; one that doesn't passes,
+      // and the later turns make up the plays.
+      let played = (await playAWord(game, await toAct())) ? 1 : 0;
+      await step();
+      // A swap: its record says how many tiles, never which.
+      const swapper = await toAct();
+      const rack =
+        ((await hit(swapper, "GET", "/api/v1/games/:id", { id: game })).json.view as WordsView)
+          .yourRack ?? [];
+      const swapped = await hit(
+        swapper,
+        "POST",
+        "/api/v1/games/:id/actions",
+        { id: game },
+        {
+          expectedVersion: await version(game, swapper),
+          action: { type: "swap", tiles: rack.slice(0, 3) },
+        },
+      );
+      expect(swapped.status, swapped.text).toBe(200);
+      await step();
+      // Then words through the tiles on the board, until a second one is played.
+      for (let turn = 0; turn < 8 && played < 2; turn++) {
+        if (await playAWord(game, await toAct())) played += 1;
+        await step();
+      }
+      expect(played).toBe(2);
+      const resigned = await transition(game, await toAct(), "resign");
+      expect(resigned.json.game?.status).toBe("finished");
+      await readEverything(game, players, stranger);
+      await hit(a, "GET", "/api/v1/games/types/:type/rules", { type: "words" });
+      // A member's own final view is theirs to see; only another seat's is a secret.
+      expect((await hit(b, "GET", "/api/v1/games/:id", { id: game })).json.view).not.toBeNull();
+    },
+  );
 
   it("an email invite claimed at onboarding (alpha A17): the lobby before and after, then the game", async () => {
     const a = await signUp(h, "Ada");

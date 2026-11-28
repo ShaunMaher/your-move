@@ -15,7 +15,6 @@ import {
   isNotNull,
   isNull,
   lt,
-  ne,
   or,
   type SQL,
   sql,
@@ -214,10 +213,11 @@ export function userRepo(db: Database): UserRepo {
                     and(eq(pastOpponents.userId, viewerId), eq(pastOpponents.otherId, otherId)),
                   ),
               ),
-              // A shared game, through a row the viewer can attribute (A23-S-1): joined (the
-              // creator's included), or the viewer's own open pick. Never a typed address's row,
-              // open or not, which would tie the address to the account (Q3); and only where the
-              // viewer's own row was visible to them.
+              // A shared game in which their row has been joined (the creator's included), the one
+              // row the viewer can always attribute (A23-S-1, S2-2). Never a row never joined: a
+              // typed address's, open or ended, would tie the address to the account (Q3), and a
+              // pick is a past opponent already. Whatever the viewer's own row is (A23-S2-1): an
+              // `inert` one must answer as any other, or the answer would tell of the block.
               exists(
                 db
                   .select({ one: sql`1` })
@@ -227,15 +227,7 @@ export function userRepo(db: Database): UserRepo {
                     and(
                       eq(mine.userId, viewerId),
                       eq(theirs.userId, otherId),
-                      or(ne(mine.delivery, "inert"), isNotNull(mine.joinedAt)),
-                      or(
-                        isNotNull(theirs.joinedAt),
-                        and(
-                          eq(mine.joinedVia, "creator"),
-                          eq(theirs.state, "invited"),
-                          isNull(theirs.inviteEmail),
-                        ),
-                      ),
+                      isNotNull(theirs.joinedAt),
                     ),
                   ),
               ),
@@ -258,9 +250,10 @@ export function userRepo(db: Database): UserRepo {
               and(eq(pastOpponents.userId, blockedId), eq(pastOpponents.otherId, blockerId)),
             ),
           ),
-        // The blocked person's open invitations in the blocker's lobbies go quiet (A23-S-2):
-        // `inert`, as at creation, so to them each is gone as if removed, while everyone else sees
-        // it as before. A row-level update like a claim: no version moves.
+        // The blocked person's open invitations in lobbies the blocker has joined (or created) go
+        // quiet (A23-S-2, P2-2): `inert`, as at creation, so to them each is gone as if removed,
+        // while everyone else sees it as before. A versionless row write (03 §5.2): the accept
+        // guard, claims refusing `inert`, and Start and Remove overwriting it keep it safe.
         db
           .update(gamePlayers)
           .set({ delivery: "inert" })
@@ -279,13 +272,9 @@ export function userRepo(db: Database): UserRepo {
                     and(
                       eq(blockerRows.userId, blockerId),
                       eq(games.status, "lobby"),
-                      or(
-                        eq(blockerRows.state, "joined"),
-                        and(
-                          eq(blockerRows.state, "invited"),
-                          inArray(blockerRows.delivery, ["normal", "hidden"]),
-                        ),
-                      ),
+                      // Joined, the creator included: where the blocker is only invited, their
+                      // own accept's check keeps the pair apart (A23-P2-2).
+                      eq(blockerRows.state, "joined"),
                     ),
                   ),
               ),

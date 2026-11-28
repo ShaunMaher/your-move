@@ -187,7 +187,17 @@ update of that row, re-checking everything that made the nudge due, with no vers
 finished game's rematch link `games.rematch_game_id` is not game state either: it is written in
 the batch that inserts the rematch, by one conditional update guarded on the game being `finished`
 and the link being NULL or naming a game that ended unplayed, with every insert of the batch
-guarded the same way and no version bump, 04, 05 `POST /api/v1/games/:id/rematch`.)
+guarded the same way and no version bump, 04, 05 `POST /api/v1/games/:id/rematch`. Two writes make
+an invitation `inert` without a transition: the block's own batch (05 §Blocks, alpha A23) sets
+`delivery = 'inert'` on the person blocked's open invitations (`invited`, `normal` or `hidden`) in
+`lobby` games the blocker has joined, and the under-age exit's batch (06 §5, alpha A21) sets it on
+the `invited`, user-less email-invite seats typed as the leaving address, every statement of that
+batch guarded on the account's `onboarded_at` still being NULL. Neither touches any other row, the
+game row or its version, and neither needs a version check: an accept is guarded in its own batch
+against a block (A23-S-4) and a claim never takes an `inert` row, while a Start (which drops the
+row) and a Remove (which removes it) write over it whatever its delivery, and no transition reads
+`delivery` to decide anything but whether the holder may still see or accept the invitation. The
+under-age exit's entry closes alpha A21's omission from this list.)
 
 1. Load game state + version.
 2. Compute the new state with the game module (pure), with recorded randomness and pre-loaded

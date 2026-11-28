@@ -394,6 +394,9 @@ describe("blocked players (07 §1, alpha A23)", () => {
     render(<App api={api} />);
     await screen.findByRole("heading", { name: "Blocked players" });
     expect(await screen.findByText("Bo")).toBeDefined();
+    // The empty status line is in the page for screen readers but takes no space (A23-P2-11).
+    const section = screen.getByRole("region", { name: "Blocked players" });
+    expect(within(section).getByRole("status").className).toBe("visually-hidden");
     expect(screen.getByText("A player")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Unblock Bo" }));
     const dialog = await screen.findByRole("dialog", { name: "Unblock Bo?" });

@@ -511,40 +511,45 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    08 T20) — and blocking someone deletes the relationship both
    ways. A test asserts that no `past_opponents` row ever exists for a blocked pair (04 invariant 6).
 10. **Blocks** apply between every pair of users in a game: they're checked when seats are added
-    (§6.1), on accept, on join, at a claim (§6.4), and again at start (02 §4). You can block anyone
-    who is a past opponent or whose row in a game with you you can already attribute (05 §Blocks:
-    a typed address never counts, Q3), from an invitation or a lobby (07). Blocking deletes the
-    past-opponent pair both ways (§6.9). Games already under way carry on: a block never changes
-    an `active` or ended game.
+    (§6.1), on every accept, on join, at a claim (§6.4), and again at start (02 §4). You can block
+    anyone who is a past opponent or whose row in a game with you has been joined (05 §Blocks: a
+    row never joined never counts, Q3), from a lobby (07). Blocking deletes the past-opponent pair
+    both ways (§6.9). Games already under way carry on: a block never changes an `active` or ended
+    game.
 
-    In the same batch, every open invitation the person blocked holds in a lobby where you are a
-    member becomes `inert` (alpha A23 review S-2): a row-level update like a claim (no version
-    bump, nothing for the creator or other members to see, since the three deliveries look alike),
-    so for them the invitation is gone exactly as if they had been removed, and it can never be
-    accepted.
+    In the same batch, every open invitation the person blocked holds in a lobby you have joined
+    (or created) becomes `inert` (alpha A23 review S-2): a versionless row write listed in 03 §5.2
+    (no version bump, nothing for the creator or other members to see, since the three deliveries
+    look alike), so for them the invitation is gone exactly as if they had been removed, and it can
+    never be accepted. Where you are only invited yourself, nothing changes (review P2-2): if you
+    accept, your accept's own check finds the block once they have joined; if they accept first,
+    yours does.
 
     Then, where you can already tell their row is theirs (their row has been `joined`, which the
     lobby shows by name, or you created the lobby and picked them by `userId`): if you created the
     lobby, their seat is removed; otherwise your own seat is declined. Each is written exactly as
-    the creator's Remove or your own Decline would be (02 §4: the same transition, state and
-    version bump, and the lobby can end `declined` the same way). It is declined rather than
-    `left` even for a joined seat, because the lobby's own Decline is how a joined player leaves
-    today (07 §1) and a `left` row would mark the block. Where the other person holds only an
-    invitation you can't attribute, nothing visible changes: acting on it would tell you who that
-    row is, and a creator would learn which typed address is whose (Q3). The checks above keep the
-    two of you apart wherever the call's per-runtime lobby limit left an effect unwritten: the
-    lobby's next Start, or an accept that would start it, writes that same effect first (the
-    blocker's Decline, or the creator-blocker's Remove; 02 §4 step 1), and a join link refuses
-    either of you.
+    the creator's Remove or your own Decline would be (02 §4: its own transition, the same state and
+    version bump, and the lobby can end `declined` the same way). It is declined rather than `left`
+    even for a joined seat, because the lobby's own Decline is how a joined player leaves today
+    (07 §1) and a `left` row would mark the block. Where the other person holds only an invitation
+    you can't attribute, nothing visible changes: acting on it would tell you who that row is, and
+    a creator would learn which typed address is whose (Q3). Where the call's per-runtime lobby
+    limit left an effect unwritten, the lobby's next Start or accept writes it first, as its own
+    transition by you (your Decline) or by you as creator (your Remove), and that Start or accept
+    answers `409 STALE_GAME` with nothing of its own written (02 §4 step 1, review S2-3). A join
+    link refuses either of you; its batch's guard checks joined members only, since an invited row
+    is kept apart by its own accept check (review P2-10).
 
     What can still be noticed (accepted residuals, F-26, 08 T20): the past-opponent pair is gone,
     so each disappears from the other's "People you've played" and a pick between them is
-    refused; and when you block, from their invitation, a past opponent who invited you by typing
-    an address, the pair's disappearance tells them that address reached your account. Blocking several co-members at once declines several lobbies at
-    once, a pattern a creator who shares them could notice. Two people comparing what they see
-    (a join link, an invitation that vanished) can infer that a block involves one of them (as T24).
-    An accept that races a block reads as an invitation gone, like a Remove. Unblocking lifts the
-    block only: deleted pairs stay deleted and `inert` seats stay `inert` (alpha A23).
+    refused, which tells the one who didn't block that the other did; and when you block, from
+    their invitation, a past opponent who invited you by typing an address, the pair's
+    disappearance also tells them that address reached your account. Blocking several co-members
+    at once declines several lobbies at once, a pattern a creator who shares them could notice.
+    Two people comparing what they see (a join link, an invitation that vanished) can infer that a
+    block involves one of them (as T24). An accept that races a block reads as an invitation gone,
+    like a Remove. Unblocking lifts the block only: deleted pairs stay deleted and `inert` seats
+    stay `inert` (alpha A23).
 
 11. **Rematch** (alpha A15, 05 `POST /api/v1/games/:id/rematch`). Any player of a `finished` game
     may ask for its rematch; it is created as if they had picked every other player of that game by

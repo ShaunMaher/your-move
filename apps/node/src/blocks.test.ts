@@ -146,22 +146,60 @@ describe("POST /api/v1/blocks: who can be blocked (05 §Blocks)", () => {
     expect((await block(c, a)).status).toBe(204);
   });
 
-  it("never through a typed address: a probe by id gets the stranger's 404 (A23-S-1, Q3)", async () => {
-    const [x, prober] = [await signUp(h, "Xan"), await signUp(h, "Pro")];
-    // The prober types x's address, open, then declined by x: neither ties it to x's account.
-    const game = await createGame(h, prober, {
+  it.each(["open", "declined", "cancelled", "expired"] as const)(
+    "never through a typed address, %s: a probe by id gets the stranger's 404 (A23-S-1, S2-2, Q3)",
+    async (how) => {
+      const [x, prober] = [await signUp(h, "Xan"), await signUp(h, "Pro")];
+      const game = await createGame(h, prober, {
+        gameType: "example",
+        seats: 3,
+        invitees: [{ email: x.email }],
+      });
+      if (how === "declined") await transition(h, x, game.id, "decline");
+      if (how === "cancelled") await transition(h, prober, game.id, "cancel");
+      if (how === "expired") {
+        h.advance(15 * DAY);
+        // Reading the list expires the overdue lobby (lazy expiry), clearing typed addresses.
+        await call(h, prober, "GET", "/api/v1/games");
+      }
+      if (how === "cancelled" || how === "expired") {
+        // The ended lobby kept x's row invited, its address cleared: it looks like a pick.
+        expect(rowsOf(game.id)[1]).toMatchObject({ user_id: x.id, invite_email: null });
+      }
+      const before = rowsOf(game.id);
+      const answer = await block(prober, x);
+      expect([answer.status, code(answer.body)]).toEqual([404, "NOT_FOUND"]);
+      expect(rowsOf(game.id)).toEqual(before);
+      expect(h.query("SELECT count(*) AS n FROM blocks")[0]?.["n"]).toBe(0);
+    },
+  );
+
+  it("answers an inert holder naming the creator exactly as after a Remove (A23-S2-1)", async () => {
+    const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
+    pastOpponents(a, b);
+    // b's invitation made inert by a's block; c's removed by a.
+    const flipped = await createGame(h, a, {
       gameType: "example",
       seats: 3,
-      invitees: [{ email: x.email }],
+      invitees: [{ email: b.email }],
     });
-    const before = rowsOf(game.id);
-    const open = await block(prober, x);
-    expect([open.status, code(open.body)]).toEqual([404, "NOT_FOUND"]);
-    expect(rowsOf(game.id)).toEqual(before);
-    expect((await transition(h, x, game.id, "decline")).status).toBe(204);
-    const after = await block(prober, x);
-    expect([after.status, code(after.body)]).toEqual([404, "NOT_FOUND"]);
-    expect(h.query("SELECT count(*) AS n FROM blocks")[0]?.["n"]).toBe(0);
+    const removed = await createGame(h, a, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: c.email }],
+    });
+    const { game } = await getGame(h, a, removed.id);
+    const playerId = game.players[1]?.playerId;
+    await call(h, a, "POST", `/api/v1/games/${removed.id}/remove-seat`, {
+      expectedVersion: game.version,
+      playerId,
+    });
+    expect((await block(a, b)).status).toBe(204);
+    expect(rowsOf(flipped.id)[1]).toMatchObject({ delivery: "inert" });
+    const fromInert = await block(b, a);
+    const fromRemoved = await block(c, a);
+    expect([fromInert.status, fromInert.body]).toEqual([fromRemoved.status, fromRemoved.body]);
+    expect(fromInert.status).toBe(204);
   });
 
   it("is 404 for a stranger, yourself, an unknown id and an AI account, writing nothing", async () => {
@@ -416,6 +454,26 @@ describe("what a new block changes (06 §6.10)", () => {
     expect((await call(h, c, "GET", `/api/v1/games/${game.id}`)).status).toBe(404);
   });
 
+  it("leaves the other's invitation normal where the blocker is only invited (A23-P2-2)", async () => {
+    const [c, v, o] = [await signUp(h, "Cy"), await signUp(h, "Vi"), await signUp(h, "Oz")];
+    pastOpponents(v, o);
+    const game = await createGame(h, c, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: v.email }, { email: o.email }],
+    });
+    expect((await block(v, o)).status).toBe(204);
+    expect(rowsOf(game.id).map((row) => [row["state"], row["delivery"]])).toEqual([
+      ["joined", "normal"],
+      ["invited", "normal"],
+      ["invited", "normal"],
+    ]);
+    // Their accepts keep them apart: o's goes through, then v's finds the block.
+    expect((await transition(h, o, game.id, "accept")).status).toBe(200);
+    const refused = await transition(h, v, game.id, "accept");
+    expect([refused.status, code(refused.body)]).toEqual([404, "NOT_FOUND"]);
+  });
+
   it("changes nothing in an active game: it carries on, and no pair is written at its end", async () => {
     const [a, b] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
     const game = await createGame(h, a, { gameType: "example", invitees: [{ email: b.email }] });
@@ -468,19 +526,34 @@ describe("the accept and start checks (02 §4, 05 `/accept`)", () => {
   const states = (gameId: string) =>
     rowsOf(gameId).map((row) => [row["user_id"], row["state"], row["removed"]]);
 
+  /**
+   * A Start that finds an outstanding block effect (02 §4 step 1, A23-S2-3): it writes that effect
+   * as its own transition, nothing of the Start's, and answers 409 STALE_GAME; the version moved
+   * by exactly one; a retry then judges the lobby as it now is.
+   */
+  async function startAfterEffect(creator: Player, game: string) {
+    const before = Number(versionOf(game));
+    const first = await transition(h, creator, game, "start");
+    expect([first.status, code(first.body)]).toEqual([409, "STALE_GAME"]);
+    expect(versionOf(game)).toBe(before + 1);
+    return transition(h, creator, game, "start");
+  }
+
   it.each([
-    ["the blocker's own Decline", "c blocks b", "c"],
-    ["the creator-blocker's Remove", "a blocks c", "a"],
-    ["the Decline of the one who blocked the creator", "b blocks a", "b"],
-  ] as const)("writes %s at Start, and starts with the rest (A23-S-3)", async (_, __, who) => {
+    ["the blocker's own Decline", "c"],
+    ["the creator-blocker's Remove", "a"],
+    ["the Decline of the one who blocked the creator", "b"],
+  ] as const)("writes %s as its own transition, then Start works (A23-S2-3)", async (_, who) => {
     const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
     const game = await lobbyWith(a, [b, c], 4);
     if (who === "c") rawBlock(c, b);
     if (who === "a") rawBlock(a, c);
     if (who === "b") rawBlock(b, a);
-    const started = await transition(h, a, game, "start");
-    expect(started.status).toBe(200);
-    expect(started.body.game.status).toBe("active");
+    const statusBefore = statusOf(game);
+    const retried = await startAfterEffect(a, game);
+    expect(statusBefore).toBe("lobby");
+    expect(retried.status).toBe(200);
+    expect(retried.body.game.status).toBe("active");
     expect(states(game)).toEqual(
       who === "c"
         ? [
@@ -502,12 +575,30 @@ describe("the accept and start checks (02 §4, 05 `/accept`)", () => {
     );
   });
 
-  it("settles a chain in joining order: A–B then B–C leaves C in", async () => {
+  it("shows the refetching creator the Decline at its own version, as a natural one", async () => {
+    const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
+    const game = await lobbyWith(a, [b, c], 4);
+    rawBlock(c, b);
+    const stale = await transition(h, a, game, "start");
+    expect(code(stale.body)).toBe("STALE_GAME");
+    const { game: seen } = await getGame(h, a, game);
+    expect(seen.status).toBe("lobby");
+    expect(seen.players.map((row) => row.state)).toEqual(["joined", "joined", "declined"]);
+    // The decliner's own transition: their marker moved with it, and the creator's didn't.
+    const markers = h.query(
+      "SELECT user_id, last_seen_version FROM game_players WHERE game_id = ? ORDER BY rowid",
+      game,
+    );
+    expect(markers[2]?.["last_seen_version"]).toBe(seen.version);
+    expect(markers[0]?.["last_seen_version"]).not.toBe(seen.version);
+  });
+
+  it("settles a chain one effect a call: A–B then B–C leaves C in", async () => {
     const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
     const game = await lobbyWith(a, [b, c], 4);
     rawBlock(a, b);
     rawBlock(b, c);
-    expect((await transition(h, a, game, "start")).body.game.status).toBe("active");
+    expect((await startAfterEffect(a, game)).body.game.status).toBe("active");
     expect(states(game)).toEqual([
       [a.id, "playing", 0],
       [b.id, "removed", 1],
@@ -515,22 +606,20 @@ describe("the accept and start checks (02 §4, 05 `/accept`)", () => {
     ]);
   });
 
-  it("writes the effect and answers NOT_ENOUGH_PLAYERS when too few would remain", async () => {
+  it("leaves too few: the retried Start is NOT_ENOUGH_PLAYERS", async () => {
     const [a, b] = [await signUp(h, "Ada"), await signUp(h, "Bo")];
     const game = await lobbyWith(a, [b], 3);
     rawBlock(a, b);
-    const before = versionOf(game);
-    const started = await transition(h, a, game, "start");
-    expect([started.status, code(started.body)]).toEqual([409, "NOT_ENOUGH_PLAYERS"]);
+    const retried = await startAfterEffect(a, game);
+    expect([retried.status, code(retried.body)]).toEqual([409, "NOT_ENOUGH_PLAYERS"]);
     expect(states(game)).toEqual([
       [a.id, "joined", 0],
       [b.id, "removed", 1],
     ]);
-    expect(versionOf(game)).toBe(Number(before) + 1);
     expect(statusOf(game)).toBe("lobby");
   });
 
-  it("ends a lobby a Decline at Start leaves unable to fill, as a decline would", async () => {
+  it("ends a lobby the blocker's Decline leaves unable to fill, as a decline would", async () => {
     const [c, d] = [await signUp(h, "Cy"), await signUp(h, "Di")];
     const lobby = await createGame(h, c, {
       gameType: "example",
@@ -539,8 +628,8 @@ describe("the accept and start checks (02 §4, 05 `/accept`)", () => {
     });
     await transition(h, d, lobby.id, "accept");
     rawBlock(d, c);
-    const started = await transition(h, c, lobby.id, "start");
-    expect([started.status, code(started.body)]).toEqual([409, "NOT_ENOUGH_PLAYERS"]);
+    const stale = await transition(h, c, lobby.id, "start");
+    expect([stale.status, code(stale.body)]).toEqual([409, "STALE_GAME"]);
     expect(statusOf(lobby.id)).toBe("declined");
     expect(states(lobby.id)).toEqual([
       [c.id, "joined", 0],
@@ -548,7 +637,7 @@ describe("the accept and start checks (02 §4, 05 `/accept`)", () => {
     ]);
   });
 
-  it("writes the effect on an accept, and the automatic start then doesn't happen", async () => {
+  it("does the same on an accept: the effect first, the accept stale, its retry written", async () => {
     const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
     const game = await createGame(h, a, {
       gameType: "example",
@@ -557,6 +646,9 @@ describe("the accept and start checks (02 §4, 05 `/accept`)", () => {
     });
     await transition(h, b, game.id, "accept");
     rawBlock(a, b);
+    const stale = await transition(h, c, game.id, "accept");
+    expect([stale.status, code(stale.body)]).toEqual([409, "STALE_GAME"]);
+    expect(rowsOf(game.id).map((row) => row["state"])).toEqual(["joined", "removed", "invited"]);
     const accepted = await transition(h, c, game.id, "accept");
     expect(accepted.status).toBe(200);
     expect(accepted.body.game.status).toBe("lobby");
@@ -624,6 +716,7 @@ describe("a block's leftovers converge (A23-S-3)", () => {
     await block(b, c);
     expect(rowsOf(first).map((row) => row["state"])).toEqual(["joined", "declined", "joined"]);
     expect(rowsOf(second).map((row) => row["state"])).toEqual(["joined", "joined", "joined"]);
+    expect(code((await transition(h, a, second, "start")).body)).toBe("STALE_GAME");
     expect((await transition(h, a, second, "start")).body.game.status).toBe("active");
     expect(rowsOf(second).map((row) => [row["user_id"], row["state"], row["removed"]])).toEqual([
       [a.id, "playing", 0],
@@ -647,8 +740,46 @@ describe("a block's leftovers converge (A23-S-3)", () => {
     await block(b, c);
     expect(rowsOf(first)[1]?.["state"]).toBe("removed");
     expect(rowsOf(second.id)[1]?.["state"]).toBe("joined");
+    expect(code((await transition(h, d, second.id, "accept")).body)).toBe("STALE_GAME");
     expect((await transition(h, d, second.id, "accept")).status).toBe(200);
     expect(rowsOf(second.id).map((row) => row["state"])).toEqual(["joined", "removed", "joined"]);
+  });
+});
+
+describe("a rematch's inert invitation (Q29, 06 §6.11, A23-P2-5)", () => {
+  it("shows its holder no place in the rematch, while the others see them invited", async () => {
+    const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
+    const game = await createGame(h, a, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: b.email }, { email: c.email }],
+    });
+    for (const other of [b, c]) await transition(h, other, game.id, "accept");
+    await playExampleToEnd(h, game.id, [a, b, c]);
+    h.advance(DAY);
+    expect((await block(b, c)).status).toBe(204);
+    const made = await call<{ game: { id: string; players: { state: string }[] } }>(
+      h,
+      a,
+      "POST",
+      `/api/v1/games/${game.id}/rematch`,
+      {},
+    );
+    expect(made.status).toBe(201);
+    const later = rowsOf(made.body.game.id).find((row) => row["delivery"] === "inert");
+    expect(later).toBeDefined();
+    const holder = later?.["user_id"] === b.id ? b : c;
+    const other = holder === b ? c : b;
+    expect((await getGame(h, holder, game.id)).game.rematch).toEqual({
+      gameId: made.body.game.id,
+      you: "none",
+    });
+    expect((await getGame(h, other, game.id)).game.rematch?.you).toBe("invited");
+    expect(made.body.game.players.map((player) => player.state)).toEqual([
+      "joined",
+      "invited",
+      "invited",
+    ]);
   });
 });
 
@@ -704,6 +835,7 @@ describe("a block's lobby changes that keep losing races (A23-P-7, P-16)", () =>
     expect(h.logs.some((line) => line["msg"] === "block's lobby change kept losing races")).toBe(
       true,
     );
+    expect(code((await transition(h, a, game, "start")).body)).toBe("STALE_GAME");
     expect((await transition(h, a, game, "start")).body.game.status).toBe("active");
     expect(rowsOf(game)[1]?.["state"]).toBe("removed");
   });

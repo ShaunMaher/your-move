@@ -49,7 +49,7 @@ whose row is whose: first "You'll decline this invitation." (on an invitation) o
 this game." (once joined), then "They won't be able to add you to games or invite you, and you
 won't be put in a game with them. In other games that haven't started yet, you'll leave the ones
 they've joined (or they're removed from games you created), and any invitation they have to a
-game you're in stops. Games you're already playing carry on." and "They won't be told, but you'll
+game you've joined stops. Games you're already playing carry on." and "They won't be told, but you'll
 no longer be on each other's lists of people you've played. You can unblock them in Settings.",
 with **Block** and **Cancel**. After a block the game list is shown. Settings has a **Blocked
 players** section listing `GET /api/v1/blocks` (name, and when they were blocked; "Show more"

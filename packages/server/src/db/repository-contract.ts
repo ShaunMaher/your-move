@@ -582,7 +582,7 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
           expect(await repos.users.canBlock(a, crypto.randomUUID())).toBe(false);
         });
 
-        it("never counts a row the viewer can't attribute (A23-S-1)", async () => {
+        it("never counts a row never joined, whatever the viewer's own row (A23-S-1, S2-1, S2-2)", async () => {
           const [creator, typed, declined, picked, someone] = [
             await human(),
             await human(),
@@ -601,22 +601,26 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
               inviteEmail: address(typed),
             }),
             player({ userId: declined, state: "declined", joinedAt: null }),
-            // The creator's open pick: theirs to block.
+            // An open row with no typed address, as a pick, or a typed row an ended lobby
+            // cleared, looks: never counts either. A real pick is a past opponent anyway.
             player({ userId: picked, state: "invited", joinedAt: null }),
           ]);
           expect(await repos.users.canBlock(creator, typed)).toBe(false);
           expect(await repos.users.canBlock(creator, declined)).toBe(false);
+          expect(await repos.users.canBlock(creator, picked)).toBe(false);
+          await pair(creator, picked);
           expect(await repos.users.canBlock(creator, picked)).toBe(true);
           // Each invitee sees the creator, who has joined.
           expect(await repos.users.canBlock(typed, creator)).toBe(true);
-          // An inert invitation was never seen: its holder can't block through it.
+          // An inert invitation's holder answers as anyone else in a game with the creator: the
+          // answer must not tell them their invitation went inert (A23-S2-1).
           const inertHolder = await human();
           const other = newGame({ status: "lobby", createdBy: someone });
           await repos.games.create(other, [
             player({ userId: someone, joinedVia: "creator" }),
             player({ userId: inertHolder, state: "invited", joinedAt: null, delivery: "inert" }),
           ]);
-          expect(await repos.users.canBlock(inertHolder, someone)).toBe(false);
+          expect(await repos.users.canBlock(inertHolder, someone)).toBe(true);
         });
 
         it("holds a transition back while a block lies between its actor and a joined member (A23-S-4)", async () => {
@@ -645,15 +649,20 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
           ).toBe("ok");
         });
 
-        it("makes the person blocked's open invitations in the blocker's lobbies inert, and no version moves", async () => {
+        it("makes the person blocked's open invitations inert where the blocker has joined, and no version moves", async () => {
           const [blocker, other, host] = [await human(), await human(), await human()];
           const shared = newGame({ status: "lobby", createdBy: host, seats: 4 });
-          const hostRow = player({ userId: host, joinedVia: "creator" });
-          const otherRow = player({ userId: other, state: "invited", joinedAt: null });
           await repos.games.create(shared, [
-            hostRow,
+            player({ userId: host, joinedVia: "creator" }),
+            player({ userId: blocker, joinedVia: "invitation" }),
+            player({ userId: other, state: "invited", joinedAt: null }),
+          ]);
+          // Where the blocker is only invited, their own accept keeps the pair apart (P2-2).
+          const invitedOnly = newGame({ status: "lobby", createdBy: host, seats: 3 });
+          await repos.games.create(invitedOnly, [
+            player({ userId: host, joinedVia: "creator" }),
             player({ userId: blocker, state: "invited", joinedAt: null, delivery: "hidden" }),
-            otherRow,
+            player({ userId: other, state: "invited", joinedAt: null }),
           ]);
           // A lobby the blocker isn't in, and one where their own row is inert: untouched.
           const apart = newGame({ status: "lobby", createdBy: host });
@@ -677,6 +686,7 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
               )
             )[0]?.["delivery"];
           expect(await delivery(shared.id)).toBe("inert");
+          expect(await delivery(invitedOnly.id)).toBe("normal");
           expect(await delivery(apart.id)).toBe("normal");
           expect(await delivery(unseen.id)).toBe("hidden");
           expect((await repos.games.get(shared.id))?.version).toBe(0);

@@ -14,6 +14,7 @@ import {
   decline,
   expire,
   type GameContext,
+  isOutstanding,
   isSettled,
   isRefusal,
   joinVerdict,
@@ -32,14 +33,16 @@ const NO_BLOCKS: readonly BlockPair[] = [];
 /** An accept with no blocks: a write set or a refusal, never a block's decline. */
 function accept(ctx: GameContext, viewer: GamePlayerRecord, now: number) {
   const outcome = acceptWith(ctx, viewer, now, NO_BLOCKS);
-  if (isSettled(outcome)) throw new Error("an accept with no blocks found one");
+  if (isSettled(outcome) || isOutstanding(outcome)) {
+    throw new Error("an accept with no blocks found one");
+  }
   return outcome;
 }
 
 /** A Start with no blocks: a write set or a refusal, never a block's settlement. */
 function start(ctx: GameContext, viewer: GamePlayerRecord, now: number) {
   const outcome = startWith(ctx, viewer, now, NO_BLOCKS);
-  if (isSettled(outcome)) throw new Error("a start with no blocks found one");
+  if (isOutstanding(outcome)) throw new Error("a start with no blocks found one");
   return outcome;
 }
 

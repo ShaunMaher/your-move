@@ -119,20 +119,20 @@ export interface UserRepo {
   blocksAmong(userIds: readonly string[]): Promise<BlockPair[]>;
   /**
    * Whether `viewerId` may block `otherId` (05 §Blocks): another human account that is a past
-   * opponent of the viewer (04 `past_opponents`) or already blocked by them (a repeat is the same
-   * answer), or that shares a game with the viewer through a row the viewer can attribute (A23-S-1):
-   * one that has been joined, or, when the viewer created the game, an open pick (`invited` with
-   * `invite_email` NULL). The viewer's own row there must have been visible to them (not an `inert`
-   * invitation they never saw). A typed address's row, open or not, never counts: otherwise the
-   * answer would tie an address to an account (Q3). Never the viewer and never an AI account.
+   * opponent of the viewer (04 `past_opponents`, which covers every pick), already blocked by them
+   * (a repeat is the same answer), or that has a `joined` row (`joined_at` set) in a game where
+   * the viewer has any row (A23-S-1, S2-1, S2-2). A row never joined never counts: a typed
+   * address's, open or ended, would tie the address to an account (Q3). Never the viewer and
+   * never an AI account.
    */
   canBlock(viewerId: string, otherId: string): Promise<boolean>;
   /**
    * Records `blockerId`'s block of `blockedId` (an existing one keeps its `created_at`), deletes
    * the pair's `past_opponents` rows both ways (04 invariant 6), and makes `inert` every open
    * invitation (`invited`, `normal` or `hidden`) `blockedId` holds in a `lobby` where `blockerId`
-   * is a member (06 §6.10, A23-S-2), in one atomic batch. That last is a row-level update like a
-   * claim: no game's version moves, and the creator and other members see the row as before.
+   * has joined, the creator included (06 §6.10, A23-S-2, P2-2), in one atomic batch. That last is
+   * a versionless row write listed in 03 §5.2: no game's version moves, and the creator and other
+   * members see the row as before.
    */
   block(blockerId: string, blockedId: string, createdAt: number): Promise<void>;
   /** Deletes `blockerId`'s block of `blockedId`; true if there was one. Nothing else changes. */

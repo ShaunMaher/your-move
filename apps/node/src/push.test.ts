@@ -501,10 +501,20 @@ describe("blocks send no push (06 §6.10, 02 §4 Lobby notifications, A23-P-7)",
     await subscribe(ada, phones[0] ?? (await device()));
     await subscribe(bo, phones[1] ?? (await device()));
     await subscribe(cy, phones[2] ?? (await device()));
+    const di = await signUp(h, "Di");
+    await subscribe(di, await device());
+    // Di is Ada's past opponent, invited by typed address: her row can't be told from any other.
+    h.exec(
+      "INSERT INTO past_opponents (user_id, other_id, last_finished_at) VALUES (?, ?, 0), (?, ?, 0)",
+      ada.id,
+      di.id,
+      di.id,
+      ada.id,
+    );
     const lobby = await createGame(h, ada, {
       gameType: "example",
-      seats: 3,
-      invitees: [{ email: bo.email }, { email: cy.email }],
+      seats: 4,
+      invitees: [{ email: bo.email }, { email: cy.email }, { email: di.email }],
     });
     const accepted = await call(h, bo, "POST", `/api/v1/games/${lobby.id}/accept`, {
       expectedVersion: lobby.version,
@@ -512,9 +522,18 @@ describe("blocks send no push (06 §6.10, 02 §4 Lobby notifications, A23-P-7)",
     expect(accepted.status).toBe(200);
     await h.drain();
     sent.length = 0;
-    // Ada removes Bo by blocking him; Cy's invitation is declined by her own block of Ada.
+    // Ada removes Bo by blocking him and makes Di's invitation inert by blocking her; Cy's
+    // invitation is declined by her own block of Ada.
     expect((await call(h, ada, "POST", "/api/v1/blocks", { userId: bo.id })).status).toBe(204);
+    expect((await call(h, ada, "POST", "/api/v1/blocks", { userId: di.id })).status).toBe(204);
     expect((await call(h, cy, "POST", "/api/v1/blocks", { userId: ada.id })).status).toBe(204);
+    expect(
+      h.query(
+        "SELECT delivery FROM game_players WHERE game_id = ? AND user_id = ?",
+        lobby.id,
+        di.id,
+      ),
+    ).toEqual([{ delivery: "inert" }]);
     await h.drain();
     expect(sent).toEqual([]);
   });

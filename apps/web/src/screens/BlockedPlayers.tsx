@@ -105,7 +105,10 @@ export function BlockedPlayers({ api, onSessionLost }: BlockedPlayersProps) {
       <h2 id="blocked-heading" ref={heading} tabIndex={-1}>
         Blocked players
       </h2>
-      <p role="status">{done}</p>
+      {/* Always mounted, so the change is announced; it takes no space while empty (A23-P2-11). */}
+      <p role="status" className={done === null ? "visually-hidden" : undefined}>
+        {done}
+      </p>
       <p className="hint">
         People you&apos;ve blocked can&apos;t add you to games or invite you, and you won&apos;t be
         put in a game with them. They aren&apos;t told.

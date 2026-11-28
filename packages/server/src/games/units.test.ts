@@ -16,6 +16,7 @@ import {
   endedUnplayed,
   expire,
   type GameContext,
+  isOutstanding,
   isSettled,
   isModuleOutcome,
   isRefusal,
@@ -41,14 +42,16 @@ const NO_BLOCKS: readonly BlockPair[] = [];
 /** An accept with no blocks: a write set or a refusal, never a block's decline. */
 function accept(ctx: GameContext, viewer: GamePlayerRecord, now: number) {
   const outcome = acceptWith(ctx, viewer, now, NO_BLOCKS);
-  if (isSettled(outcome)) throw new Error("an accept with no blocks found one");
+  if (isSettled(outcome) || isOutstanding(outcome)) {
+    throw new Error("an accept with no blocks found one");
+  }
   return outcome;
 }
 
 /** A Start with no blocks: a write set or a refusal, never a block's settlement. */
 function start(ctx: GameContext, viewer: GamePlayerRecord, now: number) {
   const outcome = startWith(ctx, viewer, now, NO_BLOCKS);
-  if (isSettled(outcome)) throw new Error("a start with no blocks found one");
+  if (isOutstanding(outcome)) throw new Error("a start with no blocks found one");
   return outcome;
 }
 
@@ -592,6 +595,13 @@ describe("a finished game's rematch as one of its players sees it (05 `rematch`,
       "joined",
       "none",
     ]);
+    // An inert invitation gives no access: none, never an Accept that fails (Q29, A23-P2-5).
+    expect(
+      rematchOf({ game: game(), viewerState: "invited", viewerDelivery: "inert" }, 2000)?.you,
+    ).toBe("none");
+    expect(
+      rematchOf({ game: game(), viewerState: "invited", viewerDelivery: "hidden" }, 2000)?.you,
+    ).toBe("invited");
     expect(
       rematchOf({ game: game(), viewerState: "joined", viewerDelivery: "normal" }, 2000),
     ).toEqual({

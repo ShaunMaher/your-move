@@ -61,10 +61,12 @@ import {
   type GameContext,
   lobbyExpiresAt,
   isModuleOutcome,
+  isOutstanding,
   isRefusal,
   isSettled,
   moduleTransition,
   type ModuleOutcome,
+  type Outstanding,
   type Refusal,
   removeSeat,
   resign,
@@ -351,7 +353,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       viewer: GamePlayerRecord,
       at: number,
       pairs: readonly BlockPair[],
-    ) => GameWriteSet | ModuleOutcome | Settled | Refusal,
+    ) => GameWriteSet | ModuleOutcome | Settled | Outstanding | Refusal,
     options: { readonly gate?: (user: UserRecord) => void; readonly blocks?: boolean } = {},
   ) => {
     const user = userOf(c);
@@ -363,10 +365,16 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     const outcome = run(ctx, viewer, now(), options.blocks === true ? await blocksIn(loaded) : []);
     if (isRefusal(outcome)) throw refusal(outcome);
     if (isSettled(outcome)) {
-      // Written, then refused (05 `/accept`, `/start`): an accept a block declined answers the
-      // `404` of a game they can no longer see; a start whose block effects left too few, 409.
+      // Written, then refused (05 `/accept`): an accept a block declined answers the `404` of a
+      // game they can no longer see.
       await commit(c, loaded, outcome.settle, viewer, null);
       throw refusal(outcome.then);
+    }
+    if (isOutstanding(outcome)) {
+      // A block's outstanding effect, as its own transition by the blocker or the creator (02 §4
+      // step 1, A23-S2-3); nothing of the caller's is written, and they see a lost race.
+      await applyAs(loaded, outcome.outstanding, outcome.actor);
+      throw ApiError.of("STALE_GAME");
     }
     await commit(
       c,
@@ -540,16 +548,23 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
         // `games:create` (05 §Token scopes, 10 M3 acceptance); only sessions reach this today.
         const outcome = accept(contextOf(loaded), viewer, now(), await blocksIn(loaded));
         if (isRefusal(outcome)) throw refusal(outcome);
-        const settled = isSettled(outcome) ? outcome : null;
+        if (isOutstanding(outcome)) {
+          // A block's outstanding effect first, as its own transition (02 §4 step 1); then this
+          // accept is judged again, as after any lost race.
+          await applyAs(loaded, outcome.outstanding, outcome.actor);
+          if (attempt >= REMATCH_ACCEPT_ATTEMPTS) throw ApiError.of("STALE_GAME");
+          continue;
+        }
+        const writes = isSettled(outcome) ? outcome.settle : outcome;
         try {
-          await commit(c, loaded, settled?.settle ?? (outcome as GameWriteSet), viewer, null);
+          await commit(c, loaded, writes, viewer, null);
         } catch (error) {
           const lost = error instanceof ApiError && error.code === "STALE_GAME";
           if (!lost || attempt >= REMATCH_ACCEPT_ATTEMPTS) throw error;
           continue;
         }
         // A block found on accept declined the invitation: the `404` of `/accept` (05).
-        if (settled !== null) throw refusal(settled.then);
+        if (isSettled(outcome)) throw refusal(outcome.then);
       }
       return (await gameWithView(rematchId, user)).game;
     }
