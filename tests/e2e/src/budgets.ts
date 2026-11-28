@@ -81,3 +81,11 @@ export const NO_PLAY_TEST_TIMEOUT_MS = 60_000;
  * re-measured on CI.
  */
 export const INVITE_TEST_TIMEOUT_MS = 60_000;
+/**
+ * The join-link test (join-links.spec.ts, alpha A18): one sign-in, a words game with a link and no
+ * address, the second person's sign-up from the link (sign-in and onboarding on the way), the join,
+ * the creator's Start and both boards. Fewer steps than the email invite test, so the same 60 s.
+ * Measured locally in the pinned image: 2.3 s (Chromium) and 3.1 s (WebKit) alone, 4.4 s and 8.4 s
+ * in the full suite, 2026-11-28; to be re-measured on CI.
+ */
+export const JOIN_LINK_TEST_TIMEOUT_MS = 60_000;

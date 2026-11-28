@@ -17,6 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { normaliseAddress } from "../accounts/email.js";
 import { createApp, type App } from "../app.js";
+import { parseIp } from "../auth/client-ip.js";
 import { createSession } from "../auth/session.js";
 import { parseConfig } from "../config/parse.js";
 import type {
@@ -67,6 +68,12 @@ function racing(repos: Repositories) {
   } | null = null;
   let stale = 0;
   let created: ((gameId: string) => void) | null = null;
+  /**
+   * Orders a join against a link change (a rotation or revoke, which is no transition): `link`
+   * holds the join's transition until the link has changed; `join` holds the link change until a
+   * transition has been applied.
+   */
+  let first: { who: "link" | "join"; release: () => void; released: Promise<void> } | null = null;
   /** While set, the transition it matches waits until another transition has been applied. */
   let holding: {
     matches: (writes: GameWriteSet) => boolean;
@@ -92,6 +99,8 @@ function racing(repos: Repositories) {
       return loaded;
     },
     async applyTransition(...args) {
+      const order = first;
+      if (order?.who === "link" && args[2].requireJoinLink !== undefined) await order.released;
       const gate = holding;
       if (gate !== null && !gate.held && gate.matches(args[2])) {
         gate.held = true;
@@ -100,11 +109,25 @@ function racing(repos: Repositories) {
       const result = await repos.games.applyTransition(...args);
       if (result === "stale") stale += 1;
       if (gate !== null && !gate.matches(args[2])) gate.release();
+      if (order?.who === "join") order.release();
       return result;
     },
   };
+  /** A link change, ordered by `first`. */
+  const linkChange = async <T>(change: () => Promise<T>): Promise<T> => {
+    const order = first;
+    if (order?.who === "join") await order.released;
+    const result = await change();
+    if (order?.who === "link") order.release();
+    return result;
+  };
+  const joinLinks: Repositories["joinLinks"] = {
+    ...repos.joinLinks,
+    put: (...args) => linkChange(() => repos.joinLinks.put(...args)),
+    revoke: (...args) => linkChange(() => repos.joinLinks.revoke(...args)),
+  };
   return {
-    repos: { ...repos, games },
+    repos: { ...repos, games, joinLinks },
     /** The id of the next game created, once it is stored. */
     nextCreated(): Promise<string> {
       return new Promise((resolve) => {
@@ -118,7 +141,11 @@ function racing(repos: Repositories) {
      */
     async race<T>(
       requests: readonly (() => Promise<T>)[],
-      options: { readonly hold?: (writes: GameWriteSet) => boolean } = {},
+      options: {
+        readonly hold?: (writes: GameWriteSet) => boolean;
+        /** Which of a join and a link change goes first (see `first`). */
+        readonly first?: "link" | "join";
+      } = {},
     ): Promise<{ answers: T[]; stale: number }> {
       let open = (): void => undefined;
       const opened = new Promise<void>((resolve) => {
@@ -128,10 +155,19 @@ function racing(repos: Repositories) {
       const released = new Promise<void>((resolve) => {
         release = resolve;
       });
+      let releaseFirst = (): void => undefined;
+      const firstReleased = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
       const timer = setTimeout(() => {
         open();
         release();
+        releaseFirst();
       }, BARRIER_TIMEOUT_MS);
+      first =
+        options.first === undefined
+          ? null
+          : { who: options.first, release: releaseFirst, released: firstReleased };
       barrier = { parties: requests.length, arrived: 0, open, opened };
       holding =
         options.hold === undefined
@@ -145,6 +181,7 @@ function racing(repos: Repositories) {
         clearTimeout(timer);
         barrier = null;
         holding = null;
+        first = null;
       }
     },
   };
@@ -205,8 +242,11 @@ export function gameRaceContract(
           log,
           email: createConsoleEmailSender(log, now),
           push: DISABLED_PUSH_SENDER,
-          // No game route uses the client address.
-          clientIp: () => ({ ok: false, reason: "missing" }),
+          // The join routes' per-IP limit reads it (08 §4.1); every racer shares one address.
+          clientIp: () => {
+            const ip = parseIp("203.0.113.9");
+            return ip === null ? { ok: false, reason: "missing" } : { ok: true, ip };
+          },
           dictionaries: NO_DICTIONARIES,
           now,
         },
@@ -562,6 +602,154 @@ export function gameRaceContract(
       expect(retried.body?.game?.status).toBe("active");
       await consistent(gameId, 2);
       clock += 1;
+    });
+
+    /** A lobby with a join link asked for at creation, and the link's token (alpha A18). */
+    const linkedLobby = async (seats: number, invitees: readonly Player[]) => {
+      const creator = await player();
+      const created = await send(creator, "POST", "/api/v1/games", {
+        gameType: game.type,
+        seats,
+        invitees: invitees.map((invitee) => ({ email: invitee.email })),
+        joinLink: true,
+      });
+      expect(created.status).toBe(201);
+      const url = (created.body as { joinLinkUrl?: string } | null)?.joinLinkUrl ?? "";
+      return { creator, gameId: created.body?.game?.id ?? "", token: url.split("#")[1] ?? "" };
+    };
+
+    it("join against join for the last open seat: one joins, the other's retry finds it full", async () => {
+      for (let round = 0; round < 3; round++) {
+        const { gameId, token } = await linkedLobby(2, []);
+        const joiners = [await player(), await player()];
+        const { answers, stale } = await races.race(
+          joiners.map((who) => () => send(who, "POST", "/api/v1/join", { token })),
+        );
+        // The server retried the loser (03 §5.2): it never sees STALE_GAME, only the full game.
+        expect(answers.map((answer) => answer.status).sort()).toEqual([200, 404]);
+        expect(stale).toBe(1);
+        const winner = answers.findIndex((answer) => answer.status === 200);
+        const { game: stored, players } = await consistent(gameId, 1);
+        expect(stored?.status).toBe("lobby");
+        expect(players.filter((row) => row.state === "joined")).toHaveLength(2);
+        const joined = joiners[winner];
+        if (joined === undefined) throw new Error("no winner");
+        expect(rowOf(players, joined).joinedVia).toBe("join_link");
+        expect(players.some((row) => row.userId === joiners[1 - winner]?.id)).toBe(false);
+        clock += 1;
+      }
+    });
+
+    it("remove against a join accepting the same invitation: exactly one happens", async () => {
+      for (let round = 0; round < 4; round++) {
+        const b = await player();
+        const { creator, gameId, token } = await linkedLobby(3, [b]);
+        const before = await rows(gameId);
+        const removeWins = round % 2 === 0;
+        const { answers, stale } = await races.race(
+          [
+            () =>
+              send(creator, "POST", `/api/v1/games/${gameId}/remove-seat`, {
+                expectedVersion: 0,
+                playerId: rowOf(before, b).id,
+              }),
+            () => send(b, "POST", "/api/v1/join", { token }),
+          ],
+          {
+            hold: (writes) =>
+              (writes.updatePlayers ?? []).some((update) =>
+                removeWins ? update.set.state === "joined" : update.set.state === "removed",
+              ),
+          },
+        );
+        const [removing, joining] = answers;
+        expect(stale).toBe(1);
+        const { players } = await consistent(gameId, 1);
+        if (removeWins) {
+          expect(removing?.status).toBe(200);
+          // Removed: the join's retry is the link's 404 (a removal sticks, 06 §6.8).
+          expect(joining?.status).toBe(404);
+          expect(rowOf(players, b).state).toBe("removed");
+        } else {
+          expect([removing?.status, removing?.body?.error?.code]).toEqual([409, "STALE_GAME"]);
+          expect(joining?.status).toBe(200);
+          expect(rowOf(players, b)).toMatchObject({ state: "joined", joinedVia: "invitation" });
+        }
+        clock += 1;
+      }
+    });
+
+    it.each(["rotate", "revoke"] as const)(
+      "join against a %s of its link: either the join comes first, or it finds the link gone",
+      async (change) => {
+        for (const linkFirst of [true, false]) {
+          const { creator, gameId, token } = await linkedLobby(3, []);
+          const b = await player();
+          const { answers, stale } = await races.race(
+            [
+              () => send(b, "POST", "/api/v1/join", { token }),
+              () =>
+                send(
+                  creator,
+                  change === "rotate" ? "POST" : "DELETE",
+                  `/api/v1/games/${gameId}/join-link`,
+                  change === "rotate" ? {} : undefined,
+                ),
+            ],
+            { first: linkFirst ? "link" : "join" },
+          );
+          const [joining, changing] = answers;
+          expect(changing?.status).toBe(change === "rotate" ? 200 : 204);
+          const players = await rows(gameId);
+          if (linkFirst) {
+            // The join was judged against the old link: its transition was refused, and the
+            // retry found no link with that token.
+            expect(joining?.status).toBe(404);
+            expect(stale).toBe(1);
+            expect(players.some((row) => row.userId === b.id)).toBe(false);
+            await consistent(gameId, 0);
+          } else {
+            expect(joining?.status).toBe(200);
+            expect(stale).toBe(0);
+            expect(rowOf(players, b)).toMatchObject({ state: "joined", joinedVia: "join_link" });
+            await consistent(gameId, 1);
+          }
+          clock += 1;
+        }
+      },
+    );
+
+    it("accept against remove of the same invitation: exactly one happens", async () => {
+      for (let round = 0; round < 4; round++) {
+        const b = await player();
+        const c = await player();
+        const { creator, gameId } = await lobby(3, [b, c]);
+        const before = await rows(gameId);
+        const removeWins = round % 2 === 0;
+        const winner = oneWinner(
+          await races.race(
+            [
+              () =>
+                send(creator, "POST", `/api/v1/games/${gameId}/remove-seat`, {
+                  expectedVersion: 0,
+                  playerId: rowOf(before, b).id,
+                }),
+              () => send(b, "POST", `/api/v1/games/${gameId}/accept`, { expectedVersion: 0 }),
+            ],
+            {
+              hold: (writes) =>
+                (writes.updatePlayers ?? []).some((update) =>
+                  removeWins ? update.set.state === "joined" : update.set.state === "removed",
+                ),
+            },
+          ),
+        );
+        expect(winner).toBe(removeWins ? 0 : 1);
+        const { game: stored, players } = await consistent(gameId, 1);
+        expect(stored?.status).toBe("lobby");
+        expect(rowOf(players, b).state).toBe(removeWins ? "removed" : "joined");
+        clock += 1;
+      }
     });
   });
 }

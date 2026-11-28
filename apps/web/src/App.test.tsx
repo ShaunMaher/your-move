@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App.js";
+import { captureJoinFragment, clearJoinToken, keptJoinToken } from "./join-token.js";
 import { clearReturnPath, isAppPath, peekReturnPath, rememberReturnPath } from "./return-path.js";
 import { clearClientState } from "./session-sync.js";
 import { CONFIG, fakeApi, json, ME, problem } from "./test-support.js";
@@ -654,6 +655,119 @@ describe("returning to where a signed-out visit was headed", () => {
     expect(peekReturnPath()).toBe("/settings");
     clearReturnPath();
     expect(peekReturnPath()).toBeNull();
+  });
+});
+
+describe("a join link through sign-in and onboarding (06 §6.8, 07 §1)", () => {
+  const TOKEN = "AbCdEfGhIjKlMnOpQrSt_-";
+  const PREVIEW = {
+    id: "g7",
+    gameType: "words",
+    options: {},
+    resources: [],
+    turnTimeoutDays: 3,
+    seatOrder: "join",
+    aiAssistance: "off",
+    creatorName: "Ada",
+    players: [{ displayName: "Ada", kind: "human" }],
+    openSeats: 1,
+    expiresAt: 1,
+  };
+  /** Every address the tab shows on the way: the token must never be in one. */
+  const seen: string[] = [];
+  const watch = () => {
+    seen.push(window.location.href);
+  };
+
+  beforeEach(() => {
+    seen.length = 0;
+    clearJoinToken();
+    // What main.tsx does before the app renders.
+    window.history.replaceState(null, "", `/join#${TOKEN}`);
+    captureJoinFragment();
+    window.addEventListener("popstate", watch);
+  });
+  afterEach(() => {
+    window.removeEventListener("popstate", watch);
+    clearJoinToken();
+  });
+
+  it("returns a signed-out visitor to the link after signing in, and never joins by itself", async () => {
+    const { api, calls } = fakeApi({
+      ...signedOut,
+      "POST /api/v1/auth/otp/request": json({}, 202),
+      "POST /api/v1/auth/otp/verify": json({ user: ME, needsOnboarding: false }),
+      "POST /api/v1/join/lookup": json({ game: PREVIEW }),
+      "GET /api/v1/catalog": json({ games: [] }),
+    });
+    expect(window.location.href).not.toContain(TOKEN);
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    seen.push(window.location.href);
+    expect(peekReturnPath()).toBe("/join");
+    typeInto("Email address", "sam@example.org");
+    click("Email me a code");
+    await screen.findByLabelText("Sign-in code");
+    typeInto("Sign-in code", "12345678");
+    click("Sign in");
+    expect(await screen.findByRole("button", { name: "Join" })).toBeDefined();
+    seen.push(window.location.href);
+    expect(window.location.pathname).toBe("/join");
+    expect(calls.filter((call) => call.path === "/api/v1/join/lookup")).toHaveLength(1);
+    expect(calls.filter((call) => call.path === "/api/v1/join")).toHaveLength(0);
+    expect(keptJoinToken()).toBe(TOKEN);
+    expect(seen.join(" ")).not.toContain(TOKEN);
+  });
+
+  it("keeps the link through onboarding", async () => {
+    const { api } = fakeApi({
+      ...signedOut,
+      "POST /api/v1/auth/otp/request": json({}, 202),
+      "POST /api/v1/auth/otp/verify": json({
+        user: { ...ME, displayName: null, needsOnboarding: true },
+        needsOnboarding: true,
+      }),
+      "PATCH /api/v1/me": json(ME),
+      "POST /api/v1/join/lookup": json({ game: PREVIEW }),
+      "GET /api/v1/catalog": json({ games: [] }),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    typeInto("Email address", "sam@example.org");
+    click("Email me a code");
+    await screen.findByLabelText("Sign-in code");
+    typeInto("Sign-in code", "12345678");
+    click("Sign in");
+    await screen.findByRole("heading", { name: "Welcome to Family Games" });
+    expect(window.location.href).not.toContain(TOKEN);
+    typeInto("Display name", "Sam");
+    click("Continue");
+    expect(await screen.findByRole("button", { name: "Join" })).toBeDefined();
+    expect(window.location.pathname).toBe("/join");
+    expect(window.location.href).not.toContain(TOKEN);
+  });
+
+  it("brings someone signed in but not yet onboarded back to the link after onboarding", async () => {
+    const { api } = fakeApi({
+      ...signedIn({ ...ME, displayName: null, needsOnboarding: true }),
+      "PATCH /api/v1/me": json(ME),
+      "POST /api/v1/join/lookup": json({ game: PREVIEW }),
+      "GET /api/v1/catalog": json({ games: [] }),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Welcome to Family Games" });
+    expect(window.location.pathname).toBe("/welcome");
+    typeInto("Display name", "Sam");
+    click("Continue");
+    expect(await screen.findByRole("button", { name: "Join" })).toBeDefined();
+    expect(window.location.pathname).toBe("/join");
+    expect(window.location.href).not.toContain(TOKEN);
+  });
+
+  it("forgets the link when the session ends, so the next person isn't offered it", () => {
+    expect(keptJoinToken()).toBe(TOKEN);
+    clearClientState();
+    expect(keptJoinToken()).toBeNull();
   });
 });
 

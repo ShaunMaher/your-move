@@ -5,7 +5,8 @@
  * GET handlers never write game state, except the lazy expiry of an overdue lobby (03 §8).
  *
  * Membership decides access (04 §Membership): a game the viewer isn't a member of is `404`,
- * never `403`.
+ * never `403`. Join links (06 §6.8, alpha A18) are the one way in for someone who isn't a member:
+ * the lookup and the join answer every refusal with the same `404`.
  */
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { isGameError, type ResourceMeta, type Text } from "@your-move/sdk";
@@ -22,6 +23,7 @@ import {
   previewRoute,
   recentPlayersRoute,
   rematchRoute,
+  removeSeatRoute,
   resignGameRoute,
   rulesRoute,
   startGameRoute,
@@ -40,6 +42,8 @@ import { sendAddedPushes, sendTransitionPushes } from "../push/notify.js";
 import { createGame } from "./create.js";
 import { expireIfOverdue, expireOverdueLobbies, loadCurrent } from "./expiry.js";
 import { sendInviteMail } from "./invite-mail.js";
+import { joinUrl } from "./join-links.js";
+import { registerJoinRoutes } from "./join-routes.js";
 import {
   accept,
   cancel,
@@ -52,7 +56,9 @@ import {
   moduleTransition,
   type ModuleOutcome,
   type Refusal,
+  removeSeat,
   resign,
+  SERVER_ATTEMPTS,
   start,
   startAtCreation,
 } from "./lifecycle.js";
@@ -83,8 +89,8 @@ const RECENT_PLAYERS = 50;
 /** `GET /api/v1/games` keeps finished games 90 days and other endings 7 days (05). */
 const FINISHED_LISTED_MS = 90 * DAY;
 const ENDED_LISTED_MS = 7 * DAY;
-/** Accepting an invitation in a rematch retries a lost race this often (03 §5.2). */
-const REMATCH_ACCEPT_ATTEMPTS = 3;
+/** Accepting an invitation in a rematch: one try and up to 3 retries on a lost race (03 §5.2). */
+const REMATCH_ACCEPT_ATTEMPTS = SERVER_ATTEMPTS;
 /** Creating a rematch whose guarded insert lost, with no live rematch to show, is tried twice. */
 const REMATCH_CREATE_ATTEMPTS = 2;
 
@@ -145,6 +151,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     markSeenRoute,
     recentPlayersRoute,
     rematchRoute,
+    removeSeatRoute,
   ]) {
     // Registered for the method only, so the public rules route under /games/types is unaffected.
     app.on(route.method.toUpperCase(), honoPath(route.path), session);
@@ -197,6 +204,8 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     ]);
     return {
       ...(rematch === null ? {} : { rematch: rematchOf(rematch, now()) }),
+      joinLink: loaded.joinLink,
+      now: now(),
       game: loaded.game,
       players: loaded.players,
       resources: gameResources,
@@ -236,6 +245,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       options: parsed.data,
       state: loaded.game.state === null ? null : (JSON.parse(loaded.game.state) as unknown),
       random: options.random(),
+      joinLink: loaded.joinLink,
     };
   };
 
@@ -435,12 +445,20 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       body,
     );
     if (created === null) throw new Error("a game that isn't a rematch is always created");
-    const { invitations } = created;
+    const { invitations, joinToken } = created;
     if (invitations !== null) {
       // One task whenever an address was typed, whatever it sends (Q3, 06 §6.3).
       background(c, platform, () => sendInviteMail(platform, invitations));
     }
-    return c.json({ game: await afterCreate(c, user, created, false) }, 201);
+    const game = await afterCreate(c, user, created, false);
+    // The link's URL is shown here and on a rotation only (06 §6.8).
+    return c.json(
+      {
+        game,
+        ...(joinToken === null ? {} : { joinLinkUrl: joinUrl(config.publicUrl, joinToken) }),
+      },
+      201,
+    );
   });
 
   /**
@@ -620,7 +638,10 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
                 byYou: member.seat !== null && last.seat === member.seat,
               },
         lastActionAt: game.lastActionAt,
-        unread: member.delivery !== "hidden" && game.version > member.lastSeenVersion,
+        // Only an open hidden invitation never badges; once accepted, the game is like any other.
+        unread:
+          !(member.state === "invited" && member.delivery === "hidden") &&
+          game.version > member.lastSeenVersion,
         version: game.version,
       };
     });
@@ -740,6 +761,29 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     const { id } = c.req.valid("param");
     const { expectedVersion } = c.req.valid("json");
     return c.json(await memberLifecycle(c, id, expectedVersion, cancel), 200);
+  });
+
+  app.openapi(removeSeatRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { expectedVersion, playerId } = c.req.valid("json");
+    return c.json(
+      await memberLifecycle(c, id, expectedVersion, (ctx, viewer, at) =>
+        removeSeat(ctx, viewer, playerId, at),
+      ),
+      200,
+    );
+  });
+
+  registerJoinRoutes(app, {
+    platform,
+    keys: options.keys,
+    userOf,
+    onboarded,
+    limit,
+    loadMember,
+    contextOf,
+    gameWithView,
+    describeResource,
   });
 
   app.openapi(markSeenRoute, async (c) => {

@@ -1,9 +1,10 @@
 /**
  * The new-game flow (07 §1.1): pick a game, set its options (the module's own form), choose the
- * players — people you've played, picked from the list, or anyone by email — check them, create.
- * The alpha's slice of the flow: no join link, AI seats, seat order or turn timeout (10, Alpha), so
- * the creator's choices are the game, the options, the seat count and the players. A game whose
- * seats are all people you've played starts at once and opens on the board; otherwise the lobby.
+ * players — people you've played, picked from the list, anyone by email, or a join link for the
+ * seats left open — check them, create. The alpha's slice of the flow: no AI seats, seat order or
+ * turn timeout (10, Alpha), so the creator's choices are the game, the options, the seat count,
+ * the players and the link. A game whose seats are all people you've played starts at once and
+ * opens on the board; otherwise the lobby, which shows a link made with the game once (alpha A18).
  */
 import type { ApiClient } from "@your-move/api-client";
 import type { GameClientModule } from "@your-move/sdk/client";
@@ -14,6 +15,7 @@ import { createProblem } from "../create-problems.js";
 import { type CatalogGame, createGame, listRecentPlayers, type RecentPlayer } from "../game-api.js";
 import { GameIcon } from "../GameIcon.js";
 import { loadGameClient } from "../games.js";
+import { handOffJoinLink } from "../join-link-handoff.js";
 import { rememberPushOffered, shouldOfferPush } from "../push.js";
 import { PushOffer } from "../PushOffer.js";
 import { navigate, Link } from "../router.js";
@@ -52,6 +54,8 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
   const [recent, setRecent] = useState<readonly RecentPlayer[] | null>(null);
   /** The past opponents picked, by user id, in the order picked: each fills a seat. */
   const [picked, setPicked] = useState<readonly string[]>([]);
+  /** A join link for the seats left open (07 §1.1 step 3); address fields may then stay empty. */
+  const [withLink, setWithLink] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   /** The created game's path, while the notifications offer is open. */
@@ -146,14 +150,24 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
   const nameOf = (userId: string): string =>
     recent?.find((player) => player.userId === userId)?.displayName ?? "";
 
+  /** A link is asked for only while a seat is left for it (picks may fill every seat). */
+  const asksLink = withLink && seats - 1 - picked.length > 0;
+  /** The addresses to invite: every field, or with a link only the ones filled in. */
+  const invitedEmails = asksLink ? emails.filter((email) => email !== "") : emails;
+
   function checkPlayers(event: SyntheticEvent) {
     event.preventDefault();
     const typed = emails.map((email) => email.trim().toLowerCase());
-    if (typed.some((email) => !looksLikeEmail(email))) {
-      setProblem("Enter an email address for each player.");
+    const filled = asksLink ? typed.filter((email) => email !== "") : typed;
+    if (filled.some((email) => !looksLikeEmail(email))) {
+      setProblem(
+        asksLink
+          ? "Check the addresses, or leave a field empty for the join link to fill."
+          : "Enter an email address for each player.",
+      );
       return;
     }
-    if (new Set(typed).size !== typed.length) {
+    if (new Set(filled).size !== filled.length) {
       setProblem("Each address must be different.");
       return;
     }
@@ -174,10 +188,18 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
       gameType: chosen.type,
       options,
       seats,
-      invitees: [...picked.map((userId) => ({ userId })), ...emails.map((email) => ({ email }))],
+      invitees: [
+        ...picked.map((userId) => ({ userId })),
+        ...invitedEmails.map((email) => ({ email })),
+      ],
+      ...(asksLink ? { joinLink: true } : {}),
     });
     if (result.ok) {
       const path = `/g/${encodeURIComponent(result.data.game.id)}`;
+      // Shown once, by the lobby: never stored, never in the address bar (06 §6.8).
+      if (result.data.joinLinkUrl !== undefined) {
+        handOffJoinLink(result.data.game.id, result.data.joinLinkUrl);
+      }
       if (pushKey !== undefined && (await shouldOfferPush(pushKey))) {
         rememberPushOffered();
         setOffering(path);
@@ -370,6 +392,27 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
               you&apos;ll see them as invited until they accept.
             </p>
           ) : null}
+          {seats - 1 - picked.length > 0 ? (
+            <div className="stack">
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={withLink}
+                  aria-describedby="link-note"
+                  onChange={(event) => {
+                    setWithLink(event.target.checked);
+                    setProblem(null);
+                  }}
+                />
+                <span className="check-text">Add a join link for the open seats</span>
+              </label>
+              <p id="link-note" className="hint">
+                Leave an address empty and the link can fill that seat: share it in a group chat.
+                Anyone with the link can see the game and join it, so share it only with people you
+                know. The game then waits for you to press Start.
+              </p>
+            </div>
+          ) : null}
           <Problem id="players-problem" message={problem} />
           <div className="row">
             <button type="button" className="button secondary" onClick={back("options")}>
@@ -387,9 +430,14 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
           <h2 id="review-heading">Ready to create?</h2>
           <p>
             A {chosen.name} game for {String(seats)} players.
-            {emails.length === 0
-              ? " It starts as soon as you create it, unless someone you picked has asked to be invited instead."
-              : ` Check the ${emails.length === 1 ? "address" : "addresses"}: we never say whether an address has an account, so a typo would send your invitation to someone else.`}
+            {invitedEmails.length === 0
+              ? asksLink
+                ? ""
+                : " It starts as soon as you create it, unless someone you picked has asked to be invited instead."
+              : ` Check the ${invitedEmails.length === 1 ? "address" : "addresses"}: we never say whether an address has an account, so a typo would send your invitation to someone else.`}
+            {asksLink
+              ? " You'll get a join link for the open seats to share; the game waits for you to press Start."
+              : ""}
           </p>
           <ul className="plain">
             {picked.map((userId) => (
@@ -397,7 +445,7 @@ export function NewGame({ api, appName, pushKey, ownEmail, onSessionLost }: NewG
                 Playing with <strong>{nameOf(userId)}</strong>
               </li>
             ))}
-            {emails.map((email) => (
+            {invitedEmails.map((email) => (
               <li key={email} className="card">
                 Check the address: <strong>{email}</strong>
               </li>

@@ -17,7 +17,7 @@ import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 
 import type { Database, Statement } from "../database.js";
 import type { GameWriteSet } from "../repositories.js";
-import { blocks, gameActions, gamePlayers, games, pastOpponents } from "../schema.js";
+import { blocks, gameActions, gamePlayers, games, joinLinks, pastOpponents } from "../schema.js";
 
 /** True only while `token` is the game's stored write token: this transition won. */
 export function tokenGuard(gameId: string, token: string): SQL {
@@ -66,10 +66,19 @@ export function transitionStatements(
   writes: GameWriteSet,
 ): [Statement, ...Statement[]] {
   const guard = tokenGuard(gameId, token);
+  const link = writes.requireJoinLink;
   const first = db
     .update(games)
     .set({ ...writes.game, version: sql`${games.version} + 1`, writeToken: token })
-    .where(and(eq(games.id, gameId), eq(games.version, expectedVersion)))
+    .where(
+      and(
+        eq(games.id, gameId),
+        eq(games.version, expectedVersion),
+        link === undefined
+          ? undefined
+          : sql`EXISTS (SELECT 1 FROM ${joinLinks} WHERE ${joinLinks.gameId} = ${gameId} AND ${joinLinks.tokenHash} = ${link.tokenHash} AND ${joinLinks.expiresAt} > ${link.now})`,
+      ),
+    )
     .returning({ id: games.id });
   const dependent: Statement[] = [
     ...(writes.insertPlayers ?? []).map((player) =>
@@ -95,6 +104,9 @@ export function transitionStatements(
         set: { lastFinishedAt: pair.lastFinishedAt },
       }),
     ),
+    ...(writes.deleteJoinLink === true
+      ? [db.delete(joinLinks).where(and(eq(joinLinks.gameId, gameId), guard))]
+      : []),
   ];
   return [first, ...dependent];
 }

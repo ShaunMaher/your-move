@@ -7,6 +7,7 @@ import { runScheduled } from "./scheduled.js";
 const clean: SweepReport = {
   lobbies: 1,
   claims: { claimed: 1, skipped: 0 },
+  joinLinks: 0,
   nudges: { due: 1, sent: 1, failed: 0, skipped: 0, capped: false },
 };
 

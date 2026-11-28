@@ -31,7 +31,12 @@ import { nodeDictionaries } from "./dictionaries.js";
 import type { NodeConfig } from "./node-config.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
 import { NODE_ONBOARDING_CLAIMS } from "./server.js";
-import { NODE_CLAIMS_PER_RUN, NODE_LOBBIES_PER_RUN, NODE_NUDGES_PER_RUN } from "./sweeper.js";
+import {
+  NODE_CLAIMS_PER_RUN,
+  NODE_JOIN_LINKS_PER_RUN,
+  NODE_LOBBIES_PER_RUN,
+  NODE_NUDGES_PER_RUN,
+} from "./sweeper.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
 /** The dictionary package's served layout (built by `pnpm build`, or the tests' global setup). */
@@ -138,6 +143,8 @@ export interface HarnessOptions {
   readonly claimsPerRun?: number;
   /** The sweep's lobby expiries per run; Node's own by default. */
   readonly lobbiesPerRun?: number;
+  /** The sweep's expired join links per run; Node's own by default. */
+  readonly joinLinksPerRun?: number;
   /** Seats completing onboarding claims; Node's own by default. */
   readonly onboardingClaims?: number;
   /** Wraps the capturing email sender (e.g. to fail some messages and still capture the rest). */
@@ -200,6 +207,7 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     nudgesPerRun: options.nudgesPerRun ?? NODE_NUDGES_PER_RUN,
     claimsPerRun: options.claimsPerRun ?? NODE_CLAIMS_PER_RUN,
     lobbiesPerRun: options.lobbiesPerRun ?? NODE_LOBBIES_PER_RUN,
+    joinLinksPerRun: options.joinLinksPerRun ?? NODE_JOIN_LINKS_PER_RUN,
   });
   const background = createBackgroundTracker();
   let scheduled = 0;

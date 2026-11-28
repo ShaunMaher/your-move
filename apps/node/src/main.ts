@@ -36,6 +36,7 @@ import { createNodeApp } from "./server.js";
 import { isRefusal, startup, type Started, verifyEmail, verifyPush } from "./startup.js";
 import {
   NODE_CLAIMS_PER_RUN,
+  NODE_JOIN_LINKS_PER_RUN,
   NODE_LOBBIES_PER_RUN,
   NODE_NUDGES_PER_RUN,
   startSweeper,
@@ -185,6 +186,7 @@ const sweeper = startSweeper(
     nudgesPerRun: NODE_NUDGES_PER_RUN,
     claimsPerRun: NODE_CLAIMS_PER_RUN,
     lobbiesPerRun: NODE_LOBBIES_PER_RUN,
+    joinLinksPerRun: NODE_JOIN_LINKS_PER_RUN,
   }),
 );
 

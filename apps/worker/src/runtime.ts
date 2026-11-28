@@ -8,11 +8,14 @@ import { createApp, createSweep, type InstalledGame, type Platform } from "@your
 /**
  * What one Cron Trigger invocation does at most (03 §7, §8; 09 §3 has the arithmetic): one overdue
  * lobby expired (at most 4 statements and one per typed address), one email-invite seat claimed
- * (5) and 2 email nudges (10 each, and up to 5 per run), 35 for a two-seat game.
+ * (5), up to 100 expired join links deleted (1) and 2 email nudges (10 each, and up to 5 per
+ * run), 36 for a two-seat game.
  */
 const WORKER_NUDGES_PER_RUN = 2;
 const WORKER_CLAIMS_PER_RUN = 1;
 const WORKER_LOBBIES_PER_RUN = 1;
+/** Expired join links deleted per run: one statement however many (09 §3). */
+const WORKER_JOIN_LINKS_PER_RUN = 100;
 /**
  * Email-invite seats the request completing onboarding claims at most (06 §6.4): 4 statements
  * each, so 8 keep the request at about 36 (09 §3); the sweep claims the rest.
@@ -34,6 +37,7 @@ export function workerRuntime(platform: Platform, games: readonly InstalledGame[
       nudgesPerRun: WORKER_NUDGES_PER_RUN,
       claimsPerRun: WORKER_CLAIMS_PER_RUN,
       lobbiesPerRun: WORKER_LOBBIES_PER_RUN,
+      joinLinksPerRun: WORKER_JOIN_LINKS_PER_RUN,
     }),
   };
 }

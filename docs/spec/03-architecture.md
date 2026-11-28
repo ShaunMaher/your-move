@@ -372,8 +372,9 @@ transition like any other (§5.2), so it bumps the game's version: a member sees
 and a request in flight with the earlier `expectedVersion` gets `STALE_GAME`. `start` and `accept`
 also refuse a lobby at or past its expiry. Past the 20-per-request bound a list may still show
 some overdue lobbies as open until a later request expires them. The alpha's sweep has the
-email-nudge step (A6), and the invite-claim and lobby-expiry steps (A17), which expires the
-lobbies no one comes back to, so a typed address never outlives its lobby for long.)
+email-nudge step (A6), the invite-claim and lobby-expiry steps (A17), which expires the
+lobbies no one comes back to, so a typed address never outlives its lobby for long, and the join-link expiry (A18), which deletes links past
+`expires_at`.)
 
 One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * * *`) or a Node
 `setInterval` (every 15 minutes, first run 15 minutes after start; a run still going when the next

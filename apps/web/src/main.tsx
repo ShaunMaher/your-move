@@ -4,6 +4,7 @@ import { config } from "zod";
 
 import { api } from "./api.js";
 import { App } from "./App.js";
+import { captureJoinFragment } from "./join-token.js";
 import { applyStoredTheme } from "./theme.js";
 import "./styles.css";
 
@@ -14,6 +15,8 @@ import "./styles.css";
 config({ jitless: true });
 
 applyStoredTheme();
+// Before anything renders or moves to another screen: the token leaves the address bar (08 T24).
+captureJoinFragment();
 
 const root = document.getElementById("root");
 if (!root) throw new Error("index.html has no #root element");

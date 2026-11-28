@@ -12,10 +12,7 @@
  */
 import type { NormalisedEmail } from "../accounts/email.js";
 import type { ClaimableSeat, Repositories } from "../db/repositories.js";
-import { LOBBY_LIFETIME_MS, lobbyExpiresAt } from "./lifecycle.js";
-
-/** A claim reloads and retries this often when the game's version moved meanwhile (02 §4). */
-const ATTEMPTS = 3;
+import { LOBBY_LIFETIME_MS, lobbyExpiresAt, SERVER_ATTEMPTS as ATTEMPTS } from "./lifecycle.js";
 
 /** Who claims: an onboarded human and the address they completed onboarding with. */
 export interface Claimant {

@@ -20,6 +20,7 @@ import type {
   GamePlayerUpdate,
   GameRecord,
   GameWriteSet,
+  JoinLinkTimes,
   PastOpponentPair,
 } from "../db/repositories.js";
 import { UNPLAYED } from "../db/repositories.js";
@@ -35,6 +36,8 @@ export interface GameContext {
   readonly state: unknown;
   /** This transition's source of randomness, recorded for replay (02 §5). */
   readonly random: RandomSource;
+  /** The game's join link, live or expired, if it has one (04 `join_links`). */
+  readonly joinLink: JoinLinkTimes | null;
 }
 
 /** The final views written when a started game ends (04 `games.final_views`). */
@@ -246,6 +249,11 @@ function pairsWhoActed(
   );
 }
 
+/** Whether the game has a join link that still works at `now` (06 §6.8). */
+export function linkLive(link: JoinLinkTimes | null, now: number): boolean {
+  return link !== null && now < link.expiresAt;
+}
+
 /** Players in the lobby counted for starting and filling (02 §4). */
 function lobbyCounts(players: readonly GamePlayerRecord[]): { joined: number; invited: number } {
   return {
@@ -280,6 +288,8 @@ function startWrites(ctx: GameContext, now: number): GameWriteSet | GameError {
   const seated = new Map(order.map((row, seat) => [row.id, seat]));
 
   return {
+    // The link ends with the lobby (06 §6.8).
+    deleteJoinLink: true,
     game: {
       status: "active",
       seats: order.length,
@@ -317,12 +327,24 @@ function startWrites(ctx: GameContext, now: number): GameWriteSet | GameError {
   };
 }
 
-/** Whether the lobby starts by itself after a transition (02 §4 Start). */
-function autoStarts(game: GameRecord, players: readonly GamePlayerRecord[]): boolean {
+/**
+ * Whether the lobby starts by itself after a transition (02 §4 Start). Never while a join link is
+ * live or once anyone has joined through one: the creator sees who joined and presses Start
+ * (06 §6.8, 08 T24).
+ */
+function autoStarts(
+  game: GameRecord,
+  players: readonly GamePlayerRecord[],
+  joinLink: JoinLinkTimes | null,
+  now: number,
+): boolean {
   const { joined } = lobbyCounts(players);
   // AI assistance allowed with another human: every human starts knowingly, by the creator's Start.
   const aiHeld = game.aiAssistance === "allowed" && joined > 1;
-  return joined === game.seats && !aiHeld;
+  const linkHeld =
+    linkLive(joinLink, now) ||
+    players.some((row) => row.state === "joined" && row.joinedVia === "join_link");
+  return joined === game.seats && !aiHeld && !linkHeld;
 }
 
 /**
@@ -332,7 +354,9 @@ function autoStarts(game: GameRecord, players: readonly GamePlayerRecord[]): boo
  * simply leaves it there; null when it doesn't start.
  */
 export function startAtCreation(ctx: GameContext, now: number): GameWriteSet | null {
-  if (ctx.game.status !== "lobby" || !autoStarts(ctx.game, ctx.players)) return null;
+  if (ctx.game.status !== "lobby" || !autoStarts(ctx.game, ctx.players, ctx.joinLink, now)) {
+    return null;
+  }
   const writes = startWrites(ctx, now);
   return isGameError(writes) ? null : writes;
 }
@@ -347,7 +371,7 @@ function withStart(
     row.id === rowUpdate.id ? { ...row, ...rowUpdate.set } : row,
   );
   const plain: GameWriteSet = { game: { updatedAt: now }, updatePlayers: [rowUpdate] };
-  if (!autoStarts(ctx.game, players)) return plain;
+  if (!autoStarts(ctx.game, players, ctx.joinLink, now)) return plain;
   const started = startWrites({ ...ctx, players }, now);
   // An automatic start that validateStart refuses simply doesn't happen (02 §4 step 2).
   if (isGameError(started)) return plain;
@@ -399,14 +423,16 @@ export function accept(
   ) {
     return { refused: "WRONG_STATUS" };
   }
-  return withStart(
-    ctx,
-    {
-      id: viewer.id,
-      set: { state: "joined", joinedVia: "invitation", joinedAt: now, inviteEmail: null },
-    },
-    now,
-  );
+  return withStart(ctx, { id: viewer.id, set: acceptedSet(now) }, now);
+}
+
+/**
+ * What accepting an invitation sets on its row, by the Accept button or by joining through a link
+ * (06 §6.8): joined, as an invitation, its typed address cleared (06 §6.5). The row keeps its
+ * `delivery`, which only an open invitation uses (05 `unread`).
+ */
+function acceptedSet(now: number): GamePlayerUpdate {
+  return { state: "joined", joinedVia: "invitation", joinedAt: now, inviteEmail: null };
 }
 
 /** Every row's typed address cleared: the lobby reached a terminal state (06 §6.5). */
@@ -415,6 +441,12 @@ function clearAddresses(players: readonly GamePlayerRecord[], except?: string) {
     .filter((row) => row.inviteEmail !== null && row.id !== except)
     .map((row) => ({ id: row.id, set: { inviteEmail: null } }));
 }
+
+/**
+ * Transitions the server starts itself (joins, the sweep, lazy expiry, claims) try once and, on
+ * `stale`, reload and retry up to 3 times (03 §5.2): 4 attempts in all.
+ */
+export const SERVER_ATTEMPTS = 4;
 
 /** Lobbies expire 14 days after creation, not extended by joins (02 §4); `invites` with them. */
 export const LOBBY_LIFETIME_MS = 14 * DAY;
@@ -452,6 +484,7 @@ export function expire(
 ): GameWriteSet | null {
   if (game.status !== "lobby" || now < lobbyExpiresAt(game)) return null;
   return {
+    deleteJoinLink: true,
     game: {
       status: "expired",
       endReason: "expired",
@@ -471,6 +504,7 @@ export function cancel(
   if (viewer.joinedVia !== "creator") return { refused: "NOT_ALLOWED" };
   if (ctx.game.status !== "lobby") return { refused: "WRONG_STATUS" };
   return {
+    deleteJoinLink: true,
     game: { status: "cancelled", endReason: "cancelled", endedAt: now, updatedAt: now },
     updatePlayers: clearAddresses(ctx.players),
   };
@@ -478,7 +512,8 @@ export function cancel(
 
 /**
  * `POST /decline` in the lobby (02 §4 Decline): an invited or joined player other than the
- * creator. The lobby ends `declined` when it can no longer fill (no join links exist yet, M4).
+ * creator. The lobby ends `declined` when it can no longer fill: fewer than `min` joined and
+ * invited, and no live join link to bring anyone else.
  */
 function declineInLobby(
   ctx: GameContext,
@@ -493,8 +528,11 @@ function declineInLobby(
   );
   const { joined, invited } = lobbyCounts(players);
   const { min } = ctx.definition.players(ctx.options);
-  if (joined + invited >= min) return { game: { updatedAt: now }, updatePlayers: [own] };
+  if (joined + invited >= min || linkLive(ctx.joinLink, now)) {
+    return { game: { updatedAt: now }, updatePlayers: [own] };
+  }
   return {
+    deleteJoinLink: true,
     game: { status: "declined", endReason: "declined", endedAt: now, updatedAt: now },
     updatePlayers: [own, ...clearAddresses(ctx.players, viewer.id)],
   };
@@ -542,6 +580,119 @@ function declineActive(
       },
     })),
   };
+}
+
+/**
+ * `POST /remove-seat` (05, 02 §4): the creator, in the lobby, removes another row that holds a seat
+ * (`invited` or `joined`). It becomes `removed` with `removed_at` set and any typed address
+ * cleared (06 §6.5); a remove never ends the lobby and never starts it. Any other row, the
+ * creator's own included, is `404`, as one of another game would be.
+ */
+export function removeSeat(
+  ctx: GameContext,
+  viewer: GamePlayerRecord,
+  playerId: string,
+  now: number,
+): GameWriteSet | Refusal {
+  if (viewer.joinedVia !== "creator") return { refused: "NOT_ALLOWED" };
+  if (ctx.game.status !== "lobby" || now >= lobbyExpiresAt(ctx.game)) {
+    return { refused: "WRONG_STATUS" };
+  }
+  const row = ctx.players.find((candidate) => candidate.id === playerId);
+  if (row === undefined || row.id === viewer.id) return { refused: "NOT_FOUND" };
+  if (row.state !== "invited" && row.state !== "joined") return { refused: "NOT_FOUND" };
+  return {
+    game: { updatedAt: now },
+    updatePlayers: [{ id: row.id, set: { state: "removed", removedAt: now, inviteEmail: null } }],
+  };
+}
+
+/** What a join link offers one signed-in user (06 §6.8), the same for the lookup and the join. */
+export type JoinVerdict =
+  /** The indistinguishable `404`: whatever the reason, it reads and says the same. */
+  | { readonly kind: "refused" }
+  /** Already joined (the creator included): the lookup shows the game, a join is `409`. */
+  | { readonly kind: "member" }
+  /** Holds a `normal` or `hidden` invitation: joining accepts it, open seat or not. */
+  | { readonly kind: "accept"; readonly row: GamePlayerRecord }
+  /** Holds no row: joining takes an open seat on a new one. */
+  | { readonly kind: "seat" };
+
+/** Seats not held by an `invited` or `joined` row (02 §4 open seats). */
+export function openSeats(game: GameRecord, players: readonly GamePlayerRecord[]): number {
+  const { joined, invited } = lobbyCounts(players);
+  return Math.max(0, game.seats - joined - invited);
+}
+
+/**
+ * The join-link rules (06 §6.8, 05 §Join links) for `userId`, given the link the token named and
+ * whether a block lies between the user and anyone holding a row in the game (either direction).
+ * Every refusal is the same `refused`, so neither the lookup nor the join can say which rule it was.
+ */
+export function joinVerdict(
+  game: GameRecord,
+  players: readonly GamePlayerRecord[],
+  link: JoinLinkTimes,
+  input: { readonly userId: string; readonly blocked: boolean; readonly now: number },
+): JoinVerdict {
+  const { userId, blocked, now } = input;
+  const refused = { kind: "refused" } as const;
+  if (game.status !== "lobby" || now >= lobbyExpiresAt(game) || !linkLive(link, now)) {
+    return refused;
+  }
+  // A lobby whose creator's account was deleted takes no one new (its link went with them too).
+  const creator = players.find((row) => row.joinedVia === "creator");
+  if (creator?.userId == null) return refused;
+  const own = players.find((row) => row.userId === userId);
+  if (own?.state === "joined") return { kind: "member" };
+  if (blocked) return refused;
+  if (own !== undefined) {
+    // An inert row is never accepted (its block, or its being a duplicate, stays hidden). Declined,
+    // left and removed rows never come back through any link, a rotated or new one included: the
+    // creator can play with a removed person in another game (cancel this one, create a new one).
+    return own.state === "invited" && own.delivery !== "inert"
+      ? { kind: "accept", row: own }
+      : refused;
+  }
+  return openSeats(game, players) === 0 ? refused : { kind: "seat" };
+}
+
+/**
+ * The join's writes (05 `POST /api/v1/join`) for a verdict that takes or accepts a seat. A join
+ * never starts the game: the link it came through is live, and a link joiner holds the start for
+ * the creator (02 §4). The joiner has seen the version their join creates.
+ */
+export function joinWrites(
+  game: GameRecord,
+  verdict: Extract<JoinVerdict, { kind: "accept" | "seat" }>,
+  input: { readonly userId: string; readonly newRowId: string; readonly now: number },
+): GameWriteSet {
+  const { userId, newRowId, now } = input;
+  const seen = game.version + 1;
+  const base = { game: { updatedAt: now } };
+  switch (verdict.kind) {
+    case "accept":
+      return {
+        ...base,
+        updatePlayers: [
+          { id: verdict.row.id, set: { ...acceptedSet(now), lastSeenVersion: seen } },
+        ],
+      };
+    case "seat":
+      return {
+        ...base,
+        insertPlayers: [
+          {
+            id: newRowId,
+            userId,
+            state: "joined",
+            joinedVia: "join_link",
+            joinedAt: now,
+            lastSeenVersion: seen,
+          },
+        ],
+      };
+  }
 }
 
 /** `POST /decline`, in the lobby or before a first action (05 §Lifecycle transitions). */

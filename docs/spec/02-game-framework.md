@@ -368,7 +368,9 @@ player, never the other players; 06 §6.9). A pair with a block in either direct
 recorded, at the finish or through that question (06 §6.10).
 
 The creator can **remove** any other seat while in the lobby (`removed`); a removed user can't rejoin
-through the link that was live when they were removed (06 §6.8).
+through any join link of the game, a rotated or new one included (06 §6.8); the creator can play
+with them in another game (cancel this one and create a new one), inviting them by address or as a
+past opponent.
 
 **Lobby notifications.** The only pushes a lobby causes go to the person being added: an auto-join
 push naming the creator ("<creator> added you to a game") and the generic invitation push that names
@@ -408,7 +410,7 @@ created, and so does a game of the creator against their own AI accounts.
 joined). The seat reopens. Only decline and leave check whether the lobby can still fill: it ends
 as `declined` when `joined + invited < min` (every `invited` row counts, whatever its delivery, 04)
 and no join link is live; otherwise it waits for a join, Start or expiry. A **remove** never ends
-the lobby — the creator chose it, and can still share a link, add players or cancel. Revoking a
+the lobby — the creator chose it, and can still share a link, or cancel and create a new game. Revoking a
 link or its expiry never ends a lobby by itself either. The creator leaving means cancelling.
 
 **Before a seat's first action (active game).** Any `playing` seat that hasn't acted yet
