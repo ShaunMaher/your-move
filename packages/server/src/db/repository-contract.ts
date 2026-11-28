@@ -640,6 +640,37 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
           };
           expect(await repos.games.applyTransition(game.id, 0, accept)).toBe("stale");
           expect((await repos.games.load(game.id))?.players[2]?.state).toBe("invited");
+          // An accept with `inertBlockedBy` flips, in its own winning batch, the open invitations
+          // of those its actor blocked in this game, and nothing else (A23-S3-1).
+          const flips = newGame({ status: "lobby", createdBy: host, seats: 4 });
+          const actorRow = player({ userId: guest, state: "invited", joinedAt: null });
+          const blockedRow = player({ userId: joiner, state: "invited", joinedAt: null });
+          const otherRow = player({ userId: await human(), state: "invited", joinedAt: null });
+          await repos.games.create(flips, [
+            player({ userId: host, joinedVia: "creator" }),
+            actorRow,
+            blockedRow,
+            otherRow,
+          ]);
+          await block(guest, joiner);
+          expect(
+            await repos.games.applyTransition(flips.id, 0, {
+              game: { updatedAt: T0 + 3 },
+              updatePlayers: [{ id: actorRow.id, set: { state: "joined" as const, joinedAt: T0 } }],
+              inertBlockedBy: { userId: guest },
+            }),
+          ).toBe("ok");
+          const deliveries = (await repos.games.load(flips.id))?.players.map((row) => row.delivery);
+          expect(deliveries).toEqual(["normal", "normal", "inert", "normal"]);
+          // A losing transition flips nothing.
+          await block(host, otherRow.userId ?? "");
+          expect(
+            await repos.games.applyTransition(flips.id, 0, {
+              game: { updatedAt: T0 + 4 },
+              inertBlockedBy: { userId: host },
+            }),
+          ).toBe("stale");
+          expect((await repos.games.load(flips.id))?.players[3]?.delivery).toBe("normal");
           // The host has no block with anyone joined: their transition goes through.
           expect(
             await repos.games.applyTransition(game.id, 0, {

@@ -405,8 +405,10 @@ describe("an automatic start validateStart refuses (02 §4 Start, step 2)", () =
           set: { state: "joined", joinedVia: "invitation", joinedAt: 5, inviteEmail: null },
         },
       ],
-      // Written only while no block lies between the accepter and a joined member (A23-S-4).
+      // Written only while no block lies between the accepter and a joined member (A23-S-4),
+      // and the invitations of anyone the accepter blocked go inert with it (A23-S3-1).
       requireUnblocked: { userId: "u-b" },
+      inertBlockedBy: { userId: "u-b" },
     });
   });
 });

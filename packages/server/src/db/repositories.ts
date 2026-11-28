@@ -440,6 +440,13 @@ export interface GameWriteSet {
    * join racing a new block makes the transition `stale`, so it is judged again.
    */
   readonly requireUnblocked?: { readonly userId: string };
+  /**
+   * The joiner's blocks reach this lobby (06 §6.10, A23-S3-1): with an accept or a link join, the
+   * open (`normal` or `hidden`) invitations in this game of anyone this user has blocked become
+   * `inert`, guarded by the transition's token like every dependent write. The flip a block makes
+   * in lobbies its blocker has already joined, made here for a blocker who joins later.
+   */
+  readonly inertBlockedBy?: { readonly userId: string };
 }
 
 /** `stale`: another transition changed the game since `expectedVersion`; nothing was written. */

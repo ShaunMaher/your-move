@@ -12,7 +12,7 @@
  * A guard on the version would be wrong both ways: `version = expected` skips the winner's own
  * dependent writes, `version = expected + 1` lets the loser's through.
  */
-import { and, eq, getTableColumns, is, SQL, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, inArray, is, SQL, sql } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 
 import type { Database, Statement } from "../database.js";
@@ -111,6 +111,22 @@ export function transitionStatements(
         set: { lastFinishedAt: pair.lastFinishedAt },
       }),
     ),
+    ...(writes.inertBlockedBy === undefined
+      ? []
+      : [
+          db
+            .update(gamePlayers)
+            .set({ delivery: "inert" })
+            .where(
+              and(
+                eq(gamePlayers.gameId, gameId),
+                eq(gamePlayers.state, "invited"),
+                inArray(gamePlayers.delivery, ["normal", "hidden"]),
+                sql`${gamePlayers.userId} IN (SELECT ${blocks.blockedId} FROM ${blocks} WHERE ${blocks.blockerId} = ${writes.inertBlockedBy.userId})`,
+                guard,
+              ),
+            ),
+        ]),
     ...(writes.deleteJoinLink === true
       ? [db.delete(joinLinks).where(and(eq(joinLinks.gameId, gameId), guard))]
       : []),

@@ -327,7 +327,7 @@ function outstandingEffect(
   ctx: GameContext,
   pairs: readonly BlockPair[],
   now: number,
-): Outstanding | null {
+): Outstanding | Refusal | null {
   const blocks = (a: string | null, b: string | null) =>
     a !== null && b !== null && pairs.some((pair) => pair.blockerId === a && pair.blockedId === b);
   const joined = joinedInOrder(ctx.players);
@@ -344,7 +344,9 @@ function outstandingEffect(
       const writes = removes
         ? removeSeat(ctx, earlier, later.id, now)
         : declineInLobby(ctx, actor, now);
-      if (isRefusal(writes)) return null;
+      // Fails closed (A23-S3-4): a blocked pair whose effect can't be written refuses the Start
+      // or accept rather than letting it go ahead with the pair joined.
+      if (isRefusal(writes)) return writes;
       return { outstanding: writes, actor };
     }
   }
@@ -545,7 +547,11 @@ export function accept(
   const outstanding = outstandingEffect(ctx, pairs, now);
   if (outstanding !== null) return outstanding;
   const writes = withStart(ctx, { id: viewer.id, set: acceptedSet(now) }, now);
-  return userId === null ? writes : { ...writes, requireUnblocked: { userId } };
+  // Guarded against a racing block, and, now that the accepter joins, the invitations of anyone
+  // they blocked while only invited go `inert` here too (A23-S-4, S3-1).
+  return userId === null
+    ? writes
+    : { ...writes, requireUnblocked: { userId }, inertBlockedBy: { userId } };
 }
 
 /**

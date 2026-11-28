@@ -521,9 +521,10 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
     (or created) becomes `inert` (alpha A23 review S-2): a versionless row write listed in 03 §5.2
     (no version bump, nothing for the creator or other members to see, since the three deliveries
     look alike), so for them the invitation is gone exactly as if they had been removed, and it can
-    never be accepted. Where you are only invited yourself, nothing changes (review P2-2): if you
-    accept, your accept's own check finds the block once they have joined; if they accept first,
-    yours does.
+    never be accepted. Where you are only invited yourself, nothing changes yet (review P2-2):
+    your own accept, or your link join, makes their open invitation in that game `inert` in its
+    own transition (review S3-1), so whichever of you accepts second finds the game gone, as after
+    a Remove; if they accept first, your accept's check finds the block and declines yours.
 
     Then, where you can already tell their row is theirs (their row has been `joined`, which the
     lobby shows by name, or you created the lobby and picked them by `userId`): if you created the

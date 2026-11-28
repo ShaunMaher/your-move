@@ -454,6 +454,61 @@ describe("what a new block changes (06 §6.10)", () => {
     expect((await call(h, c, "GET", `/api/v1/games/${game.id}`)).status).toBe(404);
   });
 
+  it("flips the other's invitation once the invited blocker accepts: theirs answers as a Remove (A23-S3-1)", async () => {
+    const [carol, m, b] = [await signUp(h, "Carol"), await signUp(h, "Em"), await signUp(h, "Bo")];
+    pastOpponents(m, b);
+    const game = await createGame(h, carol, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: m.email }, { email: b.email }],
+    });
+    expect((await block(m, b)).status).toBe(204);
+    expect(rowsOf(game.id)[2]).toMatchObject({ state: "invited", delivery: "normal" });
+    expect((await transition(h, m, game.id, "accept")).status).toBe(200);
+    expect(rowsOf(game.id)[2]).toMatchObject({ state: "invited", delivery: "inert" });
+    // b's accept is the 404 of someone no longer in the game, and writes no decline.
+    const refused = await transition(h, b, game.id, "accept", 0);
+    expect([refused.status, code(refused.body)]).toEqual([404, "NOT_FOUND"]);
+    expect(rowsOf(game.id)[2]).toMatchObject({ state: "invited", delivery: "inert" });
+    expect((await call(h, b, "GET", `/api/v1/games/${game.id}`)).status).toBe(404);
+  });
+
+  it("refuses a blocker's link join, and flips the invitation if the join raced the block (A23-S3-1)", async () => {
+    const [carol, m, b] = [await signUp(h, "Carol"), await signUp(h, "Em"), await signUp(h, "Bo")];
+    pastOpponents(m, b);
+    const game = await createGame(h, carol, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: b.email }],
+    });
+    const link = await call<{ url: string }>(
+      h,
+      carol,
+      "POST",
+      `/api/v1/games/${game.id}/join-link`,
+      {},
+    );
+    const token = new URL(link.body.url).hash.slice(1);
+    expect((await block(m, b)).status).toBe(204);
+    // A block with anyone holding a row refuses the join (06 §6.8): nothing changes.
+    const refused = await call(h, m, "POST", "/api/v1/join", { token });
+    expect([refused.status, code(refused.body)]).toEqual([404, "NOT_FOUND"]);
+    expect(rowsOf(game.id)[1]).toMatchObject({ state: "invited", delivery: "normal" });
+    // A join whose read missed the block (it landed just after): the join's own batch flips b's
+    // invitation, so b's accept answers as after a Remove.
+    faults.missBlocks = 1;
+    const joined = await call(h, m, "POST", "/api/v1/join", { token });
+    expect(joined.status).toBe(200);
+    expect(rowsOf(game.id)[1]).toMatchObject({
+      user_id: b.id,
+      state: "invited",
+      delivery: "inert",
+    });
+    const accepted = await transition(h, b, game.id, "accept", 0);
+    expect([accepted.status, code(accepted.body)]).toEqual([404, "NOT_FOUND"]);
+    expect(rowsOf(game.id)[1]).toMatchObject({ state: "invited", delivery: "inert" });
+  });
+
   it("leaves the other's invitation normal where the blocker is only invited (A23-P2-2)", async () => {
     const [c, v, o] = [await signUp(h, "Cy"), await signUp(h, "Vi"), await signUp(h, "Oz")];
     pastOpponents(v, o);

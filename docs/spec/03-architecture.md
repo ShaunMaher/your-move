@@ -190,7 +190,10 @@ and the link being NULL or naming a game that ended unplayed, with every insert 
 guarded the same way and no version bump, 04, 05 `POST /api/v1/games/:id/rematch`. Two writes make
 an invitation `inert` without a transition: the block's own batch (05 §Blocks, alpha A23) sets
 `delivery = 'inert'` on the person blocked's open invitations (`invited`, `normal` or `hidden`) in
-`lobby` games the blocker has joined, and the under-age exit's batch (06 §5, alpha A21) sets it on
+`lobby` games the blocker has joined (and, for a blocker who joins later, the same flip restricted
+to that game is one more statement of their accept's or link join's own transition, guarded by its
+token like every dependent write, so it happens only if that transition won; A23-S3-1), and the
+under-age exit's batch (06 §5, alpha A21) sets it on
 the `invited`, user-less email-invite seats typed as the leaving address, every statement of that
 batch guarded on the account's `onboarded_at` still being NULL. Neither touches any other row, the
 game row or its version, and neither needs a version check: an accept is guarded in its own batch
