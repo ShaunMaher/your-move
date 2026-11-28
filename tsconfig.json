@@ -12,6 +12,7 @@
     { "path": "games/example" },
     { "path": "games/words" },
     { "path": "games/paths" },
+    { "path": "games/pairs" },
     { "path": "apps/node" },
     { "path": "apps/worker" },
     { "path": "apps/worker/scripts" },

@@ -406,7 +406,15 @@ with its own review, as paths was built (A22, A24):
   320 px wide with touch emulation: a match and its extra turn, a miss whose pair the next player
   sees and whose cards hold no face markup on any player's page after that player's first card, a
   resignation mid-turn turning the card back, and play to the end; every card measured at least
-  44 CSS px; the whole board visible at 320 × 568 for 2–4 players on every grid.
+  44 CSS px; the whole board visible at 320 × 568 for 2–4 players on every grid. **Depends on** a
+  chores slice, before this one installs pairs, that makes the full kit affordable in CI: the kit
+  checks each distinct view once per step, `games:verify` is sharded, and a `test:games` CI job
+  runs it (review A25-P-1: with pairs installed the full kit took 27 minutes locally; the kit's
+  game counts stay as 02 §6 fixes them). The same chores slice takes the stronger
+  `hiddenFromEveryone` check (review A25-S2-1, 02 §6.3): under the flag, the summary and the
+  `validate` and `preview` answers a seat to act gets must depend only on the view, which the kit
+  checks with a per-combo map keyed by the view JSON, the seat and the action (keys hashed, the
+  map capped), failing on two different answers under one key.
 
 ## M6 — Bring-your-own dictionaries
 - `BlobStore` (R2 / filesystem with key and path checks), `dictionaries` table, `serverOnly`

@@ -98,6 +98,11 @@ class Kit extends Reporter {
   private statePerturbed = 0;
   /** The resources of the combo being played (`test.resources`). */
   private resources: Resources = {};
+  /**
+   * The rules version's `test.hiddenFromEveryone`, read once when `runKit` starts on that version
+   * (see {@link Kit.claimsSameView}), so a hook that changed its answer can't dodge the check.
+   */
+  private sameView = false;
 
   readonly options: KitOptions;
 
@@ -162,9 +167,10 @@ class Kit extends Reporter {
 
     for (let step = 0; ; step += 1) {
       const toAct = this.turns(def, state, seats, out, where);
-      this.observeViews(def, state, seats, where, observe);
+      const seen = this.observeViews(def, state, seats, where, observe);
       const finished = this.call("schema", "result", where, () => def.result(state)) !== null;
       if (finished) break;
+      this.sameForEveryone(seen, toAct, where);
       if (step >= limit) {
         this.fail(
           "termination",
@@ -497,14 +503,18 @@ class Kit extends Reporter {
 
   // --- views ---------------------------------------------------------------------------------
 
+  /**
+   * Checks every viewer's view and summary against their schemas; returns their JSON, by viewer
+   * (each seat, then the public).
+   */
   private observeViews(
     def: AnyGameDefinition,
     state: unknown,
     seats: number,
     where: Where,
     observe?: (o: Observation) => void,
-  ): void {
-    for (const viewer of viewers(seats)) {
+  ): { view: string; summary: string }[] {
+    return viewers(seats).map((viewer) => {
       const view = this.call("schema", "view", where, () => def.view(state, viewer));
       this.check(
         def.viewSchema.safeParse(view).success,
@@ -519,8 +529,51 @@ class Kit extends Reporter {
         `summary for ${String(viewer)} isn't a ListSummary`,
         where,
       );
-      observe?.(`view ${String(viewer)} ${canonical(view)} ${canonical(summary)}`);
-    }
+      const seen = { view: canonical(view), summary: canonical(summary) };
+      observe?.(`view ${String(viewer)} ${seen.view} ${seen.summary}`);
+      return seen;
+    });
+  }
+
+  /** Reads a rules version's `hiddenFromEveryone` once, before any game of it is played. */
+  claimsSameView(def: AnyGameDefinition): void {
+    this.sameView = def.test.hiddenFromEveryone === true;
+  }
+
+  /**
+   * A module that sets `hiddenFromEveryone` gives every seat and the public the same view while the
+   * game is in progress (identical JSON, key order included), and every seat not in `toAct` the
+   * same summary as the public, at every step (02 §6.3). Only the seats to act may be told
+   * something else ("your turn").
+   */
+  private sameForEveryone(
+    seen: readonly { view: string; summary: string }[],
+    toAct: readonly Seat[],
+    where: Where,
+  ): void {
+    if (!this.sameView) return;
+    const publicIndex = seen.length - 1;
+    const who = (index: number): string =>
+      index === publicIndex ? "the public" : `seat ${String(index)}`;
+    const differs = seen.findIndex((viewer) => viewer.view !== seen[0]?.view);
+    this.check(
+      differs < 0,
+      "secrecy",
+      `hiddenFromEveryone is set, but ${who(differs)} gets a different view from seat 0 while the game is in progress`,
+      where,
+    );
+    const told = seen.findIndex(
+      (viewer, seat) =>
+        seat !== publicIndex &&
+        !toAct.includes(seat) &&
+        viewer.summary !== seen[publicIndex]?.summary,
+    );
+    this.check(
+      told < 0,
+      "secrecy",
+      `hiddenFromEveryone is set, but seat ${String(told)}, which isn't to act, gets a different summary from the public while the game is in progress`,
+      where,
+    );
   }
 
   // --- secrecy (02 §6.3) ---------------------------------------------------------------------
@@ -733,7 +786,7 @@ class Kit extends Reporter {
     this.samples = 0;
     this.viewPerturbed = 0;
     this.statePerturbed = 0;
-    if (def.test.hiddenFromEveryone === true && !def.test.hiddenInformation) {
+    if (this.sameView && !def.test.hiddenInformation) {
       this.fail("secrecy", "hiddenFromEveryone is set but hiddenInformation isn't", {
         version: def.version,
       });
@@ -742,10 +795,9 @@ class Kit extends Reporter {
     // A perturbation counts when it changes what another viewer sees. Only a module that declares
     // its hidden information is seen by no seat at all (e.g. deck order alone) is counted by
     // whether the state changed: otherwise reordering a deck while hands leak would pass.
-    const [counted, what] =
-      def.test.hiddenFromEveryone === true
-        ? [statePerturbed, "the state"]
-        : [viewPerturbed, "another viewer's view"];
+    const [counted, what] = this.sameView
+      ? [statePerturbed, "the state"]
+      : [viewPerturbed, "another viewer's view"];
     if (counted * 2 < samples) {
       this.fail(
         "secrecy",
@@ -878,6 +930,7 @@ export function runKit(engines: GameEngines, given: KitOptions): KitReport {
   let seed = options.seed ?? 1;
   const stop = (): boolean => options.stopAtFirstFailure === true && kit.failures.length > 0;
   for (const def of Object.values(engines)) {
+    kit.claimsSameView(def);
     const combos = resolveCombos(kit, def, options);
     const perCombo =
       options.games ??

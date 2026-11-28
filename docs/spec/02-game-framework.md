@@ -126,7 +126,7 @@ interface GameDefinition<Options, State, Action, View, PublicRecord, PreviewResu
     maxActions(options: Options, seats: number): number;  // termination bound
     worstCase(options: Options, seats: number, rng: RandomSource): { state: State; seat: Seat; action: Action }[]; // CPU budget
     publicRandomness?: boolean;                            // true if records legitimately show random draws (e.g. dice)
-    hiddenFromEveryone?: boolean;                          // true if, while in progress, every seat and the public get the same view (identical JSON; summaries may differ), §6.3
+    hiddenFromEveryone?: boolean;                          // true if, while in progress, every seat and the public get the same view (identical JSON) and only seats to act a different summary, §6.3
     optionInputs(ctx: OptionsContext): unknown[];          // the option inputs the kit plays (§6); required, non-empty
     context?(): OptionsContext;                            // what resolveOptions, catalog and checkConfig see in the kit; default: configSchema.parse({}), no resources
     resources?(options: Options): Resources;               // what validate and preview get in the kit's games; default: none
@@ -551,15 +551,22 @@ plays exactly these hooks, so a game that needs a dictionary supplies one throug
      a module that declares **`test.hiddenFromEveryone: true`** is counted by whether `s'`
      differs from `s` instead (it requires `hiddenInformation: true`). The flag means exactly
      this: **while the game is in progress, every seat and the public get the same view**
-     (identical JSON; summaries may differ), so nothing is hidden from one viewer that another
-     sees, e.g. a game whose only hidden information is the deck order, or a memory game's
-     face-down cards (games/pairs.md §8.7). A module that sets it keeps per-viewer conveniences
-     ("your turn", which seat is yours) out of the view: they belong in `summary` or come from the
-     envelope (05), which already says who the viewer is and who is to act. The kit checks the
-     flag at every step of every game of a module that sets it, and fails the module on any two
-     viewers, seats or the public, whose views differ (built with the pairs engine slice, 10
-     §Pairs game). A weaker reading, the same perturbation for every viewer, wouldn't do: a hand
-     game that set the flag with a deck-only `perturbHidden` would pass it;
+     (identical JSON), and every seat not in `toAct` the same summary as the public, so only the
+     seats to act may get a different summary ("your turn"), e.g. a game whose only hidden
+     information is the deck order, or a memory game's face-down cards (games/pairs.md §8.7). A
+     module that sets it keeps per-viewer conveniences (which seat is yours) out of the view and
+     the summary: they come from the envelope (05), which already says who the viewer is and who
+     is to act. The kit checks exactly this at every step of every game of a module that sets it:
+     it fails the module on any two viewers, seats or the public, whose views differ, and on any
+     seat not to act whose summary differs from the public's (built with the pairs engine slice,
+     10 §Pairs game; review A25-S-1). It does **not** check that the seats to act learn nothing
+     more: their summaries and their `validate` and `preview` answers are covered only by the
+     perturbation comparison below, so they are secret only as far as `perturbHidden` changes
+     everything hidden. A module that sets the flag therefore MUST have its own test that
+     `perturbHidden` covers its whole hidden set (pairs' `kit-hooks.test.ts` does; review
+     A25-S2-1, S2-2). A stronger check, that under the flag those answers depend only on the view,
+     is backlog (10). A weaker reading of the flag, the same perturbation for every viewer,
+     wouldn't do: a hand game that set the flag with a deck-only `perturbHidden` would pass it;
    - `validate` and `preview` results, including `detail`, are identical for `s` and `s'`, for
      legal actions from `randomAction` **and** for possibly-illegal ones from `randomAnyAction`;
    - the `record` from `apply`/`onResign`/`onTimeout` by any seat is identical for `s` and `s'`
@@ -640,8 +647,10 @@ one repeats a secret choice in its record, and one a rare secret choice; one has
 `setup`; one is nondeterministic; one never terminates, with a small and with a large
 `maxActions`; one leaves `toAct` non-empty after the end; one keeps hidden state in a module-level
 variable shared between games; one has an empty and one an illegal `worstCase`; one sets
-`hiddenFromEveryone` while its seats see different hands): the kit MUST fail each one, in fast
-mode.
+`hiddenFromEveryone` while its seats see different hands, one sets it with different hands and a
+deck-only `perturbHidden`, one while every seat sees the same view but the public's differs, one
+while views differ only late in the game, and one while a seat not to act gets a summary that
+leaks another seat's hand): the kit MUST fail each one, in fast mode.
 
 The framework, not the kit, enforces that only seats in `toAct` may act (05 `/actions`).
 

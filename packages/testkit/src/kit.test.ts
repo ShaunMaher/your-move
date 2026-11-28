@@ -483,13 +483,11 @@ describe("runKit's static checks", () => {
 
   it("counts a deck-only perturbation by the state only when the module says no seat sees its hidden information", () => {
     const toy = toyGame();
-    // Every hand is public, so the deck order is the only hidden information.
+    // Every hand is public, so the deck order is the only hidden information, and every viewer
+    // gets the same view (the public's, with every hand), as the flag requires (02 §6.3).
     const deckOnly = (hiddenFromEveryone?: boolean) => ({
       ...toy,
-      view: (s: Parameters<typeof toy.view>[0], v: number | null) => ({
-        ...toy.view(s, v),
-        peek: s.hands,
-      }),
+      view: (s: Parameters<typeof toy.view>[0]) => ({ ...toy.view(s, null), peek: s.hands }),
       test: {
         ...toy.test,
         perturbHidden: (s: Parameters<typeof toy.view>[0]) => ({
@@ -505,6 +503,55 @@ describe("runKit's static checks", () => {
         .failures.map((f) => f.message)
         .join("\n"),
     ).toMatch(/changed another viewer's view in only 0 of/u);
+  });
+
+  const view = (who: string): string =>
+    `hiddenFromEveryone is set, but ${who} gets a different view from seat 0 while the game is in progress`;
+  it.each([
+    ["sets hiddenFromEveryone while its seats see different hands", view("seat 1")],
+    ["sets hiddenFromEveryone while the public's view differs from the seats'", view("the public")],
+    ["sets hiddenFromEveryone with different hands and a deck-only perturbHidden", view("seat 1")],
+    ["sets hiddenFromEveryone while its views differ only late in the game", view("seat 1")],
+    [
+      "sets hiddenFromEveryone while a summary leaks the next seat's hand",
+      "hiddenFromEveryone is set, but seat 1, which isn't to act, gets a different summary from the public while the game is in progress",
+    ],
+  ])("checks hiddenFromEveryone at every step: a module that %s fails", (name, message) => {
+    const report = runKit(brokenFixtures()[name]?.engines() ?? {}, { mode: "fast", games: 3 });
+    expect(report.failures.map((f) => f.message)).toContain(message);
+  });
+
+  it("reads hiddenFromEveryone once per rules version, so a hook can't take the claim back", () => {
+    const toy = toyGame();
+    let reads = 0;
+    const test = {
+      ...toy.test,
+      // Claims the flag when first asked, and denies it on every later read.
+      get hiddenFromEveryone() {
+        reads += 1;
+        return reads === 1;
+      },
+    };
+    const report = runKit(asEngines({ ...toy, test }), { mode: "fast", games: 3 });
+    expect(reads).toBe(1);
+    expect(report.failures.map((f) => f.message)).toContain(
+      "hiddenFromEveryone is set, but seat 1 gets a different view from seat 0 while the game is in progress",
+    );
+  });
+
+  it("lets the seats to act get their own summary under hiddenFromEveryone", () => {
+    const toy = toyGame();
+    // One view for everyone; the summary says "your turn" to the seat to act only.
+    const report = runKit(
+      asEngines({
+        ...toy,
+        view: (s) => toy.view(s, null),
+        summary: (s, v) => ({ headline: [v === s.turn ? "Your turn" : "Playing"] }),
+        test: { ...toy.test, hiddenFromEveryone: true },
+      }),
+      { mode: "fast", games: 10 },
+    );
+    expect(report.failures).toEqual([]);
   });
 
   it("refuses hiddenFromEveryone without hiddenInformation", () => {

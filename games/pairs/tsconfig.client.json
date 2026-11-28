@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/client/.tsbuildinfo",
+    // The client entry point is a placeholder until the client slice (10 §Pairs game), which adds
+    // the DOM library, JSX and React here as paths has them.
+    "types": [],
+    "lib": ["ES2023"]
+  },
+  "include": ["src/client"],
+  "references": [{ "path": "../../packages/sdk" }, { "path": "./tsconfig.engine.json" }]
+}

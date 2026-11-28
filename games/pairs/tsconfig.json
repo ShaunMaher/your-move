@@ -1,0 +1,11 @@
+{
+  // Solution file: the engine (built to dist/, no DOM library), the client entry point (built to
+  // dist/) and the package's own config files (type-checked only), so all are type-checked and
+  // lintable (11 §2).
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.engine.json" },
+    { "path": "./tsconfig.client.json" },
+    { "path": "./tsconfig.config.json" }
+  ]
+}

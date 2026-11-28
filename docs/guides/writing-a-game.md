@@ -327,11 +327,20 @@ The `test` object drives the generic kit (02 §6):
   For `null`, everything hidden from the public. Keep the state's key order (build the new state
   from the old one, as `{ ...state, deck }` does): views are compared key order included. The kit
   counts a perturbation only if it changes what some _other_ viewer sees (another seat's hand,
-  say), and at least half of them must. If no seat ever sees your hidden information (only the deck
-  order is hidden), set `hiddenFromEveryone: true`, and the kit counts perturbations that change
-  the state instead. **The kit can't tell if your perturbation stops covering a hidden part**: a
-  hook that leaves the deck alone passes as long as hands change, and the secrecy check then never
-  tests the deck. Write a test that it changes every hidden part (paths'
+  say), and at least half of them must. If every seat and the public always get the same view
+  while the game is in progress (identical JSON: only the deck order is hidden, say, or the
+  face-down cards of `pairs`), set `hiddenFromEveryone: true`, and the kit counts perturbations
+  that change the state instead. The flag means exactly that: the same view for every viewer,
+  and the same summary as the public's for every seat not to act. The kit checks both at every
+  step of every game, so keep per-viewer conveniences out of the view; only a seat to act may get
+  its own summary ("your turn"), and the envelope already says who the viewer is. Never set it
+  for a game with hidden hands. The kit doesn't check what the seat to act learns from its
+  summary or from `validate` and `preview` beyond the perturbation comparison, so with the flag
+  set you **must** test that `perturbHidden` covers your whole hidden set (pairs'
+  `kit-hooks.test.ts` checks that only the hidden cards change and that they change whenever two
+  of their faces differ). **The kit can't tell if your perturbation stops covering a hidden
+  part**: a hook that leaves the deck alone passes as long as hands change, and the secrecy check
+  then never tests the deck. Write a test that it changes every hidden part (paths'
   `kit-hooks.test.ts` checks that the deck order itself changes for the public viewer, for a
   viewer who holds the only hand, and in a finished game, and that the other hands change in a game
   in progress), and that it keeps the multiset of cards.

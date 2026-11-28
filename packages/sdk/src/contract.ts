@@ -218,9 +218,17 @@ export interface GameTestHooks<Options, State, Action> {
   /** Whether records legitimately show random draws (e.g. dice). */
   readonly publicRandomness?: boolean;
   /**
-   * True if no seat ever sees the hidden information (e.g. only the deck order is hidden): the
-   * kit's non-vacuity check then counts perturbations that change the state, rather than ones that
-   * change another viewer's view (02 §6.3). Never set it for a game with hidden hands.
+   * True if, while the game is in progress, every seat and the public get the same view
+   * (identical JSON, key order included), and every seat not in `toAct` the same summary as the
+   * public: e.g. a game whose only hidden information is the deck order, or the pairs game's
+   * face-down cards. The kit checks exactly that at every step of every game and fails the
+   * module otherwise; its non-vacuity check then counts perturbations that change the state,
+   * rather than ones that change another viewer's view (02 §6.3). What the seats to act get
+   * (their summary, `validate` and `preview` answers) is not checked against the view: it is
+   * secret only as far as `perturbHidden` changes everything hidden, so a module that sets the
+   * flag must test that its `perturbHidden` covers its whole hidden set. Only the seats to act may
+   * get their own summary ("your turn"); other per-viewer conveniences (which seat is yours) come
+   * from the envelope. Requires `hiddenInformation`; never set it for a game with hidden hands.
    */
   readonly hiddenFromEveryone?: boolean;
   /**
