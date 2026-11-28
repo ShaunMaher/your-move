@@ -404,7 +404,9 @@ developer laptop (2026-11-24), the words engine's worst cases take 0.02 ms media
 at the 99th percentile; budget failures on the runner are pauses (garbage collection, a busy
 host), not engine cost. Since 2026-11-28 every Node kit run times in the thread's CPU time and
 takes the median of five runs per sample (02 §6.6), so a busy host no longer counts against a
-game; half of the calibration's reason is gone. The other half stands: CPU time on the `qemu64`
+game; half of the calibration's reason is gone. (That clock's resolution is the kernel's:
+microseconds where it accounts CPU time precisely, otherwise one scheduler tick of 1–4 ms, coarse
+against a 5 ms budget but not biased; on a 20 ms budget it hardly matters.) The other half stands: CPU time on the `qemu64`
 VM is still 2–3× a laptop's, so the 5 ms reference doesn't fit it, and inside a VM a vCPU the
 hypervisor takes away may still be charged to the running thread. The value stays 20 ms;
 re-measure the worst cases' CPU time on the runner, and revisit it then or when the runner

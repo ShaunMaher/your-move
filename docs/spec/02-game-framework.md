@@ -576,18 +576,27 @@ plays exactly these hooks, so a game that needs a dictionary supplies one throug
    every Node caller (`games:verify`, each game package's kit test) passes the calling thread's
    CPU time (`threadCpuClock()` from `@your-move/testkit/cpu-clock`, built on Node's
    `process.threadCpuUsage()`, falling back to `process.cpuUsage()`), so time a run spends waiting
-   for a core on a busy host doesn't count; on Linux that clock steps by about 1 ms, so the budget
-   is checked to about a millisecond. Each sample is the **median of five back-to-back runs** on
-   fresh copies of the state and the action, so a run or two that a pause slowed (garbage
-   collection and JIT compilation are CPU time on the same thread; on a wall clock, preemption
-   too) don't count against the module, while code slow on most calls is slow in most runs. A
-   sample stops once three of its runs are on the same side of the budget; for a module whose cost
-   doesn't depend on earlier calls, that doesn't change the result. The budget is measured **on the host running the
-   kit**; `pnpm games:verify --cpu-budget-ms <n>`, or the `KIT_CPU_BUDGET_MS` variable (read by every kit run without an explicit budget; CI
-   sets it to its calibrated value, 08 T25), sets it (raising it for a host slower than the
-   reference hardware, or lowering it). `worstCase` must not be vacuous: it returns at least one
-   input for every playable seat count, each input is a game of that seat count (`seatStatus`
-   has one entry per seat), its seat is in `toAct` and its action validates.
+   for a core on a busy host doesn't count. The budget measures **the calling thread**: work V8
+   does on its helper threads (concurrent garbage collection, background JIT compilation) isn't
+   counted, and the pauses it still makes on the calling thread are. The clock's resolution
+   depends on the kernel: microseconds where it accounts CPU time precisely, otherwise one
+   scheduler tick (1–4 ms; about 1 ms on the Linux developer machines measured), so with a 5 ms
+   budget a run is judged to within about a tick. CPU time doesn't count a **blocked** thread
+   either: an engine that waited (`Atomics.wait`) or handed work to another thread could pass the
+   check and still stall the server, so engines can't reach a blocking or concurrent primitive
+   (`Atomics`, `SharedArrayBuffer`, `Worker`, `WebAssembly` stay off §7.5's globals allow-list).
+   Each sample is the **median of five back-to-back runs** on fresh copies of the state and the
+   action, so a run or two that a pause slowed (garbage collection and JIT compilation on the
+   calling thread; on a wall clock, preemption too) don't count against the module, while code
+   slow on most calls is slow in most runs. A sample stops once three of its runs are on the same
+   side of the budget; for a module whose cost doesn't depend on earlier calls, that doesn't
+   change the result. The budget is measured **on the host running the kit**;
+   `pnpm games:verify --cpu-budget-ms <n>`, or the `KIT_CPU_BUDGET_MS` variable (read by every kit
+   run without an explicit budget; CI sets it to its calibrated value, 08 T25), sets it (raising
+   it for a host slower than the reference hardware, or lowering it). `worstCase` must not be
+   vacuous: it returns at least one input for every playable seat count, each input is a game of
+   that seat count (`seatStatus` has one entry per seat), its seat is in `toAct` and its action
+   validates.
 7. **Isolation between games**: two random games are played interleaved through the same loaded
    engine module and compared with the same games played alone; every view, record, `validate` and
    `preview` result must be identical. This catches module-level state (e.g. a wrongly keyed cache)

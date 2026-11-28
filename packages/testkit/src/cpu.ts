@@ -27,13 +27,12 @@ const MAJORITY = Math.floor(REPETITIONS / 2) + 1;
 /**
  * The CPU budget (02 §6.6, 08 T25): `validate` + `preview` + `apply` on each `worstCase` input,
  * timed on the host running the kit with `cpuClock` (CPU time where the caller passes a CPU clock,
- * such as `threadCpuClock()`, otherwise `performance.now()`), after warm-up runs. The median still
- * matters with a CPU clock: garbage collection and JIT pauses on the calling thread are CPU time
- * too. Each timed sample is the median of
- * `REPETITIONS` back-to-back runs on fresh copies of the state and the action, and the 99th
- * percentile of the samples must stay within the budget (`cpuBudgetMs`, default 5 ms). The slowest
- * 1 % of samples are dropped, and timing stops as soon as more samples than that are over budget,
- * so a slow module fails quickly.
+ * such as `threadCpuClock()`, otherwise `performance.now()`), after warm-up runs. Each timed sample
+ * is the median of `REPETITIONS` back-to-back runs on fresh copies of the state and the action, and
+ * the 99th percentile of the samples must stay within the budget (`cpuBudgetMs`, default 5 ms). The
+ * median still matters with a CPU clock: garbage collection and JIT pauses on the calling thread
+ * are CPU time too. The slowest 1 % of samples are dropped, and timing stops as soon as more
+ * samples than that are over budget, so a slow module fails quickly.
  *
  * A sample stops as soon as a majority of its runs are on one side of the budget, which decides its
  * median. For a module whose cost doesn't depend on earlier calls, that doesn't change the result,

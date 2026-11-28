@@ -12,18 +12,31 @@ function burn(clock: () => number, ms: number): number {
   return performance.now() - wallStart;
 }
 
+/** What this host offers (`process.threadCpuUsage` is Node 23.9 and later). */
+const host = globalThis as { process?: { threadCpuUsage?: unknown; cpuUsage?: unknown } };
+const hasThreadClock = typeof host.process?.threadCpuUsage === "function";
+
 describe("threadCpuClock (02 §6.6)", () => {
-  it("uses this thread's CPU time on Node", () => {
-    expect(threadCpuClock().source).toBe("thread CPU time");
+  it("picks the best clock the host offers", () => {
+    const expected = hasThreadClock
+      ? "thread CPU time"
+      : typeof host.process?.cpuUsage === "function"
+        ? "process CPU time"
+        : "wall clock";
+    expect(threadCpuClock().source).toBe(expected);
   });
 
-  it("advances with busy work: CPU time never runs ahead of wall time", () => {
-    // If the clock didn't count this thread's work, `burn` would never return (the test's timeout).
-    // One thread can't use more CPU than wall time, give or take the clock's steps of about 1 ms.
-    expect(burn(threadCpuClock().now, 20)).toBeGreaterThanOrEqual(18);
-  });
+  // These two assume the thread clock; on an older Node the fallback tests below still run.
+  it.runIf(hasThreadClock)(
+    "advances with busy work: CPU time never runs ahead of wall time",
+    () => {
+      // If the clock didn't count this thread's work, `burn` would never return (the test's timeout).
+      // One thread can't use more CPU than wall time, give or take the clock's steps of about 1 ms.
+      expect(burn(threadCpuClock().now, 20)).toBeGreaterThanOrEqual(18);
+    },
+  );
 
-  it("doesn't advance while the thread waits", () => {
+  it.runIf(hasThreadClock)("doesn't advance while the thread waits", () => {
     const clock = threadCpuClock().now;
     const start = clock();
     // Blocks this thread for 60 ms without running it (ECMAScript, so no host types needed).

@@ -49,8 +49,10 @@ const milliseconds = (usage: CpuUsage): number => (usage.user + usage.system) / 
  *   for its neighbours;
  * - otherwise the wall clock, the kit's default.
  *
- * On Linux both CPU clocks advance in steps of about 1 ms (the kernel's accounting tick), so the
- * budget is checked to about a millisecond; `host` is for tests.
+ * Both CPU clocks count the calling thread (or process) only while it runs: not time waiting for a
+ * core, nor time blocked. Their resolution depends on the kernel: microseconds where it accounts
+ * CPU time precisely, otherwise one scheduler tick (1–4 ms; about 1 ms on the Linux machines
+ * measured), so with a 5 ms budget a run is judged to within about a tick. `host` is for tests.
  *
  * @public
  */
