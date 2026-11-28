@@ -200,11 +200,9 @@ The platform records every value drawn and replays a game from its log, so the s
 and draws must always give the same result. Keep no module-level mutable state: one loaded engine
 serves many games at once, and the kit plays games interleaved to catch leaks between them. The
 engine lint rules don't forbid a module-level `let` or a cache in a `Map`, so nothing stops you
-writing one; it breaks isolation and determinism all the same, so don't. For the same reason the
-engine's globals allow-list leaves out every blocking or concurrent primitive (`Atomics`,
-`SharedArrayBuffer`, `Worker`, `WebAssembly`). They must stay off: the CPU budget (below) counts
-only CPU time of the calling thread, so an engine that waited or handed work elsewhere would pass
-the check and still stall the server (02 §6.6, 08 T25).
+writing one; it breaks isolation and determinism all the same, so don't. Don't ask for blocking or
+concurrent globals (`Atomics`, `SharedArrayBuffer`, `Worker`, `WebAssembly`): they are off the
+allow-list on purpose, and the reason is in [02 §6.6](../spec/02-game-framework.md).
 
 ### Turns: `toAct`
 
@@ -282,8 +280,10 @@ reaches players through `view`, as the example's round result does. `paths` show
 records carry the tile placed (it is on the public board), the public movement it caused and who
 went out or was skipped, and never a drawn tile, the deck or a hand; where a public outcome does
 disclose something about a hand (a player put out under the default rule had no safe tile), the
-rules text says so (paths §3). Views are compared as the JSON clients receive, key order included: build them with a fixed
-key order, never one that depends on hidden state. The example's records are only:
+rules text says so (step 4 of "A turn" in
+[`docs/spec/games/paths.md`](../spec/games/paths.md)). Views are compared as the JSON clients
+receive, key order included: build them with a fixed key order, never one that depends on hidden
+state. The example's records are only:
 
 ```ts
 { kind: "played", seat, round } | { kind: "resigned", seat } | { kind: "declined", seat } | { kind: "timedOut", seat }
@@ -331,9 +331,10 @@ The `test` object drives the generic kit (02 §6):
   order is hidden), set `hiddenFromEveryone: true`, and the kit counts perturbations that change
   the state instead. **The kit can't tell if your perturbation stops covering a hidden part**: a
   hook that leaves the deck alone passes as long as hands change, and the secrecy check then never
-  tests the deck. Write a test that it changes every hidden part, in every phase (paths'
-  `kit-hooks.test.ts` checks that the deck order itself changes, for the public viewer, a viewer
-  whose is the only hand and a finished game), and that it keeps the multiset of cards.
+  tests the deck. Write a test that it changes every hidden part (paths'
+  `kit-hooks.test.ts` checks that the deck order itself changes for the public viewer, for a
+  viewer who holds the only hand, and in a finished game, and that the other hands change in a game
+  in progress), and that it keeps the multiset of cards.
 - `hiddenInformation`: whether anything is ever hidden (must match the manifest).
 - `maxActions(options, seats)`: an upper bound on transitions in a game, for the termination
   check: a whole number from 1 to 1 000 000, as tight as you can prove it.
@@ -507,7 +508,7 @@ the small example stops being a guide. What its reviews turned up:
   the function only what the client has: the viewer's `view`, never the full state. Then test the
   client's use against the server's rule with a property test: play seeded games, and at each turn
   compare what the client computes from the viewer's view with `validate` and the engine's legal
-  moves on the real state (`games/paths/src/client/rule.test.ts`). Your client may import your own engine (section 1).
+  moves on the real state (`games/paths/src/client/rule.test.ts`). Your client may import your own engine (02 §3).
 - **CSS goes in a constructable stylesheet.** The page's content security policy allows no inline
   styles, so a `<style>` element or a `style` attribute is blocked. Build one `CSSStyleSheet`,
   fill it with `replaceSync`, add it to `document.adoptedStyleSheets` once per page, and say so to
@@ -520,8 +521,9 @@ the small example stops being a guide. What its reviews turned up:
   your marker would survive"), keep the board a region, and announce changes in a polite live
   region. Use real `<button>`s and fieldsets, as the example does.
 - **Touch targets are at least 44 × 44 CSS px**, including buttons that are only part of a
-  drawing. Paths sizes its squares in `pt` and its marker-phase buttons separately in CSS px; measure
-  the targets in CSS px, in your tests and in the e2e.
+  drawing. Paths meets this for its buttons (in rem: 2.75 rem is 44 px at the default root size),
+  while its squares shrink to fit a 320 px screen (about 50 px) and its hand tiles can go to 4 rem
+  under 360 px. Measure targets in CSS px, in your tests and in the e2e.
 - **Respect `prefers-reduced-motion`**: skip the animation and show the end state. **Cap the
   animation**: a replay of everyone's movement can be long, so give the whole replay a frame budget
   and share it between the moves (paths: 90 frames of 40 ms, property-tested over long replays).
