@@ -154,13 +154,13 @@ export const gameEnvelopeSchema: z.ZodObject<{
         aiOwnerName: z.ZodOptional<z.ZodString>;
         invitedAs: z.ZodOptional<z.ZodString>;
         state: z.ZodEnum<{
+            out: "out";
             declined: "declined";
             invited: "invited";
             joined: "joined";
             left: "left";
             removed: "removed";
             playing: "playing";
-            out: "out";
         }>;
         outReason: z.ZodOptional<z.ZodEnum<{
             declined: "declined";
@@ -246,13 +246,13 @@ export const gamePlayerSchema: z.ZodObject<{
     aiOwnerName: z.ZodOptional<z.ZodString>;
     invitedAs: z.ZodOptional<z.ZodString>;
     state: z.ZodEnum<{
+        out: "out";
         declined: "declined";
         invited: "invited";
         joined: "joined";
         left: "left";
         removed: "removed";
         playing: "playing";
-        out: "out";
     }>;
     outReason: z.ZodOptional<z.ZodEnum<{
         declined: "declined";
@@ -504,13 +504,13 @@ export const submitResultSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             aiOwnerName: z.ZodOptional<z.ZodString>;
             invitedAs: z.ZodOptional<z.ZodString>;
             state: z.ZodEnum<{
+                out: "out";
                 declined: "declined";
                 invited: "invited";
                 joined: "joined";
                 left: "left";
                 removed: "removed";
                 playing: "playing";
-                out: "out";
             }>;
             outReason: z.ZodOptional<z.ZodEnum<{
                 declined: "declined";
