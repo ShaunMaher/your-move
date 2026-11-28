@@ -397,8 +397,8 @@ once) can't hold the 5 ms reference budget reliably. CI therefore sets one calib
 `KIT_CPU_BUDGET_MS` (20 ms, 4× the reference; a whole number from 1 to 50), in `.gitlab-ci.yml`'s
 global variables, and every kit run in CI uses it: the testkit's `runKit` reads it whenever it
 isn't given a budget, so the game packages' own kit tests in `pnpm test`, `games:verify` in
-`pnpm build` (`build:app`) and the full kit in `test` all do, and the image build receives it as a
-`--build-arg`. In CI, installed third-party games are checked at the calibrated budget too.
+`pnpm build` (`build:app`) and the full kit in `test:games` all do, and the image build receives it
+as a `--build-arg`. In CI, installed third-party games are checked at the calibrated budget too.
 Developer machines keep the real 5 ms budget, enforced by every local `pnpm test` and
 `pnpm games:verify` (and local Docker builds), so a slow engine still fails there. Measured on a
 developer laptop (2026-11-24), the words engine's worst cases take 0.02 ms median and under 0.1 ms
@@ -413,10 +413,32 @@ is still 2–3× a laptop's (re-measured after its CPU model changed to `host-pa
 hypervisor takes away may still be charged to the running thread. The value stays 20 ms;
 revisit it when the runner changes.
 
-The `test` job has an explicit `timeout` of 55 minutes (ADR 0004): on the shared amd64 runner it
-took 1414 s with the workerd tests and 2048 s once the paths game's full kit joined `games:verify`
-(2026-11-29). If it creeps past about 45 minutes, split the job rather than raise the timeout again.
-The job's first step fails at once with a clear message if the runner's CPU lacks SSE4.2.
+The `test` job has an explicit `timeout` of 40 minutes (ADR 0004): on the shared amd64 runner it
+took 1414 s with the workerd tests and the words game's full kit, and 2048 s once the paths game's
+full kit joined `games:verify` (2026-11-29). The full kit has since moved to `test:games`, so
+`test` runs `pnpm test` alone, under the 1414 s bound; re-measure it from the first pipeline that
+runs it. The job's first step fails at once with a clear message if the runner's CPU lacks SSE4.2.
+
+**`test:games`** runs `pnpm games:verify` (the full game kit and every other check on each
+installed game, 02 §6) in `parallel:` shards, `--shard "$CI_NODE_INDEX/$CI_NODE_TOTAL"`. Shard `i`
+of `n` plays the option set and seat count combinations numbered `i-1`, `i-1+n`, … of every
+installed game, with the seeds an unsharded run uses, so together the shards play exactly the
+unsharded run's games; every check that plays no game runs in each shard. Each shard's log gives,
+per package, the games and combinations it played, the whole run's number of combinations and a
+fingerprint of their list, which is the same in every shard of one run. A newly installed game is
+covered without a CI change, but re-measure the shards when one is installed and raise the count
+if a shard would run much past 20 minutes.
+
+Measured locally (16-thread developer laptop, 2026-11-29, shards run side by side), as an upper
+estimate with pairs installed too: the four shards took 328, 338, 336 and 336 s, and three would
+take 445, 502 and 376 s. Without pairs, as installed today, the four take 136, 134, 96 and 82 s.
+The shared runner took about 2.3× a laptop's time for the paths game's full kit (`test` grew
+634 s when it was installed, against 281 s locally), so with pairs each of the four should take
+about 13 minutes on the runner, plus its workspace install, where three would come close to 20.
+More shards would each add an install and, since jobs queue for the runner's concurrency, little
+wall time. The shards share one `timeout` (30 minutes), a margin over that estimate, provisional
+until it is set from the first pipeline that runs them (ADR 0004). The jobs keep `TMPDIR` on tmpfs
+as `test` does, and the publish jobs need every shard.
 
 The `test` job keeps its scratch files (temporary SQLite databases,
 bundles) on tmpfs: `TMPDIR` points into `/dev/shm`. On the shared amd64 runner the disk is shared

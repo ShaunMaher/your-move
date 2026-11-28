@@ -3,7 +3,7 @@ import { z } from "@your-move/sdk/schema";
 import { describe, expect, it } from "vitest";
 
 import { threadCpuClock } from "./cpu-clock.js";
-import { runKit, type KitOptions } from "./kit.js";
+import { runKit, type KitOptions, type KitReport } from "./kit.js";
 import { asEngines, brokenFixtures, toyGame, toyManifest } from "./test-support.js";
 
 /** A dictionary that knows every word: the "reads resources in setup" fixture needs one. */
@@ -703,5 +703,237 @@ describe("runKit's test hooks (02 §6)", () => {
       { mode: "fast", games: 1 },
     );
     expect(report.failures.map((f) => f.message)).toEqual(["test.context threw Error: ctx"]);
+  });
+});
+
+type ToyState = Parameters<ReturnType<typeof toyGame>["view"]>[0];
+
+describe("how runKit checks views (02 §6.1)", () => {
+  /** The toy at two seats only, with a view schema that counts its checks. */
+  const counted = (view: (s: ToyState, v: number | null) => unknown) => {
+    const toy = toyGame();
+    const real = toy.viewSchema;
+    const checks = { count: 0 };
+    const viewSchema = Object.assign(Object.create(real) as typeof real, {
+      safeParse: (value: unknown) => {
+        checks.count += 1;
+        return real.safeParse(value);
+      },
+    });
+    const engines = asEngines({
+      ...toy,
+      viewSchema,
+      view: view as typeof toy.view,
+      players: () => ({ min: 2, max: 2 }),
+      // The views below show no hand, so no viewer sees hidden information.
+      test: { ...toy.test, hiddenInformation: false, optionInputs: () => [{}] },
+    });
+    return { engines, checks };
+  };
+  const options: KitOptions = { mode: "fast", games: 5, cpuClock: () => 0 };
+
+  it("checks each distinct view JSON once per step", () => {
+    const toy = toyGame();
+    // The same games either way: views don't steer play. Three viewers (two seats and the
+    // public) get one view in the first module and three in the second.
+    const same = counted((s) => toy.view(s, null));
+    const distinct = counted((s, v) => ({ ...toy.view(s, null), peek: v }));
+    expect(runKit(same.engines, options).failures).toEqual([]);
+    expect(runKit(distinct.engines, options).failures).toEqual([]);
+    expect(same.checks.count).toBeGreaterThan(0);
+    expect(distinct.checks.count).toBe(3 * same.checks.count);
+  });
+
+  /** The toy with a view of `{ x }` alone, judged by `schema`. */
+  const viewing = (schema: z.ZodType, x: (v: number | null) => unknown) => {
+    const toy = toyGame();
+    return asEngines({
+      ...toy,
+      viewSchema: z.object({ x: schema }).strict() as unknown as typeof toy.viewSchema,
+      view: ((_s: ToyState, v: number | null) => ({ x: x(v) })) as unknown as typeof toy.view,
+      players: () => ({ min: 2, max: 2 }),
+      test: { ...toy.test, hiddenInformation: false, optionInputs: () => [{}] },
+    });
+  };
+  const schemaFailures = (engines: ReturnType<typeof viewing>) =>
+    runKit(engines, { ...options, stopAtFirstFailure: true })
+      .failures.filter((f) => f.property === "schema")
+      .map((f) => f.message);
+
+  it.each([
+    ["seat 0 gets null and the public NaN", (v: number | null) => (v === null ? NaN : null)],
+    ["seat 0 gets NaN and the public null", (v: number | null) => (v === 0 ? NaN : null)],
+  ])("checks the JSON a client is served, in which NaN is null: %s", (_name, x) => {
+    expect(schemaFailures(viewing(z.null(), x))).toEqual([]);
+    expect(schemaFailures(viewing(z.number(), x))).toEqual(["view for 0 doesn't match viewSchema"]);
+  });
+
+  it("checks a Date as the ISO string a client is served", () => {
+    expect(schemaFailures(viewing(z.string(), () => new Date(0)))).toEqual([]);
+    expect(schemaFailures(viewing(z.date(), () => new Date(0)))).toEqual([
+      "view for 0 doesn't match viewSchema",
+    ]);
+  });
+
+  it("still checks a view only one viewer gets", () => {
+    const toy = toyGame();
+    const publicOnly = counted((s, v) =>
+      v === null ? { ...toy.view(s, v), turn: "mine" } : toy.view(s, v),
+    );
+    expect(runKit(publicOnly.engines, options).failures.map((f) => f.message)).toContain(
+      "view for null doesn't match viewSchema",
+    );
+  });
+});
+
+describe("sharding a full run (02 §6)", () => {
+  /** The toy, recording every `apply` it is asked to make and its answer. */
+  const recorded = (change: (toy: ReturnType<typeof toyGame>) => typeof toy = (toy) => toy) => {
+    const calls: string[] = [];
+    const toy = change(toyGame());
+    const engines = asEngines({
+      ...toy,
+      apply: (state, seat, action, rng) => {
+        const result = toy.apply(state, seat, action, rng);
+        calls.push(JSON.stringify([state, seat, action, result]));
+        return result;
+      },
+    });
+    return { calls, engines };
+  };
+  // The CPU check's runs depend on the clock, so a clock that never moves keeps them the same.
+  const full: KitOptions = { mode: "full", games: 20, cpuClock: () => 0 };
+  const shards = (count: number): KitOptions[] =>
+    Array.from({ length: count }, (_, i) => ({ ...full, shard: { index: i + 1, count } }));
+
+  it("plays exactly the whole run's games, split between the shards", () => {
+    const whole = recorded();
+    const report = runKit(whole.engines, full);
+    expect(report.failures).toEqual([]);
+    // Two option inputs, each at two and three seats.
+    expect(report.combos).toBe(4);
+    const parts = shards(3).map((options) => {
+      const part = recorded();
+      return { part, report: runKit(part.engines, options) };
+    });
+    // Combinations 0 and 3, 1, and 2.
+    expect(parts.map(({ report: r }) => r.combos)).toEqual([2, 1, 1]);
+    // Every shard names the same whole run.
+    expect(report.allCombos).toBe(4);
+    expect(report.comboDigest).toMatch(/^[0-9a-f]{16}$/u);
+    for (const { report: r } of parts) {
+      expect([r.allCombos, r.comboDigest]).toEqual([report.allCombos, report.comboDigest]);
+    }
+    // A different run has a different list.
+    const twoSeats = runKit(asEngines({ ...toyGame(), players: () => ({ min: 2, max: 2 }) }), {
+      ...full,
+      games: 1,
+    });
+    expect(twoSeats.allCombos).toBe(2);
+    expect(twoSeats.comboDigest).not.toBe(report.comboDigest);
+    expect(parts.reduce((games, { report: r }) => games + r.games, 0)).toBe(report.games);
+    expect(parts.flatMap(({ report: r }) => r.failures)).toEqual([]);
+    expect(parts.flatMap(({ part }) => part.calls).sort()).toEqual([...whole.calls].sort());
+  });
+
+  it("reports a failing game with the seed the whole run reports", () => {
+    const fixture = brokenFixtures()["leaks other hands only under a non-default option"];
+    const stop = { stopAtFirstFailure: true };
+    const whole = runKit(fixture?.engines() ?? {}, { ...full, ...stop });
+    expect(whole.failures[0]).toMatchObject({ property: "secrecy", seats: 2 });
+    // The open option's games are combinations 2 (two seats) and 3: shards 3 and 1 of 3.
+    const [first, second, third] = shards(3).map(
+      (options) => runKit(fixture?.engines() ?? {}, { ...options, ...stop }).failures,
+    );
+    expect(third?.[0]).toEqual(whole.failures[0]);
+    expect(first?.[0]).toMatchObject({ property: "secrecy", seats: 3 });
+    expect(second).toEqual([]);
+  });
+
+  it("judges non-vacuity per option set and seat count in full mode, per rules version in fast", () => {
+    const toy = toyGame();
+    // Vacuous only under the open option at three seats: a quarter of the combinations.
+    const engines = asEngines({
+      ...toy,
+      test: {
+        ...toy.test,
+        perturbHidden: (s, v, rng) =>
+          s.open && s.seats === 3 ? s : toy.test.perturbHidden(s, v, rng),
+      },
+    });
+    const vacuous = (report: KitReport) =>
+      report.failures.filter((f) => f.message.includes("perturbHidden changed"));
+    expect(vacuous(runKit(engines, { mode: "fast", cpuClock: () => 0 }))).toEqual([]);
+    const failure = {
+      property: "secrecy",
+      version: 1,
+      seats: 3,
+      message: expect.stringMatching(
+        /^perturbHidden changed another viewer's view in only 0 of \d+ samples taken in progress under options \{"open":true\}; it must change at least half$/u,
+      ) as unknown,
+    };
+    expect(vacuous(runKit(engines, full))).toEqual([failure]);
+    // Combination 3 is in shard 1 of 3, and only there.
+    expect(shards(3).map((options) => vacuous(runKit(engines, options)))).toEqual([
+      [failure],
+      [],
+      [],
+    ]);
+  });
+
+  it("judges a hiddenFromEveryone module's state changes per option set and seat count in full mode", () => {
+    const toy = toyGame();
+    // Every hand public, so only the deck order is hidden, as the flag requires; the deck is
+    // reordered except under the open option. Two seats: with three, the deck is down to a card
+    // for most of each game, when nothing is hidden at all.
+    const engines = asEngines({
+      ...toy,
+      players: () => ({ min: 2, max: 2 }),
+      view: (s) => ({ ...toy.view(s, null), peek: s.hands }),
+      test: {
+        ...toy.test,
+        hiddenFromEveryone: true,
+        perturbHidden: (s) => (s.open ? s : { ...s, deck: [...s.deck].reverse() }),
+      },
+    });
+    const vacuous = (report: KitReport) =>
+      report.failures.filter((f) => f.message.includes("perturbHidden changed"));
+    const failure = {
+      property: "secrecy",
+      version: 1,
+      seats: 2,
+      message: expect.stringMatching(
+        /^perturbHidden changed the state in only 0 of \d+ samples taken in progress under options \{"open":true\}; it must change at least half$/u,
+      ) as unknown,
+    };
+    expect(vacuous(runKit(engines, full))).toEqual([failure]);
+    // Combination 1 (the open option) is shard 2's.
+    expect(shards(2).map((options) => vacuous(runKit(engines, options)))).toEqual([[], [failure]]);
+  });
+
+  it("fails a run with more combinations than 32-bit seeds leave room for, rather than repeat games", () => {
+    // From this base seed only two combinations fit below 2^32; the toy has four.
+    const seed = 2 ** 32 - 2 * 2 ** 20;
+    const report = runKit(asEngines(toyGame()), { ...full, games: 1, seed });
+    expect(report.failures).toEqual([
+      {
+        property: "schema",
+        version: 1,
+        message: `the kit plays at most 2 option set and seat count combinations from seed ${String(seed)}; this module has more`,
+      },
+    ]);
+    expect([report.combos, report.allCombos]).toEqual([2, 2]);
+  });
+
+  it.each([
+    ["a fast run", { mode: "fast", shard: { index: 1, count: 2 } }, "only a full-mode run"],
+    ["shard 0", { mode: "full", shard: { index: 0, count: 2 } }, "shard must be"],
+    ["shard 3 of 2", { mode: "full", shard: { index: 3, count: 2 } }, "shard must be"],
+    ["half a shard", { mode: "full", shard: { index: 1.5, count: 2 } }, "shard must be"],
+    ["more games than a combination's seeds", { mode: "full", games: 2 ** 20 }, "games must be"],
+  ] as const)("refuses %s", (_name, options, message) => {
+    const run = () => runKit(asEngines(toyGame()), options);
+    expect(run).toThrow(RangeError);
+    expect(run).toThrow(message);
   });
 });

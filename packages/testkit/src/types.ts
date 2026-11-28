@@ -54,7 +54,13 @@ export interface KitOptions {
    * `test.resources` (replay always uses none).
    */
   readonly resources?: Resources;
-  /** The first seed; game `n` uses `seed + n`. Default 1. */
+  /**
+   * The base seed. Default 1. The kit numbers the combinations it plays (each rules version's
+   * option sets and seat counts, in order) from 0; game `g` of combination `k` uses seed
+   * `seed + k * 2^20 + g`, so a failure's reported seed names its game in every shard. Seeds are
+   * 32-bit, so from the default seed a run may have at most 4,096 combinations; the kit fails one
+   * with more rather than repeat another combination's games.
+   */
   readonly seed?: number;
   /** Games per option set and seat count, overriding the mode's number. */
   readonly games?: number;
@@ -73,6 +79,25 @@ export interface KitOptions {
   readonly cpuClock?: () => number;
   /** Stop at the first failing game instead of playing on: for tests of modules that must fail. */
   readonly stopAtFirstFailure?: boolean;
+  /**
+   * Play only one shard of a full-mode run's combinations (`pnpm games:verify --shard`):
+   * combination `k` (numbered as for `seed`) belongs to shard `k mod count + 1`. Default: the whole
+   * run. Each combination is played and judged exactly as in the whole run, with the same seeds,
+   * so the shards of a run together play its games and find its failures; the checks that play no
+   * game (the manifest, the static checks of 02 §6.1) run in every shard. A fast-mode run can't be
+   * sharded: it judges non-vacuity (02 §6.3) over each whole rules version.
+   */
+  readonly shard?: KitShard;
+}
+
+/**
+ * One of `count` shards of a kit run, numbered from 1 (see `KitOptions.shard`).
+ *
+ * @public
+ */
+export interface KitShard {
+  readonly index: number;
+  readonly count: number;
 }
 
 /**
@@ -84,4 +109,14 @@ export interface KitReport {
   readonly failures: readonly KitFailure[];
   /** How many games were played. */
   readonly games: number;
+  /** How many option set and seat count combinations were played (in this shard). */
+  readonly combos: number;
+  /** How many combinations the whole run has, whichever shard plays them. */
+  readonly allCombos: number;
+  /**
+   * A fingerprint (16 hex digits, not cryptographic) of the whole run's combination list: each
+   * combination's rules version, resolved options as JSON and seat count, in order. Every shard of
+   * a run reports the same one, so their logs show they split the same run.
+   */
+  readonly comboDigest: string;
 }

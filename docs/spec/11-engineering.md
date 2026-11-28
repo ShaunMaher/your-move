@@ -80,7 +80,7 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
 |---|---|---|---|
 | Unit and integration | Vitest | every package; repositories against both drivers (03 §4) | runs on every MR |
 | Property-based | fast-check (inside Vitest) | engines, rule invariants, tile conservation, parsers | seeded; a failure prints the seed |
-| Game contract | `@your-move/testkit` (02 §6) | every installed game package | **full** kit on every MR (test stage); **fast** kit in `pnpm games:verify` during `pnpm build` and the Docker build (never in the deploy job, 08 §6) |
+| Game contract | `@your-move/testkit` (02 §6) | every installed game package | **full** kit on every MR (test stage, in parallel shards); **fast** kit in `pnpm games:verify` during `pnpm build` and the Docker build (never in the deploy job, 08 §6) |
 | API contract | Vitest + `@your-move/api-client` | the same suite against the Node build and the Worker build (Miniflare / `@cloudflare/vitest-pool-workers`) | runs on every MR |
 | Component | Vitest + Testing Library | web app and game clients | runs on every MR |
 | End-to-end | Playwright | WebKit (iPhone viewport) and Chromium; real server + SQLite | runs on every MR (sharded) |
@@ -224,9 +224,14 @@ in order:
    `pnpm lint:arch`, knip, commitlint (MR),
    changeset check (§7), committed generated-code drift (§3), OpenAPI breaking-change check against
    the target branch (`oasdiff breaking`, 05 §Versioning), API Extractor report check.
-2. **test** — Vitest with coverage (unit, integration, property, component, the **full** game
-   kit, API contract on both runtimes, workerd included); JUnit and
-   Cobertura reports to the MR.
+2. **test** — Vitest with coverage (unit, integration, property, component, API contract on both
+   runtimes, workerd included; the `test` job); JUnit and Cobertura reports to the MR. The
+   **full** game kit and every other `games:verify` check run beside it in `test:games`, a job
+   split into parallel shards by option set and seat count (`pnpm games:verify --shard
+   "$CI_NODE_INDEX/$CI_NODE_TOTAL"`, 02 §6), so no one job carries every game's kit. The shards
+   share one timeout, provisional until it is measured on the runner (ADR 0004); the shard count
+   is sized so that no shard runs much past 20 minutes on the shared runner, and is re-measured
+   when a game is installed. The publish jobs need every shard.
 3. **build** — `pnpm games:verify --fast`, web app, Node server build (`apps/node/dist`), Worker
    bundle, then `pnpm games:check-inputs` (the bundler-input closure check, 02 §7.3; the whole
    sequence is `pnpm build`), `generated/installed.json` kept as an artifact for the deploy job, Docker image per

@@ -62,8 +62,8 @@ variables:
   # amd64 runner is a VM 2-3x slower than a developer laptop and often
   # running several pipelines at once, so 4x the 5 ms reference budget. One variable for every
   # kit run here: the testkit reads it whenever a run isn't given a budget, so the packages' own
-  # kit tests (test), games:verify in `pnpm build` (build:app) and the full kit (test) use it, and
-  # the image build gets it as a --build-arg. Developer machines keep the real 5 ms.
+  # kit tests (test), games:verify in `pnpm build` (build:app) and the full kit (test:games) use
+  # it, and the image build gets it as a --build-arg. Developer machines keep the real 5 ms.
   KIT_CPU_BUDGET_MS: "20"
 
 default:
@@ -241,12 +241,12 @@ test:
   extends: [.pnpm, .every-pipeline]
   needs: [validate]
   # Measured, not guessed (ADR 0004): `test` took 1414 s on the shared amd64 runner with the
-  # workerd tests (pipeline 82901) and 2048 s once the paths game was installed, which adds its
-  # full kit to `games:verify` (82904). 55 minutes keeps about 60 % headroom and stays under the
-  # hour at which a hung job should be investigated; if it creeps past ~45 minutes, split the job
-  # rather than raise this again. (The runner did not stop earlier jobs at the 20-minute default,
-  # so its enforcement is looser than the setting.) docs/deploy.md "CI runners".
-  timeout: 55 minutes
+  # workerd tests and the words game's full kit (pipeline 82901), and 2048 s once the paths game's
+  # full kit joined it (82904). The full kit now runs in test:games, so this job is `pnpm test`
+  # alone, under 1414 s; 40 minutes keeps over 40 % headroom over that bound. Re-measure it from
+  # the first pipeline that runs it. (The runner did not stop earlier jobs at the 20-minute
+  # default, so its enforcement is looser than the setting.) docs/deploy.md "CI runners".
+  timeout: 40 minutes
   variables:
     # Wrangler's own log file goes where the artifacts can keep it.
     WRANGLER_LOG_PATH: $CI_PROJECT_DIR/reports/wrangler-logs
@@ -258,10 +258,8 @@ test:
     # Unit, integration, property, component and API contract tests, the workerd ones included
     # (the Worker half of the contract suite, the D1 repository contract suite, the gmail redirect
     # test). The statistical timing suite runs alone in test:timing; `pnpm test` skips it (ADR 0006).
+    # The full game kit runs in test:games.
     - pnpm test
-    # The full game kit and every other games:verify check on each installed game (02 §6, 11 §4);
-    # the build stage runs the fast kit.
-    - pnpm games:verify
   after_script:
     # The Worker build writes Wrangler's log, but a job that fails earlier writes none: an empty
     # directory keeps the artifact upload from warning.
@@ -280,6 +278,39 @@ test:
       coverage_report:
         coverage_format: cobertura
         path: coverage/cobertura-coverage.xml
+
+# The full game kit and every other games:verify check on each installed game (02 §6, 11 §4,
+# 11 §9), in parallel shards: shard i of n plays the option set and seat count combinations
+# numbered i-1, i-1+n, ... of every installed game, with the same seeds as an unsharded run, so the
+# shards together play exactly the unsharded games, and every check that plays no game runs in
+# each. New games are covered without a change here; re-measure the shards when one is installed.
+# The build stage runs the fast kit, unsharded.
+test:games:
+  stage: test
+  extends: [.pnpm, .every-pipeline]
+  needs: [validate]
+  # Sized from local measurements (docs/deploy.md "CI runners", 2026-11-29): with words, paths
+  # and pairs installed, an upper estimate, four shards took 328-338 s each on a developer laptop
+  # (three took up to 502 s; without pairs the four take 82-136 s), and the shared runner took about 2.3x a laptop's time for the paths game's full kit
+  # (its job grew 634 s against 281 s locally), so about 13 minutes each here, under the 20 that
+  # a shard should stay within. More shards would each add a workspace install and, with jobs
+  # queueing for the runner, little wall time.
+  parallel: 4
+  # ADR 0004: about 2x the 13-minute estimate above, which is not a CI measurement yet; set it
+  # from the first pipeline that runs these shards.
+  timeout: 30 minutes
+  script:
+    # The workspace game builds' scratch files on tmpfs, as in `test`.
+    - *tmp-in-memory
+    - pnpm games:verify --shard "$CI_NODE_INDEX/$CI_NODE_TOTAL"
+  after_script:
+    # When a shard fails, how busy the runner was and what it offers.
+    - |
+      if [ "$CI_JOB_STATUS" = "failed" ]; then
+        grep -m1 '^model name' /proc/cpuinfo || true
+        echo "nproc: $(nproc); loadavg: $(cat /proc/loadavg)"
+        grep -E '^(MemTotal|MemAvailable)' /proc/meminfo || true
+      fi
 
 # The statistical enumeration-timing suite (06 §3.2, Q3), on its own (ADR 0006). It is a
 # measurement, not an ordinary test: on the shared amd64 runner, a slow VM often running several
@@ -550,7 +581,15 @@ publish:packages:
     - if: $CI_COMMIT_TAG =~ /^v/
       when: manual
       allow_failure: true
-  needs: [validate, test, test:timing, build:app, e2e, security:secrets, security:dependencies]
+  needs:
+    - validate
+    - test
+    - test:games
+    - test:timing
+    - build:app
+    - e2e
+    - security:secrets
+    - security:dependencies
   variables:
     # A fresh clone, never a checkout left on the runner by another pipeline.
     GIT_STRATEGY: clone
@@ -591,6 +630,7 @@ publish:image:
   needs:
     - validate
     - test
+    - test:games
     - test:timing
     - build:app
     - build:image:amd64

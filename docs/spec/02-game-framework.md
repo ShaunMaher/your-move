@@ -547,7 +547,11 @@ plays exactly these hooks, so a game that needs a dictionary supplies one throug
      (it survives JSON and Zod, so a key order that follows hidden state is a leak);
    - the perturbation isn't vacuous: for a module with `hiddenInformation: true`, at least half of
      the samples taken while `result()` is null must change **some other viewer's view** (seat
-     `w ≠ v`, or the public view), so reordering a deck while hands are hidden doesn't count. Only
+     `w ≠ v`, or the public view), so reordering a deck while hands are hidden doesn't count. In
+     full mode the share is counted for each option input and seat count on its own, so no
+     combination hides behind the others and a shard of the run (below) judges each as the whole
+     run does; in fast mode, where a combination may have only three games, it is counted over the
+     rules version. Only
      a module that declares **`test.hiddenFromEveryone: true`** is counted by whether `s'`
      differs from `s` instead (it requires `hiddenInformation: true`). The flag means exactly
      this: **while the game is in progress, every seat and the public get the same view**
@@ -637,7 +641,12 @@ The kit has two modes: **fast**, 300 games per rules version spread evenly over 
 and seat counts (rounded up, at least 3 per combination), run by `pnpm build` and the Docker build through
 `pnpm games:verify --fast` (`games:verify`, fast or full, never runs in a deploy job, §7.3); and
 **full**, 1000 games per option input and seat count, run in CI's test stage and in each game
-package's own CI.
+package's own CI. A full run may be split into **shards** (`pnpm games:verify --shard <i>/<n>`,
+which CI runs as parallel jobs, 11 §9): the kit numbers the combinations it resolves (rules
+version, option input, seat count, in order), combination `k` belongs to shard `k mod n + 1`, and
+its games use seeds that depend only on `k` and the run's base seed, so each shard plays and checks its combinations exactly as the
+whole run does and the `n` shards together play the whole run's games. The checks that play no game
+(the manifest and the static checks of §6.1) run in every shard. The fast kit is never sharded.
 
 The kit itself is tested against deliberately **broken fixture modules** (one leaks hidden state
 into a view, one into an error detail, one into a record, one into the public view; one leaks only
@@ -778,7 +787,9 @@ Cloudflare Workers can't load code at runtime, so an instance's set of games is 
   published package; for such a package the file-name rules of §7.1.1 cover the files `pnpm pack`
   would publish, plus every symlink anywhere in it, and names are compared case-insensitively.
 - **Bundler-input closure.** `games:verify` records every package file its checks covered
-  (`generated/verified-files.json`); the web, Node and Worker builds record the files their
+  (`generated/verified-files.json`), when it checked every installed package and passed; a run
+  restricted to one package or one shard (`--only`, `--shard`) or one that fails deletes the
+  record instead, so `games:check-inputs` fails until a whole run has passed; the web, Node and Worker builds record the files their
   bundler read (`generated/bundles/<app>.json`); and `pnpm games:check-inputs`, the last step of
   `pnpm build` (`--only web,node` in the Docker build), fails if any bundler input inside an
   installed game package is not a file `games:verify` checked **for that build's role**: the Node

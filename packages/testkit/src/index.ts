@@ -20,6 +20,7 @@ export {
   type KitOptions,
   type KitProperty,
   type KitReport,
+  type KitShard,
 } from "./kit.js";
 export {
   CPU_BUDGET_VARIABLE,

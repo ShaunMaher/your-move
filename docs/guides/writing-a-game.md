@@ -327,7 +327,8 @@ The `test` object drives the generic kit (02 §6):
   For `null`, everything hidden from the public. Keep the state's key order (build the new state
   from the old one, as `{ ...state, deck }` does): views are compared key order included. The kit
   counts a perturbation only if it changes what some _other_ viewer sees (another seat's hand,
-  say), and at least half of them must. If every seat and the public always get the same view
+  say), and at least half of them must: in full mode under each option input at each seat count,
+  in fast mode over the rules version. If every seat and the public always get the same view
   while the game is in progress (identical JSON: only the deck order is hidden, say, or the
   face-down cards of `pairs`), set `hiddenFromEveryone: true`, and the kit counts perturbations
   that change the state instead. The flag means exactly that: the same view for every viewer,
@@ -396,7 +397,10 @@ and seat counts) and `mode: "full"` in CI (1000 games per option input and seat 
 them checked for secrecy at every step). The kit plays the option inputs your `test.optionInputs`
 lists, with your `test.context` and `test.resources`, at every seat count `players(options)`
 allows and `validateStart` accepts; the operator's `games:verify` plays exactly the same hooks. Secrecy is checked at points spread evenly over each game, early
-and late alike. A failure names the property and the seed, so you can replay it. The kit also
+and late alike. A failure names the property and the seed, so you can replay it. A long full run
+can be split with `shard: { index, count }` (from 1): each shard plays its share of the option
+inputs and seat counts, with the same seeds as the whole run, and together the shards play the
+whole run (the operator's CI runs `games:verify --shard` this way). The kit also
 checks that the manifest agrees with the engine: the type, `hiddenInformation`, player bounds
 (exactly the union of the engine's bounds over your option inputs), rules text for every exported
 version, and the resource kinds.

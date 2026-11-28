@@ -410,11 +410,21 @@ with its own review, as paths was built (A22, A24):
   chores slice, before this one installs pairs, that makes the full kit affordable in CI: the kit
   checks each distinct view once per step, `games:verify` is sharded, and a `test:games` CI job
   runs it (review A25-P-1: with pairs installed the full kit took 27 minutes locally; the kit's
-  game counts stay as 02 §6 fixes them). The same chores slice takes the stronger
+  game counts stay as 02 §6 fixes them). Alpha chores 12 did this; the shards cover every
+  installed game, so installing pairs adds no CI job, but this slice re-measures the shards with
+  pairs installed and raises `test:games`'s `parallel` count if one would run past about
+  20 minutes (11 §9, docs/deploy.md "CI runners"). A later chores slice takes the stronger
   `hiddenFromEveryone` check (review A25-S2-1, 02 §6.3): under the flag, the summary and the
   `validate` and `preview` answers a seat to act gets must depend only on the view, which the kit
   checks with a per-combo map keyed by the view JSON, the seat and the action (keys hashed, the
-  map capped), failing on two different answers under one key.
+  map capped), failing on two different answers under one key. The same slice takes three kit and
+  CI items from the review of alpha chores 12: under the flag, at each secrecy sample, the kit
+  also checks that one sampled other viewer's view of the perturbed state equals the view that
+  viewer was served (CH12-S-1; the view tally it skips under the flag built those views without
+  comparing them); each combination's isolation check also interleaves one game of the next
+  combination, so state a module keeps between option sets or seat counts is caught too
+  (CH12-S-3); and `test:games` shares the `.runner-report` anchor with `test` instead of its own
+  failure report (CH12-P-12).
 
 ## M6 — Bring-your-own dictionaries
 - `BlobStore` (R2 / filesystem with key and path checks), `dictionaries` table, `serverOnly`

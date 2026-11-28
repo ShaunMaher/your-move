@@ -9,7 +9,7 @@
 import { relative, resolve, sep } from "node:path";
 
 import { isGameType } from "@your-move/sdk";
-import { runKit, type KitMode } from "@your-move/testkit";
+import { runKit, type KitMode, type KitShard } from "@your-move/testkit";
 import { threadCpuClock } from "@your-move/testkit/cpu-clock";
 import { gamePackageRules } from "@your-move/testkit/depcruise";
 import { engineEslintConfig } from "@your-move/testkit/eslint-engine";
@@ -18,7 +18,7 @@ import { ESLint } from "eslint";
 import { satisfies, validRange } from "semver";
 
 import { isAllowedExpression } from "../licences/policy.js";
-import type { CheckedPackage } from "./inputs.js";
+import { removeVerifiedFiles, writeVerifiedFiles, type CheckedPackage } from "./inputs.js";
 import type { LoadedGame } from "./load.js";
 import { packageFileProblems, packedFiles } from "./packages.js";
 
@@ -51,8 +51,49 @@ export interface VerifyOptions {
    * Default 5; raise it only for a host slower than the reference hardware.
    */
   readonly cpuBudgetMs?: number;
+  /**
+   * Only the package whose manifest has this game type (`--only`): the other packages' checks are
+   * skipped, except that every type id must still be unique.
+   */
+  readonly only?: string;
+  /** Play only this shard of each package's full-mode kit run (`--shard`, 02 §6). */
+  readonly shard?: KitShard;
   /** Receives, per package, the files the checks covered by role (absolute paths). */
   readonly checked?: CheckedPackage[];
+  /** Receives, per package, how much of the kit it played. */
+  readonly played?: KitPlayed[];
+  /**
+   * The root whose `generated/verified-files.json` (./inputs.ts) the run records: a whole run
+   * (no `only`, no `shard`) that passes writes it; any other run deletes it, so
+   * `games:check-inputs` fails closed rather than read a record this run didn't make. Unset, the
+   * file is left alone.
+   */
+  readonly recordIn?: string;
+}
+
+/** How much of the kit one package played. */
+export interface KitPlayed {
+  readonly name: string;
+  readonly games: number;
+  /** Option set and seat count combinations played (in this shard). */
+  readonly combos: number;
+  /** Combinations in the whole run, and the fingerprint of their list (`KitReport`). */
+  readonly allCombos: number;
+  readonly comboDigest: string;
+}
+
+/**
+ * `--shard <index>/<count>`: one of `count` shards, numbered from 1 (as GitLab's `parallel:` jobs
+ * number theirs), or the problem with the text.
+ */
+export function parseShard(text: string): KitShard | string {
+  const match = /^([1-9]\d*)\/([1-9]\d*)$/u.exec(text);
+  const index = Number(match?.[1]);
+  const count = Number(match?.[2]);
+  if (match === null || index > count || !Number.isSafeInteger(count)) {
+    return `--shard must be <index>/<count> with 1 <= index <= count, e.g. 2/4; it is "${text}"`;
+  }
+  return { index, count };
 }
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&");
@@ -316,14 +357,18 @@ async function checkEngineLint(
 }
 
 /** The generic test kit (02 §6) and the manifest-versus-engine check (02 §7.2), icon included. */
-function checkKit(game: LoadedGame, mode: KitMode, cpuBudgetMs: number | undefined): string[] {
+function checkKit(game: LoadedGame, mode: KitMode, options: VerifyOptions): string[] {
+  const { cpuBudgetMs, shard } = options;
   try {
     const report = runKit(game.engines, {
       mode,
       manifest: game.manifest,
       cpuClock: kitClock.now,
       ...(cpuBudgetMs === undefined ? {} : { cpuBudgetMs }),
+      ...(shard === undefined ? {} : { shard }),
     });
+    const { games, combos, allCombos, comboDigest } = report;
+    options.played?.push({ name: game.packageName, games, combos, allCombos, comboDigest });
     return report.failures.map(
       (failure) =>
         `${game.packageName}: kit ${failure.property}${failure.version === undefined ? "" : ` (rules version ${String(failure.version)}${failure.seats === undefined ? "" : `, ${String(failure.seats)} seats`}${failure.seed === undefined ? "" : `, seed ${String(failure.seed)}`})`}: ${failure.message}`,
@@ -361,8 +406,34 @@ function unpackedFiles(
  * after the builds (10 M1).
  */
 export async function verifyGames(options: VerifyOptions): Promise<string[]> {
+  const checked = options.checked ?? [];
+  const problems = await runChecks({ ...options, checked });
+  const { only, shard, recordIn } = options;
+  if (recordIn !== undefined) {
+    if (problems.length === 0 && only === undefined && shard === undefined) {
+      writeVerifiedFiles(recordIn, checked);
+    } else {
+      removeVerifiedFiles(recordIn);
+    }
+  }
+  return problems;
+}
+
+async function runChecks(options: VerifyOptions): Promise<string[]> {
   const problems = checkIdentity(options.games);
-  for (const game of options.games) {
+  const { only } = options;
+  if (options.shard !== undefined && options.kit !== "full") {
+    // The fast kit judges non-vacuity over each whole rules version (02 §6.3).
+    return [...problems, "--shard runs the full kit only; the fast kit isn't sharded"];
+  }
+  const games =
+    only === undefined
+      ? options.games
+      : options.games.filter((game) => game.manifest.type === only);
+  if (only !== undefined && games.length === 0) {
+    problems.push(`--only ${only}: no installed game has that type`);
+  }
+  for (const game of games) {
     const workspace = options.workspaceDirs.has(game.pkg.dir);
     const packed = workspace ? packedFiles(game.pkg.dir) : undefined;
     const imports = await checkImports(game, options.rootDir, options.sdkDir);
@@ -375,7 +446,7 @@ export async function verifyGames(options: VerifyOptions): Promise<string[]> {
       ...checkDependencies(game),
       ...imports.problems,
       ...(await checkEngineLint(game, options.rootDir, imports.engineFiles)),
-      ...(options.kit === undefined ? [] : checkKit(game, options.kit, options.cpuBudgetMs)),
+      ...(options.kit === undefined ? [] : checkKit(game, options.kit, options)),
     );
     options.checked?.push({
       name: game.packageName,
