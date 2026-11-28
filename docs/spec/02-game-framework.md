@@ -17,6 +17,7 @@ First-party game packages:
 | `example` | `@your-move/game-example` | §7.6 (reference module) | 2–4 | M1; public example for game authors, disabled by default |
 | `words` | `@your-move/game-words` | [games/words.md](games/words.md) | 2 (rulesets may allow up to 4 later) | MVP |
 | `paths` | `@your-move/game-paths` | [games/paths.md](games/paths.md) | 2–8 | M5: engine (alpha A22), client and installed (alpha A24) |
+| `pairs` | `@your-move/game-pairs` | [games/pairs.md](games/pairs.md) | 2–6 | Proposed: an engine slice, then a client slice (10 §Pairs game) |
 
 Candidate future modules and the framework features each one exercises are listed in 10 §Later.
 
@@ -125,7 +126,7 @@ interface GameDefinition<Options, State, Action, View, PublicRecord, PreviewResu
     maxActions(options: Options, seats: number): number;  // termination bound
     worstCase(options: Options, seats: number, rng: RandomSource): { state: State; seat: Seat; action: Action }[]; // CPU budget
     publicRandomness?: boolean;                            // true if records legitimately show random draws (e.g. dice)
-    hiddenFromEveryone?: boolean;                          // true if no seat ever sees the hidden information (e.g. deck order only), §6.3
+    hiddenFromEveryone?: boolean;                          // true if what is hidden is hidden from every seat alike (e.g. deck order only), §6.3
     optionInputs(ctx: OptionsContext): unknown[];          // the option inputs the kit plays (§6); required, non-empty
     context?(): OptionsContext;                            // what resolveOptions, catalog and checkConfig see in the kit; default: configSchema.parse({}), no resources
     resources?(options: Options): Resources;               // what validate and preview get in the kit's games; default: none
@@ -546,8 +547,10 @@ plays exactly these hooks, so a game that needs a dictionary supplies one throug
      the samples taken while `result()` is null must change **some other viewer's view** (seat
      `w ≠ v`, or the public view), so reordering a deck while hands are hidden doesn't count. Only
      a module that declares **`test.hiddenFromEveryone: true`** — no seat ever sees its hidden
-     information, e.g. only the deck order is hidden — is counted by whether `s'` differs from `s`
-     instead (it requires `hiddenInformation: true`);
+     information while it is hidden, e.g. only the deck order is hidden, or a memory game's
+     face-down cards, which every seat sees alike even after seeing some earlier (games/pairs.md
+     §8.6) — is counted by whether `s'` differs from `s` instead (it requires
+     `hiddenInformation: true`);
    - `validate` and `preview` results, including `detail`, are identical for `s` and `s'`, for
      legal actions from `randomAction` **and** for possibly-illegal ones from `randomAnyAction`;
    - the `record` from `apply`/`onResign`/`onTimeout` by any seat is identical for `s` and `s'`

@@ -15,6 +15,7 @@ changes. This applies to code, copy, emails, manifests and Docker image names. P
 | 02 | [Game framework](02-game-framework.md) | Game module contract, lifecycle (lobby, seats, turns, timeouts), secrecy, replay, test kit, game packages, AI players |
 | G1 | [Game: words](games/words.md) | Crossword-tile word game: rules, rulesets, dictionaries, module contract |
 | G2 | [Game: paths](games/paths.md) | Path-laying tile game for 2–8 players |
+| G3 | [Game: pairs](games/pairs.md) | Memory game for 2–6 players: turn over two cards, find the pairs (proposed) |
 | 03 | [Architecture](03-architecture.md) | Repo layout, runtimes (Cloudflare + Docker), storage, realtime, Durable Objects |
 | 04 | [Data model](04-data-model.md) | Tables, columns, invariants |
 | 05 | [API](05-api.md) | Versioned public HTTP + WebSocket API, OpenAPI, tokens, Admin API |

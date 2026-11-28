@@ -372,6 +372,29 @@ tests are green in CI.
 - The writing-a-game guide revision (first bullet) is deferred to M5's close, once the paths
   client has been through review.
 
+## Pairs game (proposed)
+Proposed (2026-11-29), not scheduled: the memory game the owner asked for as a third,
+family-friendly game, specified in games/pairs.md from the design note in §Later. Children play
+through a parent's account (Q20); the child-safety (alpha A21) and blocking (A23) items paths
+needed are done. It needs no framework change. Proposed: **an engine slice, then a client slice**,
+each a branch with its own review, as paths was built (A22, A24):
+- **Engine slice**: `@your-move/game-pairs` (02 §7) with its engine and manifest, not yet installed:
+  the grids, the faces in play and the layout (§1, §2), the two-card turn with a match's extra turn
+  (§3), the view rule of §4 (every seat sees the same; a missed pair shown until the next first
+  card, then gone from every view), leaving mid-turn (§5), ranking (§6), options (§7) and the
+  contract of §8, with `hiddenFromEveryone`, the `perturbHidden` of §8.6 and the capped
+  `randomAction` that bounds `maxActions`. **Accept:** passes the generic test kit at 2, 3, 4 and 6
+  players on every grid (CPU budget included, T25); the rule tables of pairs §10.
+- **Client slice**: the board of pairs §9 (cards sized for 320 px with 44 CSS px targets, the reveal
+  of the missed pair when a turn opens, accessible names for positions and faces, keyboard play,
+  `prefers-reduced-motion`, a light and a dark theme, the 18 original face drawings and the card
+  back), the options form, rules sheet and history items; `pairs` installed in
+  `instance.config.ts` and the root dependencies, so the full kit, the image build and the client
+  bundle checks cover it. **Accept:** Playwright, three people through a join link on screens from
+  320 px wide with touch emulation: a match and its extra turn, a miss whose pair the next player
+  sees and that is gone from every player's board after that player's first card, a resignation
+  mid-turn turning the card back, and play to the end; every card measured at least 44 CSS px.
+
 ## M6 — Bring-your-own dictionaries
 - `BlobStore` (R2 / filesystem with key and path checks), `dictionaries` table, `serverOnly`
   distribution path, byte-sized LRU cache, resource authorisation for uploads.
@@ -473,7 +496,7 @@ the generic mechanics, under our own name.
 | Yacht (generic Yahtzee-style dice) | 1–8 | Dice and scorecards; can be played side by side | Rerolls inside one turn |
 | Battleships (generic) | 2 | Kids | **Simultaneous hidden setup** |
 | Hex | 2 | Elegant, has no draws | Swap rule (pie rule) |
-| Pairs (the memory game) | 2–6 | Kids, families; tiny rules | A layout no seat sees until it's turned; two actions per turn (see below) |
+| Pairs (the memory game) | 2–6 | Kids, families; tiny rules | A layout no seat sees until it's turned; two actions per turn (specified: games/pairs.md, proposed in §Pairs game) |
 | Grid race (generic Bananagrams-style mechanics, working name) | 2–8 | Fast word game for groups, reuses the words dictionaries | Every seat acting in the same round (see below) |
 | Liar's dice | 2–6 | Bluffing, quick rounds, works well async | Hidden dice per seat; bids as turns |
 | Crazy eights (the traditional ancestor of Uno-style games) | 2–6 | Kids and families | Hidden hands, draw pile |
@@ -484,6 +507,9 @@ Go is the strongest next candidate: it's widely loved, has no IP issues, and its
 phase is a good test of multi-seat `toAct`.
 
 #### Pairs: keeping the memory in an async game (idea, 2026-11-28)
+Now specified in games/pairs.md and proposed in §Pairs game; this note is the design it started
+from.
+
 Played asynchronously, the memory game loses its point if the history shows every card turned:
 anyone could scroll back. A design that keeps it:
 - A turn would be two actions: turn a first card, then, having seen it, a second. A match stays face
