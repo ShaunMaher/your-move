@@ -222,6 +222,7 @@ export function createApp(options: AppOptions): App {
         appShortName: config.appShortName,
         operatorContact: config.operatorContact,
         minAge: config.minAge,
+        ...(config.privacyRetention === null ? {} : { privacyRetention: config.privacyRetention }),
         ...(config.vapid ? { vapidPublicKey: config.vapid.publicKey } : {}),
         ...(config.turnstile ? { turnstileSiteKey: config.turnstile.siteKey } : {}),
         uploadsEnabled: config.dictionaryUploads,

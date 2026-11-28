@@ -32,6 +32,7 @@ import {
 } from "@your-move/shared";
 import type { Context } from "hono";
 
+import { needsOnboarding } from "../accounts/onboarding.js";
 import { checkLimits, type LimitName } from "../auth/limits.js";
 import { requireSession } from "../auth/require-session.js";
 import type { Subkeys } from "../crypto/subkeys.js";
@@ -162,9 +163,12 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
 
   const userOf = (c: Context<AppEnv>): UserRecord => c.get("session").user;
 
-  /** Onboarding gate (05: the game list, creating and accepting). Re-prompts arrive in M4. */
+  /**
+   * The onboarding gate of 06 §5's gated endpoints: onboarding incomplete, or a re-prompt after a
+   * `MIN_AGE` rise (alpha A21).
+   */
   const onboarded = (user: UserRecord): void => {
-    if (user.onboardedAt === null) throw ApiError.of("ONBOARDING_REQUIRED");
+    if (needsOnboarding(user, config.minAge)) throw ApiError.of("ONBOARDING_REQUIRED");
   };
 
   const limit = async (user: UserRecord, ...names: LimitName[]): Promise<void> => {
@@ -610,6 +614,8 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
    */
   app.openapi(addPlayerRoute, async (c) => {
     const user = userOf(c);
+    // Gated like game creation (06 §5, alpha A19 review S-2).
+    onboarded(user);
     await limit(user, "WRITES_USER_MINUTE");
     const { id } = c.req.valid("param");
     const { userId } = c.req.valid("json");

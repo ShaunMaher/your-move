@@ -624,12 +624,12 @@ describe("Origin and JSON rules (05 §Conventions, 08 T6)", () => {
 });
 
 describe("onboarding: PATCH /api/v1/me (06 §5)", () => {
-  it("the first display name completes onboarding", async () => {
+  it("the first display name, with the age confirmation, completes onboarding", async () => {
     const cookie = await h.signIn(fresh());
     const response = await h.request(
       "PATCH",
       "/api/v1/me",
-      { displayName: "  Sam   Smith " },
+      { displayName: "  Sam   Smith ", ageAttested: true },
       { cookie },
     );
     expect(response.status).toBe(200);
@@ -659,7 +659,7 @@ describe("onboarding: PATCH /api/v1/me (06 §5)", () => {
 
   it("after onboarding, at most 3 changes per 30 days", async () => {
     const cookie = await h.signIn(fresh());
-    await h.request("PATCH", "/api/v1/me", { displayName: "Sam" }, { cookie });
+    await h.request("PATCH", "/api/v1/me", { displayName: "Sam", ageAttested: true }, { cookie });
     for (const name of ["Sam A", "Sam B", "Sam C"]) {
       expect(
         (await h.request("PATCH", "/api/v1/me", { displayName: name }, { cookie })).status,

@@ -34,6 +34,7 @@ describe("GET /api/v1/config", () => {
       VAPID_PUBLIC_KEY: TEST_VAPID.publicKey,
       VAPID_PRIVATE_KEY: TEST_VAPID.privateKey,
       VAPID_SUBJECT: "mailto:ops@example.org",
+      PRIVACY_RETENTION: "Logs 14 days, backups 30 days.",
     });
     const res = await app.request("/api/v1/config");
     expect(res.status).toBe(200);
@@ -43,6 +44,7 @@ describe("GET /api/v1/config", () => {
       appShortName: "Family Games",
       operatorContact: "ops@example.org",
       minAge: 13,
+      privacyRetention: "Logs 14 days, backups 30 days.",
       vapidPublicKey: TEST_VAPID.publicKey,
 
       uploadsEnabled: true,
@@ -56,6 +58,7 @@ describe("GET /api/v1/config", () => {
     const body = (await (await app.request("/api/v1/config")).json()) as Record<string, unknown>;
     expect(body).not.toHaveProperty("vapidPublicKey");
     expect(body).not.toHaveProperty("turnstileSiteKey");
+    expect(body).not.toHaveProperty("privacyRetention");
   });
 });
 
@@ -99,6 +102,7 @@ describe("GET /api/v1/openapi.json", () => {
       "/api/v1/join/lookup",
       "/api/v1/me",
       "/api/v1/me/delete/otp",
+      "/api/v1/me/under-age",
       "/api/v1/players/recent",
       "/api/v1/push/subscriptions",
     ]);

@@ -173,6 +173,8 @@ export function contractSuite(name: string, target: () => Target): void {
           email,
           displayName: name,
           onboardedAt: now,
+          ageAttestedAt: now,
+          ageAttestedMinAge: 13,
           createdAt: now,
           updatedAt: now,
         });

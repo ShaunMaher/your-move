@@ -1,7 +1,8 @@
 /**
  * The sign-in and account endpoints (docs/spec/05-api.md §Auth & account, 06 §3–§5, §7): OTP
  * request and verify, logout and logout-all, `GET`/`PATCH /me` (with the `emailNudges` setting,
- * 03 §7), and account deletion with a step-up code.
+ * 03 §7, and the age confirmation, 06 §5), the under-age exit, and account deletion with a step-up
+ * code.
  */
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import {
@@ -15,6 +16,7 @@ import {
   otpRequestRoute,
   otpVerifyRoute,
   patchMeRoute,
+  underAgeRoute,
   UserSettingsSchema,
 } from "@your-move/shared";
 import type { Context } from "hono";
@@ -22,9 +24,10 @@ import { z } from "zod";
 
 import { validateDisplayName } from "../accounts/display-name.js";
 import { normaliseAddress } from "../accounts/email.js";
+import { ageConfirmed, needsOnboarding } from "../accounts/onboarding.js";
 import { isLocalDev } from "../config/local-dev.js";
 import { emailId, type Subkeys } from "../crypto/subkeys.js";
-import type { UserRecord } from "../db/repositories.js";
+import type { UserRecord, UserUpdate } from "../db/repositories.js";
 import type { EmailMessage } from "../email/sender.js";
 import {
   accountDeletedEmail,
@@ -60,10 +63,10 @@ import {
   sessionCookie,
 } from "./session.js";
 
-type ErrorStatus = 400 | 401 | 403 | 429;
+type ErrorStatus = 400 | 401 | 403 | 409 | 429;
 type Code = Extract<
   ErrorCode,
-  "BAD_REQUEST" | "INVALID_CODE" | "UNAUTHENTICATED" | "SUSPENDED" | "RATE_LIMITED"
+  "BAD_REQUEST" | "INVALID_CODE" | "UNAUTHENTICATED" | "SUSPENDED" | "WRONG_STATUS" | "RATE_LIMITED"
 >;
 
 const MESSAGES: Readonly<Record<Code, string>> = {
@@ -71,6 +74,7 @@ const MESSAGES: Readonly<Record<Code, string>> = {
   INVALID_CODE: "That code is wrong or has expired.",
   UNAUTHENTICATED: "Please sign in.",
   SUSPENDED: "This account is suspended.",
+  WRONG_STATUS: "Your account is already set up.",
   RATE_LIMITED: "Too many requests. Please wait and try again.",
 };
 
@@ -115,9 +119,9 @@ function toMe(user: UserRecord, adminEmails: readonly string[], minAge: number):
       emailNudges: settings.emailNudges ?? false,
       theme: settings.theme ?? "system",
     },
-    ageAttested: user.ageAttestedMinAge !== null && user.ageAttestedMinAge >= minAge,
-    // M2b: onboarding is the display name; the age confirmation joins in M4 (10 M2).
-    needsOnboarding: user.onboardedAt === null,
+    ageAttested: ageConfirmed(user, minAge),
+    // Again true for a user re-prompted after a MIN_AGE rise (06 §5).
+    needsOnboarding: needsOnboarding(user, minAge),
     isAdmin: user.email !== null && adminEmails.includes(user.email),
   };
 }
@@ -184,6 +188,7 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     logoutRoute.path,
     logoutAllRoute.path,
     getMeRoute.path,
+    underAgeRoute.path,
     deleteOtpRoute.path,
   ]) {
     app.use(path, session);
@@ -306,35 +311,49 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     const active = c.get("session");
     const body = c.req.valid("json");
     let user = active.user;
-    if (body.displayName !== undefined) {
-      const result = validateDisplayName(body.displayName, config.appName);
-      if (!result.ok) return fail(c, 400, "BAD_REQUEST");
-      const at = now();
-      if (user.onboardedAt === null) {
-        // Completing onboarding (06 §5), which claims the address's email-invite seats (06 §6.4).
-        await repos.users.update(user.id, {
-          displayName: result.name,
-          onboardedAt: at,
-          updatedAt: at,
-        });
-        user = { ...user, displayName: result.name, onboardedAt: at, updatedAt: at };
-        if (user.email !== null) {
-          await claimAtOnboarding(c, { id: user.id, email: user.email }, at);
-        }
-      } else if (result.name !== user.displayName) {
-        const [limit] = await checkLimits(repos, config, at, [
-          { name: "DISPLAY_NAME_CHANGES_30D", key: user.id, amount: 1 },
-        ]);
-        if (limit?.exceeded === true) return fail(c, 429, "RATE_LIMITED");
-        await repos.users.update(user.id, { displayName: result.name, updatedAt: at });
-        await repos.authEvents.record({
-          userId: user.id,
-          type: "display_name_changed",
-          ipHash: null,
-          createdAt: at,
-        });
-        user = { ...user, displayName: result.name, updatedAt: at };
-      }
+    const at = now();
+    // Checked before anything is written, so a refused name changes nothing else either.
+    const named =
+      body.displayName === undefined
+        ? undefined
+        : validateDisplayName(body.displayName, config.appName);
+    if (named?.ok === false) return fail(c, 400, "BAD_REQUEST");
+    const set: Partial<Omit<UserUpdate, "updatedAt">> = {};
+    // A rename (06 §5) is budgeted and logged; a name set before onboarding completes isn't one.
+    const renamed = named !== undefined && named.name !== user.displayName;
+    const rename = renamed && user.onboardedAt !== null;
+    if (rename) {
+      const [limit] = await checkLimits(repos, config, at, [
+        { name: "DISPLAY_NAME_CHANGES_30D", key: user.id, amount: 1 },
+      ]);
+      if (limit?.exceeded === true) return fail(c, 429, "RATE_LIMITED");
+    }
+    if (renamed) set.displayName = named.name;
+    if (body.ageAttested === true && !ageConfirmed(user, config.minAge)) {
+      // The confirmation's time and the MIN_AGE in force (06 §5): a later rise re-prompts.
+      set.ageAttestedAt = at;
+      set.ageAttestedMinAge = config.minAge;
+    }
+    const after = { ...user, ...set };
+    // The request that leaves both the name and the age confirmation done completes onboarding.
+    const completes =
+      user.onboardedAt === null && after.displayName !== null && ageConfirmed(after, config.minAge);
+    if (completes) set.onboardedAt = at;
+    if (Object.keys(set).length > 0) {
+      await repos.users.update(user.id, { ...set, updatedAt: at });
+      user = { ...user, ...set, updatedAt: at };
+    }
+    if (rename) {
+      await repos.authEvents.record({
+        userId: user.id,
+        type: "display_name_changed",
+        ipHash: null,
+        createdAt: at,
+      });
+    }
+    // Completing onboarding claims the address's email-invite seats (06 §6.4).
+    if (completes && user.email !== null) {
+      await claimAtOnboarding(c, { id: user.id, email: user.email }, at);
     }
     const nudges = body.settings?.emailNudges;
     if (nudges !== undefined) {
@@ -357,6 +376,45 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
       user = (await repos.users.findById(user.id)) ?? user;
     }
     return c.json(toMe(user, config.adminEmails, config.minAge), 200);
+  });
+
+  /**
+   * "I'm under MIN_AGE" (06 §5). A new account goes at once, with no step-up code: the short
+   * deletion, with its address suppressed and its email seats made inert. A re-prompted account
+   * may be a parent's, held by a child, so only this session ends and nothing is deleted (T5).
+   */
+  app.openapi(underAgeRoute, async (c) => {
+    const active = c.get("session");
+    const { user } = active;
+    if (!needsOnboarding(user, config.minAge)) return fail(c, 409, "WRONG_STATUS");
+    const at = now();
+    const keys = await options.keys();
+    // The event is pseudonymous: the hashed IP bucket, never the address (06 §5, 09 §5).
+    const ipHash = (await clientBuckets(c, keys))?.ipBuckets[0]?.hash ?? null;
+    const signedOut = () => {
+      clearCookie(c);
+      return c.body(null, 204);
+    };
+    if (user.onboardedAt === null && user.email !== null) {
+      const deleted = await repos.users.underAgeDelete(
+        { id: user.id, email: user.email, emailId: await emailId(keys, user.email) },
+        { ipHash, createdAt: at },
+      );
+      if (deleted) return signedOut();
+      // Onboarding completed meanwhile: judged again for the account as it is now (06 §5).
+      const current = await repos.users.findById(user.id);
+      if (current === null) return signedOut();
+      if (!needsOnboarding(current, config.minAge)) return fail(c, 409, "WRONG_STATUS");
+    }
+    // A re-prompted account: this session only, nothing deleted.
+    await repos.sessions.delete(user.id, active.session.id);
+    await repos.authEvents.record({
+      userId: user.id,
+      type: "under_age_exit",
+      ipHash,
+      createdAt: at,
+    });
+    return signedOut();
   });
 
   app.openapi(deleteOtpRoute, async (c) => {

@@ -457,4 +457,133 @@ export function inviteRepositoryContract(target: () => InviteTarget): void {
       }
     });
   });
+
+  describe("users.underAgeDelete (06 §5, 04 §Account deletion, alpha A21)", () => {
+    const at = (createdAt: number) => ({ ipHash: "under-age-ip", createdAt });
+
+    async function sessionOf(userId: string): Promise<string> {
+      const tokenHash = crypto.randomUUID();
+      await repos().sessions.create({
+        id: crypto.randomUUID(),
+        userId,
+        tokenHash,
+        createdAt: LATER,
+        lastSeenAt: LATER,
+        expiresAt: LATER + DAY,
+      });
+      return tokenHash;
+    }
+
+    it("deletes an account that never onboarded, suppresses its address and makes its email seats inert", async () => {
+      const kid = await human({ onboarded: false });
+      const tokenHash = await sessionOf(kid.id);
+      const emailId = freshEmailId();
+      const pending = await lobby(kid.email);
+      const declined = await lobby(kid.email, { seat: { state: "declined" } });
+      const other = await lobby(address());
+      const versionBefore = await version(pending.gameId);
+      const when = nextTime();
+      expect(await repos().users.underAgeDelete({ ...kid, emailId }, at(when))).toBe(true);
+      expect(await repos().users.findById(kid.id)).toBeNull();
+      expect(await repos().sessions.findByTokenHash(tokenHash)).toBeNull();
+      expect(
+        await target().sql(
+          "SELECT reason, created_at FROM email_suppressions WHERE email_hash = ?",
+          emailId,
+        ),
+      ).toEqual([{ reason: "unsubscribed", created_at: when }]);
+      expect(await row(pending.playerId)).toMatchObject({
+        user_id: null,
+        invite_email: kid.email,
+        state: "invited",
+        delivery: "inert",
+      });
+      // Not a transition: the version stays. Other addresses' seats are untouched.
+      expect(await version(pending.gameId)).toBe(versionBefore);
+      expect((await row(other.playerId))?.["delivery"]).toBe("normal");
+      // Only `invited` rows: one in any other state keeps its delivery.
+      expect((await row(declined.playerId))?.["delivery"]).toBe("normal");
+      const events = await target().sql(
+        "SELECT type, user_id FROM auth_events WHERE ip_hash = 'under-age-ip' AND created_at = ? ORDER BY type",
+        when,
+      );
+      expect(events).toEqual([
+        { type: "account_deleted", user_id: null },
+        { type: "under_age_exit", user_id: null },
+      ]);
+    });
+
+    it("keeps an existing suppression's reason", async () => {
+      const kid = await human({ onboarded: false });
+      const emailId = freshEmailId();
+      await repos().emailSuppressions.suppress(emailId, "complained", LATER);
+      expect(await repos().users.underAgeDelete({ ...kid, emailId }, at(nextTime()))).toBe(true);
+      expect(
+        await target().sql(
+          "SELECT reason, created_at FROM email_suppressions WHERE email_hash = ?",
+          emailId,
+        ),
+      ).toEqual([{ reason: "complained", created_at: LATER }]);
+    });
+
+    it("writes nothing at all for an onboarded account (one whose onboarding won the race)", async () => {
+      const done = await human();
+      const tokenHash = await sessionOf(done.id);
+      const emailId = freshEmailId();
+      const seat = await lobby(done.email);
+      const when = nextTime();
+      expect(await repos().users.underAgeDelete({ ...done, emailId }, at(when))).toBe(false);
+      expect(await repos().users.findById(done.id)).not.toBeNull();
+      expect(await repos().sessions.findByTokenHash(tokenHash)).not.toBeNull();
+      expect(
+        await target().sql("SELECT 1 FROM email_suppressions WHERE email_hash = ?", emailId),
+      ).toEqual([]);
+      expect((await row(seat.playerId))?.["delivery"]).toBe("normal");
+      expect(
+        await target().sql(
+          "SELECT 1 FROM auth_events WHERE ip_hash = 'under-age-ip' AND created_at = ?",
+          when,
+        ),
+      ).toEqual([]);
+    });
+
+    it("is false, writing nothing, for an account already gone; and safe to repeat", async () => {
+      const kid = await human({ onboarded: false });
+      const emailId = freshEmailId();
+      expect(await repos().users.underAgeDelete({ ...kid, emailId }, at(nextTime()))).toBe(true);
+      const when = nextTime();
+      expect(await repos().users.underAgeDelete({ ...kid, emailId }, at(when))).toBe(false);
+      expect(
+        await target().sql(
+          "SELECT 1 FROM auth_events WHERE ip_hash = 'under-age-ip' AND created_at = ?",
+          when,
+        ),
+      ).toEqual([]);
+    });
+
+    it("racing an onboarding that completes: either the account is gone, or it is whole", async () => {
+      const kid = await human({ onboarded: false });
+      const emailId = freshEmailId();
+      const seat = await lobby(kid.email);
+      const when = nextTime();
+      const [deleted] = await Promise.all([
+        repos().users.underAgeDelete({ ...kid, emailId }, at(when)),
+        repos().users.update(kid.id, { displayName: "Kid", onboardedAt: when, updatedAt: when }),
+      ]);
+      const stored = await repos().users.findById(kid.id);
+      const suppressed = await target().sql(
+        "SELECT 1 FROM email_suppressions WHERE email_hash = ?",
+        emailId,
+      );
+      if (deleted) {
+        expect(stored).toBeNull();
+        expect(suppressed).toHaveLength(1);
+        expect((await row(seat.playerId))?.["delivery"]).toBe("inert");
+      } else {
+        expect(stored?.onboardedAt).toBe(when);
+        expect(suppressed).toEqual([]);
+        expect((await row(seat.playerId))?.["delivery"]).toBe("normal");
+      }
+    });
+  });
 }

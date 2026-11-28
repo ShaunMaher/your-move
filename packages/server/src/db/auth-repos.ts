@@ -273,6 +273,76 @@ export function userRepo(db: Database): UserRepo {
         db.delete(users).where(eq(users.id, user.id)),
       ]);
     },
+    async underAgeDelete(account, at) {
+      // Every statement is guarded on the account still not being onboarded (06 §5), read inside
+      // the batch, so an onboarding that won the race leaves this batch writing nothing at all.
+      const pending = sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${account.id} AND ${users.onboardedAt} IS NULL)`;
+      const event = (type: "under_age_exit" | "account_deleted") =>
+        guardedInsert(
+          db,
+          authEvents,
+          {
+            id: crypto.randomUUID(),
+            userId: account.id,
+            type,
+            ipHash: at.ipHash,
+            createdAt: at.createdAt,
+          },
+          pending,
+        );
+      const results = await runBatch(db, [
+        db.delete(sessions).where(and(eq(sessions.userId, account.id), pending)),
+        db
+          .delete(apiTokens)
+          .where(
+            and(or(eq(apiTokens.userId, account.id), eq(apiTokens.createdBy, account.id)), pending),
+          ),
+        db.delete(otpChallenges).where(and(eq(otpChallenges.email, account.email), pending)),
+        db
+          .delete(blocks)
+          .where(
+            and(or(eq(blocks.blockerId, account.id), eq(blocks.blockedId, account.id)), pending),
+          ),
+        db
+          .delete(pastOpponents)
+          .where(
+            and(
+              or(eq(pastOpponents.userId, account.id), eq(pastOpponents.otherId, account.id)),
+              pending,
+            ),
+          ),
+        // No more invite emails to the address (04 `email_suppressions`); a row already there
+        // keeps its reason, which stops at least as much mail.
+        guardedInsert(
+          db,
+          emailSuppressions,
+          { emailHash: account.emailId, reason: "unsubscribed", createdAt: at.createdAt },
+          pending,
+        ).onConflictDoNothing({ target: emailSuppressions.emailHash }),
+        // Its pending email seats are never delivered or claimed (04 `delivery`). Not a game
+        // transition: like a claim, the row changes in a way no member can see (the creator still
+        // sees the typed address while the seat is invited, Q3), so the version stays.
+        db
+          .update(gamePlayers)
+          .set({ delivery: "inert" })
+          .where(
+            and(
+              eq(gamePlayers.state, "invited"),
+              isNull(gamePlayers.userId),
+              eq(gamePlayers.inviteEmail, account.email),
+              pending,
+            ),
+          ),
+        event("under_age_exit"),
+        event("account_deleted"),
+        db
+          .delete(users)
+          .where(and(eq(users.id, account.id), isNull(users.onboardedAt)))
+          .returning({ id: users.id }),
+      ]);
+      const deleted = results.at(-1) as { id: string }[] | undefined;
+      return deleted?.length === 1;
+    },
   };
 }
 

@@ -268,6 +268,8 @@ export function gameRaceContract(
         email,
         displayName: "Racer",
         onboardedAt: clock,
+        ageAttestedAt: clock,
+        ageAttestedMinAge: 13,
         createdAt: clock,
         updatedAt: clock,
       });

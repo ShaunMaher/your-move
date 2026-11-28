@@ -103,7 +103,7 @@ export const MeSchema = z
       .openapi({ description: "Whether the age confirmation for the current MIN_AGE is given." }),
     needsOnboarding: z.boolean().openapi({
       description:
-        "True until onboarding is complete (06 §5); gated endpoints answer 403 until then.",
+        "True until onboarding is complete, and again after a `MIN_AGE` rise until the age is confirmed again (06 §5); gated endpoints answer 403 until then.",
     }),
     isAdmin: z
       .boolean()
@@ -247,6 +247,10 @@ export const PatchMeBodySchema = z
         "1–24 characters; no links, addresses, long digit runs or reserved words (06 §5.1). Setting it completes onboarding.",
     }),
     settings: UserSettingsPatchSchema.optional(),
+    ageAttested: z.literal(true).optional().openapi({
+      description:
+        "The user confirms they are at least `minAge` (`GET /api/v1/config`): records the time and the `MIN_AGE` in force (06 §5). With a display name it completes onboarding; alone it answers a re-prompt after a `MIN_AGE` rise.",
+    }),
   })
   .strict()
   .openapi("PatchMe");
@@ -258,9 +262,9 @@ export const patchMeRoute = createRoute({
   method: "patch",
   path: `${API_V1}/me`,
   tags: ["Account"],
-  summary: "Change the display name or settings; completes onboarding",
+  summary: "Change the display name or settings; confirm the age; completes onboarding",
   description:
-    "Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`). `settings` changes only the keys given.",
+    "Session only. The request that leaves both a display name and the age confirmation for the current `MIN_AGE` done completes onboarding (06 §5); they may come together or apart. After onboarding, at most 3 name changes per 30 days (`429`). `settings` changes only the keys given.",
   request: { body: jsonBody(PatchMeBodySchema) },
   responses: {
     200: {
@@ -271,6 +275,26 @@ export const patchMeRoute = createRoute({
       ...SESSION_ERRORS,
       400: "A display name breaking the rules, or an invalid request (`BAD_REQUEST`).",
       429: "Too many display-name changes (`RATE_LIMITED`).",
+    }),
+  },
+});
+
+export const underAgeRoute = createRoute({
+  operationId: "underAgeExit",
+  "x-scope": "session",
+  security: SESSION,
+  method: "post",
+  path: `${API_V1}/me/under-age`,
+  tags: ["Account"],
+  summary: "Say the user is under the minimum age",
+  description:
+    "Session only, and only while `needsOnboarding` is true (06 §5). An account that never completed onboarding is deleted at once with its sessions, with no step-up code; invite emails to its address stop and its pending email seats are never delivered. An onboarded account re-prompted after a `MIN_AGE` rise is only signed out of this session; nothing is deleted. Either way the cookie is cleared.",
+  request: { body: jsonBody(EmptyObjectSchema, false) },
+  responses: {
+    204: { description: "Done; this session has ended." },
+    ...errors({
+      ...SESSION_ERRORS,
+      409: "Onboarding is complete for the current `MIN_AGE` (`WRONG_STATUS`).",
     }),
   },
 });

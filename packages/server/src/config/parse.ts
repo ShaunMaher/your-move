@@ -85,6 +85,8 @@ export interface AppConfig {
     readonly subject: string;
   } | null;
   readonly operatorContact: string;
+  /** `PRIVACY_RETENTION`: the operator's retention statement for the privacy page (08 §5). */
+  readonly privacyRetention: string | null;
   readonly minAge: number;
   readonly turnstile: { readonly siteKey: string; readonly secret: string } | null;
   /** `LIMIT_*` overrides, keyed by the name after the prefix, e.g. `DICT_TOTAL_BYTES`. */
@@ -128,6 +130,8 @@ export class ConfigError extends Error {
 }
 
 const DEFAULT_LIMIT_DICT_TOTAL_BYTES = 2_147_483_648;
+/** `PRIVACY_RETENTION` is plain text of at most this many characters (09 §1). */
+const PRIVACY_RETENTION_MAX = 1000;
 const DICTIONARY_ID = /^[a-z][a-z0-9-]{1,31}$/u;
 const NO_CONTROL_CHARS = /^[^\p{Cc}]+$/u;
 const STRICT_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
@@ -182,6 +186,14 @@ const envSchema = z.looseObject({
   VAPID_PRIVATE_KEY: z.string().optional(),
   VAPID_SUBJECT: z.string().optional(),
   OPERATOR_CONTACT: required().pipe(text),
+  // Empty counts as unset, like every variable (`parseConfig`).
+  PRIVACY_RETENTION: z
+    .string()
+    .max(PRIVACY_RETENTION_MAX, {
+      error: `must be at most ${String(PRIVACY_RETENTION_MAX)} characters`,
+    })
+    .pipe(text)
+    .optional(),
   MIN_AGE: z
     .string()
     .regex(POSITIVE_INTEGER, { error: "must be a whole number of at least 13" })
@@ -474,6 +486,7 @@ function toConfig(raw: RawEnv, options: ParseConfigOptions): AppConfig {
           }
         : null,
     operatorContact: raw.OPERATOR_CONTACT,
+    privacyRetention: raw.PRIVACY_RETENTION ?? null,
     minAge: raw.MIN_AGE === undefined ? 13 : Number(raw.MIN_AGE),
     turnstile:
       raw.TURNSTILE_SITE_KEY !== undefined && raw.TURNSTILE_SECRET !== undefined

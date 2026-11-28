@@ -50,6 +50,7 @@ const METHODS = {
     disableNudgesByEmailId: true,
     hasPastOpponent: true,
     deleteAccount: true,
+    underAgeDelete: true,
   } satisfies Record<keyof UserRepo, true>,
   otp: { issue: true, live: true, attempt: true, consume: true } satisfies Record<
     keyof OtpRepo,

@@ -344,7 +344,9 @@ describe("the generic invitation push (06 §6.2, 03 §7)", () => {
     const samPhone = await device(sam);
     await invite(ada, sam.email);
     expect(await received(samPhone)).toEqual([]);
-    expect((await call(h, sam, "PATCH", "/api/v1/me", { displayName: "Sam" })).status).toBe(200);
+    expect(
+      (await call(h, sam, "PATCH", "/api/v1/me", { displayName: "Sam", ageAttested: true })).status,
+    ).toBe(200);
     expect(await received(samPhone)).toEqual([INVITATION]);
 
     // By the sweep: onboarding committed while the game was being created, so nothing claimed.
@@ -361,7 +363,9 @@ describe("the generic invitation push (06 §6.2, 03 §7)", () => {
     const cyd = await seasoned("Cyd");
     await invite(cyd, hal.email);
     block(cyd, hal);
-    expect((await call(h, hal, "PATCH", "/api/v1/me", { displayName: "Hal" })).status).toBe(200);
+    expect(
+      (await call(h, hal, "PATCH", "/api/v1/me", { displayName: "Hal", ageAttested: true })).status,
+    ).toBe(200);
     expect(await received(halPhone)).toEqual([]);
   });
 

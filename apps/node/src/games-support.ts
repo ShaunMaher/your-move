@@ -73,7 +73,12 @@ export async function signUp(
 ): Promise<Player> {
   const cookie = await h.signIn(email);
   if (name !== null) {
-    const response = await h.request("PATCH", "/api/v1/me", { displayName: name }, { cookie });
+    const response = await h.request(
+      "PATCH",
+      "/api/v1/me",
+      { displayName: name, ageAttested: true },
+      { cookie },
+    );
     expect(response.status).toBe(200);
   }
   const me = (await (await h.request("GET", "/api/v1/me", undefined, { cookie })).json()) as {
