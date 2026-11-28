@@ -387,7 +387,9 @@ describe("onboarding", () => {
     expect(calls.some((call) => call.method === "PATCH")).toBe(false);
     click("Back to sign in");
     expect(await screen.findByRole("heading", { name: "Sign in" })).toBeDefined();
-    expect(window.location.pathname).toBe("/signin");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/signin");
+    });
   });
 
   it("says so when \"I'm under 13\" doesn't go through, and stays", async () => {
@@ -454,11 +456,17 @@ describe("the privacy page (07 §1, 08 §5)", () => {
     window.history.replaceState(null, "", "/settings");
     render(<App api={fakeApi(signedOut).api} />);
     await screen.findByRole("heading", { name: "Sign in" });
-    expect(peekReturnPath()).toBe("/settings");
+    await waitFor(() => {
+      expect(peekReturnPath()).toBe("/settings");
+    });
     fireEvent.click(screen.getByRole("link", { name: "Privacy" }));
     expect(await screen.findByRole("heading", { name: "Privacy" })).toBeDefined();
-    expect(window.location.pathname).toBe("/privacy");
-    expect(peekReturnPath()).toBe("/settings");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/privacy");
+    });
+    await waitFor(() => {
+      expect(peekReturnPath()).toBe("/settings");
+    });
   });
 
   it("is readable while onboarding, linked from the welcome screen", async () => {
@@ -904,8 +912,12 @@ describe("a join link through sign-in and onboarding (06 §6.8, 07 §1)", () => 
     await screen.findByRole("heading", { name: "Privacy" });
     fireEvent.click(screen.getByRole("link", { name: "Back" }));
     await screen.findByRole("heading", { name: "Sign in" });
-    expect(window.location.pathname).toBe("/signin");
-    expect(peekReturnPath()).toBe("/join");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/signin");
+    });
+    await waitFor(() => {
+      expect(peekReturnPath()).toBe("/join");
+    });
     typeInto("Email address", "sam@example.org");
     click("Email me a code");
     await screen.findByLabelText("Sign-in code");
@@ -940,8 +952,12 @@ describe("a join link through sign-in and onboarding (06 §6.8, 07 §1)", () => 
     await screen.findByRole("heading", { name: "Privacy" });
     fireEvent.click(screen.getByRole("link", { name: "Back" }));
     await screen.findByRole("heading", { name: "Welcome to Family Games" });
-    expect(window.location.pathname).toBe("/welcome");
-    expect(peekReturnPath()).toBe("/join");
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/welcome");
+    });
+    await waitFor(() => {
+      expect(peekReturnPath()).toBe("/join");
+    });
     expect(screen.getByLabelText<HTMLInputElement>("Display name").value).toBe("Sam");
     fireEvent.click(screen.getByLabelText("I'm 13 or older"));
     click("Continue");
