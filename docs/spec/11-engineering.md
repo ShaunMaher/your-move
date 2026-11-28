@@ -216,7 +216,8 @@ store and mise's tools are cached inside the project directory, keyed by `pnpm-l
 architecture writes them (validate on amd64), and every job checks pnpm uses the cached store.
 Jobs run unprivileged (no Docker-in-Docker); untagged jobs run on the amd64 shared runner, whose
 CPU must offer x86-64-v2 (SSE4.2): workerd's linux-64 build fails to start without it. Until it
-does, the Worker half of the contract suite runs in its own job on the arm64 runner, which also
+does, the workerd tests (the Worker half of the contract suite, the D1 repository contract suite
+and the gmail redirect test) run in their own job on the arm64 runner, which also
 writes the arm64 caches (M0 review CI-1). Stages, in order:
 
 1. **validate** — `pnpm games:generate` first (§3), then `prettier --check`, ESLint, `tsc -b`,

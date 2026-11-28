@@ -377,11 +377,11 @@ anything or running game code while the deploy token is present.
 ## CI runners
 
 The amd64 runner's CPU must offer **x86-64-v2 (SSE4.2)**: workerd's linux-64 build, which the
-Worker contract tests run, fails at startup without it (an empty `jsg.Error` at isolate
-bootstrap). A VM on the generic `qemu64` CPU model doesn't qualify; use the `host` CPU type, or at
-least an x86-64-v2 model. Until the shared amd64 runner offers it, the Worker contract tests run
-in the `test:worker` job on the arm64 runner (`arch-arm64`); when it does, delete that job and the
-`--exclude` in `test`. Caches are kept per architecture (`CACHE_ARCH`).
+workerd tests run, fails at startup without it (an empty `jsg.Error` at isolate bootstrap). A VM
+on the generic `qemu64` CPU model doesn't qualify; use the `host` CPU type, or at least an
+x86-64-v2 model. Until the shared amd64 runner offers it, the workerd tests (the Worker contract
+suite, the D1 repository contract suite and the gmail redirect test) run in the `test:worker` job
+on the arm64 runner (`arch-arm64`); when it does, delete that job and the `--exclude`s in `test`. Caches are kept per architecture (`CACHE_ARCH`).
 
 `test:timing` (the statistical sign-in timing suite, ADR 0006) measures on the arm64 runner, after
 this pipeline's other arm64 jobs. Jobs of other pipelines can still share that runner while it

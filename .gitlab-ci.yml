@@ -248,9 +248,9 @@ test:
     # Unit, integration, property, component and API contract tests. The Worker half of the
     # contract suite, the D1 repository contract suite and the gmail redirect test (all workerd)
     # run in test:worker instead (see there): to fold them back, drop those three --excludes and
-    # the test:worker job. The statistical timing
-    # suite runs alone in test:timing; `pnpm test` skips it (ADR 0006). Vitest matches --exclude
-    # against each project's own directory, so only an absolute path names one file and no other.
+    # the test:worker job. The statistical timing suite runs alone in test:timing; `pnpm test`
+    # skips it (ADR 0006). Vitest matches --exclude against each project's own directory, so only an
+    # absolute path names one file and no other.
     - pnpm test --exclude "$CI_PROJECT_DIR/tests/contract/src/worker.test.ts" --exclude "$CI_PROJECT_DIR/tests/contract/src/d1-repositories.test.ts" --exclude "$CI_PROJECT_DIR/tests/contract/src/redirect.test.ts"
     # The full game kit and every other games:verify check on each installed game (02 §6, 11 §4);
     # the build stage runs the fast kit.
