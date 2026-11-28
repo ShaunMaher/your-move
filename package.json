@@ -45,6 +45,7 @@
   },
   "dependencies": {
     "@your-move/game-example": "workspace:*",
+    "@your-move/game-paths": "workspace:*",
     "@your-move/game-words": "workspace:*",
     "@your-move/sdk": "workspace:*"
   },

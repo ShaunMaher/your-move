@@ -16,7 +16,7 @@ First-party game packages:
 |---|---|---|---|---|
 | `example` | `@your-move/game-example` | §7.6 (reference module) | 2–4 | M1; public example for game authors, disabled by default |
 | `words` | `@your-move/game-words` | [games/words.md](games/words.md) | 2 (rulesets may allow up to 4 later) | MVP |
-| `paths` | `@your-move/game-paths` | [games/paths.md](games/paths.md) | 2–8 | after MVP (roadmap M5) |
+| `paths` | `@your-move/game-paths` | [games/paths.md](games/paths.md) | 2–8 | M5: engine (alpha A22), client and installed (alpha A24) |
 
 Candidate future modules and the framework features each one exercises are listed in 10 §Later.
 
