@@ -103,6 +103,17 @@ describe("watchForUpdates", () => {
     expect(onUpdate).not.toHaveBeenCalled();
   });
 
+  it("does not call the first worker an update when it already controls the page", () => {
+    // WebKit under load: the claim is visible before the page sees the worker leave `installed`.
+    const f = fakes({ controlled: false });
+    const { onUpdate } = watch(f);
+    f.foundUpdate();
+    f.container.controller = f.installing;
+    f.installing.state = "installed";
+    f.installing.fire("statechange");
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
   it("offers a worker that was already waiting", () => {
     const { onUpdate } = watch(fakes({ controlled: true, waiting: true }));
     expect(onUpdate).toHaveBeenCalledOnce();

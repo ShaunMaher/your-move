@@ -34,13 +34,21 @@ export function watchForUpdates(
       },
     });
   };
+  // An update is a worker that is not the one in control. Under load WebKit has been seen to show
+  // the page its controller (the first worker, claiming it) before the page has seen that same
+  // worker leave `installed`, so "something controls the page" alone offered the very first
+  // install as an update; the controller must be a different worker.
+  const replacesController = (worker: ServiceWorker) =>
+    container.controller !== null && container.controller !== worker;
   // A worker already waiting from an earlier visit.
-  if (registration.waiting !== null && container.controller !== null) offer(registration.waiting);
+  if (registration.waiting !== null && replacesController(registration.waiting)) {
+    offer(registration.waiting);
+  }
   registration.addEventListener("updatefound", () => {
     const installing = registration.installing;
     if (installing === null) return;
     installing.addEventListener("statechange", () => {
-      if (installing.state === "installed" && container.controller !== null) offer(installing);
+      if (installing.state === "installed" && replacesController(installing)) offer(installing);
     });
   });
   container.addEventListener("controllerchange", () => {
