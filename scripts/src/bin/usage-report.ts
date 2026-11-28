@@ -4,28 +4,14 @@
  * per-move, per-game and per-player-per-day estimates (docs/spec/10-roadmap.md, Workers cost
  * model). Read-only: it logs nothing and fetches nothing.
  */
-import { createReadStream } from "node:fs";
-import { createInterface } from "node:readline";
-import { parseArgs } from "node:util";
-
-import { buildReport, formatReport, parseLog } from "../usage/report.js";
-import { fail, run } from "./cli.js";
+import { parseUsageArgs, linesFrom } from "../usage/cli.js";
+import { aggregate, formatReport } from "../usage/report.js";
+import { run } from "./cli.js";
 
 run("ops:usage", async () => {
-  const { values, positionals } = parseArgs({
-    options: { players: { type: "string" }, json: { type: "boolean" } },
-    allowPositionals: true,
+  const args = parseUsageArgs(process.argv.slice(2));
+  const report = (await aggregate(linesFrom(args.file, process.stdin))).report({
+    players: args.players,
   });
-  const players = values.players === undefined ? null : Number(values.players);
-  if (players !== null && !(Number.isInteger(players) && players > 0)) {
-    fail("ops:usage", ["--players must be a positive integer"]);
-  }
-  const [file] = positionals;
-  const input = file === undefined ? process.stdin : createReadStream(file, "utf8");
-  const lines: string[] = [];
-  for await (const line of createInterface({ input })) lines.push(line);
-  const report = buildReport(parseLog(lines), { players });
-  process.stdout.write(
-    values.json === true ? `${JSON.stringify(report, null, 2)}\n` : formatReport(report),
-  );
+  process.stdout.write(args.json ? `${JSON.stringify(report, null, 2)}\n` : formatReport(report));
 });
