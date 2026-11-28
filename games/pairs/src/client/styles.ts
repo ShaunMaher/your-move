@@ -223,6 +223,7 @@ const CSS = `
   justify-content: center; min-width: 1.15rem; height: 1.15rem; padding: 0 0.2rem; border-radius: 999px;
   background: var(--pr-ink); color: var(--pr-paper); font-size: 0.72rem; font-weight: 800; line-height: 1;
   pointer-events: none; }
+.ym-pr-badge::after { content: attr(data-no); }
 .ym-pr-card[data-state="matched"] .ym-pr-badge { background: var(--pr-done-ink); }
 .ym-pr-flip-in { animation: ym-pr-in ${String(FLIP_MS)}ms ease-out; }
 .ym-pr-flip-out { animation: ym-pr-out ${String(FLIP_MS)}ms ease-in forwards; }

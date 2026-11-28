@@ -420,7 +420,8 @@ that remembers for you spoil the game for everyone else, who can't tell.
   the turn (02 §3).
   - **The players area is compact**: at widths under 480 px, two columns of one line each
     ("1 Ann · 3", "2 Sam · out"), so 2–4 players take two lines and 5–6 three; on wider screens one
-    wrapped line. Near the limit the turn line adds "N moves left", where `N = moveLimit − moves`
+    wrapped line. A player who left shows "out" and, if they keep any pairs, their count after it
+    ("2 Sam · out (3)"). Near the limit the turn line adds "N moves left", where `N = moveLimit − moves`
     (from the view): from when `N < 2 × p`, with `p` the seats still playing (about one turn each
     left), and it stays visible until the game ends.
   - **Above the fold**: at 320 × 568 the whole board, not just its top (02 §3), is on the first
@@ -439,7 +440,8 @@ that remembers for you spoil the game for everyone else, who can't tell.
   last turn: moon (row 1, column 2) and key (row 3, column 4). They turn face down when you turn
   your first card." Tapping one of them turns it as your first card (it stays face up as yours) and
   the other goes down. After your second card the line says "A pair of stars! Your turn again." or
-  "No match. Sam to play."
+  "No match. Sam to play." (after the last pair, "A pair of stars!" alone), above the line that
+  says what the view now shows; the next change of the view replaces it.
 - **Off turn**, the status line says whose turn it is and what is shown: "Sam to play.", "Sam
   turned over a star (row 2, column 3).", or, while a missed pair is shown, "Ann's last turn: moon
   (row 1, column 2) and key (row 3, column 4)."
@@ -455,10 +457,14 @@ that remembers for you spoil the game for everyone else, who can't tell.
     before showing it, so an old view can't come back (the shell does this, for every game).
 - **Faces** are drawn as SVG React elements from our own artwork (§1), with `viewBox` and class
   names, decorative and `aria-hidden`; the card back is one pattern. Matched cards are drawn
-  dimmed with a check and the finder's player number; words or numbers always go with colour.
+  dimmed with a check and the finder's player number; words or numbers always go with colour. A
+  player number on a card is drawn by CSS from a `data-` attribute, not as text in the button, so
+  the button's visible label is its name (WCAG 2.5.3).
 - **Accessible names** (rows and columns from 1): "Row 2, column 3, face down"; "Row 2, column 3,
   star, your first card"; "Row 2, column 3, star, Sam's first card"; "Row 1, column 2, moon, Sam's
-  last turn, turns face down at the next first card"; "Row 4, column 4, apple, matched by Ann".
+  last turn, turns face down at the next first card"; "Row 4, column 4, apple, matched by Ann" ("matched by you" for the viewer's own pairs, "your"
+  for the viewer's own cards in the names above). In a finished game a card left down shows its
+  face, named "Row 2, column 3, star, not found".
 - **Grid semantics**: the board is a `role="grid"` labelled "Cards", with a `role="row"` per row
   and a `role="gridcell"` per card holding the card's `<button>`, so screen readers can move by row
   and column in focus mode. Arrow keys move between cards (one tab stop, roving `tabindex`), Enter
@@ -479,7 +485,8 @@ that remembers for you spoil the game for everyone else, who can't tell.
   - `move-limit`: "The move limit (N moves) was reached with K pairs still face down." (`N` =
     `moveLimit`, `K` the pairs not found);
 
-  then every card's face and each player's pairs. After a framework-only ending or a cancel
+  then every card's face and each player's pairs ("Ann found 3 pairs. Sam found 1 pair and left
+  the game."). After a framework-only ending or a cancel
   (`endReason` null in the frozen view, §8.4) it adds no ending line and draws the frozen view as it
   is, face-down cards still blank; an `up` or `missed` card keeps its face and gets a stopped-game
   name without the in-play hints: "Row 2, column 3, star, Sam's first card when the game stopped";

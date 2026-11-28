@@ -143,11 +143,7 @@ function CardButton({
           <Face id={leaving} />
         </span>
       )}
-      {badge === null ? null : (
-        <span className="ym-pr-badge" aria-hidden="true">
-          {badge}
-        </span>
-      )}
+      {badge === null ? null : <span className="ym-pr-badge" data-no={badge} aria-hidden="true" />}
     </button>
   );
 }
@@ -248,7 +244,7 @@ function Table(props: Props): ReactElement {
 
   const status: { tone?: "bad"; text: string }[] = [];
   if (message !== null) status.push({ tone: "bad", text: message });
-  if (note !== null && mode === "play") status.push({ text: note });
+  if (note !== null) status.push({ text: note });
   const line = shownLine(view, who, mode, yourTurn);
   if (line !== null) status.push({ text: line });
   if (mode === "play" && seat !== null && view.out[seat] !== null && view.out[seat] !== undefined) {

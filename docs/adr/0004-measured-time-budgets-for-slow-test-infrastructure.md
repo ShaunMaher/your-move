@@ -41,7 +41,10 @@ hangs slow to fail and would blur what the tests are measuring.
     (`INVITE_TEST_TIMEOUT_MS`, 6–10 s locally), and the paths game in `paths.spec.ts` (alpha A24:
     four sign-ins, a join link used three times, four markers, five tile turns and three
     resignations across four contexts) 150 s (`PATHS_TEST_TIMEOUT_MS`, provisional: 9–13 s locally, to be set from the first CI
-    measurement). These are
+    measurement), and the pairs game in `pairs.spec.ts` (alpha A26: a three-person game played to
+    its end by a perfect-memory double, 180 s, `PAIRS_TEST_TIMEOUT_MS`, and the layout test of
+    four sign-ins and eight games, 240 s, `PAIRS_LAYOUT_TEST_TIMEOUT_MS`; both provisional, 15–20 s
+    locally, to be set from the first CI measurement). These are
     margins over local measurements, not CI ones; each is re-measured
     on the CI runner from the first pipeline that runs it, and then set from that.
   - CI runs one worker per job.

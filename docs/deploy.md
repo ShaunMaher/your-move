@@ -429,15 +429,21 @@ fingerprint of their list, which is the same in every shard of one run. A newly 
 covered without a CI change, but re-measure the shards when one is installed and raise the count
 if a shard would run much past 20 minutes.
 
-Measured locally (16-thread developer laptop, 2026-11-29, shards run side by side), as an upper
-estimate with pairs installed too: the four shards took 328, 338, 336 and 336 s, and three would
-take 445, 502 and 376 s. Without pairs, as installed today, the four take 136, 134, 96 and 82 s.
-The shared runner took about 2.3× a laptop's time for the paths game's full kit (`test` grew
-634 s when it was installed, against 281 s locally), so with pairs each of the four should take
-about 13 minutes on the runner, plus its workspace install, where three would come close to 20.
-More shards would each add an install and, since jobs queue for the runner's concurrency, little
-wall time. The shards share one `timeout` (30 minutes), a margin over that estimate, provisional
-until it is set from the first pipeline that runs them (ADR 0004). The jobs keep `TMPDIR` on tmpfs
+Measured, with pairs installed (alpha A26, 2026-11-29; a 16-thread developer laptop, shards run one
+after another): four shards took 276, 292, 283 and 286 s, and eight took 162, 189, 187, 208, 116, 98,
+99 and 83 s locally; the options and seat counts of each game fall unevenly on the
+shards (words has two combinations, paths 35, pairs 20, the example game 16), so shards differ by
+2×. The first real run of the shards on the runner (pipeline 82926, without pairs) took 891, 880, 688
+and 649 s against about 136, 134, 92 and 80 s locally: a factor of about **6.5×** for kit work, run
+concurrently with `test`, the e2e jobs and the builds (the earlier 2.3× came from one `test` job
+growing 634 s against 281 s locally, which was not concurrent kit work). The runner runs the shards
+concurrently (each queued about 2 s), so more shards do cut wall time. With pairs, four shards would
+take about 36 minutes each on the runner, over any sensible timeout, so `test:games` runs **8**
+shards: the slowest, 208 s locally, is about 22 minutes on the runner, and the shards share one
+`timeout` of 35 minutes, a margin over that, provisional until it is set from the first pipeline
+that runs them (ADR 0004). Re-measure when a game is installed: keep the slowest local shard at
+about 180–210 s or less. The `test` job itself took 1,951 s in pipeline 82926, without
+`games:verify`, inside its 40-minute timeout. The jobs keep `TMPDIR` on tmpfs
 as `test` does, and the publish jobs need every shard.
 
 The `test` job keeps its scratch files (temporary SQLite databases,

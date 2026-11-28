@@ -344,7 +344,7 @@ describe("the missed pair's reveal when a turn opens (pairs §9)", () => {
     setup(miss());
     for (const spot of [card(0, 0), card(1, 2)]) {
       expect(spot.getAttribute("data-state")).toBe("missed");
-      expect(spot.querySelector(".ym-pr-badge")?.textContent).toBe("2");
+      expect(spot.querySelector(".ym-pr-badge")?.getAttribute("data-no")).toBe("2");
       expect(spot.querySelector(".ym-pr-face")).not.toBeNull();
     }
     expect(status()).toBe(
@@ -509,8 +509,19 @@ describe("the second card's outcome (pairs §9)", () => {
     rerenderAt(4, flip(before, 0, 1).state);
     expect(status()).toBe("A pair of acorns! Your turn again.");
     expect(card(0, 0).getAttribute("data-state")).toBe("matched");
-    expect(card(0, 0).querySelector(".ym-pr-badge")?.textContent).toBe("✓" + "1");
+    expect(card(0, 0).querySelector(".ym-pr-badge")?.getAttribute("data-no")).toBe("✓" + "1");
     expect(turnLine()?.textContent).toBe("Your turn: turn over a card");
+  });
+
+  it("says the pair was found, without a turn again, when it was the last", () => {
+    const before = game({
+      turned: 0,
+      matched: Array.from({ length: 18 }, (_, i) => [i + 2, 0] as const),
+    });
+    const { rerenderAt } = setup(before);
+    rerenderAt(4, flip(before, 0, 1).state);
+    expect(status()).toBe("A pair of acorns!");
+    expect(screen.getByRole("region", { name: "How it ended" })).toBeTruthy();
   });
 
   it("says there was no match and who is to play", () => {
@@ -555,7 +566,7 @@ describe("matched cards", () => {
     );
     const matched = card(0, 0);
     expect(matched.getAttribute("data-state")).toBe("matched");
-    expect(matched.querySelector(".ym-pr-badge")?.textContent).toBe("✓" + "2");
+    expect(matched.querySelector(".ym-pr-badge")?.getAttribute("data-no")).toBe("✓" + "2");
     expect(matched.getAttribute("aria-disabled")).toBe("true");
   });
 });
