@@ -27,8 +27,21 @@ const METHODS: ReadonlySet<string> = new Set([
   "DELETE",
   "OPTIONS",
 ]);
-/** Route patterns only: no query string, whitespace or control characters (09 §5). */
-const ROUTE_SHAPE = /^\/[A-Za-z0-9/:_*.-]*$/;
+/**
+ * Route patterns only (09 §5): each segment is a short literal word, a `:param` or `*`, so an id or
+ * token that reached `route` by mistake (a UUID, a long hex string) is never printed. The longest
+ * real literal is `manifest.webmanifest`.
+ */
+const SEGMENT = /^(?:[a-z][a-z0-9_.-]{0,19}|:[A-Za-z][A-Za-z0-9_]{0,31}|\*)$/;
+const HEX_TOKEN = /^[a-f0-9]{12,}$/;
+function isRoutePattern(route: string): boolean {
+  if (route === "/") return true;
+  if (!route.startsWith("/")) return false;
+  return route
+    .slice(1)
+    .split("/")
+    .every((segment) => SEGMENT.test(segment) && !HEX_TOKEN.test(segment));
+}
 const MS_PER_DAY = 86_400_000;
 
 const ACTIONS = "/api/v1/games/:id/actions";
@@ -84,7 +97,7 @@ export interface UsageReport {
 const ok = (status: number): boolean => status >= 200 && status < 300;
 const divide = (a: number, b: number): number | null => (b > 0 ? a / b : null);
 
-/** Strips control characters, so a hostile log line can't drive the terminal. */
+/** Strips control characters, so a hostile log line can't drive the terminal. A second layer: routes are already validated on the way in. */
 const printable = (text: string): string =>
   // eslint-disable-next-line no-control-regex -- the point is to match control characters
   text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
@@ -134,8 +147,7 @@ export class UsageAggregator {
       return;
     }
     const { method, status } = line;
-    const route =
-      line.route === UNMATCHED || ROUTE_SHAPE.test(line.route) ? line.route : OTHER_ROUTE;
+    const route = line.route === UNMATCHED || isRoutePattern(line.route) ? line.route : OTHER_ROUTE;
     this.total += 1;
     const key = `${method} ${route}`;
     const known = this.counts.get(key);

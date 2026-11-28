@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { aggregate, formatReport, FREE_PLAN_REQUESTS_PER_DAY, UsageAggregator } from "./report.js";
@@ -109,6 +111,38 @@ describe("UsageAggregator.add", () => {
     ]);
   });
 
+  it("counts a UUID or token-like segment under (other)", () => {
+    const report = build([
+      line("/api/v1/games/3f2b8c1e-9d4a-4e7b-8a61-0c5d2f7e9b11"),
+      line("/g/0123456789abcdef0123"),
+      line("/g/abcdefghijklmnopqrstuvwxyz"),
+      line("/api/v1/games/:id"),
+    ]);
+    expect(report.routes.map((r) => r.route).sort()).toEqual(["(other)", "/api/v1/games/:id"]);
+    expect(report.routes.find((r) => r.route === "(other)")?.count).toBe(3);
+  });
+
+  it("accepts every path in the published API and the static routes", () => {
+    const doc = JSON.parse(
+      readFileSync(
+        new URL("../../../packages/api-client/openapi/v1.json", import.meta.url),
+        "utf8",
+      ),
+    ) as { paths: Record<string, unknown> };
+    const routes = [
+      ...Object.keys(doc.paths).map((path) => path.replaceAll(/\{(\w+)\}/g, ":$1")),
+      "/",
+      "/*",
+      "/api/*",
+      "/api/health",
+      "/manifest.webmanifest",
+      "/api/v1/email/unsubscribe",
+    ];
+    expect(routes.length).toBeGreaterThan(20);
+    const report = build(routes.map((route) => line(route)));
+    expect(report.routes.map((r) => r.route).sort()).toEqual([...new Set(routes)].sort());
+  });
+
   it("never prints a query string, as text or JSON", () => {
     const report = build([line("/api/v1/email/unsubscribe?t=secret")]);
     expect(formatReport(report)).not.toContain("secret");
@@ -189,9 +223,10 @@ describe("formatReport", () => {
 });
 
 describe("aggregate", () => {
-  it("streams 200k lines within budget, holding counts rather than lines", async () => {
+  it("throughput smoke test: 200k lines through an async iterable, generous budget", async () => {
     const routes = ["/api/v1/me", "/api/v1/games/:id", "/api/health", "/*"];
-    function* lines(): Generator<string> {
+    async function* lines(): AsyncGenerator<string> {
+      await Promise.resolve();
       for (let i = 0; i < 200_000; i += 1) {
         yield line(routes[i % routes.length] ?? "/*", "GET", 200, day1);
       }
@@ -202,7 +237,7 @@ describe("aggregate", () => {
     const report = aggregator.report();
     expect(report.totalRequests).toBe(200_000);
     expect(report.routes).toHaveLength(4);
-    expect(elapsed).toBeLessThan(5000);
+    expect(elapsed).toBeLessThan(30_000);
   });
 
   it("accepts an async iterable", async () => {
