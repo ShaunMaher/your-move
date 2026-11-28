@@ -185,12 +185,17 @@ Tracks invitation emails (for rate limiting, expiry and abuse handling). Stores 
 | sent_at | INTEGER NULL | when the sender accepted the invite email, set by the background task that sends it, never before the response (06 §6.3); or, for a typed address of a user with email nudges on, the invitation email (06 §6.2, alpha A20); NULL when none was sent (an invitation to a user without nudges, a suppressed address or `hidden` seat, a cap, a failed send) |
 | expires_at | INTEGER | = lobby expiry: 14 days from the game's `created_at` (02 §4) |
 
+Since alpha A20 (review S-1) an invite's `id` is its seat's `game_players.id`, so the inbound cap
+(06 §6.7) can tell a live invitation from one whose seat was removed or whose lobby ended unplayed;
+an older row's id matches no seat and counts until its lobby ends.
+
 ### `email_suppressions`
 Addresses that must not get our non-OTP emails. `unsubscribed` (the invites unsubscribe, 05
 §Email links, and the under-age exit) stops invite emails and the invitation email to a user
 with nudges on (06 §6.2, alpha A20) only: the turn nudges have their own opt-out, the setting
-and `users.email_id` (03 §7). `bounced` and `complained` stop every non-OTP
-email, nudges included. One row per address: a `bounced` or `complained` row replaces an
+and `users.email_id` (03 §7). Turning email nudges on deletes the account's own address's
+`unsubscribed` row, the holder's explicit opt-in (alpha A20 review P-3); nothing else deletes a
+row. `bounced` and `complained` stop every non-OTP email, nudges included. One row per address: a `bounced` or `complained` row replaces an
 `unsubscribed` one (it stops more mail), never the reverse, and otherwise the first row stays;
 `created_at` is when the row's current reason was recorded.
 

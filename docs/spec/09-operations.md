@@ -227,23 +227,31 @@ that work on both runtimes, plus SMTP for Node only.
   typed addresses (F-16's residual); re-measure at the first Workers deployment (10).
 - **Requests that do several statements per address (alpha A17 review S-5).** Counted the same
   conservative way (every statement of a batch, the session's refresh included):
-  - `POST /api/v1/games` with `n` typed addresses: 25 statements plus 20 per address (the caps,
-    the lookups, the per-pair counts, the inbound cap, the two tiers of invite-email caps, and the
-    seat and `invites` row in the insert), and in its background task 1 to record `sent_at` and,
-    when the instance cap stopped an email, 2 for its alert; since alpha A20, when a `normal`
-    invitation with a user was seated and push is configured, the invitation push's read of the
-    game (2), the subscriptions (1) and, for invitees with a device, the daily counter (2 each),
-    the delivery marks (1) and the deletions (1). A pick seated as an invitation adds the two
-    shared invite-email counters (4), and a request with such a pick but no typed address the
-    suppression and past-opponent reads and the instance cap's stop marker (4). One address (every two-seat game, so
-    every words game) is 46–48, inside the Free plan's 50; two or more addresses are over it
-    (65 for two, up to 165 for seven), and so is any create that lazily expires the creator's
-    overdue lobbies (up to 20 of them, 03 §8). Those **need the Paid plan, or re-measure at the
-    first Workers deployment** (10).
+  - `POST /api/v1/games` with `n` typed addresses: 25 statements plus 17 per address (the caps,
+    the lookups, the per-pair counts, the inbound cap's one read of live invitations, alpha A20
+    review S-1, the two tiers of invite-email caps, and the seat and `invites` row in the insert).
+    One address (every two-seat game, so every words game) is 43–45 in the request, inside the
+    Free plan's 50; two or more addresses are over it (59 for two, up to 144 for seven), and so is
+    any create that lazily expires the creator's overdue lobbies (up to 20 of them, 03 §8). Its
+    background task runs in the same invocation, in this order (review A20-S-2, P-1): 2 for the
+    instance cap's alert and day stop when the cap stopped an email, then the sends, then 1 to
+    record `sent_at`, and only then the invitation push (alpha A20, when a `normal` invitation with
+    a user was seated and push is configured): the read of the game (2), the subscriptions (1),
+    and for invitees with a device the daily counter (2 each), the delivery marks (1) and the
+    deletions (1). One known invitee with a device is therefore about 53 statements, or 55 when
+    the instance cap stopped an email: **over the Free plan's 50**; because the push comes
+    last, the statement over the limit is one of the push's, after the F-20 stop and `sent_at`
+    are written. A
+    pick seated as an invitation adds the two shared invite-email counters (4), and a request with
+    such a pick but no typed address the suppression and past-opponent reads and the instance
+    cap's stop marker (4). Those **need the Paid plan, or the invitation push in an invocation of
+    its own** (10, First Workers deployment).
   - The `PATCH /api/v1/me` that completes onboarding: 4 statements plus 4 per claimed seat (the
     game's load, the block lookup, the claim), so the Worker claims at most 8 there (36) and leaves
-    the rest to the sweep, plus at most 5 in the background for the claimant's invitation push
-    (alpha A20: the subscriptions, the daily counter, the delivery marks and the deletions); a claim that loses a race and retries adds 4 per attempt (at most 3).
+    the rest to the sweep; a claim that loses a race and retries adds 4 per attempt (at most 3).
+    The claimant's invitation push in the background normally costs only its subscriptions read
+    (1): a just-onboarded user has no subscription yet (06 §6.4), so the counter, marks and
+    deletions are not a normal-case cost.
     Node claims up to 50 per request. Each nudge also makes one provider subrequest (the `gmail` provider
   one more per run for its token). A run with a failed step or a failed nudge ends the invocation
   as failed (not retried), so it shows in the trigger's history. Re-measure the per-invocation

@@ -274,8 +274,9 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    that the address has an account.)
 
    An invitation is an `invited` seat with my `user_id`. It shows under *Invitations* in my game
-   list with an in-app badge and a realtime update, plus a generic push that names nobody ("You have a new game invitation"), at most one per recipient per day — never
-   the inviter's display name, the game or anything else they chose. If I have email nudges on,
+   list with an in-app badge and a realtime update, plus a generic push that names nobody ("You
+   have a new game invitation"), at most one per recipient per day — never the inviter's display
+   name, the game or anything else they chose. If I have email nudges on,
    I get at most one email per invitation: a fixed "<Display Name> invited you to play <game name>"
    template, sent via `waitUntil` when the invitation is created (a claim sends only the push,
    below), category `nudges`
@@ -297,14 +298,18 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    - **The email** (`invitationNudgeEmail`) goes only to an onboarded human with
      `settings.emailNudges` true and `email_id` set, not suspended or being deleted, whose address
      has no `email_suppressions` row of any reason (an `unsubscribed` row is the address's own
-     "don't send me invites", which this email is). Subject and first line: "<Display Name>
+     "don't send me invites", which this email is). Turning email nudges on in Settings is the
+     holder's own opt-in and deletes their address's `unsubscribed` row, never a `bounced` or
+     `complained` one (review A20-P-3, 04). Subject and first line: "<Display Name>
      invited you to play <game name> on <APP_NAME>"; then a link to `PUBLIC_URL` (the invitation is
      in the game list), why it was sent, and the Settings link and the `nudges` one-click
      unsubscribe with its headers (05 §Email links); never the game's id, options, state or other
      players, nor any address. For a typed address it is built, counted and scheduled exactly like
      the invite email (§6.3, §6.6): "may be mailed" in §6.6's tiers covers this email too, so it is
      sent only when the inviter's caps, the per-address cap and the instance-wide cap all passed,
-     and `invites.sent_at` records it. A picked invitee isn't a typed address: it counts nothing
+     and `invites.sent_at` records it. Strangers' invitations can use up a nudged user's 3 in 30
+     days, so a later invitation sends no email; the push still arrives (accepted residual F-24,
+     review A20-S-3). A picked invitee isn't a typed address: it counts nothing
      toward the inviter's caps, and the shared caps under its real keys (its `email_id`) only when
      it may be mailed, the `silent` counter otherwise, so the work doesn't depend on its setting.
    - A claim (§6.4) sends the push, never the email: the seat's one email was the invite email
@@ -353,11 +358,13 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    `last_seen_version` of -1 it was created with). It claims at most a per-runtime number of seats,
    oldest lobby first (Node 50, the Worker 8, sized by the Worker's per-request query budget,
    09 §3; review A17-S-5); the sweep's claim step claims any beyond that on its next runs (03 §8),
-   so an address with more seats than the cap gets the rest within a sweep or a few. A claim that fails there is logged by error
-   class and never fails onboarding; the sweep claims it later. A lobby at or past its expiry is
-   never claimed into (it is about to expire, 02 §4). A claim that makes a `normal` invitation
-   sends the claimant the generic invitation push (§6.2; alpha A20), in the background after the
-   onboarding response or from the sweep, and never the invitation email.
+   so an address with more seats than the cap gets the rest within a sweep or a few. A claim
+   that fails there is logged by error class and never fails onboarding; the sweep claims it
+   later. A lobby at or past its expiry is never claimed into (it is about to expire, 02 §4). A
+   claim that makes a `normal` invitation sends the claimant the generic invitation push (§6.2; alpha A20), in the background after the
+   onboarding response or from the sweep, and never the invitation email. At onboarding the
+   claimant has usually just signed in and has no push subscription yet, so that push is normally
+   a no-op (review A20-P-6); the sweep's claim is the one that usually reaches a device.
 5. Lobbies expire 14 days after creation → `expired`. When an email seat reaches any terminal
    state (accepted, game expired/cancelled/started without it, removed or declined), `invite_email`
    is cleared — we don't retain addresses the creator typed (the `invites` table keeps only the
@@ -367,7 +374,8 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
      email whatever it turns out to be, so the limit reveals nothing. Over the limit the
      whole request is `429` and nothing is created.
    - **Invite emails** (to email-invite seats: no account, or one that hasn't finished
-     onboarding; and, since alpha A20, the invitation email to a user with nudges on, §6.2): per inviter 5 / day and 20 / 30 days;
+     onboarding; and, since alpha A20, the invitation email to a user with nudges on, §6.2): per
+     inviter 5 / day and 20 / 30 days;
      accounts younger than 7 days **that have not yet completed a game** (have no past-opponent
      row, §6.9: a finished game in which both players acted) get 2 / day; per target
      address 3 invite emails / 30 days across all inviters (counted in `rate_limits` keyed by the
@@ -397,20 +405,34 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
      background task. Known residual (review A17-P-13): for a mailed address the per-target row
      is typically inserted, while an unmailed one updates the long-lived `silent` row, so the
      database work differs as an insert differs from an update; nothing of it is visible through
-     the API, and the statistical timing suite covers the timing class (ADR 0006).
+     the API, and the statistical timing suite covers the timing class (ADR 0006). The background
+     task's own work differs by address too (an email sent or not; since alpha A20 the invitation
+     push and its daily counter): on Workers it runs in the request's `waitUntil`, after the
+     response; on Node it shares the server's event loop, so a creator's next request can wait a
+     little longer behind a send than behind nothing. That residual (review A20-S-6) needs the
+     creator to time their own following requests against an email provider's or push service's
+     latency; nothing of it is in any response.
 7. Game creation is also limited per pair (5 / day) and per user (30 / day), so a harasser can't
    spam declines-and-recreate. A **pair** is (creator, `userId`) for a picked past opponent and
    (creator, `emailId`) for every typed address, whatever it resolves to, so these limits (and the
-   per-pair cap on `lobby`/`active` games, 05) behave the same for every address (Q3). **Inbound cap**: a user receives at most **1 invitation per day from
-   any one creator** who isn't a past opponent, and **3 per day in total** from such creators. Over
-   the cap the invitation is created with `delivery = hidden`: it goes to a collapsed *Hidden
-   invitations* list (no badge, no push, no email), where the user can still accept or decline it,
-   and it expires with the lobby. The cap is counted in `rate_limits` keyed by the target's
-   `emailId` (with the creator's id for the per-creator count), for **every** typed address
-   whatever it resolves to, with the same lookups and writes (Q3): a past opponent's invitation
-   adds nothing to the counters, and one already over the per-creator cap adds nothing to the
-   total; each adds 1 to the never-read `silent` counter instead (§3.2), so every address writes
-   the same rows (alpha A17). The creator sees "Invited" either way. Active game caps (05) count
+   per-pair cap on `lobby`/`active` games, 05) behave the same for every address (Q3).
+   **Inbound cap**: a user receives at most **1 invitation per day from any one creator** who
+   isn't a past opponent, and **3 per day in total** from such creators. Over the cap the
+   invitation is created with `delivery = hidden`: it goes to a collapsed *Hidden invitations*
+   list (no badge, no push, no email), where the user can still accept or decline it, and it
+   expires with the lobby. Since alpha A20 (review S-1, which fixes F-17) the cap counts **live
+   invitations**, not creations: the `invites` rows for the target's `emailId` in games created
+   in the last 24 hours, from creators who aren't past opponents of the user the address belongs
+   to. The per-creator count takes the creator's rows of any delivery but `inert`; the total takes
+   `normal` ones. A row stops counting when its lobby ended unplayed (`cancelled`, `expired`, or
+   `declined` by someone else) or its seat was `removed`, so throwaway lobbies can't push a real
+   invitation into *Hidden*; the target's own decline keeps it counting, so declining doesn't
+   invite a re-invitation, and so does a game that started. Each `invites` row has its seat's
+   `game_players.id` as its id (04), which is how a removal is seen. It is one read per typed
+   address, the same statement whatever the address resolves to (a placeholder user when there is
+   none), and writes nothing (Q3). Two creations racing for a target's last place can both get
+   it, at most one more `normal` invitation each; the per-creator and pair limits bound that.
+   The creator sees "Invited" either way. Active game caps (05) count
    only games a user *created*, so other people's games can never lock a user out of creating their
    own.
 8. **Join links** (for groups, and for players who'd rather share a link in a group chat than type
