@@ -456,10 +456,12 @@ Paid plan, or fewer statements per address (alpha A17 review S-5).
 **Workers cost model (before the first Workers deployment).** Before choosing a plan, estimate
 what the Workers Free plan carries, as games per month, from measurements rather than guesses:
 
-- **Usage per game, from the Docker deployment.** The request log (09 §5) already has one line per
+- **Usage per game, from the Docker deployment** (done: `pnpm ops:usage`, docs/deploy.md
+  "Measuring usage"). The request log (09 §5) already has one line per
   request; count requests per route over finished games and derive requests per move, per game and
   per player per day (game screens, polling, history, push subscription, sign-in). Add a script
-  that reads the logs and prints these, with no new personal data logged.
+  that reads the logs and prints these, with no new personal data logged. The script derives moves
+  and games from route counts alone (the log has no game or user), and says where it cannot.
 - **Cost per request, on the Worker build.** On the Worker's request log line, record the D1
   queries and the rows read and written that the request caused (from each D1 result's `meta`),
   and the Durable Object requests. Measure CPU per endpoint under workerd in the contract suite as
