@@ -13,3 +13,5 @@ This record covers the review of `alpha-chores-8`: the kit's CPU budget check, w
 | CH8-P-1, CH8-P-3, CH8-P2-3 to CH8-P2-5 | Fixed: naming, a virtual clock for exact tests, wrapping, older-Node gating. | `cpu.ts`, `kit.test.ts`, `cpu-clock.test.ts` |
 | CH8-P-2, CH8-P-4, CH8-P2-6 | No change needed. | — |
 | CH8-P2-1, CH8-P2-2 | Resolved at merge with chores 9's runner wording. | `docs/deploy.md`, 08 T25 |
+
+After sign-off, the MR pipeline (82898) found that the testkit tests assumed the 5 ms reference budget, while CI sets `KIT_CPU_BUDGET_MS`; alpha chores 11 names it in the tests.
