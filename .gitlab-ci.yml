@@ -240,13 +240,13 @@ test:
   stage: test
   extends: [.pnpm, .every-pipeline]
   needs: [validate]
-  # Measured, not guessed (ADR 0004): `test` took 1273-1291 s on the shared amd64 runner
-  # (pipelines 82752 and 82775, before the workerd tests joined it; the runner did not stop them at
-  # the 20-minute default, so its enforcement is looser than the setting), and the D1 suite and
-  # Worker contract suite add about 3 minutes there (test:worker took 151-173 s on arm64). 40
-  # minutes leaves headroom for a loaded runner and stays under the hour at which a hung job
-  # should be investigated. docs/deploy.md "CI runners".
-  timeout: 40 minutes
+  # Measured, not guessed (ADR 0004): `test` took 1414 s on the shared amd64 runner with the
+  # workerd tests (pipeline 82901) and 2048 s once the paths game was installed, which adds its
+  # full kit to `games:verify` (82904). 55 minutes keeps about 60 % headroom and stays under the
+  # hour at which a hung job should be investigated; if it creeps past ~45 minutes, split the job
+  # rather than raise this again. (The runner did not stop earlier jobs at the 20-minute default,
+  # so its enforcement is looser than the setting.) docs/deploy.md "CI runners".
+  timeout: 55 minutes
   variables:
     # Wrangler's own log file goes where the artifacts can keep it.
     WRANGLER_LOG_PATH: $CI_PROJECT_DIR/reports/wrangler-logs

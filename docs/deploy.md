@@ -413,9 +413,10 @@ is still 2–3× a laptop's (re-measured after its CPU model changed to `host-pa
 hypervisor takes away may still be charged to the running thread. The value stays 20 ms;
 revisit it when the runner changes.
 
-The `test` job has an explicit `timeout` of 40 minutes (ADR 0004): it took 1273–1291 s on the
-shared amd64 runner before the workerd tests joined it, which adds about 3 minutes, and the job's
-first step fails at once with a clear message if the runner's CPU lacks SSE4.2.
+The `test` job has an explicit `timeout` of 55 minutes (ADR 0004): on the shared amd64 runner it
+took 1414 s with the workerd tests and 2048 s once the paths game's full kit joined `games:verify`
+(2026-11-29). If it creeps past about 45 minutes, split the job rather than raise the timeout again.
+The job's first step fails at once with a clear message if the runner's CPU lacks SSE4.2.
 
 The `test` job keeps its scratch files (temporary SQLite databases,
 bundles) on tmpfs: `TMPDIR` points into `/dev/shm`. On the shared amd64 runner the disk is shared
