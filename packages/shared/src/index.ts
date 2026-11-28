@@ -25,6 +25,13 @@ export {
   type Me,
 } from "./auth.js";
 export {
+  BlockBodySchema,
+  BlockListSchema,
+  createBlockRoute,
+  deleteBlockRoute,
+  listBlocksRoute,
+} from "./blocks.js";
+export {
   ERROR_CODES,
   ERROR_STATUS,
   ErrorResponseSchema,

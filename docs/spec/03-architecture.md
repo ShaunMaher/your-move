@@ -187,7 +187,20 @@ update of that row, re-checking everything that made the nudge due, with no vers
 finished game's rematch link `games.rematch_game_id` is not game state either: it is written in
 the batch that inserts the rematch, by one conditional update guarded on the game being `finished`
 and the link being NULL or naming a game that ended unplayed, with every insert of the batch
-guarded the same way and no version bump, 04, 05 `POST /api/v1/games/:id/rematch`.)
+guarded the same way and no version bump, 04, 05 `POST /api/v1/games/:id/rematch`. Two writes make
+an invitation `inert` without a transition: the block's own batch (05 §Blocks, alpha A23) sets
+`delivery = 'inert'` on the person blocked's open invitations (`invited`, `normal` or `hidden`) in
+`lobby` games the blocker has joined (and, for a blocker who joins later, the same flip restricted
+to that game is one more statement of their accept's or link join's own transition, guarded by its
+token like every dependent write, so it happens only if that transition won; A23-S3-1), and the
+under-age exit's batch (06 §5, alpha A21) sets it on
+the `invited`, user-less email-invite seats typed as the leaving address, every statement of that
+batch guarded on the account's `onboarded_at` still being NULL. Neither touches any other row, the
+game row or its version, and neither needs a version check: an accept is guarded in its own batch
+against a block (A23-S-4) and a claim never takes an `inert` row, while a Start (which drops the
+row) and a Remove (which removes it) write over it whatever its delivery, and no transition reads
+`delivery` to decide anything but whether the holder may still see or accept the invitation. The
+under-age exit's entry closes alpha A21's omission from this list.)
 
 1. Load game state + version.
 2. Compute the new state with the game module (pure), with recorded randomness and pre-loaded
@@ -315,7 +328,8 @@ filesystems are unsupported for the database anyway).
   (06 §6.2), the create request schedules, in the background like a transition's pushes, one push to
   each added player and never to the creator: `body` is "<creator> added you to a game." (the
   creator's display name, "New player" without one), or "<creator> wants a rematch." when the game
-  is a finished game's rematch (05 `POST /api/v1/games/:id/rematch`, alpha A15), followed by " Your
+  is a finished game's rematch (05 `POST /api/v1/games/:id/rematch`, alpha A15; only a rematch
+  with one person carried over adds anyone at once, Q29), followed by " Your
   turn." when the game started at creation and the added player's seat is to act; `url`, `tag`, the
   TTL, the 240-code-point cut, the per-request cap of 40 and the live-session rule are as above.
   The start at creation sends no "your turn" push of its own: the auto-join push says it, so an

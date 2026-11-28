@@ -8,6 +8,7 @@ import {
   asc,
   desc,
   eq,
+  exists,
   gt,
   gte,
   inArray,
@@ -18,6 +19,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 
 import type { NormalisedEmail } from "../accounts/email.js";
 import { type Database, runBatch, runBatchEndingWith, type Statement } from "./database.js";
@@ -183,6 +185,133 @@ export function userRepo(db: Database): UserRepo {
         .select({ blockerId: blocks.blockerId, blockedId: blocks.blockedId })
         .from(blocks)
         .where(and(inArray(blocks.blockerId, ids), inArray(blocks.blockedId, ids)));
+    },
+    async canBlock(viewerId, otherId) {
+      if (viewerId === otherId) return false;
+      const mine = alias(gamePlayers, "mine");
+      const theirs = alias(gamePlayers, "theirs");
+      const row = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(
+          and(
+            eq(users.id, otherId),
+            eq(users.kind, "human"),
+            or(
+              // Already blocked: a repeat is the same answer (05 §Blocks).
+              exists(
+                db
+                  .select({ one: sql`1` })
+                  .from(blocks)
+                  .where(and(eq(blocks.blockerId, viewerId), eq(blocks.blockedId, otherId))),
+              ),
+              exists(
+                db
+                  .select({ one: sql`1` })
+                  .from(pastOpponents)
+                  .where(
+                    and(eq(pastOpponents.userId, viewerId), eq(pastOpponents.otherId, otherId)),
+                  ),
+              ),
+              // A shared game in which their row has been joined (the creator's included), the one
+              // row the viewer can always attribute (A23-S-1, S2-2). Never a row never joined: a
+              // typed address's, open or ended, would tie the address to the account (Q3), and a
+              // pick is a past opponent already. Whatever the viewer's own row is (A23-S2-1): an
+              // `inert` one must answer as any other, or the answer would tell of the block.
+              exists(
+                db
+                  .select({ one: sql`1` })
+                  .from(mine)
+                  .innerJoin(theirs, eq(theirs.gameId, mine.gameId))
+                  .where(
+                    and(
+                      eq(mine.userId, viewerId),
+                      eq(theirs.userId, otherId),
+                      isNotNull(theirs.joinedAt),
+                    ),
+                  ),
+              ),
+            ),
+          ),
+        )
+        .get();
+      return row !== undefined;
+    },
+    async block(blockerId, blockedId, createdAt) {
+      const blockerRows = alias(gamePlayers, "blocker_rows");
+      await runBatch(db, [
+        db.insert(blocks).values({ blockerId, blockedId, createdAt }).onConflictDoNothing(),
+        // Never a past-opponent pair with a block either way (04 invariant 6).
+        db
+          .delete(pastOpponents)
+          .where(
+            or(
+              and(eq(pastOpponents.userId, blockerId), eq(pastOpponents.otherId, blockedId)),
+              and(eq(pastOpponents.userId, blockedId), eq(pastOpponents.otherId, blockerId)),
+            ),
+          ),
+        // The blocked person's open invitations in lobbies the blocker has joined (or created) go
+        // quiet (A23-S-2, P2-2): `inert`, as at creation, so to them each is gone as if removed,
+        // while everyone else sees it as before. A versionless row write (03 §5.2): the accept
+        // guard, claims refusing `inert`, and Start and Remove overwriting it keep it safe.
+        db
+          .update(gamePlayers)
+          .set({ delivery: "inert" })
+          .where(
+            and(
+              eq(gamePlayers.userId, blockedId),
+              eq(gamePlayers.state, "invited"),
+              inArray(gamePlayers.delivery, ["normal", "hidden"]),
+              inArray(
+                gamePlayers.gameId,
+                db
+                  .select({ id: blockerRows.gameId })
+                  .from(blockerRows)
+                  .innerJoin(games, eq(games.id, blockerRows.gameId))
+                  .where(
+                    and(
+                      eq(blockerRows.userId, blockerId),
+                      eq(games.status, "lobby"),
+                      // Joined, the creator included: where the blocker is only invited, their
+                      // own accept's check keeps the pair apart (A23-P2-2).
+                      eq(blockerRows.state, "joined"),
+                    ),
+                  ),
+              ),
+            ),
+          ),
+      ]);
+    },
+    async unblock(blockerId, blockedId) {
+      const removed = await db
+        .delete(blocks)
+        .where(and(eq(blocks.blockerId, blockerId), eq(blocks.blockedId, blockedId)))
+        .returning({ id: blocks.blockedId });
+      return removed.length > 0;
+    },
+    async blocksOf(blockerId, page) {
+      const { after } = page;
+      return db
+        .select({
+          userId: blocks.blockedId,
+          displayName: users.displayName,
+          createdAt: blocks.createdAt,
+        })
+        .from(blocks)
+        .innerJoin(users, eq(users.id, blocks.blockedId))
+        .where(
+          and(
+            eq(blocks.blockerId, blockerId),
+            after === undefined
+              ? undefined
+              : or(
+                  lt(blocks.createdAt, after.createdAt),
+                  and(eq(blocks.createdAt, after.createdAt), lt(blocks.blockedId, after.userId)),
+                ),
+          ),
+        )
+        .orderBy(desc(blocks.createdAt), desc(blocks.blockedId))
+        .limit(page.limit);
     },
     async rememberGameOptions(id, remember) {
       // Only the two keys change, in SQL, so a concurrent change to any other setting survives

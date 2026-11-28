@@ -340,7 +340,9 @@ and in the lobby, and the AI setting also in the game header.
 - **A past opponent picked from the list** (by user id). Whether they're added straight away
   depends on *their* setting **who can add me to games** (`whoCanAddMe`, 06 §6.2): with
   `pastOpponents` (the default) they're *auto-joined* (`joined`) and notified; with `nobody` they get
-  an invitation.
+  an invitation. When the creator picks two or more past opponents at once, every pick gets an
+  invitation, whatever their setting (06 §6.1, Q29), so no pick's state shows a block between
+  two of them.
 - **An email address.** The response never reveals whether the address has an account (06 §6.1,
   Q3). An onboarded user with that address gets an **invitation**: the seat is `invited` with their
   user id; it appears under *Invitations* in their game list with an in-app badge and only a generic
@@ -388,10 +390,17 @@ of an auto-join, whatever their `whoCanAddMe`: every human sees the AI seats and
 accepts knowingly (08 T31). At start the framework, in
 the start transition:
 
-1. re-checks blocks between every pair of joined users: if a pair has a block, the member of the
-   pair who joined later is moved to `removed` (realtime only); if fewer than `min` remain the start
-   fails with `409 NOT_ENOUGH_PLAYERS` (or, for an automatic start, simply doesn't happen); a pair
-   with a block never becomes past opponents later either;
+1. re-checks blocks between every pair of joined users. An outstanding block effect (06 §6.10:
+   one the block's per-call limit left unwritten, or one that raced) is written as its own
+   transition, by the person whose action it is: for the first pair with a block, in joining
+   order, the creator-blocker's Remove of the person blocked, or otherwise the blocker's own
+   Decline (the later-joined one's, if both blocked), with exactly that action's writes, so no one
+   else's transition carries it (review A23-S2-3). The Start (or the accept that found it, the
+   same check runs there) then writes nothing of its own and answers `409 STALE_GAME`, as after
+   any lost race; the client refetches, sees the Decline or Remove at its own version, and tries
+   again. One effect per call; a pair with a block never becomes past opponents later either
+   (built by alpha A23). A game created full whose start at creation finds one simply waits for
+   the creator's Start. Writing these from the sweep instead is M4 backlog (10);
 2. calls `validateStart(options, joinedCount)`. On failure, Start returns `409 INVALID_SEATS`; an
    automatic start simply doesn't happen, the triggering transition (accept or join) still
    succeeds, and the game waits in the lobby for the creator;

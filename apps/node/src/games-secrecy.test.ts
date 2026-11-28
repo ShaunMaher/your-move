@@ -213,16 +213,21 @@ function typedAddressesOnlyTheirOwn(
       for (const row of players as Record<string, unknown>[]) {
         const address = row["invitedAs"];
         if (typeof address !== "string") continue;
-        expect(typedAddresses(record["id"]), `${label}: invitedAs is not stored`).toContain(
-          address,
-        );
+        // A pick's invitedAs is the name the creator picked (05), not an address: only the
+        // creator check below applies to it, and it counts toward no address.
+        const typed = address.includes("@");
+        if (typed) {
+          expect(typedAddresses(record["id"]), `${label}: invitedAs is not stored`).toContain(
+            address,
+          );
+        }
         const [mine] = h.query(
           "SELECT joined_via FROM game_players WHERE game_id = ? AND user_id = ?",
           record["id"],
           viewer.id,
         );
         expect(mine?.["joined_via"], `${label}: invitedAs shown to a non-creator`).toBe("creator");
-        accounted += 1;
+        if (typed) accounted += 1;
       }
     }
     Object.values(record).forEach(walk);
@@ -837,8 +842,8 @@ describe("route-wide secrecy (04 invariant 4)", () => {
       await readEverything(game, players, stranger);
       await hit(a, "GET", "/api/v1/games/types/:type/rules", { type: "example" });
 
-      // Past opponents picked from the list: the game starts at creation (alpha A12), and the
-      // creator's response is checked like every other.
+      // Past opponents picked from the list: two picks are both invited (Q29, alpha A23), and
+      // the creator's response, the invitations and the start are checked like every other.
       const recent = await hit(a, "GET", "/api/v1/players/recent");
       expect(recent.text).toContain(b.id);
       const rematch = await created(a, {
@@ -846,6 +851,8 @@ describe("route-wide secrecy (04 invariant 4)", () => {
         seats: 3,
         invitees: [{ userId: c.id }, { userId: b.id }],
       });
+      expect(stored(rematch).status).toBe("lobby");
+      for (const player of [c, b]) await transition(rematch, player, "accept");
       expect(stored(rematch).status).toBe("active");
       await readEverything(rematch, players, stranger);
       expect(await unchangedByHiddenState(rematch, players)).toBe(3);
@@ -876,57 +883,62 @@ describe("route-wide secrecy (04 invariant 4)", () => {
     },
   );
 
-  it("words: real plays, a swap, previews and a resignation", async () => {
-    const players = [await signUp(h, "Ada"), await signUp(h, "Bo")];
-    const [a, b] = players as [Player, Player];
-    const stranger = await signUp(h, "Stranger");
-    const game = await created(a, { gameType: "words", invitees: [{ email: b.email }] });
-    await readEverything(game, players, stranger);
-    await transition(game, b, "accept");
-    const toAct = async () => {
-      const now = (await hit(a, "GET", "/api/v1/games/:id", { id: game })).json;
-      return playerAt(now, now.game?.toAct[0], players);
-    };
-    const step = async () => {
+  // Like the example game's: about 0.8 s alone, over 5 s on a busy machine (A23 round 1).
+  it(
+    "words: real plays, a swap, previews and a resignation",
+    { timeout: FULL_GAME_TIMEOUT_MS },
+    async () => {
+      const players = [await signUp(h, "Ada"), await signUp(h, "Bo")];
+      const [a, b] = players as [Player, Player];
+      const stranger = await signUp(h, "Stranger");
+      const game = await created(a, { gameType: "words", invitees: [{ email: b.email }] });
       await readEverything(game, players, stranger);
-      expect(await unchangedByHiddenState(game, players)).toBe(2);
-    };
+      await transition(game, b, "accept");
+      const toAct = async () => {
+        const now = (await hit(a, "GET", "/api/v1/games/:id", { id: game })).json;
+        return playerAt(now, now.game?.toAct[0], players);
+      };
+      const step = async () => {
+        await readEverything(game, players, stranger);
+        expect(await unchangedByHiddenState(game, players)).toBe(2);
+      };
 
-    await step();
-    // The opening: almost every rack spells a word across the centre; one that doesn't passes,
-    // and the later turns make up the plays.
-    let played = (await playAWord(game, await toAct())) ? 1 : 0;
-    await step();
-    // A swap: its record says how many tiles, never which.
-    const swapper = await toAct();
-    const rack =
-      ((await hit(swapper, "GET", "/api/v1/games/:id", { id: game })).json.view as WordsView)
-        .yourRack ?? [];
-    const swapped = await hit(
-      swapper,
-      "POST",
-      "/api/v1/games/:id/actions",
-      { id: game },
-      {
-        expectedVersion: await version(game, swapper),
-        action: { type: "swap", tiles: rack.slice(0, 3) },
-      },
-    );
-    expect(swapped.status, swapped.text).toBe(200);
-    await step();
-    // Then words through the tiles on the board, until a second one is played.
-    for (let turn = 0; turn < 8 && played < 2; turn++) {
-      if (await playAWord(game, await toAct())) played += 1;
       await step();
-    }
-    expect(played).toBe(2);
-    const resigned = await transition(game, await toAct(), "resign");
-    expect(resigned.json.game?.status).toBe("finished");
-    await readEverything(game, players, stranger);
-    await hit(a, "GET", "/api/v1/games/types/:type/rules", { type: "words" });
-    // A member's own final view is theirs to see; only another seat's is a secret.
-    expect((await hit(b, "GET", "/api/v1/games/:id", { id: game })).json.view).not.toBeNull();
-  });
+      // The opening: almost every rack spells a word across the centre; one that doesn't passes,
+      // and the later turns make up the plays.
+      let played = (await playAWord(game, await toAct())) ? 1 : 0;
+      await step();
+      // A swap: its record says how many tiles, never which.
+      const swapper = await toAct();
+      const rack =
+        ((await hit(swapper, "GET", "/api/v1/games/:id", { id: game })).json.view as WordsView)
+          .yourRack ?? [];
+      const swapped = await hit(
+        swapper,
+        "POST",
+        "/api/v1/games/:id/actions",
+        { id: game },
+        {
+          expectedVersion: await version(game, swapper),
+          action: { type: "swap", tiles: rack.slice(0, 3) },
+        },
+      );
+      expect(swapped.status, swapped.text).toBe(200);
+      await step();
+      // Then words through the tiles on the board, until a second one is played.
+      for (let turn = 0; turn < 8 && played < 2; turn++) {
+        if (await playAWord(game, await toAct())) played += 1;
+        await step();
+      }
+      expect(played).toBe(2);
+      const resigned = await transition(game, await toAct(), "resign");
+      expect(resigned.json.game?.status).toBe("finished");
+      await readEverything(game, players, stranger);
+      await hit(a, "GET", "/api/v1/games/types/:type/rules", { type: "words" });
+      // A member's own final view is theirs to see; only another seat's is a secret.
+      expect((await hit(b, "GET", "/api/v1/games/:id", { id: game })).json.view).not.toBeNull();
+    },
+  );
 
   it("an email invite claimed at onboarding (alpha A17): the lobby before and after, then the game", async () => {
     const a = await signUp(h, "Ada");

@@ -46,6 +46,11 @@ export interface AppOptions {
    * Worker 8.
    */
   readonly onboardingClaims: number;
+  /**
+   * Lobbies one `POST /api/v1/blocks` changes at most (05 §Blocks); a repeat changes any left.
+   * Each runtime sets it from its per-request budget (09 §3): Node 50, the Worker 6.
+   */
+  readonly blockLobbies: number;
 }
 
 /** The HTTP application `createApp` returns. */
@@ -255,6 +260,7 @@ export function createApp(options: AppOptions): App {
     resources,
     keys,
     random: options.random ?? cryptoRandom,
+    blockLobbies: options.blockLobbies,
   });
 
   // Dev only (06 §4, 09 §2, 08 T19): registered only in local-dev mode, so a production config

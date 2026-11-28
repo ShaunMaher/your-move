@@ -66,9 +66,22 @@ interface RecentOpponent {
 }
 
 /** One block (04 `blocks`): `blockerId` blocked `blockedId`. */
-interface BlockPair {
+export interface BlockPair {
   readonly blockerId: string;
   readonly blockedId: string;
+}
+
+/** One of a user's blocks, as `GET /api/v1/blocks` lists them (05 §Blocks). */
+interface BlockedUser {
+  readonly userId: string;
+  readonly displayName: string | null;
+  readonly createdAt: number;
+}
+
+/** Where a page of {@link UserRepo.blocksOf} continues: after this block, newest first. */
+export interface BlockCursor {
+  readonly createdAt: number;
+  readonly userId: string;
 }
 
 export interface UserRepo {
@@ -104,6 +117,34 @@ export interface UserRepo {
    * direction. Ids that match no user simply match nothing.
    */
   blocksAmong(userIds: readonly string[]): Promise<BlockPair[]>;
+  /**
+   * Whether `viewerId` may block `otherId` (05 §Blocks): another human account that is a past
+   * opponent of the viewer (04 `past_opponents`, which covers every pick), already blocked by them
+   * (a repeat is the same answer), or that has a `joined` row (`joined_at` set) in a game where
+   * the viewer has any row (A23-S-1, S2-1, S2-2). A row never joined never counts: a typed
+   * address's, open or ended, would tie the address to an account (Q3). Never the viewer and
+   * never an AI account.
+   */
+  canBlock(viewerId: string, otherId: string): Promise<boolean>;
+  /**
+   * Records `blockerId`'s block of `blockedId` (an existing one keeps its `created_at`), deletes
+   * the pair's `past_opponents` rows both ways (04 invariant 6), and makes `inert` every open
+   * invitation (`invited`, `normal` or `hidden`) `blockedId` holds in a `lobby` where `blockerId`
+   * has joined, the creator included (06 §6.10, A23-S-2, P2-2), in one atomic batch. That last is
+   * a versionless row write listed in 03 §5.2: no game's version moves, and the creator and other
+   * members see the row as before.
+   */
+  block(blockerId: string, blockedId: string, createdAt: number): Promise<void>;
+  /** Deletes `blockerId`'s block of `blockedId`; true if there was one. Nothing else changes. */
+  unblock(blockerId: string, blockedId: string): Promise<boolean>;
+  /**
+   * The user's own blocks (05 `GET /api/v1/blocks`) with the blocked users' current names,
+   * newest first (then by user id), after `after` if given, at most `limit`.
+   */
+  blocksOf(
+    blockerId: string,
+    page: { readonly after?: BlockCursor; readonly limit: number },
+  ): Promise<BlockedUser[]>;
   update(id: string, set: UserUpdate): Promise<void>;
   /**
    * Every column change of a `PATCH /api/v1/me` (05): the display name and the age confirmation,
@@ -393,6 +434,19 @@ export interface GameWriteSet {
    * revoked, rotated or expired meanwhile makes the transition `stale`, so it is judged again.
    */
   readonly requireJoinLink?: { readonly tokenHash: string; readonly now: number };
+  /**
+   * A precondition of the transition itself (A23-S-4): it happens only while no block, in either
+   * direction, lies between this user and any `joined` member of the game. An accept or a link
+   * join racing a new block makes the transition `stale`, so it is judged again.
+   */
+  readonly requireUnblocked?: { readonly userId: string };
+  /**
+   * The joiner's blocks reach this lobby (06 §6.10, A23-S3-1): with an accept or a link join, the
+   * open (`normal` or `hidden`) invitations in this game of anyone this user has blocked become
+   * `inert`, guarded by the transition's token like every dependent write. The flip a block makes
+   * in lobbies its blocker has already joined, made here for a blocker who joins later.
+   */
+  readonly inertBlockedBy?: { readonly userId: string };
 }
 
 /** `stale`: another transition changed the game since `expectedVersion`; nothing was written. */
@@ -429,12 +483,14 @@ export const UNPLAYED = {
 
 /**
  * What a finished game's players see of its rematch (05 `rematch`): a few columns of the rematch
- * and one user's own row state in it, if any.
+ * and one user's own row state and delivery in it, if any.
  */
 export interface RematchRead {
   readonly game: Pick<GameRecord, "id" | "status" | "createdAt" | "actionCount" | "endReason">;
   /** The user's `game_players.state` in the rematch; null when they hold no row. */
   readonly viewerState: GamePlayerRecord["state"] | null;
+  /** That row's `delivery` (an `inert` invitation shows as no place in it, Q29); null with no row. */
+  readonly viewerDelivery: GamePlayerRecord["delivery"] | null;
 }
 
 /** Which of a user's games to list (05 `GET /api/v1/games`). */
@@ -533,6 +589,25 @@ export interface GameRepo {
    * is a member (04 §Membership: not a declined, left or inert row), oldest first: the lobbies lazy expiry looks at (02 §4).
    */
   overdueLobbies(userId: string, createdBefore: number, limit: number): Promise<string[]>;
+  /**
+   * Up to `limit` ids of `lobby` games created after `createdAfter` (not yet due to expire),
+   * oldest first, where a block by `viewerId` of `otherId` takes effect (06 §6.10, 05 §Blocks):
+   * the viewer is a member (a joined row, or a `normal` or `hidden` invitation) and `otherId`
+   * holds an `invited` or `joined` row the viewer can already tell is theirs: one that has been
+   * joined, or, when the viewer created the lobby, an invitation they picked by id (`invite_email`
+   * NULL; a typed one keeps its address while invited). No other lobby is listed, so the block
+   * never tells the viewer who an unattributed row is (Q3).
+   */
+  blockableLobbies(
+    viewerId: string,
+    otherId: string,
+    window: {
+      readonly createdAfter: number;
+      /** Only games of these type and version pairs: an orphaned one takes no transition (02 §7.3). */
+      readonly installed: readonly InstalledVersion[];
+      readonly limit: number;
+    },
+  ): Promise<string[]>;
   /** How many `lobby`/`active` games the user created (05 `TOO_MANY_GAMES`). */
   countLiveCreated(userId: string): Promise<number>;
   /**
@@ -712,7 +787,7 @@ export interface NudgeWindow {
 }
 
 /** A game type and one rules version of it that this build installs (02 §7.3). */
-interface InstalledVersion {
+export interface InstalledVersion {
   readonly gameType: string;
   readonly gameVersion: number;
 }

@@ -51,7 +51,7 @@ function pastOpponents(a: Player, b: Player, at = now()): void {
   );
 }
 
-/** `blocker` blocks `blocked` (04 `blocks`; nothing writes one through the API before M4). */
+/** `blocker` blocks `blocked` (04 `blocks`), written directly: none of a real block's other effects. */
 function block(blocker: Player, blocked: Player): void {
   h.exec(
     "INSERT INTO blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)",
@@ -177,27 +177,36 @@ describe("adding a past opponent by userId (06 §6.1, §6.2)", () => {
     );
   });
 
-  it("seats past opponents in the order listed, creator first, and starts when all are in", async () => {
+  it("invites every pick when a request picks two or more, and starts once all have accepted (Q29)", async () => {
     const a = await signUp(h, "Ada");
     const [b, c] = [await signUp(h, "Bo"), await signUp(h, "Cy")];
     pastOpponents(a, b);
     pastOpponents(a, c);
-    for (const order of [
-      [c, b],
-      [b, c],
-    ]) {
-      const game = await createGame(h, a, {
-        gameType: "example",
-        seats: 3,
-        invitees: order.map((player) => ({ userId: player.id })),
-      });
-      expect(game.status).toBe("active");
-      expect(game.players.map((player) => player.userId)).toEqual([
-        a.id,
-        ...order.map((p) => p.id),
-      ]);
-      h.advance(DAY);
-    }
+    const game = await createGame(h, a, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ userId: c.id }, { userId: b.id }],
+    });
+    expect(game.status).toBe("lobby");
+    // Listed in the order picked, each as the creator picked them: invited, by name.
+    expect(game.players.slice(1)).toEqual([
+      expect.objectContaining({ userId: null, state: "invited", invitedAs: "Cy" }),
+      expect.objectContaining({ userId: null, state: "invited", invitedAs: "Bo" }),
+    ]);
+    expect(rowsOf(game.id).slice(1)).toEqual([
+      expect.objectContaining({ user_id: c.id, state: "invited", delivery: "normal" }),
+      expect.objectContaining({ user_id: b.id, state: "invited", delivery: "normal" }),
+    ]);
+    expect((await getGame(h, b, game.id)).game.yourInvitation).toBe("normal");
+    expect((await transition(h, b, game.id, "accept")).body.game.status).toBe("lobby");
+    h.advance(1);
+    const started = (await transition(h, c, game.id, "accept")).body.game;
+    expect(started.status).toBe("active");
+    // Seat order `join`: the creator first, then in the order they accepted (02 §4), not the
+    // order picked.
+    expect(
+      [...started.players].sort((x, y) => (x.seat ?? 0) - (y.seat ?? 0)).map((p) => p.userId),
+    ).toEqual([a.id, b.id, c.id]);
   });
 
   it("waits in the lobby while a typed address's seat is open: the picked one joined, the other invited", async () => {
@@ -258,20 +267,14 @@ describe("adding a past opponent by userId (06 §6.1, §6.2)", () => {
 
   it("makes it an invitation when their stored whoCanAddMe is nobody (A12-P-3, 06 §6.2)", async () => {
     const a = await signUp(h, "Ada");
-    const [b, c] = [await signUp(h, "Bo"), await signUp(h, "Cy")];
+    const b = await signUp(h, "Bo");
     pastOpponents(a, b);
-    pastOpponents(a, c);
     h.exec("UPDATE users SET settings = ? WHERE id = ?", '{"whoCanAddMe":"nobody"}', b.id);
-    const game = await createGame(h, a, {
-      gameType: "example",
-      seats: 3,
-      invitees: [{ userId: b.id }, { userId: c.id }],
-    });
+    const game = await createGame(h, a, { gameType: "words", invitees: [{ userId: b.id }] });
     expect(game.status).toBe("lobby");
-    expect(rowsOf(game.id).slice(1)).toEqual([
+    expect(rowsOf(game.id)[1]).toEqual(
       expect.objectContaining({ user_id: b.id, state: "invited", delivery: "normal" }),
-      expect.objectContaining({ user_id: c.id, state: "joined", joined_via: "added" }),
-    ]);
+    );
     expect((await getGame(h, b, game.id)).game.yourInvitation).toBe("normal");
     // b's accept fills the last seat: the game starts.
     expect((await transition(h, b, game.id, "accept")).body.game.status).toBe("active");
@@ -484,14 +487,22 @@ describe("blocks among the people added (06 §6.1)", () => {
     },
   );
 
-  // Today's behaviour, which tells the creator about a block between two people they picked
-  // (06 §6.1, open-questions Q29). It MUST change in M4 before anything can write `blocks`:
-  // the default there makes every pick an invitation when a request picks two or more.
-  it("gives the later of two picked past opponents with a block between them an inert invitation", async () => {
+  // Q29, settled by alpha A23 (option e): with two or more picks every pick is an invitation, so a
+  // block between two of them shows the creator nothing (06 §6.1). Replaces A12's test of the old
+  // behaviour, where the later pick's state told the creator about the block.
+  it("shows the creator two invited picks whether or not they have a block between them (Q29)", async () => {
     const a = await signUp(h, "Ada");
     const [b, c] = [await signUp(h, "Bo"), await signUp(h, "Cy")];
     pastOpponents(a, b);
     pastOpponents(a, c);
+    const shape = (players: readonly Record<string, unknown>[]) =>
+      players.map((player) => ({ ...player, playerId: undefined }));
+    const control = await createGame(h, a, {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ userId: b.id }, { userId: c.id }],
+    });
+    h.advance(DAY);
     block(b, c);
     const game = await createGame(h, a, {
       gameType: "example",
@@ -499,11 +510,35 @@ describe("blocks among the people added (06 §6.1)", () => {
       invitees: [{ userId: b.id }, { userId: c.id }],
     });
     expect(game.status).toBe("lobby");
+    expect(shape(game.players)).toEqual(shape(control.players));
     expect(rowsOf(game.id).slice(1)).toEqual([
-      expect.objectContaining({ user_id: b.id, state: "joined" }),
+      expect.objectContaining({ user_id: b.id, state: "invited", delivery: "normal" }),
       expect.objectContaining({ user_id: c.id, state: "invited", delivery: "inert" }),
     ]);
     expect((await call(h, c, "GET", `/api/v1/games/${game.id}`)).status).toBe(404);
+  });
+
+  it("counts an inert pick toward the per-pair live-game cap exactly as a normal one (Q29)", async () => {
+    const a = await signUp(h, "Ada");
+    const [b, c] = [await signUp(h, "Bo"), await signUp(h, "Cy")];
+    pastOpponents(a, b);
+    pastOpponents(a, c);
+    block(b, c);
+    for (let i = 0; i < 5; i++) {
+      const game = await createGame(h, a, {
+        gameType: "example",
+        seats: 3,
+        invitees: [{ userId: b.id }, { userId: c.id }],
+      });
+      expect(rowsOf(game.id)[2]).toEqual(expect.objectContaining({ delivery: "inert" }));
+      h.advance(DAY);
+    }
+    // c's five inert invitations fill the (creator, userId) pair, as five normal ones would.
+    const over = await call(h, a, "POST", "/api/v1/games", {
+      gameType: "words",
+      invitees: [{ userId: c.id }],
+    });
+    expect([over.status, code(over.body)]).toEqual([409, "TOO_MANY_GAMES"]);
   });
 });
 

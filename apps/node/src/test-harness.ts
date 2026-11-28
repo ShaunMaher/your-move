@@ -30,7 +30,7 @@ import { nodeRepositories, openSqlite } from "./db/sqlite.js";
 import { nodeDictionaries } from "./dictionaries.js";
 import type { NodeConfig } from "./node-config.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
-import { NODE_ONBOARDING_CLAIMS } from "./server.js";
+import { NODE_BLOCK_LOBBIES, NODE_ONBOARDING_CLAIMS } from "./server.js";
 import {
   NODE_CLAIMS_PER_RUN,
   NODE_JOIN_LINKS_PER_RUN,
@@ -147,6 +147,8 @@ export interface HarnessOptions {
   readonly joinLinksPerRun?: number;
   /** Seats completing onboarding claims; Node's own by default. */
   readonly onboardingClaims?: number;
+  /** Lobbies one block changes at most (05 §Blocks); Node's 50 by default. */
+  readonly blockLobbies?: number;
   /** Wraps the capturing email sender (e.g. to fail some messages and still capture the rest). */
   readonly wrapSender?: (capture: EmailSender) => EmailSender;
   /** The installed games (the generated registry); none by default. */
@@ -199,6 +201,7 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     platform,
     games,
     onboardingClaims: options.onboardingClaims ?? NODE_ONBOARDING_CLAIMS,
+    blockLobbies: options.blockLobbies ?? NODE_BLOCK_LOBBIES,
     ...(options.random === undefined ? {} : { random: options.random }),
   });
   const sweep = createSweep({

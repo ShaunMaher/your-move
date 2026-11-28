@@ -61,13 +61,16 @@ export function fakeApi(routes: Routes) {
       };
       calls.push(call);
       // A route may name a query (`GET /api/v1/games?invitations=hidden`); the hidden-invitation
-      // list is empty unless a test says otherwise.
+      // list and Settings' blocked players are empty unless a test says otherwise.
       const search = new URL(request.url).search;
       const route: Handler | Answer | undefined =
         routes[`${method} ${path}${search}`] ??
         (search === "?invitations=hidden" && path === "/api/v1/games"
           ? json({ games: [], nextCursor: null })
-          : routes[`${method} ${path}`]);
+          : (routes[`${method} ${path}`] ??
+            (method === "GET" && path === "/api/v1/blocks"
+              ? json({ blocks: [], nextCursor: null })
+              : undefined)));
       const answer = await (typeof route === "function" ? route(call) : route);
       // A body can be read once; the same route may be asked again.
       if (answer instanceof Response) return answer.clone();

@@ -21,6 +21,11 @@ const WORKER_JOIN_LINKS_PER_RUN = 100;
  * each, so 8 keep the request at about 36 (09 §3); the sweep claims the rest.
  */
 const WORKER_ONBOARDING_CLAIMS = 8;
+/**
+ * Lobbies one block changes at most (05 §Blocks): about 6 statements each, so 6 keep the request at
+ * about 44 (09 §3); a repeat changes any left.
+ */
+const WORKER_BLOCK_LOBBIES = 6;
 
 export interface Built {
   readonly app: ReturnType<typeof createApp>;
@@ -30,7 +35,12 @@ export interface Built {
 /** The core app and sweep over the Worker's platform, with the Worker's budgets. */
 export function workerRuntime(platform: Platform, games: readonly InstalledGame[]): Built {
   return {
-    app: createApp({ platform, games, onboardingClaims: WORKER_ONBOARDING_CLAIMS }),
+    app: createApp({
+      platform,
+      games,
+      onboardingClaims: WORKER_ONBOARDING_CLAIMS,
+      blockLobbies: WORKER_BLOCK_LOBBIES,
+    }),
     sweep: createSweep({
       platform,
       games,

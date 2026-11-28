@@ -1294,6 +1294,49 @@
         "required": ["game"],
         "additionalProperties": false
       },
+      "BlockList": {
+        "type": "object",
+        "properties": {
+          "blocks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "userId": { "type": "string" },
+                "displayName": {
+                  "type": ["string", "null"],
+                  "description": "Their current display name; null only for an account without one."
+                },
+                "createdAt": {
+                  "type": "integer",
+                  "description": "When you blocked them (ms since the epoch)."
+                }
+              },
+              "required": ["userId", "displayName", "createdAt"],
+              "additionalProperties": false
+            }
+          },
+          "nextCursor": {
+            "type": ["string", "null"],
+            "description": "Pass as `?cursor=` for the next page; null on the last one."
+          }
+        },
+        "required": ["blocks", "nextCursor"],
+        "additionalProperties": false
+      },
+      "BlockRequest": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "The person to block: a past opponent, or someone who holds or held a row in a game with you."
+          }
+        },
+        "required": ["userId"],
+        "additionalProperties": false
+      },
       "SeenRequest": {
         "type": "object",
         "properties": { "version": { "type": "integer", "minimum": 0 } },
@@ -3693,6 +3736,178 @@
           },
           "429": {
             "description": "Too many join-link lookups and joins from you or your network (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/blocks": {
+      "get": {
+        "operationId": "listBlocks",
+        "x-scope": "session",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Blocks"],
+        "summary": "The people you've blocked",
+        "description": "Session only. Newest first, 100 per page.",
+        "parameters": [
+          {
+            "schema": { "type": "string", "maxLength": 200 },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Your blocks.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/BlockList" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createBlock",
+        "x-scope": "session",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Blocks"],
+        "summary": "Block someone",
+        "description": "Session only. Blocks a past opponent, or someone who holds or held a row in a game with you; they are never told. It removes you from each other's past opponents, and in each lobby you share where you can already tell their row is theirs (they have joined, or you created it and picked them) it removes their seat if you created the lobby and otherwise declines yours, exactly as Remove or Decline would. Games already under way carry on. `204` also when they were already blocked (a repeat applies it to any lobby left).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/BlockRequest" } }
+          }
+        },
+        "responses": {
+          "204": { "description": "Blocked." },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No one you can block by that id (`NOT_FOUND`): no shared game or past game, yourself, or an AI account.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many writes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/blocks/{userId}": {
+      "delete": {
+        "operationId": "deleteBlock",
+        "x-scope": "session",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Blocks"],
+        "summary": "Unblock someone",
+        "description": "Session only, body-less. Lifts your block; past opponents it removed stay removed until you finish another game together.",
+        "parameters": [
+          {
+            "schema": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "required": true,
+            "name": "userId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": { "description": "Unblocked." },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN`, `ONBOARDING_REQUIRED` (onboarding incomplete, or a re-prompt after a `MIN_AGE` rise, 06 §5) or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "You haven't blocked that person (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many writes (`RATE_LIMITED`).",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
             }

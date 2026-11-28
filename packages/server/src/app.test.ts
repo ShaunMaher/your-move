@@ -12,7 +12,7 @@ import { PROD_ENV, TEST_VAPID, testPlatform } from "./test-support.js";
 
 function setup(env = PROD_ENV) {
   const platform = testPlatform(env);
-  const app = createApp({ platform, games: [], onboardingClaims: 8 });
+  const app = createApp({ platform, games: [], onboardingClaims: 8, blockLobbies: 6 });
   return { platform, app };
 }
 
@@ -79,6 +79,8 @@ describe("GET /api/v1/openapi.json", () => {
       "/api/v1/auth/logout-all",
       "/api/v1/auth/otp/request",
       "/api/v1/auth/otp/verify",
+      "/api/v1/blocks",
+      "/api/v1/blocks/{userId}",
       "/api/v1/catalog",
       "/api/v1/config",
       "/api/v1/games",
@@ -211,7 +213,12 @@ describe("errors and logging", () => {
         throw new TypeError("kaboom");
       },
     });
-    const app = createApp({ platform: { ...platform, config }, games: [], onboardingClaims: 8 });
+    const app = createApp({
+      platform: { ...platform, config },
+      games: [],
+      onboardingClaims: 8,
+      blockLobbies: 6,
+    });
     const failed = await app.request("/api/v1/config");
     expect(failed.status).toBe(500);
     const body = await failed.text();
@@ -240,7 +247,12 @@ describe("errors and logging", () => {
     });
     return {
       platform,
-      app: createApp({ platform: { ...platform, config }, games: [], onboardingClaims: 8 }),
+      app: createApp({
+        platform: { ...platform, config },
+        games: [],
+        onboardingClaims: 8,
+        blockLobbies: 6,
+      }),
     };
   }
 
@@ -359,7 +371,12 @@ describe("errors and logging", () => {
     const platform = testPlatform();
     let calls = 0;
     const now = (): Date => new Date(Date.UTC(2026, 0, 1) + 25 * calls++);
-    const app = createApp({ platform: { ...platform, now }, games: [], onboardingClaims: 8 });
+    const app = createApp({
+      platform: { ...platform, now },
+      games: [],
+      onboardingClaims: 8,
+      blockLobbies: 6,
+    });
     await app.request("/api/v1/health");
     expect(platform.lines.at(-1)).toMatchObject({ durationMs: 25 });
   });
@@ -477,6 +494,7 @@ describe("errors and logging", () => {
         platform: { ...platform, clientIp: () => ({ ok: false, reason: "missing" }) },
         games: [],
         onboardingClaims: 8,
+        blockLobbies: 6,
       });
       const res = await app.request(OTP, post(JSON.stringify({ email: "a@example.org" })));
       expect(res.status).toBe(400);
@@ -551,6 +569,7 @@ describe("errors and logging", () => {
             platform: { ...platform, repos } as never,
             games: [],
             onboardingClaims: 8,
+            blockLobbies: 6,
           }),
         };
       }

@@ -215,20 +215,21 @@ export function invitationOf(
  *   replaced, and the press expires an overdue lobby first;
  * - otherwise `joined` if they hold a joined or seated row in it, `invited` while they hold an
  *   invitation in its open lobby, and `none` otherwise (declined, left, removed, dropped at its
- *   start, or no row).
+ *   start, an `inert` invitation, or no row).
  *
- * An `inert` invitation shows as `invited`, like any other: whether a row is inert never shows,
- * and accepting it is refused as `404`, as accepting an invitation with a block is (05).
+ * An `inert` invitation (a block between two players carried over, Q29) is `none`, like every row
+ * that gives no access, so its holder is offered no Accept that would fail; the other players see
+ * it as invited, like any invitation (05, alpha A23).
  */
 export function rematchOf(rematch: RematchRead, now: number): GameEnvelope["rematch"] {
-  const { game, viewerState } = rematch;
+  const { game, viewerState, viewerDelivery } = rematch;
   if (endedUnplayed(game)) return null;
   if (game.status === "lobby" && now >= lobbyExpiresAt(game)) return null;
   const lobbyOpen = game.status === "lobby";
   const you =
     viewerState === "joined" || viewerState === "playing" || viewerState === "out"
       ? "joined"
-      : viewerState === "invited" && lobbyOpen
+      : viewerState === "invited" && viewerDelivery !== "inert" && lobbyOpen
         ? "invited"
         : "none";
   return { gameId: game.id, you };

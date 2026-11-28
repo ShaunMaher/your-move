@@ -12,23 +12,10 @@ import { createRoute, z } from "@hono/zod-openapi";
 import { gameEnvelopeSchema, listSummarySchema, textSchema } from "@your-move/sdk";
 
 import { EmptyObjectSchema } from "./auth.js";
-import { ErrorResponseSchema } from "./errors.js";
+import { errors } from "./error-responses.js";
 import { API_V1 } from "./routes.js";
 
-const errorContent = { "application/json": { schema: ErrorResponseSchema } } as const;
 const SESSION = [{ sessionCookie: [] }];
-
-/** Error responses by status, each with the shared error body (05 §Errors). */
-function errors<const T extends Readonly<Record<number, string>>>(
-  descriptions: T,
-): { [K in keyof T]: { description: string; content: typeof errorContent } } {
-  return Object.fromEntries(
-    Object.entries(descriptions).map(([status, description]) => [
-      status,
-      { description, content: errorContent },
-    ]),
-  ) as { [K in keyof T]: { description: string; content: typeof errorContent } };
-}
 
 const COMMON_ERRORS = {
   400: "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",

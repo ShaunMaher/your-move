@@ -1,5 +1,5 @@
 /** The Settings toggles: email nudges (03 §7; alpha A6) and notifications (07 §4; alpha A8). */
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../App.js";
@@ -367,5 +367,86 @@ describe("a launch without a session (06 §4, A8-P-1)", () => {
     });
     expect(device.state.subscription).toBeNull();
     expect(calls.filter((call) => call.path.startsWith("/api/v1/push"))).toEqual([]);
+  });
+});
+
+describe("blocked players (07 §1, alpha A23)", () => {
+  const BO = { userId: "u-bo", displayName: "Bo", createdAt: Date.UTC(2026, 10, 2) };
+  const CY = { userId: "u-cy", displayName: null, createdAt: Date.UTC(2026, 10, 1) };
+
+  it("says so when nobody is blocked", async () => {
+    const { api } = routes(json(ME));
+    render(<App api={api} />);
+    expect(await screen.findByText("You haven't blocked anyone.")).toBeDefined();
+  });
+
+  it("lists them, and Unblock asks first, then lifts the block and refreshes", async () => {
+    let listed = [BO, CY];
+    const { api, calls } = fakeApi({
+      "GET /api/v1/config": json(CONFIG),
+      "GET /api/v1/me": json(ME),
+      "GET /api/v1/blocks": () => json({ blocks: listed, nextCursor: null }),
+      "DELETE /api/v1/blocks/u-bo": () => {
+        listed = [CY];
+        return new Response(null, { status: 204 });
+      },
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Blocked players" });
+    expect(await screen.findByText("Bo")).toBeDefined();
+    // The empty status line is in the page for screen readers but takes no space (A23-P2-11).
+    const section = screen.getByRole("region", { name: "Blocked players" });
+    expect(within(section).getByRole("status").className).toBe("visually-hidden");
+    expect(screen.getByText("A player")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Unblock Bo" }));
+    const dialog = await screen.findByRole("dialog", { name: "Unblock Bo?" });
+    expect(dialog.textContent).toContain("They'll be able to invite you to games again.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Unblock" }));
+    await waitFor(() => {
+      expect(screen.queryByText("Bo")).toBeNull();
+    });
+    // The row that had focus is gone: the change is announced and focus is on the section.
+    expect(screen.getByText("Unblocked Bo.").getAttribute("role")).toBe("status");
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Blocked players" }));
+    expect(calls.filter((call) => call.method === "DELETE")).toEqual([
+      expect.objectContaining({ path: "/api/v1/blocks/u-bo" }),
+    ]);
+    expect(screen.getByText("A player")).toBeDefined();
+  });
+
+  it("pages with Show more, disabled while a page loads", async () => {
+    let release: (answer: Response) => void = () => undefined;
+    const { api } = fakeApi({
+      "GET /api/v1/config": json(CONFIG),
+      "GET /api/v1/me": json(ME),
+      "GET /api/v1/blocks": json({ blocks: [BO], nextCursor: "c1" }),
+      "GET /api/v1/blocks?cursor=c1": () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
+    });
+    render(<App api={api} />);
+    expect(await screen.findByText("Bo")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    const loading = await screen.findByRole("button", { name: "Loading…" });
+    expect((loading as HTMLButtonElement).disabled).toBe(true);
+    release(json({ blocks: [CY], nextCursor: null }));
+    expect(await screen.findByText("A player")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  });
+
+  it("says why an unblock failed", async () => {
+    const { api } = fakeApi({
+      "GET /api/v1/config": json(CONFIG),
+      "GET /api/v1/me": json(ME),
+      "GET /api/v1/blocks": json({ blocks: [BO], nextCursor: null }),
+      "DELETE /api/v1/blocks/u-bo": problem(500, "INTERNAL"),
+    });
+    render(<App api={api} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Unblock Bo" }));
+    const dialog = await screen.findByRole("dialog", { name: "Unblock Bo?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Unblock" }));
+    expect(await screen.findByText("Something went wrong. Please try again.")).toBeDefined();
+    expect(screen.getByText("Bo")).toBeDefined();
   });
 });

@@ -261,11 +261,15 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    request (alpha A12): "already added" and "earlier invitee" above always put a picked invitee
    before every typed one, so a typed address can only ever get the `inert` seat itself and never
    changes how a picked one is seated (which the creator would see, since an auto-join shows as
-   `joined`). Between two picked invitees with a block, the later one gets an `inert` invitation
-   instead of an auto-join; the creator sees it as invited rather than joined, so this one case
-   does tell the creator that two of their past opponents have a block between them. It can't arise
-   until blocks can be made (M4), and Q29 settles it before then (default: with two or more picks
-   in a request, every pick is an invitation).
+   `joined`). **A request that picks two or more past opponents makes every pick an invitation**
+   (Q29, settled by alpha A23 with its option (e)): no pick is auto-joined, whatever its
+   `whoCanAddMe`, so a block between two picks changes nothing the creator sees: the later one's
+   invitation is `inert` instead of `normal`, and both show as invited. A request with a single
+   pick may auto-join it (§6.2); its only block check is with the creator, which is refused as
+   above. Nothing else the creator can observe differs either: an `inert` pick is counted toward
+   the per-pair limits and the live-game cap exactly as a `normal` one (by (creator, `userId`)),
+   never toward the inbound cap, and spends the shared invite-email caps only on the never-read
+   `silent` counters, as every unmailed pick does (§6.6).
 
    To limit typo invites, the players step shows each typed address back for confirmation before
    Create ("Check the address: …"). A row that has never been `joined` never shows a name or user
@@ -276,7 +280,8 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    `emailId`, never by the user it resolves to.
 2. **Who can add me to games** (`users.settings.whoCanAddMe`, set in Settings):
    - `pastOpponents` (default): people I've finished a game with (04 `past_opponents`) can pick me
-     from their list and I'm auto-joined and notified (push "<creator> added you to a game" +
+     from their list and I'm auto-joined and notified (when I'm their only pick: a request picking
+     two or more makes every pick an invitation, §6.1) (push "<creator> added you to a game" +
      realtime; when the game starts at creation and it's my turn, the one push says "<creator>
      added you to a game. Your turn.", 03 §7). Everyone else — including a
      past opponent who types my email — sends me an **invitation**. A game with AI seats or with
@@ -286,8 +291,8 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
 
    Decision (alpha A12 review S2-2): a creator who picks someone whose setting is `nobody` sees that
    seat as invited rather than joined, which reveals that person's global preference to their past
-   opponents. That is acceptable: it says nothing about an address or a block, and Q29's default
-   (every pick an invitation when a request picks two or more) hides it in group games.
+   opponents. That is acceptable: it says nothing about an address or a block, and Q29's
+   settlement (every pick an invitation when a request picks two or more) hides it in group games.
 
    (There's no "anyone" setting: adding by email must never auto-join, or the creator would learn
    that the address has an account.)
@@ -506,10 +511,46 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    08 T20) — and blocking someone deletes the relationship both
    ways. A test asserts that no `past_opponents` row ever exists for a blocked pair (04 invariant 6).
 10. **Blocks** apply between every pair of users in a game: they're checked when seats are added
-    (§6.1), on accept, on join, and again at start (02 §4). Blocking someone you share a lobby with
-    takes effect at once: if you created it, their seat is removed; otherwise your own seat is
-    declined or left (05 §Blocks). You can block anyone who is a past opponent or who holds or held a
-    row in a game with you, including from the invitation screen.
+    (§6.1), on every accept, on join, at a claim (§6.4), and again at start (02 §4). You can block
+    anyone who is a past opponent or whose row in a game with you has been joined (05 §Blocks: a
+    row never joined never counts, Q3), from a lobby (07). Blocking deletes the past-opponent pair
+    both ways (§6.9). Games already under way carry on: a block never changes an `active` or ended
+    game.
+
+    In the same batch, every open invitation the person blocked holds in a lobby you have joined
+    (or created) becomes `inert` (alpha A23 review S-2): a versionless row write listed in 03 §5.2
+    (no version bump, nothing for the creator or other members to see, since the three deliveries
+    look alike), so for them the invitation is gone exactly as if they had been removed, and it can
+    never be accepted. Where you are only invited yourself, nothing changes yet (review P2-2):
+    your own accept, or your link join, makes their open invitation in that game `inert` in its
+    own transition (review S3-1), so whichever of you accepts second finds the game gone, as after
+    a Remove; if they accept first, your accept's check finds the block and declines yours.
+
+    Then, where you can already tell their row is theirs (their row has been `joined`, which the
+    lobby shows by name, or you created the lobby and picked them by `userId`): if you created the
+    lobby, their seat is removed; otherwise your own seat is declined. Each is written exactly as
+    the creator's Remove or your own Decline would be (02 §4: its own transition, the same state and
+    version bump, and the lobby can end `declined` the same way). It is declined rather than `left`
+    even for a joined seat, because the lobby's own Decline is how a joined player leaves today
+    (07 §1) and a `left` row would mark the block. Where the other person holds only an invitation
+    you can't attribute, nothing visible changes: acting on it would tell you who that row is, and
+    a creator would learn which typed address is whose (Q3). Where the call's per-runtime lobby
+    limit left an effect unwritten, the lobby's next Start or accept writes it first, as its own
+    transition by you (your Decline) or by you as creator (your Remove), and that Start or accept
+    answers `409 STALE_GAME` with nothing of its own written (02 §4 step 1, review S2-3). A join
+    link refuses either of you; its batch's guard checks joined members only, since an invited row
+    is kept apart by its own accept check (review P2-10).
+
+    What can still be noticed (accepted residuals, F-26, 08 T20): the past-opponent pair is gone,
+    so each disappears from the other's "People you've played" and a pick between them is
+    refused, which tells the one who didn't block that the other did; and when you block, from
+    their invitation, a past opponent who invited you by typing an address, the pair's
+    disappearance also tells them that address reached your account. Blocking several co-members
+    at once declines several lobbies at once, a pattern a creator who shares them could notice.
+    Two people comparing what they see (a join link, an invitation that vanished) can infer that a
+    block involves one of them (as T24). An accept that races a block reads as an invitation gone,
+    like a Remove. Unblocking lifts the block only: deleted pairs stay deleted and `inert` seats
+    stay `inert` (alpha A23).
 
 11. **Rematch** (alpha A15, 05 `POST /api/v1/games/:id/rematch`). Any player of a `finished` game
     may ask for its rematch; it is created as if they had picked every other player of that game by
@@ -541,9 +582,12 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
       (any declined ending, or cancelled or expired before any action, but never an operator's
       cancel; 04 `rematch_game_id`) shows as no rematch (`null`) and may be replaced;
       its status is one every member of it saw, and any player could have pressed Rematch anyway. An `inert` invitation (a block
-      between two picked players, which can't arise until M4, Q29) shows as invited, and accepting
-      it is `404`, the same as accepting an invitation whose block is found on accept (05); it shows
-      the player that a rematch was made, which they'd also learn from the other players.
+      between two carried-over players, the later of them seated so, Q29) shows to its holder as
+      `none` from the moment the rematch exists, like any row that gives no access, so they are
+      offered no Accept that would fail; to them it reads like an immediate Remove. The other
+      players see their row as invited, as for every invitation (Q29, alpha A23). The holder can
+      still learn of the rematch from the other players, and that they aren't in it: the residual
+      of people comparing answers (08 T24).
     - Status codes, error codes, caps and their timing class are those of `POST /api/v1/games` (and
       of `POST …/accept` for the accept), whatever the other players' states. Two simultaneous
       presses yield one game; the loser's own daily creation counters were already counted (its

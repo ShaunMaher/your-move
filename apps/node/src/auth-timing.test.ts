@@ -583,6 +583,46 @@ describe("enumeration parity: timing of creating a game with a typed address (06
     );
   }
 
+  /**
+   * A known, onboarded account that has blocked its creator (05 §Blocks, alpha A23): the seat is
+   * `inert`, never delivered or mailed (06 §6.1). The creator is made just before the measured
+   * request, as for every arm, and the block written right after it.
+   */
+  const blockedArm = (cookies: Map<string, string>): Arm => ({
+    make: knownArm.make,
+    prepare: async (harness, email) => {
+      const creator = await signUp(harness, "Creator");
+      cookies.set(email, creator.cookie);
+      harness.exec(
+        "INSERT INTO blocks (blocker_id, blocked_id, created_at) SELECT id, ?, ? FROM users WHERE email = ?",
+        creator.id,
+        T0,
+        email,
+      );
+    },
+  });
+
+  it(
+    "POST /api/v1/games with one typed address: blocked vs unknown",
+    async () => {
+      h = gameHarness(RAISED);
+      const cookies = new Map<string, string>();
+      const result = await compare(
+        h,
+        creations(h, cookies),
+        blockedArm(cookies),
+        withCreator(cookies)(unknownArm),
+      );
+      // The blocked arm's seats really were inert: not vacuous.
+      expect(
+        h.query("SELECT count(*) AS n FROM game_players WHERE delivery = 'inert'")[0]?.["n"],
+      ).toBe(PAIRS);
+      report("create blocked vs unknown", result);
+      expectIndistinguishable(result);
+    },
+    CREATE_TIMEOUT_MS,
+  );
+
   it(
     "has power: two extra indexed SELECTs on the known path are detected",
     async () => {

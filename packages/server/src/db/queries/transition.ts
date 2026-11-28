@@ -12,7 +12,7 @@
  * A guard on the version would be wrong both ways: `version = expected` skips the winner's own
  * dependent writes, `version = expected + 1` lets the loser's through.
  */
-import { and, eq, getTableColumns, is, SQL, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, inArray, is, SQL, sql } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 
 import type { Database, Statement } from "../database.js";
@@ -57,6 +57,11 @@ export function unblocked(a: string, b: string): SQL {
   return sql`NOT EXISTS (SELECT 1 FROM ${blocks} WHERE (${blocks.blockerId} = ${a} AND ${blocks.blockedId} = ${b}) OR (${blocks.blockerId} = ${b} AND ${blocks.blockedId} = ${a}))`;
 }
 
+/** No block in either direction between `userId` and any other `joined` member of the game. */
+function unblockedWithJoined(gameId: string, userId: string): SQL {
+  return sql`NOT EXISTS (SELECT 1 FROM ${gamePlayers} JOIN ${blocks} ON (${blocks.blockerId} = ${userId} AND ${blocks.blockedId} = ${gamePlayers.userId}) OR (${blocks.blockerId} = ${gamePlayers.userId} AND ${blocks.blockedId} = ${userId}) WHERE ${gamePlayers.gameId} = ${gameId} AND ${gamePlayers.state} = 'joined' AND ${gamePlayers.userId} <> ${userId})`;
+}
+
 /** The statements of one transition, statement 1 first. */
 export function transitionStatements(
   db: Database,
@@ -67,6 +72,7 @@ export function transitionStatements(
 ): [Statement, ...Statement[]] {
   const guard = tokenGuard(gameId, token);
   const link = writes.requireJoinLink;
+  const actor = writes.requireUnblocked;
   const first = db
     .update(games)
     .set({ ...writes.game, version: sql`${games.version} + 1`, writeToken: token })
@@ -77,6 +83,7 @@ export function transitionStatements(
         link === undefined
           ? undefined
           : sql`EXISTS (SELECT 1 FROM ${joinLinks} WHERE ${joinLinks.gameId} = ${gameId} AND ${joinLinks.tokenHash} = ${link.tokenHash} AND ${joinLinks.expiresAt} > ${link.now})`,
+        actor === undefined ? undefined : unblockedWithJoined(gameId, actor.userId),
       ),
     )
     .returning({ id: games.id });
@@ -104,6 +111,22 @@ export function transitionStatements(
         set: { lastFinishedAt: pair.lastFinishedAt },
       }),
     ),
+    ...(writes.inertBlockedBy === undefined
+      ? []
+      : [
+          db
+            .update(gamePlayers)
+            .set({ delivery: "inert" })
+            .where(
+              and(
+                eq(gamePlayers.gameId, gameId),
+                eq(gamePlayers.state, "invited"),
+                inArray(gamePlayers.delivery, ["normal", "hidden"]),
+                sql`${gamePlayers.userId} IN (SELECT ${blocks.blockedId} FROM ${blocks} WHERE ${blocks.blockerId} = ${writes.inertBlockedBy.userId})`,
+                guard,
+              ),
+            ),
+        ]),
     ...(writes.deleteJoinLink === true
       ? [db.delete(joinLinks).where(and(eq(joinLinks.gameId, gameId), guard))]
       : []),

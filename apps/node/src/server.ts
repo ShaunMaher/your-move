@@ -21,6 +21,9 @@ const DICTIONARIES_PREFIX = "/assets/dictionaries/";
  */
 export const NODE_ONBOARDING_CLAIMS = 50;
 
+/** Lobbies one block changes at most on Node (05 §Blocks, 09 §3); a repeat changes any left. */
+export const NODE_BLOCK_LOBBIES = 50;
+
 export interface NodeAppOptions {
   readonly platform: Platform;
   readonly games: readonly InstalledGame[];
@@ -38,6 +41,7 @@ export function createNodeApp(options: NodeAppOptions): App {
     platform: options.platform,
     games: options.games,
     onboardingClaims: NODE_ONBOARDING_CLAIMS,
+    blockLobbies: NODE_BLOCK_LOBBIES,
   });
   // Server paths (/api/*, /__dev/*, /manifest.webmanifest) are answered by createApp and never
   // reach the handlers below.

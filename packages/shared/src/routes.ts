@@ -1,11 +1,9 @@
 import { createRoute, z } from "@hono/zod-openapi";
 
-import { ErrorResponseSchema } from "./errors.js";
+import { errorContent } from "./error-responses.js";
 
 /** Every public endpoint lives under this prefix (docs/spec/05-api.md §Versioning). */
 export const API_V1 = "/api/v1";
-
-const errorContent = { "application/json": { schema: ErrorResponseSchema } } as const;
 
 export const HealthResponseSchema = z
   .object({ ok: z.literal(true) })

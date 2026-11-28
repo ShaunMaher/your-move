@@ -4,22 +4,27 @@ import { type AnyGameDefinition, OK } from "@your-move/sdk";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import type { GamePlayerRecord, GameRecord } from "../db/repositories.js";
+import type { BlockPair, GamePlayerRecord, GameRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
 import { EngineFault, guardEngine } from "./engine-fault.js";
 import {
-  accept,
+  accept as acceptWith,
+  blockedBy,
+  blockEffect,
   cancel,
   decline,
   endedUnplayed,
   expire,
+  type GameContext,
+  isOutstanding,
+  isSettled,
   isModuleOutcome,
   isRefusal,
   LOBBY_LIFETIME_MS,
   removeSeat,
   rerank,
-  start,
-  startAtCreation,
+  start as startWith,
+  startAtCreation as startAtCreationWith,
 } from "./lifecycle.js";
 import { addableUserIds, rematchOf } from "./present.js";
 import { cryptoRandom, recorded } from "./random.js";
@@ -30,6 +35,27 @@ import {
   ResourceConfigError,
 } from "./resources.js";
 import { lastOptionsOf, mergeOptions, rememberedInput, whoCanAddMeOf } from "./settings.js";
+
+/** No blocks among anyone (04 `blocks`). */
+const NO_BLOCKS: readonly BlockPair[] = [];
+
+/** An accept with no blocks: a write set or a refusal, never a block's decline. */
+function accept(ctx: GameContext, viewer: GamePlayerRecord, now: number) {
+  const outcome = acceptWith(ctx, viewer, now, NO_BLOCKS);
+  if (isSettled(outcome) || isOutstanding(outcome)) {
+    throw new Error("an accept with no blocks found one");
+  }
+  return outcome;
+}
+
+/** A Start with no blocks: a write set or a refusal, never a block's settlement. */
+function start(ctx: GameContext, viewer: GamePlayerRecord, now: number) {
+  const outcome = startWith(ctx, viewer, now, NO_BLOCKS);
+  if (isOutstanding(outcome)) throw new Error("a start with no blocks found one");
+  return outcome;
+}
+
+const startAtCreation = (ctx: GameContext, now: number) => startAtCreationWith(ctx, now, NO_BLOCKS);
 
 describe("rerank (02 §4 Ranking)", () => {
   it("drops declined seats and re-ranks the rest with standard competition ranking", () => {
@@ -351,6 +377,7 @@ describe("an automatic start validateStart refuses (02 §4 Start, step 2)", () =
     ) =>
       ({
         id,
+        userId: `u-${id}`,
         state,
         joinedVia,
         joinedAt: state === "joined" ? 1 : null,
@@ -378,6 +405,10 @@ describe("an automatic start validateStart refuses (02 §4 Start, step 2)", () =
           set: { state: "joined", joinedVia: "invitation", joinedAt: 5, inviteEmail: null },
         },
       ],
+      // Written only while no block lies between the accepter and a joined member (A23-S-4),
+      // and the invitations of anyone the accepter blocked go inert with it (A23-S3-1).
+      requireUnblocked: { userId: "u-b" },
+      inertBlockedBy: { userId: "u-b" },
     });
   });
 });
@@ -549,7 +580,11 @@ describe("a finished game's rematch as one of its players sees it (05 `rematch`,
     viewerState: GamePlayerRecord["state"] | null,
     status: Status = "lobby",
     now = 2000,
-  ) => rematchOf({ game: game(status), viewerState }, now)?.you;
+  ) =>
+    rematchOf(
+      { game: game(status), viewerState, viewerDelivery: viewerState === null ? null : "normal" },
+      now,
+    )?.you;
 
   it("is joined for a joined or seated row, invited for an invitation, none otherwise", () => {
     expect(
@@ -562,7 +597,16 @@ describe("a finished game's rematch as one of its players sees it (05 `rematch`,
       "joined",
       "none",
     ]);
-    expect(rematchOf({ game: game(), viewerState: "joined" }, 2000)).toEqual({
+    // An inert invitation gives no access: none, never an Accept that fails (Q29, A23-P2-5).
+    expect(
+      rematchOf({ game: game(), viewerState: "invited", viewerDelivery: "inert" }, 2000)?.you,
+    ).toBe("none");
+    expect(
+      rematchOf({ game: game(), viewerState: "invited", viewerDelivery: "hidden" }, 2000)?.you,
+    ).toBe("invited");
+    expect(
+      rematchOf({ game: game(), viewerState: "joined", viewerDelivery: "normal" }, 2000),
+    ).toEqual({
       gameId: "r",
       you: "joined",
     });
@@ -570,20 +614,28 @@ describe("a finished game's rematch as one of its players sees it (05 `rematch`,
 
   it("is null once its lobby is past its expiry: it has ended unplayed", () => {
     expect(
-      rematchOf({ game: game(), viewerState: "invited" }, 1000 + LOBBY_LIFETIME_MS),
+      rematchOf(
+        { game: game(), viewerState: "invited", viewerDelivery: "normal" },
+        1000 + LOBBY_LIFETIME_MS,
+      ),
     ).toBeNull();
     expect(at("invited", "lobby", 999 + LOBBY_LIFETIME_MS)).toBe("invited");
   });
 
   it("is null once the rematch ended unplayed, so it may be replaced (A15-P-2, R2-1, S2-1)", () => {
     for (const status of ["cancelled", "expired", "declined"] as const) {
-      expect(rematchOf({ game: game(status), viewerState: "invited" }, 2000)).toBeNull();
+      expect(
+        rematchOf({ game: game(status), viewerState: "invited", viewerDelivery: "normal" }, 2000),
+      ).toBeNull();
     }
     // Every declined ending is a seat refusing before it acted (02 §2.1 rule 9), even after
     // others played.
     expect(endedUnplayed(game("declined", 3, "declined"))).toBe(true);
     // A cancel or expiry after moves was played, and an operator's cancel is never unplayed.
-    expect(rematchOf({ game: game("cancelled", 3), viewerState: "out" }, 2000)?.you).toBe("joined");
+    expect(
+      rematchOf({ game: game("cancelled", 3), viewerState: "out", viewerDelivery: "normal" }, 2000)
+        ?.you,
+    ).toBe("joined");
     expect(endedUnplayed(game("expired", 1))).toBe(false);
     expect(endedUnplayed(game("cancelled", 0, "operator_cancelled"))).toBe(false);
     expect(endedUnplayed(game("cancelled", 0, "cancelled"))).toBe(true);
@@ -639,5 +691,85 @@ describe("whom a finished game's creator may add to their players (05 `canAddPla
     for (const status of ["lobby", "active", "declined", "cancelled", "expired"] as const) {
       expect(addableUserIds({ status }, players, creator), status).toEqual([]);
     }
+  });
+});
+
+describe("what a block writes in one lobby (06 §6.10, alpha A23)", () => {
+  const row = (id: string, over: Partial<GamePlayerRecord> = {}) =>
+    ({
+      id,
+      userId: `u-${id}`,
+      state: "joined",
+      joinedVia: "invitation",
+      joinedAt: 1,
+      inviteEmail: null,
+      delivery: "normal",
+      seat: null,
+      ...over,
+    }) as GamePlayerRecord;
+  const ctxWith = (players: GamePlayerRecord[], status: GameRecord["status"] = "lobby") => ({
+    game: {
+      status,
+      createdAt: 1000,
+      seats: 4,
+      aiAssistance: "off",
+      seatOrder: "join",
+    } as GameRecord,
+    players,
+    definition: {
+      players: () => ({ min: 2, max: 4 }),
+      validateStart: () => OK,
+    } as unknown as AnyGameDefinition,
+    options: {},
+    state: null,
+    random: cryptoRandom(),
+    joinLink: null,
+  });
+  const creator = row("a", { joinedVia: "creator" });
+  const third = row("c");
+  const invited = { state: "invited" as const, joinedAt: null, joinedVia: null };
+
+  it.each([
+    ["the creator, the other joined", creator, row("b"), "removed"],
+    ["the creator, the other their pick", creator, row("b", invited), "removed"],
+    ["a member, the other joined", row("v"), row("b"), "declined"],
+    [
+      "an invitee, the other the creator",
+      row("v", invited),
+      row("b", { joinedVia: "creator" }),
+      "declined",
+    ],
+  ] as const)("changes the lobby for %s", (_name, viewer, other, outcome) => {
+    const players = viewer === creator ? [creator, other, third] : [creator, viewer, other, third];
+    const writes = blockEffect(ctxWith(players), viewer, other.userId ?? "", 2000);
+    const changed = writes?.updatePlayers?.[0];
+    expect(changed?.id).toBe(outcome === "removed" ? other.id : viewer.id);
+    expect(changed?.set.state).toBe(outcome);
+  });
+
+  it.each([
+    [
+      "a typed invitation, for the creator (Q3)",
+      creator,
+      row("b", { ...invited, inviteEmail: "b@example.org" }),
+    ],
+    ["someone else's invitation, for a member", row("v"), row("b", invited)],
+    ["a viewer whose own row is inert", row("v", { ...invited, delivery: "inert" }), row("b")],
+  ] as const)("leaves the lobby alone for %s", (_name, viewer, other) => {
+    const players = viewer === creator ? [creator, other] : [creator, viewer, other];
+    expect(blockEffect(ctxWith(players), viewer, other.userId ?? "", 2000)).toBeNull();
+  });
+
+  it("leaves a game that isn't an open lobby alone", () => {
+    const other = row("b");
+    expect(blockEffect(ctxWith([creator, other], "active"), creator, "u-b", 2000)).toBeNull();
+    expect(
+      blockEffect(ctxWith([creator, other]), creator, "u-b", 1000 + LOBBY_LIFETIME_MS),
+    ).toBeNull();
+  });
+
+  it("looks blocks up either way round", () => {
+    const blocked = blockedBy([{ blockerId: "x", blockedId: "y" }]);
+    expect([blocked("x", "y"), blocked("y", "x"), blocked("x", "z")]).toEqual([true, true, false]);
   });
 });

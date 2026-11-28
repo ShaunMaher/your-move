@@ -4,22 +4,10 @@
  */
 import { createRoute, z } from "@hono/zod-openapi";
 
-import { ErrorResponseSchema } from "./errors.js";
+import { errors } from "./error-responses.js";
 import { API_V1 } from "./routes.js";
 
-const errorContent = { "application/json": { schema: ErrorResponseSchema } } as const;
 const SESSION = [{ sessionCookie: [] }];
-
-function errors<const T extends Readonly<Record<number, string>>>(
-  descriptions: T,
-): { [K in keyof T]: { description: string; content: typeof errorContent } } {
-  return Object.fromEntries(
-    Object.entries(descriptions).map(([status, description]) => [
-      status,
-      { description, content: errorContent },
-    ]),
-  ) as { [K in keyof T]: { description: string; content: typeof errorContent } };
-}
 
 const PUSH_ERRORS = {
   400: "Invalid request, or an endpoint or keys that 08 T12 refuses (`BAD_REQUEST`).",

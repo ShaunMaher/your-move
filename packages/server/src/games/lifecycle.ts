@@ -16,6 +16,7 @@ import {
 } from "@your-move/sdk";
 
 import type {
+  BlockPair,
   GamePlayerRecord,
   GamePlayerUpdate,
   GameRecord,
@@ -44,6 +45,34 @@ export interface GameContext {
 export interface FinalViews {
   readonly seats: readonly { readonly view: unknown; readonly summary: unknown }[];
   readonly public: { readonly view: unknown; readonly summary: unknown };
+}
+
+/** Whether two users have a block between them, in either direction (04 `blocks`). */
+export type Blocked = (a: string, b: string) => boolean;
+
+/** {@link Blocked} over the block pairs read for a set of users. */
+export function blockedBy(pairs: readonly BlockPair[]): Blocked {
+  const keys = new Set(pairs.map((pair) => `${pair.blockerId} ${pair.blockedId}`));
+  return (a, b) => keys.has(`${a} ${b}`) || keys.has(`${b} ${a}`);
+}
+
+/** The user ids holding rows in a game, for its block lookup (once each). */
+export function rowUserIds(players: readonly GamePlayerRecord[]): string[] {
+  return [...new Set(players.flatMap((row) => (row.userId === null ? [] : [row.userId])))];
+}
+
+/**
+ * A transition that is written and then answered with a refusal (alpha A23): an accept that found
+ * a block with a joined member is its holder's own decline, then `404` (05 `/accept`).
+ */
+export interface Settled {
+  readonly settle: GameWriteSet;
+  readonly then: Refusal;
+}
+
+/** Whether a lifecycle function wrote something and then refused (05 `/accept`, `/start`). */
+export function isSettled(value: object): value is Settled {
+  return "settle" in value;
 }
 
 /** A refusal, as `{ code }` of the framework error table (05 §Errors). */
@@ -262,22 +291,76 @@ function lobbyCounts(players: readonly GamePlayerRecord[]): { joined: number; in
   };
 }
 
-/**
- * The start transition's writes (02 §4 Start, steps 2–5): `validateStart`, unjoined rows out of
- * the game, seats by the seat order (a `random` order drawn from the recorded randomness), `setup`
- * and the first clocks. Step 1, the block re-check, has nothing to check until blocks exist (M4).
- */
-function startWrites(ctx: GameContext, now: number): GameWriteSet | GameError {
-  const { definition, game } = ctx;
-  // The creator first, then in joining order (02 §4 seat order `join`). Rows that joined in the
-  // same millisecond keep the order they were added in (the sort is stable, and the rows come in
-  // that order): past opponents added at creation sit in the order the creator listed them.
-  const joined = ctx.players
+/** The joined rows, the creator first, then in joining order (02 §4 seat order `join`). */
+function joinedInOrder(players: readonly GamePlayerRecord[]): GamePlayerRecord[] {
+  // Rows that joined in the same millisecond keep the order they were added in (the sort is
+  // stable, and the rows come in that order): past opponents added at creation sit in the order
+  // the creator listed them.
+  return players
     .filter((row) => row.state === "joined")
     .sort((a, b) => {
       const creator = Number(b.joinedVia === "creator") - Number(a.joinedVia === "creator");
       return creator !== 0 ? creator : (a.joinedAt ?? 0) - (b.joinedAt ?? 0);
     });
+}
+
+/**
+ * One outstanding block effect among a lobby's joined players (02 §4 Start step 1, 06 §6.10,
+ * A23-S-3, S2-3), as its own transition by the person whose action it is: for the first pair of
+ * joined users with a block, in joining order, the creator-blocker's Remove of the person blocked,
+ * or otherwise the blocker's own Decline (the later-joined one's, if both blocked), with exactly
+ * the write set that action makes. The caller writes it as that person's transition and answers
+ * the Start or accept that found it `409 STALE_GAME`, so nothing of anyone else shares it.
+ */
+export interface Outstanding {
+  readonly outstanding: GameWriteSet;
+  /** Whose transition it is: the blocker who declines, or the creator who removes. */
+  readonly actor: GamePlayerRecord;
+}
+
+/** Whether a Start or an accept found an outstanding block effect to write first. */
+export function isOutstanding(value: object): value is Outstanding {
+  return "outstanding" in value;
+}
+
+function outstandingEffect(
+  ctx: GameContext,
+  pairs: readonly BlockPair[],
+  now: number,
+): Outstanding | Refusal | null {
+  const blocks = (a: string | null, b: string | null) =>
+    a !== null && b !== null && pairs.some((pair) => pair.blockerId === a && pair.blockedId === b);
+  const joined = joinedInOrder(ctx.players);
+  for (let j = 0; j < joined.length; j++) {
+    for (let i = 0; i < j; i++) {
+      const [earlier, later] = [joined[i], joined[j]];
+      if (earlier === undefined || later === undefined) continue;
+      const earlierBlocked = blocks(earlier.userId, later.userId);
+      const laterBlocked = blocks(later.userId, earlier.userId);
+      if (!earlierBlocked && !laterBlocked) continue;
+      // The creator-blocker removes; otherwise the blocker declines (the later one, if both).
+      const removes = earlier.joinedVia === "creator" && earlierBlocked;
+      const actor = removes ? earlier : laterBlocked ? later : earlier;
+      const writes = removes
+        ? removeSeat(ctx, earlier, later.id, now)
+        : declineInLobby(ctx, actor, now);
+      // Fails closed (A23-S3-4): a blocked pair whose effect can't be written refuses the Start
+      // or accept rather than letting it go ahead with the pair joined.
+      if (isRefusal(writes)) return writes;
+      return { outstanding: writes, actor };
+    }
+  }
+  return null;
+}
+
+/**
+ * The start transition's writes (02 §4 Start, steps 2–5) for a lobby whose blocks are settled:
+ * `validateStart`, unjoined rows out of the game, seats by the seat order (a `random` order drawn
+ * from the recorded randomness), `setup` and the first clocks.
+ */
+function startWrites(ctx: GameContext, now: number): GameWriteSet | GameError {
+  const { definition, game } = ctx;
+  const joined = joinedInOrder(ctx.players);
   const checked = definition.validateStart(ctx.options, joined.length);
   if (isGameError(checked)) return checked;
 
@@ -351,17 +434,23 @@ function autoStarts(
  * The start of a game created with every seat filled (05 `POST /api/v1/games` Created, 02 §4):
  * the creator and the past opponents added at once. The same rules as any automatic start, so
  * AI assistance allowed with another person keeps it in the lobby, and a `validateStart` refusal
- * simply leaves it there; null when it doesn't start.
+ * simply leaves it there. A block made in between leaves it there too: the creator's Start then
+ * writes its outstanding effect (02 §4 step 1). Null when it doesn't start.
  */
-export function startAtCreation(ctx: GameContext, now: number): GameWriteSet | null {
+export function startAtCreation(
+  ctx: GameContext,
+  now: number,
+  pairs: readonly BlockPair[],
+): GameWriteSet | null {
   if (ctx.game.status !== "lobby" || !autoStarts(ctx.game, ctx.players, ctx.joinLink, now)) {
     return null;
   }
+  if (outstandingEffect(ctx, pairs, now) !== null) return null;
   const writes = startWrites(ctx, now);
   return isGameError(writes) ? null : writes;
 }
 
-/** Merges the start's writes after another transition's row updates. */
+/** Merges the start's writes after another transition's row update. */
 function withStart(
   ctx: GameContext,
   rowUpdate: { id: string; set: GamePlayerUpdate },
@@ -385,18 +474,25 @@ function withStart(
   };
 }
 
-/** `POST /start`: the creator, in the lobby, with at least `min` joined (05). */
+/**
+ * `POST /start`: the creator, in the lobby, with at least `min` joined (05). An outstanding block
+ * effect among the joined comes first, as its own transition (02 §4 step 1, A23-S2-3): the caller
+ * writes it and answers `409 STALE_GAME`; the client refetches and presses Start again.
+ */
 export function start(
   ctx: GameContext,
   viewer: GamePlayerRecord,
   now: number,
-): GameWriteSet | Refusal {
+  pairs: readonly BlockPair[],
+): GameWriteSet | Outstanding | Refusal {
   if (viewer.joinedVia !== "creator") return { refused: "NOT_ALLOWED" };
   if (ctx.game.status !== "lobby" || now >= lobbyExpiresAt(ctx.game)) {
     return { refused: "WRONG_STATUS" };
   }
   const { min } = ctx.definition.players(ctx.options);
   if (lobbyCounts(ctx.players).joined < min) return { refused: "NOT_ENOUGH_PLAYERS" };
+  const outstanding = outstandingEffect(ctx, pairs, now);
+  if (outstanding !== null) return outstanding;
   const writes = startWrites(ctx, now);
   if (isGameError(writes)) {
     return {
@@ -410,12 +506,19 @@ export function start(
   return writes;
 }
 
-/** `POST /accept`: the holder of an invitation, in the lobby; may start the game (02 §4). */
+/**
+ * `POST /accept`: the holder of an invitation, in the lobby; may start the game (02 §4). A block in
+ * either direction between the holder and any joined member declines the invitation instead,
+ * exactly as the holder's own decline would (05, alpha A23): the caller writes it and answers
+ * `404`. It is a backstop: a block already makes the person blocked's invitations in the blocker's
+ * lobbies `inert` (06 §6.10). The write set carries the guard against a block racing it (A23-S-4).
+ */
 export function accept(
   ctx: GameContext,
   viewer: GamePlayerRecord,
   now: number,
-): GameWriteSet | Refusal {
+  pairs: readonly BlockPair[],
+): GameWriteSet | Settled | Outstanding | Refusal {
   if (
     ctx.game.status !== "lobby" ||
     viewer.state !== "invited" ||
@@ -423,7 +526,32 @@ export function accept(
   ) {
     return { refused: "WRONG_STATUS" };
   }
-  return withStart(ctx, { id: viewer.id, set: acceptedSet(now) }, now);
+  const { userId } = viewer;
+  const blocked = blockedBy(pairs);
+  const clash =
+    userId !== null &&
+    ctx.players.some(
+      (row) =>
+        row.state === "joined" &&
+        row.userId !== null &&
+        row.userId !== userId &&
+        blocked(userId, row.userId),
+    );
+  if (clash) {
+    const declined = declineInLobby(ctx, viewer, now);
+    if (isRefusal(declined)) return declined;
+    return { settle: declined, then: { refused: "NOT_FOUND" } };
+  }
+  // An outstanding block effect among the others comes first, as its own transition (02 §4 step
+  // 1, A23-S2-3): the caller writes it and answers `409 STALE_GAME`.
+  const outstanding = outstandingEffect(ctx, pairs, now);
+  if (outstanding !== null) return outstanding;
+  const writes = withStart(ctx, { id: viewer.id, set: acceptedSet(now) }, now);
+  // Guarded against a racing block, and, now that the accepter joins, the invitations of anyone
+  // they blocked while only invited go `inert` here too (A23-S-4, S3-1).
+  return userId === null
+    ? writes
+    : { ...writes, requireUnblocked: { userId }, inertBlockedBy: { userId } };
 }
 
 /**
@@ -603,8 +731,45 @@ export function removeSeat(
   if (row.state !== "invited" && row.state !== "joined") return { refused: "NOT_FOUND" };
   return {
     game: { updatedAt: now },
-    updatePlayers: [{ id: row.id, set: { state: "removed", removedAt: now, inviteEmail: null } }],
+    updatePlayers: [{ id: row.id, set: { ...removedSet(now), inviteEmail: null } }],
   };
+}
+
+/** A removed row (02 §4): by the creator's Remove, their block, or that block found at a start. */
+function removedSet(now: number) {
+  return { state: "removed" as const, removedAt: now };
+}
+
+/**
+ * What a block by `viewer` of `otherId` writes in one lobby they share (06 §6.10, 05 §Blocks), or
+ * null when it changes nothing there. Only where the viewer can already tell the other's row is
+ * theirs: a joined row, or the viewer's own pick as the creator (`invite_email` NULL while
+ * invited). Then the creator removes their seat, exactly as `…/remove-seat`; anyone else declines
+ * their own, exactly as `…/decline` (an invited or joined seat alike, 02 §4), so neither the blocked
+ * person nor anyone else can tell it from that action. Every other row is left alone: acting on it
+ * would say whose it is (Q3); the accept, join, claim and start checks keep the pair apart there.
+ */
+export function blockEffect(
+  ctx: GameContext,
+  viewer: GamePlayerRecord,
+  otherId: string,
+  now: number,
+): GameWriteSet | null {
+  const other = ctx.players.find((row) => row.userId === otherId);
+  if (other === undefined || ctx.game.status !== "lobby" || now >= lobbyExpiresAt(ctx.game)) {
+    return null;
+  }
+  const creator = viewer.joinedVia === "creator";
+  const attributable =
+    other.state === "joined" ||
+    (creator && other.state === "invited" && other.inviteEmail === null);
+  const member =
+    viewer.state === "joined" || (viewer.state === "invited" && viewer.delivery !== "inert");
+  if (!attributable || !member) return null;
+  const writes = creator
+    ? removeSeat(ctx, viewer, other.id, now)
+    : declineInLobby(ctx, viewer, now);
+  return isRefusal(writes) ? null : writes;
 }
 
 /** What a join link offers one signed-in user (06 §6.8), the same for the lookup and the join. */

@@ -17,6 +17,7 @@ export type HistoryItem = Schema<"HistoryItem">;
 export type CreateGameRequest = Schema<"CreateGameRequest">;
 export type RecentPlayer = Schema<"RecentPlayers">["players"][number];
 export type JoinPreview = Schema<"JoinPreview">["game"];
+export type BlockedPlayer = Schema<"BlockList">["blocks"][number];
 
 /**
  * A game and the viewer's view, with the envelope as the SDK types it (what a board is given). The
@@ -141,6 +142,18 @@ export const joinGame = (api: ApiClient, token: string) =>
 
 /** Your past opponents, to pick for a new game (05 `GET /api/v1/players/recent`). */
 export const listRecentPlayers = (api: ApiClient) => settle(api.GET("/api/v1/players/recent"));
+
+/** One page of the people you've blocked, newest first (05 `GET /api/v1/blocks`). */
+export const listBlocks = (api: ApiClient, cursor?: string) =>
+  settle(api.GET("/api/v1/blocks", { params: { query: cursor === undefined ? {} : { cursor } } }));
+
+/** Blocks someone (05 `POST /api/v1/blocks`): `204`, also when they were already blocked. */
+export const blockPlayer = (api: ApiClient, userId: string) =>
+  settle(api.POST("/api/v1/blocks", { body: { userId } }));
+
+/** Lifts your block (05 `DELETE /api/v1/blocks/:userId`). */
+export const unblockPlayer = (api: ApiClient, userId: string) =>
+  settle(api.DELETE("/api/v1/blocks/{userId}", { params: { path: { userId } } }));
 
 export const markSeen = (api: ApiClient, id: string, version: number) =>
   settle(api.POST("/api/v1/games/{id}/seen", { params: { path: { id } }, body: { version } }));

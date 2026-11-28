@@ -15,8 +15,9 @@
  *
  * A past opponent picked by `userId` (alpha A12) must be one the creator may pick (no block either
  * way, `INVALID_INVITEES` otherwise) and is added at once (`joined`, `joined_via = added`), unless
- * AI assistance is allowed or their stored `whoCanAddMe` is `nobody`, when it is an invitation
- * (02 §4, 06 §6.2). Picked invitees are seated before
+ * the request picks two or more (Q29: then every pick is an invitation, so no pick's state shows a
+ * block between two of them), AI assistance is allowed or their stored `whoCanAddMe` is `nobody`,
+ * when it is an invitation (02 §4, 06 §6.1, §6.2). Picked invitees are seated before
  * typed addresses, whatever their order in the request, so a typed address never changes how a
  * picked one is seated: an address that resolves to a picked user, or to a user with a block
  * against anyone seated before it, gets an `inert` seat instead (06 §6.1). The route starts a game
@@ -37,7 +38,7 @@ import type { Platform } from "../platform.js";
 import { expireOverdueLobbies } from "./expiry.js";
 import { type InviteMail, type MailTarget, planInviteMail } from "./invite-mail.js";
 import { hashJoinToken, linkTimes, newJoinToken } from "./join-links.js";
-import { LOBBY_LIFETIME_MS } from "./lifecycle.js";
+import { blockedBy, LOBBY_LIFETIME_MS } from "./lifecycle.js";
 import type { GameType } from "./registry.js";
 import type { ResourceProvider } from "./resources.js";
 import {
@@ -148,21 +149,28 @@ async function checkPicked(deps: CreateDeps, creator: UserRecord, picked: readon
 
 /**
  * Whether a picked past opponent is added at once (02 §4, 06 §6.2): under their `whoCanAddMe`
- * default, `pastOpponents`, unless AI assistance is allowed, so every person sees the AI setting
- * before they're in. A stored `nobody` makes it an invitation (the Settings choice is M4's). AI
- * seats arrive with AI accounts (M8).
+ * default, `pastOpponents`, when they are the request's only pick and AI assistance is off. With
+ * two or more picks every pick is an invitation (Q29, alpha A23), so that a block between two of
+ * them, which makes the later one's invitation `inert`, never shows: every pick reads as invited.
+ * With AI assistance allowed every person sees the AI setting before they're in. A stored `nobody`
+ * makes it an invitation (the Settings choice is M4's). AI seats arrive with AI accounts (M8).
  */
-function addsAtOnce(aiAssistance: "off" | "allowed", user: UserRecord | undefined): boolean {
+function addsAtOnce(
+  aiAssistance: "off" | "allowed",
+  user: UserRecord | undefined,
+  picks: number,
+): boolean {
   return (
-    aiAssistance === "off" && user !== undefined && whoCanAddMeOf(user.settings) === "pastOpponents"
+    picks === 1 &&
+    aiAssistance === "off" &&
+    user !== undefined &&
+    whoCanAddMeOf(user.settings) === "pastOpponents"
   );
 }
 
 /** The blocks among a set of users, as a lookup either way round (04 `blocks`). */
 async function blockLookup(deps: CreateDeps, userIds: readonly string[]) {
-  const pairs = await deps.platform.repos.users.blocksAmong(userIds);
-  const keys = new Set(pairs.map((pair) => `${pair.blockerId} ${pair.blockedId}`));
-  return (a: string, b: string): boolean => keys.has(`${a} ${b}`) || keys.has(`${b} ${a}`);
+  return blockedBy(await deps.platform.repos.users.blocksAmong(userIds));
 }
 
 /**
@@ -367,12 +375,12 @@ export async function createGame(
 
   const pickedRows = picked.map((userId): NewGamePlayer => {
     // A block with the creator was refused above; one with an earlier picked invitee gives an
-    // `inert` seat (06 §6.1).
+    // `inert` seat (06 §6.1), which reads as invited like every pick of a group (Q29).
     const inert = blockedWithSeated(userId);
     seated.push(userId);
     const base = { id: crypto.randomUUID(), userId, lastSeenVersion: NEVER_SEEN };
     if (inert) return { ...base, state: "invited", delivery: "inert" };
-    if (!addsAtOnce(aiAssistance, pickedUsers.get(userId))) {
+    if (!addsAtOnce(aiAssistance, pickedUsers.get(userId), picked.length)) {
       return { ...base, state: "invited", delivery: "normal" };
     }
     // Unread until they open it, like an invitation (04 `last_seen_version`).

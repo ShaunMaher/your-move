@@ -1,6 +1,7 @@
 /**
  * The parts of `/settings` (07 §1) built so far: who is signed in, notifications on this device
- * (07 §4, alpha A8), the email nudges toggle (03 §7, alpha A6), the theme choice (07 §5, alpha A9), sign out, and sign out everywhere
+ * (07 §4, alpha A8), the email nudges toggle (03 §7, alpha A6), the theme choice (07 §5, alpha A9),
+ * the blocked players (alpha A23), sign out, and sign out everywhere
  * with the choice to revoke API tokens too (06 §4). The rest of the screen arrives with its
  * features.
  */
@@ -18,6 +19,7 @@ import { type PushChange, pushState, type PushState, turnOffPush, turnOnPush } f
 import { Link } from "../router.js";
 import { applyTheme, type Theme } from "../theme.js";
 import { useSignOut } from "../use-sign-out.js";
+import { BlockedPlayers } from "./BlockedPlayers.js";
 import { Page } from "./Page.js";
 import { Problem } from "./Problem.js";
 
@@ -352,6 +354,7 @@ export function Settings({
       />
       <Appearance api={api} me={me} onMeChanged={onMeChanged} onSessionLost={onSessionLost} />
       <EmailNudges api={api} me={me} onMeChanged={onMeChanged} onSessionLost={onSessionLost} />
+      <BlockedPlayers api={api} onSessionLost={onSessionLost} />
       <section className="card stack" aria-labelledby="signout-heading">
         <h2 id="signout-heading">Sign out</h2>
         <button

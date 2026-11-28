@@ -210,6 +210,12 @@ export function registerJoinRoutes(app: OpenAPIHono<AppEnv>, deps: JoinRouteDeps
         // Only through the link as it was judged: one revoked, rotated or expired meanwhile makes
         // the join stale, and the retry finds the link gone (T24).
         requireJoinLink: { tokenHash, now: at },
+        // And only while no block lies between the joiner and a joined member: a block made
+        // meanwhile makes the join stale, and the retry finds it (A23-S-4).
+        requireUnblocked: { userId: user.id },
+        // Once the joiner is in, invitations of anyone they blocked go `inert`, as a block made
+        // after joining would have made them (A23-S3-1).
+        inertBlockedBy: { userId: user.id },
       };
       // No push: joins reach the other members as realtime invalidations only (02 §4).
       const result = await repos.games.applyTransition(loaded.game.id, loaded.game.version, writes);

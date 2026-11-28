@@ -38,6 +38,29 @@ with an AI badge (icon + accessible label "AI player"), from the envelope's `kin
 `aiOwnerName` (05). Moves made through a token show an "AI" marker in the history drawer (from
 `via`). Games with AI assistance allowed show it in the header, lobby, invitation and join page.
 
+**Blocking** (alpha A23, 05 §Blocks, 06 §6.10). The lobby screen offers **Block** for its
+creator to anyone else in it: next to Accept and Decline on an invitation (every row of the game
+list's *Invitations* and *Hidden invitations* opens that screen; the list's own rows carry no
+buttons, so "accept/decline/block" above happens there), and next to Decline for a player who has
+joined without creating the game, someone a past opponent added included (review A23-P-1). It
+isn't offered when the creator's account is gone. Its accessible name is "Block <name>". It asks
+first, in a dialog titled "Block <name>?" that says plainly what a block does, without saying
+whose row is whose: first "You'll decline this invitation." (on an invitation) or "You'll leave
+this game." (once joined), then "They won't be able to add you to games or invite you, and you
+won't be put in a game with them. In other games that haven't started yet, you'll leave the ones
+they've joined (or they're removed from games you created), and any invitation they have to a
+game you've joined stops. Games you're already playing carry on." and "They won't be told, but you'll
+no longer be on each other's lists of people you've played. You can unblock them in Settings.",
+with **Block** and **Cancel**. After a block the game list is shown. Settings has a **Blocked
+players** section listing `GET /api/v1/blocks` (name, and when they were blocked; "Show more"
+while there is a next page, disabled while it loads), each with **Unblock**, which asks first
+("Unblock <name>? They'll be able to invite you to games again. You won't be on each other's
+lists of people you've played until you finish another game together.") and then refreshes the
+list, says "Unblocked <name>." in a status line and moves focus to the section's heading; with no
+blocks it says "You haven't blocked anyone.". Nothing a blocked person sees ever mentions a block.
+Blocking from a finished game's players is not offered yet: the finished screen has no per-player
+menu (backlog).
+
 There is no admin UI in v1; operators use the Admin API and its command-line client (09 §1.2).
 
 ### 1.1 New game flow

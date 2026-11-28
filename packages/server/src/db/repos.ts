@@ -9,6 +9,7 @@ import {
   count,
   desc,
   eq,
+  gt,
   gte,
   inArray,
   isNotNull,
@@ -149,6 +150,7 @@ function gameRepo(db: Database): GameRepo {
           actionCount: games.actionCount,
           endReason: games.endReason,
           viewerState: gamePlayers.state,
+          viewerDelivery: gamePlayers.delivery,
         })
         .from(games)
         .leftJoin(
@@ -158,8 +160,8 @@ function gameRepo(db: Database): GameRepo {
         .where(eq(games.id, gameId))
         .get();
       if (row === undefined) return null;
-      const { viewerState, ...game } = row;
-      return { game, viewerState };
+      const { viewerState, viewerDelivery, ...game } = row;
+      return { game, viewerState, viewerDelivery };
     },
     async load(id) {
       const [gameRows, playerRows, linkRows] = await db.batch([
@@ -317,6 +319,47 @@ function gameRepo(db: Database): GameRepo {
             IS_MEMBER,
             eq(games.status, "lobby"),
             lte(games.createdAt, createdBefore),
+          ),
+        )
+        .orderBy(asc(games.createdAt), asc(games.id))
+        .limit(limit);
+      return rows.map((row) => row.id);
+    },
+    async blockableLobbies(viewerId, otherId, { createdAfter, installed, limit }) {
+      if (installed.length === 0) return [];
+      const mine = alias(gamePlayers, "mine");
+      const theirs = alias(gamePlayers, "theirs");
+      const rows = await db
+        .select({ id: games.id })
+        .from(games)
+        .innerJoin(mine, and(eq(mine.gameId, games.id), eq(mine.userId, viewerId)))
+        .innerJoin(theirs, and(eq(theirs.gameId, games.id), eq(theirs.userId, otherId)))
+        .where(
+          and(
+            eq(games.status, "lobby"),
+            gt(games.createdAt, createdAfter),
+            // An orphaned game takes no transition (02 §7.3): it never uses up the call's lobbies.
+            or(
+              ...installed.map((pair) =>
+                and(eq(games.gameType, pair.gameType), eq(games.gameVersion, pair.gameVersion)),
+              ),
+            ),
+            // The viewer is a member (04 §Membership): never through an `inert` row, which they
+            // can't see.
+            or(
+              eq(mine.state, "joined"),
+              and(eq(mine.state, "invited"), inArray(mine.delivery, ["normal", "hidden"])),
+            ),
+            // A row the viewer can already tell is theirs (06 §6.10): joined, or the creator's own
+            // pick (an open typed invitation keeps its `invite_email`, A12-S-3).
+            or(
+              eq(theirs.state, "joined"),
+              and(
+                eq(mine.joinedVia, "creator"),
+                eq(theirs.state, "invited"),
+                isNull(theirs.inviteEmail),
+              ),
+            ),
           ),
         )
         .orderBy(asc(games.createdAt), asc(games.id))
