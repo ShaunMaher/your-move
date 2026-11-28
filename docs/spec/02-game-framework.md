@@ -368,7 +368,8 @@ player, never the other players; 06 §6.9). A pair with a block in either direct
 recorded, at the finish or through that question (06 §6.10).
 
 The creator can **remove** any other seat while in the lobby (`removed`); a removed user can't rejoin
-through the link that was live when they were removed (06 §6.8).
+through any join link of the game, a rotated or new one included (06 §6.8), though the creator can
+still invite them by address or as a past opponent.
 
 **Lobby notifications.** The only pushes a lobby causes go to the person being added: an auto-join
 push naming the creator ("<creator> added you to a game") and the generic invitation push that names

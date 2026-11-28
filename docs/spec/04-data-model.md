@@ -102,7 +102,7 @@ At most 3 *live* challenges per (email, purpose); issuing a 4th burns the oldest
 | out_reason | TEXT NULL | `eliminated` · `resigned` · `timed_out` · `declined` (out before a first action; never ranked, 02 §4) · `cancelled` (operator cancel of an active game, 02 §4) |
 | joined_via | TEXT NULL | `creator` · `added` (auto-joined past opponent) · `invitation` (accepted — including an invited user who joins through the link, 02 §4) · `email_invite` · `join_link` |
 | delivery | TEXT NOT NULL DEFAULT 'normal' | for `invited` rows: `normal` · `hidden` (over the target's inbound cap, 06 §6.7: shown only in their collapsed *Hidden invitations*, no notification) · `inert` (blocked pair, or a typed address that resolves to a user already added in the same request: never delivered, never claimable, never accepted, `user_id` NULL for the latter, 06 §6.1). The creator sees all three the same way (Q3) |
-| removed_at | INTEGER NULL | when the creator removed this seat; compared with `join_links.created_at` (06 §6.8) |
+| removed_at | INTEGER NULL | when the creator removed this seat. A removed row never comes back through any join link, rotated or new (06 §6.8) |
 | joined_at | INTEGER NULL | for `seat_order = join`, and "who joined later" in the start-time block check (02 §4). A row with `joined_at` NULL never exposes a display name or user id in any response (05 §Common types) |
 | to_act | INTEGER NOT NULL DEFAULT 0 | 1 if this seat is in `toAct` — denormalised for "your turn" queries; updated in the same transition |
 | to_act_since | INTEGER NULL | per-seat timeout clock (02 §2.3) |
@@ -170,8 +170,8 @@ in the same transition), and deleted in both directions when either user blocks 
 | token_hash | TEXT UNIQUE NOT NULL | SHA-256 of the 128-bit token; the raw token is shown only in the create/rotate response |
 | created_at, expires_at | INTEGER | expiry ≤ 7 days and ≤ lobby expiry; deleted at game start/revoke/rotate and when the lobby ends any other way (cancelled, declined, expired); swept when expired |
 
-A user whose row has `removed_at ≥ join_links.created_at` can't use the current link; rotating it
-issues a new token (and a newer `created_at`), which re-admits them (06 §6.8).
+A user whose row is `removed` (or `declined`, `left`) can't use any link of the game, the current
+one, a rotated one or a new one: a removal sticks across links (06 §6.8, alpha A18 review S-3).
 
 ### `invites`
 Tracks invitation emails (for rate limiting, expiry and abuse handling). Stores no raw address.
@@ -395,7 +395,10 @@ deleted first, so the account is unusable from the moment deletion starts.
    - `active` where they're `playing`: a real resign transition (module `onResign`; others notified),
      or the decline rule if they haven't acted yet (02 §4);
    - `lobby` they created: cancel (deleting its `invites`/`join_links` rows and clearing every
-     `invite_email` — third parties' addresses; realtime invalidation only, no push or email, 02 §4);
+     `invite_email` — third parties' addresses; realtime invalidation only, no push or email, 02 §4).
+     Until these game steps exist (M4), the deletion batch deletes the `join_links` rows of the
+     `lobby` games the user created, and a join link refuses any lobby whose creator row has no
+     user, with the same `404` as every other refusal (alpha A18);
    - other `lobby` games: a real `leave` (or decline, if `invited`) transition, so no orphaned
      `joined` seat can auto-start a game.
 3. Delete OTP challenges for the email, blocks and `past_opponents` rows in both directions. Mark the

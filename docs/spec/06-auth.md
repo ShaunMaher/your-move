@@ -392,18 +392,24 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    - Valid until the game starts, the creator revokes/rotates it, the lobby expires, or 7 days —
      whichever is first. Revocation or expiry never ends the lobby by itself (02 §4).
    - While a link is live, or once anyone has joined through one, the game never starts
-     automatically: the creator sees who joined and presses Start (02 §4).
+     automatically: the creator sees who joined and presses Start (02 §4). Whether a game starts by
+     itself is judged only in the transition that accepts an invitation (a join through a link never
+     starts one); revoking or rotating a link, or its expiry, is no transition and never starts a
+     game, which then waits for the creator's Start or the next accept.
    - Joining requires being signed in and onboarded. A signed-out visitor signs up via OTP; the page
      keeps its own path and fragment in `sessionStorage` (only same-origin `/join` paths are
      accepted) and returns there afterwards. After reading the fragment the page calls
-     `history.replaceState` to plain `/join`, so the token doesn't linger in browser history, and it
+     `history.replaceState` to plain `/join`, so the token doesn't linger in the tab's session history
+     (the browser's own history database may still have recorded the visit: an accepted residual,
+     docs/security/findings.md F-21), and it
      clears the `sessionStorage` entry after a successful join or a `404`. Nothing ever joins
      automatically: the user always taps **Join**.
    - Refused with the indistinguishable `404` if the joiner has a block in either direction with the
      creator **or anyone else holding a row in the game** (joined, invited, declined, left or
-     removed alike, 05), if they declined or left this game, or if they were removed
-     from it while this link was live (`removed_at ≥ join_links.created_at`; rotating the link
-     lets the creator re-admit them: their row is joined again, `joined_via = join_link`). A user who already holds a `normal` or `hidden` invitation in
+     removed alike, 05), if they declined or left this game, or if the creator removed them from
+     it: a removal sticks across links, so no join link brings them back, neither a rotated one nor
+     a new one after a revoke or expiry (the creator can still invite them by address or as a past
+     opponent, alpha A18 review S-3). A user who already holds a `normal` or `hidden` invitation in
      the game accepts it by joining (`joined_via = invitation`); an `inert` row is never accepted, and
      its holder gets the same `404`. The checks read the same rows for every outcome, so the
      answer's work doesn't say which reason refused it.

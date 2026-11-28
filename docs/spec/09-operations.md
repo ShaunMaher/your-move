@@ -202,20 +202,22 @@ that work on both runtimes, plus SMTP for Node only.
 - Worker with: Static Assets (built SPA), D1 binding `DB`, Durable Object binding `USER_CHANNEL`
   (SQLite-backed DO class, declared in migrations), Cron Trigger `*/15 * * * *`.
 - The Cron Trigger runs the sweep (03 §8). One invocation has a bounded budget of D1 queries and
-  subrequests, so a Worker run expires at most 1 overdue lobby, claims at most 1 email-invite seat
-  and sends at most 2 email nudges (Node: 100 of each); the rest wait 15 minutes for the next one
+  subrequests, so a Worker run expires at most 1 overdue lobby, claims at most 1 email-invite seat,
+  deletes at most 100 expired join links and sends at most 2 email nudges (Node: 100 of each, and
+  1,000 join links); the rest wait 15 minutes for the next one
   (alpha A17 halved the nudges from A6's 4 to make room). The arithmetic, counting every
   statement of a batch as a query (the conservative reading): the lobby step's list (1), and per
   lobby its load (2) and the expiry transition (1, plus one per row with a typed address: 1 for a
   two-seat game) — 5; the claim step's list (1), and per seat the game's load (2), the block
   lookup (1) and the claim (1) — 5; the nudge step's instance-wide cap read (2 statements), due list
-  (1) and, when capped, the once-per-window alert counter (2) — at most 5, and per nudge the
+  (1) and, when capped, the once-per-window alert counter (2) — at most 5, the join-link step's one
+  delete (1, alpha A18), and per nudge the
   recipient's cap read (2), the claim (1), counting both caps (4), the game's players (1), their
-  users (1) and the last move (1) — 10. So a run is at most 5 + 5 + 25 = 35 statements for
-  two-seat games (41 with a full eight-seat lobby), inside the Workers Free plan's per-invocation
+  users (1) and the last move (1) — 10. So a run is at most 5 + 5 + 1 + 25 = 36 statements for
+  two-seat games (42 with a full eight-seat lobby), inside the Workers Free plan's per-invocation
   D1 query limit (50 at the time of writing; check the current Cloudflare limits). A lost race
-  retries a lobby's expiry or a claim from its load, at most twice more (03 §5.2), which can add
-  up to 16 in the worst case; that needs a concurrent request on the same lobby in that moment,
+  retries a lobby's expiry or a claim from its load, at most three more times (03 §5.2), which
+  can add up to 24 in the worst case; that needs a concurrent request on the same lobby in that moment,
   and a run that goes over fails and is picked up by the next. **Workers residual (review
   A17-S-6):** expiring one overdue lobby per run (96 a day) can fall behind if more lobbies than
   that fall due in a day; lazy expiry (03 §8) still expires each one the moment anyone involved
@@ -233,7 +235,7 @@ that work on both runtimes, plus SMTP for Node only.
     first Workers deployment** (10).
   - The `PATCH /api/v1/me` that completes onboarding: 4 statements plus 4 per claimed seat (the
     game's load, the block lookup, the claim), so the Worker claims at most 8 there (36) and leaves
-    the rest to the sweep; a claim that loses a race and retries adds 4 per attempt (at most 2).
+    the rest to the sweep; a claim that loses a race and retries adds 4 per attempt (at most 3).
     Node claims up to 50 per request. Each nudge also makes one provider subrequest (the `gmail` provider
   one more per run for its token). A run with a failed step or a failed nudge ends the invocation
   as failed (not retried), so it shows in the trigger's history. Re-measure the per-invocation

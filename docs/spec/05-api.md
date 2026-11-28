@@ -97,6 +97,7 @@ GameEnvelope = {
   endReason: string | null,                  // module result().endReason, or "declined" / "cancelled" / "expired"
   turnTimeoutDays, seatOrder: "join" | "random",
   aiAssistance: "off" | "allowed",           // 02 §9.3; fixed at creation
+  seats?: number,                            // the seat count: in the lobby, how many it waits for (alpha A18); always sent, optional for older servers
   available: boolean,                        // false for an orphaned game whose engine is gone (02 §7.3)
   resources: [{ kind, id, name, distribution?, uploadedBy?: string,
                 downloadUrl?: string /* public distribution only: versioned, hashed (words §9.4) */ }],  // never blob keys or hashes
@@ -333,7 +334,7 @@ the caller may see.
 | POST | `/api/v1/games/:id/accept` | Holder of a user invitation (normal or hidden), in `lobby` → `joined`. If the accepter has a block in either direction with any joined member, the invitation becomes `declined` instead and the answer is `404` | `403 ONBOARDING_REQUIRED`, `409 WRONG_STATUS` |
 | POST | `/api/v1/games/:id/decline` | Invited or joined non-creator in `lobby`, or any `playing` player — the creator included — before their first action (02 §4: ends the game `declined` if fewer than `min` would remain, else `out_reason = declined`) | `403 NOT_ALLOWED` (the creator in `lobby`: cancel instead), `409 ALREADY_ACTED`, `409 WRONG_STATUS` |
 | POST | `/api/v1/games/:id/leave` | Joined non-creator, in `lobby` | `403 NOT_ALLOWED`, `409 WRONG_STATUS` |
-| POST | `/api/v1/games/:id/remove-seat` | Creator, in `lobby`: `{ expectedVersion, playerId }` → that row becomes `removed` (`removed_at` set; an email seat's address is cleared). `playerId` must be a row of **this** game and not the creator's own. A remove never ends the lobby (02 §4) | `403 NOT_ALLOWED`, `404` (no such row in this game), `409 WRONG_STATUS` |
+| POST | `/api/v1/games/:id/remove-seat` | Creator, in `lobby`: `{ expectedVersion, playerId }` → that row becomes `removed` (`removed_at` set; an email seat's address is cleared). `playerId` must be an `invited` or `joined` row of **this** game and not the creator's own. A remove never ends the lobby (02 §4), and the person removed never comes back through a join link (06 §6.8) | `403 NOT_ALLOWED`, `404` (no such row in this game, the creator's own, or a row no longer `invited` or `joined`), `409 WRONG_STATUS`, `429` |
 | POST | `/api/v1/games/:id/resign` | Any `playing` player, in `active` | `409 WRONG_STATUS` |
 | POST | `/api/v1/games/:id/cancel` | Creator, in `lobby` → `cancelled` (realtime only, no push) | `403 NOT_ALLOWED`, `409 WRONG_STATUS` |
 
@@ -346,7 +347,7 @@ These don't take `expectedVersion`.
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/api/v1/games/:id/join-link` | Creator, in `lobby`: create or rotate the join link → `{ url, expiresAt }` (the only time the URL is returned). Changes `join_links` only, not the game row. Counts toward the creator's join-link creations (08 §4), as a `joinLink` on create does. Errors: `403 NOT_ALLOWED`, `404` (not a member), `409 WRONG_STATUS`, `429` |
-| DELETE | `/api/v1/games/:id/join-link` | Creator: revoke (body-less). Never ends the lobby (02 §4). `204`, also when there is no live link or the lobby has ended; `403 NOT_ALLOWED`, `404` (not a member) |
+| DELETE | `/api/v1/games/:id/join-link` | Creator: revoke (body-less). Never ends the lobby (02 §4). `204`, also when there is no live link or the lobby has ended; `403 NOT_ALLOWED`, `404` (not a member), `429` (the per-user write limit) |
 | POST | `/api/v1/games/:id/seen` | `{ version }` — marks activity as read (not a transition). `204` |
 | POST | `/api/v1/games/:id/add-player` | Creator of a `finished` game: `{ userId }` → records creator ↔ that link joiner as past opponents, if both acted and neither has blocked the other (02 §4, 06 §6.9). `204`; when a block exists in either direction it is a silent `204` no-op (no pair is written), so the creator can't learn about the block; `404` if not one of `canAddPlayers` |
 
@@ -356,7 +357,7 @@ or proxy logs. The web page reads it and calls:
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/v1/join/lookup` | `{ token }` → `200 { game: { id, gameType, options, resources (as in the envelope), turnTimeoutDays, seatOrder, aiAssistance, creatorName, players (joined only: `{ displayName, kind, aiOwnerName? }`), openSeats, expiresAt } }` or `404` (invalid, revoked, expired, full, a block with anyone holding a row in the game, the viewer declined/left this game, holds an `inert` row in it, or was removed while this link was live — indistinguishable). A viewer who has already joined gets the `200` (their join would be `409 ALREADY_JOINED`); one holding an invitation in the game gets it even when no seat is open, since joining accepts that invitation. `token` is the fragment as given (22 base64url characters); any other string of up to 64 characters is the same `404` |
+| POST | `/api/v1/join/lookup` | `{ token }` → `200 { game: { id, gameType, options, resources (as in the envelope), turnTimeoutDays, seatOrder, aiAssistance, creatorName, players (joined only: `{ displayName, kind, aiOwnerName? }`), openSeats, expiresAt } }` or `404` (invalid, revoked, expired, full, a block with anyone holding a row in the game, the viewer declined/left this game, holds an `inert` row in it, or was removed from it by the creator — indistinguishable). A viewer who has already joined gets the `200` (their join would be `409 ALREADY_JOINED`); one holding an invitation in the game gets it even when no seat is open, since joining accepts that invitation. `token` is the fragment as given: 22 base64url characters. A malformed or over-long `token` is `400 BAD_REQUEST`, like any malformed body; a well-formed one that isn't a live link's is the same `404`. The response may also carry `youAreIn: true` when the viewer has already joined the game |
 | POST | `/api/v1/join` | `{ token }` → takes an open seat → `200 { game }`; same `404` cases; `409 ALREADY_JOINED`. Blocks are checked against **every** row in the game (`404` if any). If the viewer already holds a `normal` or `hidden` invitation in this game, joining accepts it instead of taking another seat (`joined_via = invitation`); an `inert` row is never accepted (its block makes the join `404` anyway). Server-side retries on version conflict (up to 3 times, 03 §5.2), so callers see `STALE_GAME` only if every retry loses |
 
 Both return `403 ONBOARDING_REQUIRED` until onboarding is complete, and both are rate-limited per
