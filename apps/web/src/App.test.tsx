@@ -413,7 +413,10 @@ describe("onboarding", () => {
       expect(
         screen.getByText("Please confirm you, the account holder, are 13 or older."),
       ).toBeDefined();
-      expect(document.activeElement).toBe(screen.getByLabelText("I'm 13 or older"));
+      // The arrival focus is an effect: wait for it (11 §4).
+      await waitFor(() => {
+        expect(document.activeElement).toBe(screen.getByLabelText("I'm 13 or older"));
+      });
       expect(screen.queryByLabelText("Display name")).toBeNull();
       confirmAge();
       click("Continue");
