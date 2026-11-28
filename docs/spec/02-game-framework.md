@@ -126,7 +126,7 @@ interface GameDefinition<Options, State, Action, View, PublicRecord, PreviewResu
     maxActions(options: Options, seats: number): number;  // termination bound
     worstCase(options: Options, seats: number, rng: RandomSource): { state: State; seat: Seat; action: Action }[]; // CPU budget
     publicRandomness?: boolean;                            // true if records legitimately show random draws (e.g. dice)
-    hiddenFromEveryone?: boolean;                          // true if what is hidden is hidden from every seat alike (e.g. deck order only), §6.3
+    hiddenFromEveryone?: boolean;                          // true if, while in progress, every seat and the public get the same view (identical JSON; summaries may differ), §6.3
     optionInputs(ctx: OptionsContext): unknown[];          // the option inputs the kit plays (§6); required, non-empty
     context?(): OptionsContext;                            // what resolveOptions, catalog and checkConfig see in the kit; default: configSchema.parse({}), no resources
     resources?(options: Options): Resources;               // what validate and preview get in the kit's games; default: none
@@ -546,11 +546,14 @@ plays exactly these hooks, so a game that needs a dictionary supplies one throug
    - the perturbation isn't vacuous: for a module with `hiddenInformation: true`, at least half of
      the samples taken while `result()` is null must change **some other viewer's view** (seat
      `w ≠ v`, or the public view), so reordering a deck while hands are hidden doesn't count. Only
-     a module that declares **`test.hiddenFromEveryone: true`** — no seat ever sees its hidden
-     information while it is hidden, e.g. only the deck order is hidden, or a memory game's
-     face-down cards, which every seat sees alike even after seeing some earlier (games/pairs.md
-     §8.6) — is counted by whether `s'` differs from `s` instead (it requires
-     `hiddenInformation: true`);
+     a module that declares **`test.hiddenFromEveryone: true`** is counted by whether `s'`
+     differs from `s` instead (it requires `hiddenInformation: true`). The flag means exactly
+     this: **while the game is in progress, every seat and the public get the same view**
+     (identical JSON; summaries may differ), so nothing is hidden from one viewer that another
+     sees, e.g. a game whose only hidden information is the deck order, or a memory game's
+     face-down cards (games/pairs.md §8.6). The kit checks it at every step of every game of a
+     module that sets it, and fails the module on any two viewers whose views differ (built with
+     the pairs engine slice, 10 §Pairs game);
    - `validate` and `preview` results, including `detail`, are identical for `s` and `s'`, for
      legal actions from `randomAction` **and** for possibly-illegal ones from `randomAnyAction`;
    - the `record` from `apply`/`onResign`/`onTimeout` by any seat is identical for `s` and `s'`
@@ -573,7 +576,10 @@ plays exactly these hooks, so a game that needs a dictionary supplies one throug
 4. **Termination**: random play always reaches `result() !== null` within `maxActions(options,
    seats)`, a positive safe integer of at most 1 000 000. Half the games are played with no seat
    leaving, and in the rest a seat leaves with a chance of about 1 / `maxActions` per transition, so
-   long games really run to their end.
+   long games really run to their end. The bound must follow from the game's **rules** (a turn
+   limit, a scoreless streak, a finite supply that every move uses up), not from a test bot: a
+   `randomAction` that reads hidden state to steer games to an end proves nothing about real play
+   and keeps the kit from playing the game players get.
 5. **Turn sanity** (module-checkable): `toAct` ⊆ seats that `seatStatus` reports `playing`; at
    every step every seat in `toAct` has an action that validates (its `randomAction` result is
    checked); a seat reported `out` never returns to `playing` or `toAct`; `toAct` is empty exactly
@@ -627,8 +633,9 @@ one repeats a secret choice in its record, and one a rare secret choice; one has
 `perturbHidden`, and one perturbs only the deck while hands are hidden; one reads resources in
 `setup`; one is nondeterministic; one never terminates, with a small and with a large
 `maxActions`; one leaves `toAct` non-empty after the end; one keeps hidden state in a module-level
-variable shared between games; one has an empty and one an illegal `worstCase`): the kit MUST fail
-each one, in fast mode.
+variable shared between games; one has an empty and one an illegal `worstCase`; one sets
+`hiddenFromEveryone` while its seats see different hands): the kit MUST fail each one, in fast
+mode.
 
 The framework, not the kit, enforces that only seats in `toAct` may act (05 `/actions`).
 

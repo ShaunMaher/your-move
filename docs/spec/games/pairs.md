@@ -6,14 +6,18 @@ On your turn you turn over two cards. If they match, you keep the pair and go ag
 turn back face down and the next player goes. When every pair is found, the player with the most
 pairs wins.
 
-The game itself is traditional and public domain. Some commercial editions' names are trademarks,
-so the module never uses them: it is called **Pairs**, its UI describes it in plain words ("turn
-over cards to find the pairs"), and its card faces and card back are our own artwork.
+The game itself is traditional and public domain. Commercial editions and a television show have
+used names for it (lineage only: "Memory", "Concentration"); the module, its UI, its rules text and
+its assets never use them.
+**"Pairs" is a working name** (placeholder, like "Paths"): a published card game already has that
+title, so the final name is the owner's legal call (Q32). The UI describes the game in plain words
+("turn over cards to find the pairs"), and its card faces and card back are our own artwork.
 
 **The design problem.** Played asynchronously, the game loses its point if anything shows every card
 turned: anyone could scroll back. So a card's face reaches players only through `view`, and only
-while the card is face up (§4). Records name positions, never faces or whether a pair matched
-(02 §2.1 rule 5). The design comes from the owner's note in 10 §Later; this document settles it.
+while the card is face up (§4). Records name no card at all, and never a face or whether a pair
+matched (02 §2.1 rule 5, Q31). The design comes from the owner's note in 10 §Later; this document
+settles it.
 
 ## 1. Components
 
@@ -21,12 +25,12 @@ while the card is face up (§4). Records name positions, never faces or whether 
   the top, column from the left, both from 0. Its **card index** is `row × columns + column`
   (reading order); the state stores cards in that order.
 
-  | `grid` | Columns | Rows | Cards | Pairs |
-  |---|---|---|---|---|
-  | `4x4` | 4 | 4 | 16 | 8 |
-  | `4x5` (default) | 4 | 5 | 20 | 10 |
-  | `5x6` | 5 | 6 | 30 | 15 |
-  | `6x6` | 6 | 6 | 36 | 18 |
+  | `grid` | Columns | Rows | Cards | Pairs | Move limit (§6) |
+  |---|---|---|---|---|---|
+  | `4x4` | 4 | 4 | 16 | 8 | 128 |
+  | `4x5` (default) | 4 | 5 | 20 | 10 | 160 |
+  | `5x6` | 5 | 6 | 30 | 15 | 240 |
+  | `6x6` | 6 | 6 | 36 | 18 | 288 |
 
   Grids are written columns × rows. No grid is wider than 6 columns, because 6 is the most that
   fit a 320 px screen with 44 CSS px cards (§9).
@@ -55,16 +59,18 @@ while the card is face up (§4). Records name positions, never faces or whether 
   (the previous turn's unmatched pair, shown until the next first card is turned, §4) and `matched`
   (found, face up for the rest of the game). `missed` cards are face down for the rules: they are
   shown, not out of play.
+- **Player number**: seat + 1 (1–6), shown beside each player's name and on the cards they matched
+  or missed (§9).
 
 ## 2. Setup
 
 1. Turn order = seat order (the framework's `seatOrder`, 02 §4); seat 0 turns first.
-2. **Faces in play**: for `pairs < 18`, the 18 face ids are shuffled with the `rng` and the first
-   `pairs` are kept; for `6x6`, all 18. Which faces are in play is public (the view lists them,
-   §8.4); where they lie is not.
-3. **Layout**: the faces in play, each twice, are shuffled with the `rng` (the SDK's `shuffle`)
-   into card-index order. The layout is secret state: no card's face reaches any seat until the
-   card is turned (§4).
+2. **Faces in play**: the 18 face ids are always shuffled with the `rng` (so every grid draws the
+   same way) and the first `pairs` are kept. Which faces are in play is public (the view lists
+   them, §8.4); where they lie is not.
+3. **Layout**: the deck is the faces in play in ascending order, each twice (`[a, a, b, b, …]`),
+   shuffled with the `rng` (the SDK's `shuffle`) into card-index order. The layout is secret
+   state: no card's face reaches any seat until the card is turned (§4).
 
 ## 3. A turn
 
@@ -75,14 +81,13 @@ a second.
    It is now `up`, and the previous turn's `missed` pair, if any, goes face down (§4). The player
    stays in `toAct`.
 2. **Second card**: the player turns over any other card not `matched`.
-   - **A match** (same face): both cards are `matched`, the pair is the player's, and the same
-     player takes another turn. If it was the last pair, the game ends (§6).
+   - **A match** (same face): both cards are `matched` and the pair is the player's. If it was the
+     last pair, the game ends (§6); otherwise the same player takes another turn.
    - **No match**: both cards become the `missed` pair, shown to every seat until the next first
      card is turned. The turn passes to the next seat in turn order that is still playing
      (wrapping round).
 3. Each accepted card restarts the player's clock (02 §2.3), so a turn that finds pairs may last
-   longer than one turn timeout; each card is progress, and every turn ends after at most
-   `pairs` matches.
+   longer than one turn timeout; each card is progress, and the move limit (§6) ends every game.
 
 A card's face is never known to the client before the server answers: the board shows it from the
 view that the submit returns (§9).
@@ -95,30 +100,30 @@ same view**, and it shows a card's face exactly when:
 | Card | Face in the view |
 |---|---|
 | `matched` | shown, with the seat that found it |
-| `up` (the first card of the turn in progress) | shown |
+| `up` (the first card of the turn in progress) | shown, with the seat to act |
 | `missed` (the previous turn's unmatched pair) | shown, with the seat whose turn it was, **until the next first card is turned** |
 | every other card | hidden (`null`), including cards that were face up earlier and turned back |
 
 - The `missed` pair is cleared by the next first card turned in the game, whoever turns it.
   Normally that is the next seat. If that seat leaves before turning a card (§5), the pair stays
   shown for the seat that then has the turn.
-- Once cleared, those faces are gone from every view, and nothing else serves them (history and
-  notifications carry records and `describe` text only, §8.5; a finished game displays from
-  `final_views`, 02 §5). **Remembering them is the game.**
+- Once cleared, those faces are gone from every view, and nothing else serves them: records and
+  their `describe` text name no card (§8.5), so the history drawer and notifications can't help
+  anyone remember either, and a finished game displays from `final_views` (02 §5). **Remembering
+  them is the game.**
 - With 3 or more seats, only the next seat is sure to see a `missed` pair; the others see it only
   if they look before that seat's first card (accepted, design note).
-- Once the game is over, the view shows every card's face, so a game that ended with cards still
-  down (§6) shows where the rest were.
+- Once the game is over (`endReason` set), the view shows every card's face, so a game that ended
+  with cards still down (§6) shows where the rest were.
 
-What the history does tell (accepted): records name the positions turned (§8.5), and who turned
-next shows whether a turn matched. So a careful reader can learn that two cards turned together
-differ, and, late in a game, combine that with the pairs found since to work out where a pair lies
-without having remembered a face. That is less than any player who watched every turn knows, and
-much less than the residual below; Q31 records the alternative.
+What the history does tell: who turned a first or a second card, and so, from who turned next,
+whether a turn matched, which the view's matched cards show anyway. It never says which cards were
+turned (Q31: with positions, the history alone could solve a late game).
 
 Screenshots, notes and any client that polls the view (a script, or an assistant reading views
 with a `read` token, which 02 §9.3 always allows) remember for their player. That defeats the game
-for that player and is accepted for a family game; the rules text says so (§8.7).
+for that player, can't be seen by the others, and is accepted for a family game played among
+friends (F-27); the rules text says so (§8.7).
 
 ## 5. Leaving the game
 
@@ -134,7 +139,8 @@ for that player and is accepted for a family game; the rules text says so (§8.7
 - If it was the leaver's turn, the turn passes to the next seat still playing, as after a miss;
   otherwise the seat to act keeps the turn.
 - If only one seat is still playing, the game ends (`last-standing`, §6). In a 2-player game every
-  resignation or timeout does this.
+  resignation or timeout does this. A leave by the seat to act can also end the game at the move
+  limit (§6).
 
 ## 6. End of game
 
@@ -145,8 +151,19 @@ for that player and is accepted for a family game; the rules text says so (§8.7
   seats from the ranking and re-ranks the rest (02 §4).
 - **Last standing** (`last-standing`): the one seat still playing ranks 1; the others rank by when
   they left, the most recent highest. Cards still down stay down.
-- Every seat's `score` in `result()` is its pairs found, for display. `endReason` is `all-found`
-  or `last-standing`.
+- **Move limit** (`move-limit`): after every second card, and after every leave by the seat to act,
+  the game ends if `moves ≥ 16 × pairs` (`moves` counts every card turned and every leave; the
+  limit is eight turns per pair, far more than any real game needs). It ranks exactly as
+  `all-found`. The limit is what makes the game's length follow from its rules (02 §6.4), and it
+  bounds a game that colluding or careless players would otherwise keep going for ever, together
+  with its action log (08 T25, storage).
+- When more than one ending applies to a transition, `all-found` comes first, then
+  `last-standing`, then `move-limit`.
+- Every seat's `score` in `result()` is its pairs found, for display. `endReason` is `all-found`,
+  `last-standing` or `move-limit`.
+- **Whenever the game ends, nothing stays turned**: `turned` and `lastMiss` are cleared in the
+  ending transition, so a finished view holds only `matched` cards and `down` cards with their face
+  set (§8.4).
 
 ## 7. Options
 
@@ -162,9 +179,9 @@ Options = {
   arbitrary input is never echoed); `INVALID_OPTION` (`detail: { option }`) for any other value.
   Options carry no versions, and resolved options resolve to themselves (02 §2.1 rule 10).
 - `catalog()`: `{ grid: { values: ["4x4", "4x5", "5x6", "6x6"], default: "4x5" }, grids: [{ id:
-  "4x4", columns: 4, rows: 4, pairs: 8 }, { id: "4x5", columns: 4, rows: 5, pairs: 10 }, { id:
-  "5x6", columns: 5, rows: 6, pairs: 15 }, { id: "6x6", columns: 6, rows: 6, pairs: 18 }], faces: 18
-  }`.
+  "4x4", columns: 4, rows: 4, pairs: 8, moveLimit: 128 }, { id: "4x5", columns: 4, rows: 5, pairs:
+  10, moveLimit: 160 }, { id: "5x6", columns: 5, rows: 6, pairs: 15, moveLimit: 240 }, { id: "6x6",
+  columns: 6, rows: 6, pairs: 18, moveLimit: 288 }], faces: 18 }`.
 - `players(options)` = `{ min: 2, max: 6 }` for every grid: with more seats a `missed` pair reaches
   too few of them, and an 8-pair grid shared by more than 6 gives most players a pair or none.
   No resources. `validateStart` always succeeds.
@@ -188,41 +205,54 @@ State = {
   turn: Seat | null,                  // the seat to act; null once over
   out: ({ atMove: number, reason: "resigned" | "timed_out" | "declined" } | null)[],  // by seat
   moves: number,                      // module transitions so far
-  endReason: null | "all-found" | "last-standing",
+  endReason: null | "all-found" | "last-standing" | "move-limit",
 }
 ```
 
-`out.atMove` is the value of `moves` before the transition that put the seat out (the leaving
-order, §6). `columns`, `rows` and `pairs` come from `options.grid`.
-
-**Hidden information**: the faces of the **hidden cards**, those with `matchedBy` null that are
-neither `turned` nor in `lastMiss`, while `endReason` is null. They are hidden from every seat and
-the public alike, and a face turned back down is hidden again (§4). Nothing is hidden once the game
-is over. Which faces are in play is public (§2).
+- `out.atMove` is the value of `moves` before the transition that put the seat out (the leaving
+  order, §6). `columns`, `rows`, `pairs` and the move limit `16 × pairs` come from
+  `options.grid`.
+- **Invariants**: `turned !== null ⇒ lastMiss === null` (the first card clears the missed pair, and
+  a miss sets it only as it clears `turned`); `turned` and `lastMiss` cards are never matched;
+  `endReason !== null ⇔ turn === null`, and then `turned` and `lastMiss` are both null (§6).
+- **Hidden information**: the faces of the **hidden cards**, those with `matchedBy` null that are
+  neither `turned` nor in `lastMiss`, while `endReason` is null. They are hidden from every seat and
+  the public alike, and a face turned back down is hidden again (§4). Nothing is hidden once the game
+  is over. Which faces are in play is public (§2).
 
 ### 8.2 Turn functions
 
 - `toAct`: `[turn]` while in progress, `[]` once over.
 - `seatStatus`: `out` once the seat resigned, timed out or declined; there is no elimination by
   the rules.
-- `apply` (a valid `flip` by `turn`; `moves` goes up by one):
-  - first card (`turned` null): `lastMiss = null`, `turned` = the card.
-  - second card: `turned = null`; if its face equals the `turned` card's, both `matchedBy` = the
-    seat, and if no card is unmatched, `endReason = "all-found"` and `turn = null`; otherwise
-    `lastMiss = { seat, cards: [first, second] }` and `turn` = the next playing seat after `seat`
-    in turn order, wrapping.
-- `onResign(state, seat, rng, reason)` and `onTimeout(state, seat, rng)`: `out[seat] = { atMove:
-  moves, reason }` (`reason` `resigned`, `declined` or `timed_out`), `moves` goes up by one; if
-  `seat` is `turn`, `turned = null` (`lastMiss` is left as it is); then if one seat is still
-  playing, `endReason = "last-standing"` and `turn = null`, else if `seat` was `turn`, `turn` = the
-  next playing seat after it. Neither draws randomness; neither does `apply` (only `setup` does).
+- `apply(state, seat, { type: "flip", row, column })`, for a valid flip by `turn`, with `c` the
+  card index; `moves` goes up by one first. Exactly one branch applies:
+  1. **First card** (`turned` null): `lastMiss = null`, `turned = c`.
+  2. **Second card, match** (`faces[c] === faces[turned]`): `matchedBy[turned] = matchedBy[c] =
+     seat`, `turned = null`; then
+     - **last pair** (no card has `matchedBy` null): the game ends `all-found`;
+     - **otherwise**, if `moves ≥ 16 × pairs`, the game ends `move-limit`; else `turn` stays.
+  3. **Second card, miss**: `lastMiss = { seat, cards: [turned, c] }`, `turned = null`; then if
+     `moves ≥ 16 × pairs` the game ends `move-limit`, else `turn` = the next playing seat after
+     `seat` in turn order, wrapping.
+- `onResign(state, seat, rng, reason)` and `onTimeout(state, seat, rng)`: `moves` goes up by one;
+  `out[seat] = { atMove, reason }` with `atMove` the value before, and the reason mapped from the
+  exit: `onResign` with `"resign"` → `"resigned"`, `onResign` with `"decline"` → `"declined"`,
+  `onTimeout` → `"timed_out"`. Then:
+  1. if `seat` is `turn`, `turned = null` (`lastMiss` is left as it is);
+  2. if one seat is still playing, the game ends `last-standing`;
+  3. else if `seat` was `turn` and `moves ≥ 16 × pairs`, the game ends `move-limit`;
+  4. else if `seat` was `turn`, `turn` = the next playing seat after `seat`, wrapping; otherwise
+     `turn` is unchanged.
+- **A game ending** sets `endReason`, `turn = null`, `turned = null` and `lastMiss = null` (§6).
+- No transition draws randomness; only `setup` does.
 - `result()`: null while `endReason` is null; then the ranking of §6, every seat with `score` =
   pairs found.
 
 ### 8.3 Actions and errors
 
 ```ts
-Action = { type: "flip", row: number, column: number }   // safe integers; in range is checked by validate
+Action = { type: "flip", row: number, column: number }   // strict; safe integers; in range is checked by validate
 ```
 
 (Resign is a framework action that calls `onResign`.) `errorCodes`, checked in this order (first
@@ -234,7 +264,7 @@ failure wins), none with a `detail`:
 3. `CARD_FACE_UP`: the card is `matched` or is the turn's `up` card. A `missed` card is legal.
 
 plus `OPTIONS_NOT_OBJECT`, `UNKNOWN_OPTION` and `INVALID_OPTION` from option resolution (§7). Every
-check reads only `turn`, the grid size, `matchedBy` and `turned`, never a hidden face (02 §2.1
+check reads only `turn`, `endReason`, the grid size, `matchedBy` and `turned`, never a face (02 §2.1
 rule 4). There is no `preview` (no `previewSchema`): nothing about a card can be said before it is
 turned, and legality is visible in the view.
 
@@ -249,7 +279,8 @@ View = {
   turn: Seat | null,
   pairs: number[],                    // pairs found, by seat
   out: (null | "resigned" | "timed_out" | "declined")[],  // by seat
-  endReason: null | "all-found" | "last-standing",
+  moves: number, moveLimit: number,   // moveLimit = 16 × pairs
+  endReason: null | "all-found" | "last-standing" | "move-limit",
 }
 Card =
   | { state: "down", face: null, by: null }            // in progress; once over, face is set
@@ -259,43 +290,56 @@ Card =
 ```
 
 - `view(state, viewer)` doesn't depend on `viewer`: every seat and the public see the same (§4).
-- Once the game is over, `down` cards carry their face (`{ state: "down", face, by: null }`); the
-  other states are as they were.
+- Once `endReason` is set, every card is `matched` or `down` with its face set (`{ state: "down",
+  face, by: null }`; §6). After a framework-only ending (`declined`) or an operator cancel, the
+  stored final view is the in-progress view of the frozen state (02 §4, §5): `endReason` is null,
+  `down` faces stay null, and an `up` card or `missed` pair shown when it stopped stays shown.
 - Keys are always in the order shown; `cards` is in grid order and `faces` ascending, so nothing in
   the view's shape follows the layout.
-- Bounds (Zod): `cards` 4–6 rows of 4–6 cards (as many as the grid has); `faces` at most 18 distinct ids 0–17; `pairs` and
-  `out` 2–6 entries (one per seat); seats 0–5; `columns` and `rows` 4–6.
-- History comes from the framework's history endpoint (02 §3), not the view.
 
 ### 8.5 Records, `describe` and `summary`
 
 ```ts
 PairsRecord =                                         // discriminated by type
-  | { type: "flip", seat: Seat, step: 1 | 2, row: number, column: number }
+  | { type: "flip", seat: Seat, step: 1 | 2 }
   | { type: "resign" | "timeout" | "decline", seat: Seat }
 ```
 
 - `step` is 1 for the turn's first card and 2 for its second (public: it follows from the state
-  before). A record never names a face, whether a pair matched, who goes next or what was turned
-  back; those reach players through `view` (02 §2.1 rule 5). Record bounds: seats 0–5, `row` and
-  `column` 0–5; no arrays.
-- `describe` (rows and columns counted from 1): `[{seat:0}, " turned over a card (row 2, column
-  3)"]` for step 1; `[{seat:0}, " turned over a second card (row 4, column 1)"]` for step 2;
-  `[{seat:1}, " resigned"]`; `[{seat:1}, " ran out of time"]`; `[{seat:1}, " declined the game"]`.
-  So a push reads "Ann turned over a second card (row 4, column 1). Your turn." (03 §7).
+  before). A record names **no card**: not its position, its face, whether a pair matched, who goes
+  next or what was turned back (Q31). The view shows the cards (02 §2.1 rule 5, §6.3: every flip
+  leaves a card face up in every view, so two different flips never look the same to the others).
+- `describe`: `[{seat:0}, " turned over a card"]` for step 1; `[{seat:0}, " turned over a second
+  card"]` for step 2; `[{seat:1}, " resigned"]`; `[{seat:1}, " ran out of time"]`; `[{seat:1}, "
+  declined the game"]`. So a push reads "Ann turned over a second card. Your turn." (03 §7).
 - `summary(state, viewer)`: in progress, with `N` the pairs not yet found, `"N pairs left · your
-  turn"` for the seat to act (`"1 pair left"` for one) and `"N pairs left · ", {seat}, " to play"` for anyone else and the public; once
-  over, `[{seat}, " won"]` when one seat ranks 1, `"Shared win"` otherwise. `scores`: pairs found,
-  by seat.
+  turn"` for the seat to act (`"1 pair left"` for one) and `"N pairs left · ", {seat}, " to play"`
+  for anyone else and the public; once over, `[{seat}, " won"]` when one seat ranks 1, `"Shared
+  win"` otherwise. `scores`: pairs found, by seat.
 
-### 8.6 Kit hooks
+### 8.6 Schema bounds
 
-- `hiddenInformation: true` and **`hiddenFromEveryone: true`**: everything hidden (§8.1) is hidden
-  from every seat alike, so no perturbation can change one viewer's view and not another's, and
-  the kit counts a sample by whether `perturbHidden` changed the state (02 §6.3). "Hidden from
-  everyone" holds at every state: a face seen earlier and turned back is hidden from every seat
-  again, which is exactly what the kit then tests. `publicRandomness` is unset: no transition draws
-  randomness.
+Every object is strict (no other keys); every number is an integer.
+
+- `configSchema`: the empty object.
+- Options input: `grid` one of the four ids, optional; resolved options: `{ grid }`, required.
+- `actionSchema`: `type` `"flip"`; `row` and `column` safe integers (range checked by `validate`).
+- `viewSchema`: `grid` one of the four ids; `columns` and `rows` 4–6; `faces` 8–18 distinct ids
+  0–17, ascending; `cards` 4–6 rows of 4–6 cards; a card's `face` 0–17 (or null for `down`), its
+  `by` 0–5 (or null for `down`); `turn` 0–5 or null; `pairs` and `out` 2–6 entries, each pair count
+  0–18; `moves` 0–`moveLimit + 7` (the `maxActions` bound at 6 seats, §8.7); `moveLimit` one of 128,
+  160, 240, 288. Shape-level checks only: that `cards` matches `columns × rows` and `faces` holds
+  `pairs` ids is the engine's (and the tests') business, not Zod's.
+- `recordSchema`: `seat` 0–5, `step` 1 or 2; no arrays.
+- `catalogSchema`: as §7, with exactly the four grids.
+
+### 8.7 Kit hooks
+
+- `hiddenInformation: true` and **`hiddenFromEveryone: true`**: while the game is in progress, every
+  seat and the public get the same view (identical JSON; summaries differ only in "your turn"),
+  which is exactly what the flag means (02 §6.3), and the kit checks that at every step. The kit
+  then counts a sample by whether `perturbHidden` changed the state. `publicRandomness` is unset: no
+  transition draws randomness.
 - `perturbHidden(state, viewer, rng)`, the same for every `viewer` and `null`: the faces of the
   hidden cards (§8.1), in card-index order, are shuffled with `rng` and written back to the same
   cards; if that reproduces the state and the hidden cards hold two or more different faces, the
@@ -303,47 +347,51 @@ PairsRecord =                                         // discriminated by type
   instead, so the result always differs when it can. Nothing else changes (`{ ...state, faces }`,
   key order kept); a finished game is returned unchanged. So the multiset of faces, the faces in
   play and every shown card stay as they were.
-  - What the kit then proves: no view, summary, `toAct`, `seatStatus`, end test or `validate`
-    answer depends on a face that is down, including one turned back after a miss, and no record
-    depends on a face or on whether a pair matched (02 §6.3).
+  - What the kit then proves, **relative to the hidden set of §8.1**: no view, summary, `toAct`,
+    `seatStatus`, end test or `validate` answer depends on the faces of the cards that set names,
+    and no record depends on any face. It does not prove the set itself is right (for example that
+    a `missed` pair leaves it, and returns to it, at the right moment): the rule tables and the
+    oracle test of §10 do.
   - Non-vacuity: the state changes at every sample except those where the hidden cards all share
-    one face (the last pair, or only the turn's first card's partner), at most the game's last turn,
-    so well over half of the samples count.
+    one face (the last pair, or only the turn's first card's partner), so well over half of the
+    samples count.
 - **The secret-choice check** (02 §6.3) passes by construction: flips of different cards leave
-  different cards face up in every other viewer's view, and the same card gives the same record.
-- `randomAction(state, seat, rng)`: the first card uniform among the legal cards (`missed` ones
-  included). The second card is the partner of the `up` card (the other card with its face) once
-  `moves ≥ 4 × pairs²`, and before that the partner with probability 1/3, otherwise uniform among
-  the legal cards. Only the kit and `games:verify` read it (02 §6); the partner rule is what makes
-  termination provable.
+  different cards face up in every other viewer's view, and every flip of the same step gives the
+  same record.
+- `randomAction(state, seat, rng)`: uniform among the legal flips (every card that isn't `matched`
+  or `up`; `missed` ones included). It reads no face.
 - `randomAnyAction(state, seat, rng)`: schema-valid and often illegal: mostly a uniformly random
   card in the grid (matched, up, missed or down), sometimes a row or column one outside the grid,
   now and then a large integer.
-- `maxActions(options, seats)` = `4·pairs² + 2·pairs + 2·seats`. Proof: at most `4·pairs²`
-  transitions happen before the cap. After it every second card matches, so there are at most
-  `pairs` second cards; every first card after it is followed by a matching second card or
-  abandoned by an exit; and there are at most `seats` exits. That bounds what follows the cap by
-  `2·pairs + 2·seats` (1,344 at `6x6` with 6 seats).
-- `worstCase(options, seats, rng)`: built by seeded play from `setup` with `randomAction` at the
-  given options and seat count, so every input is a reachable state: a first card while a `missed`
-  pair is shown (apply clears it), a second card that misses (the next-seat search), and the second
-  card that finds the last pair (the game's end and the ranking). `validate` is a few lookups and
-  `apply` copies at most 36 cards and 6 seats, so the costliest inputs are the largest grid's; the
-  engine's tests report the measured p99, expected to be microseconds against the 5 ms budget
-  (08 T25). Its honesty rests on that reading of the code, which the review checks.
+- `maxActions(options, seats)` = `16·pairs + seats + 1` (131 at `4x4` with 2 seats, 295 at `6x6`
+  with 6), from the move limit (§6). Proof: every module transition adds one to `moves`, so the
+  first `16·pairs` transitions bring it to the limit. From then on the game ends at the next second
+  card or the next leave by the seat to act (§8.2). Before that, at most one first card can be
+  turned (a first card is followed by its own second card or its seat's leave), and seats not to
+  act can leave, but a game has at most `seats − 1` leaves (the last but one ends it). So at most
+  `1 + 1 + (seats − 1)` transitions follow the limit.
+- `worstCase(options, seats, rng)`: built by seeded play from `setup` at the given options and seat
+  count, so every input is a reachable state. Its own driver (not `randomAction`; it may read the
+  layout to reach the end) turns the partner of the `up` card half the time. It keeps a first card
+  while a `missed` pair is shown (apply clears it), a second card that misses (the next-seat
+  search), the second card that finds the last pair (the end and the ranking), and a second card
+  that ends the game at the move limit. `validate` is a few lookups and `apply` copies at most 36
+  cards and 6 seats, so the costliest inputs are the largest grid's; the engine's tests report the
+  measured p99, expected to be microseconds against the 5 ms budget (08 T25). Its honesty rests on
+  that reading of the code, which the review checks.
 - `optionInputs`: `[{}, { grid: "4x4" }, { grid: "5x6" }, { grid: "6x6" }]` (`{}` is `4x5`), each
   at 2–6 seats. No `context` or `resources` hooks.
 
-### 8.7 Manifest
+### 8.8 Manifest
 
-`type: "pairs"`, `name: "Pairs"`, a one-line description ("Turn over two cards at a time and find
-the matching pairs."), an original SVG icon (two cards, one face up), `licence` as the package,
-`resources: []`, `hiddenInformation: true` (so an owner's AI seats are allowed only against their
-own AI accounts, 02 §4; every seat sees the same, but the flag is binary), `players: { min: 2, max:
-6 }`. The rules text (version 1) states the rules of §3–§6, that the missed pair stays face up only
-until the next player turns their first card, that the history says which cards were turned but
-never what they showed, and that writing faces down, screenshots or a tool that remembers for you
-spoil the game.
+`type: "pairs"`, `name: "Pairs"` (working name, Q32), a one-line description ("Turn over two cards
+at a time and find the matching pairs."), an original SVG icon (two cards, one face up), `licence`
+as the package, `resources: []`, `hiddenInformation: true` (so an owner's AI seats are allowed only
+against their own AI accounts, 02 §4; every seat sees the same, but the flag is binary), `players:
+{ min: 2, max: 6 }`. The rules text (version 1) states the rules of §3–§6 (the move limit included),
+that the missed pair stays face up only until the next player turns their first card, that the
+history says who turned cards but never which, and that writing faces down, screenshots or a tool
+that remembers for you spoil the game for everyone else, who can't tell.
 
 ## 9. UI notes (games/pairs client)
 
@@ -351,71 +399,107 @@ spoil the game.
   4 px gaps; the content width is the viewport less the page's two 16 px gutters, up to the shell's
   column. At 320 px wide that is 44.7 px at 6 columns, 54.4 px at 5 and 69 px at 4, so every card
   is a touch target of at least 44 × 44 CSS px (WCAG 2.5.5) and 6 columns is the most a grid has.
-  A `6x6` board is 288 px tall there and `4x5` 361 px, so the board's top stays on the first
-  screen of a 320 × 568 phone (02 §3). Every other control is at least 44 × 44 CSS px too.
-- **Layout**, top to bottom: the players (number, name, pairs found or "out"), the turn line
-  ("Your turn: turn over a card", "… a second card", "Sam to play"), the board, and a live status
-  line. The board owns the players and the turn (02 §3).
+  A `6x6` board is 288 px tall there and `4x5` 361 px. Every other control is at least 44 × 44 CSS
+  px too.
+- **Layout**, top to bottom: the players, the turn line ("Your turn: turn over a card", "… a
+  second card", "Sam to play"), the board, and a live status line. The board owns the players and
+  the turn (02 §3).
+  - **The players area is compact**: at widths under 480 px, two columns of one line each
+    ("1 Ann · 3", "2 Sam · out"), so 2–4 players take two lines and 5–6 three; on wider screens one
+    wrapped line. Near the limit (fewer than `2 × seats` moves left) the turn line adds "N moves
+    left".
+  - **Above the fold**: at 320 × 568 the whole board, not just its top (02 §3), is on the first
+    screen for 2–4 players on every grid, and the e2e asserts it. With 5–6 players the players area
+    takes a third line, and on `4x5` the board's last row may need a short scroll; that trade-off
+    is accepted rather than shrinking cards below 44 px.
 - **Turning a card**: on your turn, tap a card that isn't matched or up. There is no confirm: one
   tap is one action, as at a table. While the request is in flight every card is inactive and the
-  tapped one shows a turning state with no face; the face appears from the view the submit returns,
-  never earlier. On an error the shell's stale-state refetch applies (02 §3). Off turn the cards
-  are inactive (`aria-disabled`, still focusable so they can be read).
-- **The reveal when your turn opens**: `missed` cards are drawn face up with a visible label ("Sam's
-  last turn", or "Your last turn") and their own outline, and the status line names them: "Sam's
+  tapped one shows a turning state: a `down` card with no face, a `missed` card with its face (it is
+  in the current view) and its outline; the other cards keep what the current view shows. The
+  face appears from the view the submit returns, never earlier. On an error the shell's stale-state
+  refetch applies (02 §3). Off turn the cards are inactive (`aria-disabled`, still focusable so they
+  can be read).
+- **The reveal when your turn opens**: each `missed` card is drawn face up with its own outline and
+  a badge with the number of the player whose turn it was. The status line says the rest: "Sam's
   last turn: moon (row 1, column 2) and key (row 3, column 4). They turn face down when you turn
   your first card." Tapping one of them turns it as your first card (it stays face up as yours) and
   the other goes down. After your second card the line says "A pair of stars! Your turn again." or
-  "No match. Sam to play.", the missed pair labelled "Your last turn".
-- **The board never remembers for the player**: it draws only what the current view shows, and
-  keeps no face from an earlier view on screen, in its status text or in storage (no
-  `localStorage` use at all); the status line is replaced whenever the view changes and never
-  names a face the current view doesn't show.
+  "No match. Sam to play."
+- **Off turn**, the status line says whose turn it is and what is shown: "Sam to play.", "Sam
+  turned over a star (row 2, column 3).", or, while a missed pair is shown, "Ann's last turn: moon
+  (row 1, column 2) and key (row 3, column 4)."
+- **The board never remembers for the player**, on screen, in the DOM or in the accessibility tree:
+  - it renders only what the current view shows: a `down` card renders no face element, and no
+    class, React key, `data-` attribute, title or accessible text derived from a face (cards are
+    keyed by position);
+  - the turn-down animation may draw the previous face only for its own duration, and then removes
+    that node; with `prefers-reduced-motion` there is none;
+  - the status line is replaced whenever the view changes and never names a face the current view
+    doesn't show; nothing is kept in storage (no `localStorage` use at all);
+  - a page restored from the back-forward cache (`pageshow` with `persisted`) refetches the game
+    before showing it, so an old view can't come back (the shell does this, for every game).
 - **Faces** are drawn as SVG React elements from our own artwork (§1), with `viewBox` and class
   names, decorative and `aria-hidden`; the card back is one pattern. Matched cards are drawn
-  dimmed with a check and the finder's player number, words or numbers alongside colour, never
-  colour alone.
+  dimmed with a check and the finder's player number; words or numbers always go with colour.
 - **Accessible names** (rows and columns from 1): "Row 2, column 3, face down"; "Row 2, column 3,
-  star, your first card"; "Row 1, column 2, moon, Sam's last turn, turns face down at the next
-  first card"; "Row 4, column 4, apple, matched by Ann". The board is a region; arrow keys move
-  between cards (one tab stop), Enter or Space turns the focused card (07 §6). Status text is in a
-  polite live region that is always in the page.
+  star, your first card"; "Row 2, column 3, star, Sam's first card"; "Row 1, column 2, moon, Sam's
+  last turn, turns face down at the next first card"; "Row 4, column 4, apple, matched by Ann".
+- **Grid semantics**: the board is a `role="grid"` labelled "Cards", with a `role="row"` per row
+  and a `role="gridcell"` per card holding the card's `<button>`, so screen readers can move by row
+  and column in focus mode. Arrow keys move between cards (one tab stop, roving `tabindex`), Enter
+  or Space turns the focused card (07 §6). Status text is in a polite live region that is always in
+  the page.
 - **Motion**: a card turns with a short flip (about 250 ms) both ways; with
   `prefers-reduced-motion` faces appear and go without animation.
 - **Shared display names**: players who share a name are written with their number, "Ann (player
   2)", in every line the board writes and in history items.
 - **Theme**: as paths (paths §8): the page's light or dark theme, colours as board tokens with each
-  theme's contrast tested, including face drawings against the card and the card against the page.
-- **Finished game**: the shell's result card owns the ranks; the board shows every card's face
-  (`view` reveals them) and each player's pairs.
+  theme's contrast tested: face drawings at least 3:1 against their card (WCAG 1.4.11), dimmed
+  matched cards included; badge and status text at least 4.5:1; the card back against the page.
+- **Finished or stopped game**: the board never offers a tap and shows no turn line; the shell's
+  result card owns the ranks and how it ended. After `all-found`, `last-standing` or `move-limit`
+  the board shows every card's face and each player's pairs; after a framework-only ending or a
+  cancel it shows the frozen view as it is (§8.4), face-down cards still blank.
 - Options form: the grid as radios ("4 × 4: 8 pairs, quickest" … "6 × 6: 18 pairs, longest").
   The rules sheet states the game's options, then the manifest's rules for its version.
   `HistoryItem` renders the record's `describe` text with names (and the shared-name number); it
-  draws no faces.
+  draws no cards.
 
 ## 10. Module-specific tests
 
 Rule tables in addition to the kit, with a seeded `RandomSource`:
 
 - **Setup**: each grid's size and pair count; every face in play on exactly two cards; `pairs`
-  distinct faces in play, all 18 at `6x6`; the same seed gives the same layout and faces.
+  distinct faces in play, all 18 at `6x6`; the 18 ids are shuffled on every grid, and the deck is
+  built ascending before its shuffle; the same seed gives the same layout and faces.
 - **A turn**: a first card clears a shown `missed` pair and keeps the seat in `toAct`; a match
   scores the pair and keeps the turn; a miss shows both and passes the turn to the next playing
   seat, skipping seats that are out and wrapping; the last pair ends the game `all-found`; a
   `missed` card is a legal first card.
+- **Move limit**: a miss, a match and a leave by the seat to act at the limit each end the game
+  `move-limit`; a first card at the limit doesn't, nor does a leave by another seat; `all-found`
+  and `last-standing` take precedence; the ranking is as `all-found`.
 - **Errors**: every code in its order (not to act, out of range on each side, matched, up) and the
   game over; none carries a `detail`.
 - **Views**: identical for every seat and the public in progress; `down` faces null in progress
-  and set once over; a `missed` pair in every view until the next first card and in none after;
-  a face shown as `up` and then turned back by a resignation in no view after it.
+  and set once `endReason` is set; a `missed` pair in every view until the next first card and in
+  none after; a face shown as `up` and then turned back by a resignation in no view after it.
 - **Leaving**: resign, timeout and decline before the first card (a shown pair kept), mid-turn
-  (the card turned back) and off turn (the turn kept); a 2-player resignation ends `last-standing`;
-  a leaver's pairs kept as its score.
+  (the card turned back) and off turn (the turn kept); the exit-reason mapping; a 2-player
+  resignation ends `last-standing`; a leaver's pairs kept as its score; a leave that ends the game
+  mid-turn, or while a missed pair is shown, leaves a finished view with only `matched` and `down`
+  cards (faces set).
 - **Ranking**: ties sharing a rank, leavers below every seat still playing whatever their pairs,
   later leavers higher, `last-standing` with several leavers.
-- **Records and text**: every record shape and its `describe` text, and the summary lines.
+- **Records and text**: every record shape and its `describe` text, and the summary lines; no
+  record or text contains a row, column or face.
+- **Invariants and an independent oracle** (property test over seeded random games with exits): the
+  §8.1 invariants hold at every state; and a separate model written from §3–§6 alone, fed the
+  **actions** applied (not the records) and the layout, predicts at every step which cards show a
+  face and in which state; the view's `cards` must equal it exactly.
 - **Hooks**: `perturbHidden` changes only hidden cards' faces, keeps the multiset, the faces in
   play and the key order, changes the state whenever two hidden faces differ, and leaves a finished
-  game alone; `randomAction` always validates and plays the partner after the cap; random games
-  with exits stay within `maxActions` (a property test); `worstCase` returns real moves for every
-  grid and seat count.
+  game alone; `randomAction` always validates and reads no face (it gives the same flip on a state
+  and on its perturbation, with the same draws); random games with exits stay within `maxActions`
+  (a property test); `worstCase` returns real moves for every grid and seat count, the four kinds
+  included.

@@ -374,26 +374,35 @@ tests are green in CI.
 
 ## Pairs game (proposed)
 Proposed (2026-11-29), not scheduled: the memory game the owner asked for as a third,
-family-friendly game, specified in games/pairs.md from the design note in §Later. Children play
-through a parent's account (Q20); the child-safety (alpha A21) and blocking (A23) items paths
-needed are done. It needs no framework change. Proposed: **an engine slice, then a client slice**,
-each a branch with its own review, as paths was built (A22, A24):
+family-friendly game, specified in games/pairs.md from the design note in §Later ("Pairs" is a
+working name, Q32). Children play through a parent's account (Q20); the child-safety (alpha A21)
+and blocking (A23) items paths needed are done. Its only framework change is the kit's check of
+`hiddenFromEveryone` (below). Proposed: **an engine slice, then a client slice**, each a branch
+with its own review, as paths was built (A22, A24):
 - **Engine slice**: `@your-move/game-pairs` (02 §7) with its engine and manifest, not yet installed:
   the grids, the faces in play and the layout (§1, §2), the two-card turn with a match's extra turn
   (§3), the view rule of §4 (every seat sees the same; a missed pair shown until the next first
-  card, then gone from every view), leaving mid-turn (§5), ranking (§6), options (§7) and the
-  contract of §8, with `hiddenFromEveryone`, the `perturbHidden` of §8.6 and the capped
-  `randomAction` that bounds `maxActions`. **Accept:** passes the generic test kit at 2, 3, 4 and 6
-  players on every grid (CPU budget included, T25); the rule tables of pairs §10.
-- **Client slice**: the board of pairs §9 (cards sized for 320 px with 44 CSS px targets, the reveal
-  of the missed pair when a turn opens, accessible names for positions and faces, keyboard play,
-  `prefers-reduced-motion`, a light and a dark theme, the 18 original face drawings and the card
-  back), the options form, rules sheet and history items; `pairs` installed in
+  card, then gone from every view), leaving mid-turn (§5), the endings with the move limit and the
+  ranking (§6), options (§7) and the contract of §8: records with no card in them, the schema
+  bounds, `hiddenFromEveryone`, the `perturbHidden` of §8.7, a uniform `randomAction` that reads no
+  face, and `maxActions` derived from the move limit. In the testkit and SDK (02 §6.3): the kit
+  checks, for a module that sets `hiddenFromEveryone`, that every seat and the public get identical
+  view JSON at every step in progress, with a broken fixture (a hand game that sets the flag) it
+  must fail; the SDK's TSDoc for the flag and the writing-a-game guide say the same (review
+  PS-S-2, PS-P-3). **Accept:** passes the generic test kit at 2–6 players on every grid (CPU budget
+  included, T25); the rule tables, invariants and oracle test of pairs §10.
+- **Client slice**: the board of pairs §9 (cards sized for 320 px with 44 CSS px targets, the
+  compact players area, the reveal of the missed pair when a turn opens, the `role="grid"` board
+  with accessible names for positions and faces, keyboard play, `prefers-reduced-motion`, a light
+  and a dark theme, the 18 original face drawings and the card back, and no face kept in the DOM or
+  the accessibility tree once the view drops it), the options form, rules sheet and history items;
+  in the shell, a refetch on `pageshow` with `persisted`, for every game; `pairs` installed in
   `instance.config.ts` and the root dependencies, so the full kit, the image build and the client
   bundle checks cover it. **Accept:** Playwright, three people through a join link on screens from
   320 px wide with touch emulation: a match and its extra turn, a miss whose pair the next player
-  sees and that is gone from every player's board after that player's first card, a resignation
-  mid-turn turning the card back, and play to the end; every card measured at least 44 CSS px.
+  sees and whose cards hold no face markup on any player's page after that player's first card, a
+  resignation mid-turn turning the card back, and play to the end; every card measured at least
+  44 CSS px; the whole board visible at 320 × 568 for 2–4 players on every grid.
 
 ## M6 — Bring-your-own dictionaries
 - `BlobStore` (R2 / filesystem with key and path checks), `dictionaries` table, `serverOnly`
