@@ -1,7 +1,7 @@
 /**
  * Blocking (alpha A23, 07 §1, 05 §Blocks, 06 §6.10): Bob opens Ann's invitation and blocks her
  * from it, after a dialog that says what a block does; he is back on his game list with no
- * invitation, and Ann's lobby shows only that Bob declined. Then Bob finds Ann under Settings'
+ * invitation, and Ann's game shows only that Bob declined. Then Bob finds Ann under Settings'
  * *Blocked players* and unblocks her.
  */
 import { expect, test } from "./fixtures.js";
@@ -39,9 +39,10 @@ test("an invitee blocks the inviter from the invitation, then unblocks her in Se
   await expect(bob).toHaveURL(/\/$/u);
   await expect(bob.getByRole("region", { name: /Invitations/u })).toHaveCount(0);
 
-  // To Ann it is a decline like any other: no name, no mention of a block.
+  // To Ann it is a decline like any other: her two-seat lobby ends as Bob's own Decline would
+  // end it, with no mention of a block.
   await refocus(ann);
-  await expect(ann.getByRole("listitem").filter({ hasText: "Declined" })).toHaveCount(1, FAR);
+  await expect(ann.getByText("Declined, no result")).toBeVisible(FAR);
   await expect(ann.getByText(/block/iu)).toHaveCount(0);
 
   await bob.goto("/settings");
