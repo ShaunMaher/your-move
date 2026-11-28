@@ -5,8 +5,9 @@
  */
 import type { RandomSource, Seat } from "@your-move/sdk";
 
+import { ascending } from "./engine/at.js";
 import type { Marker, Options, Out, Placed, Position } from "./engine/schemas.js";
-import { ascending, type State } from "./engine/state.js";
+import type { State } from "./engine/state.js";
 import { normalise, rotatePairs, ROTATIONS, TILE_COUNT, TILES, type Pair } from "./engine/tiles.js";
 
 /** A source that must never be drawn from: proves a transition uses no randomness. */
@@ -44,8 +45,11 @@ export const STRAIGHT: readonly Pair[] = [
   [3, 6],
 ];
 
-/** A marker on the board facing `pos`'s square. */
-export const at = (r: number, c: number, n: number): Marker => ({ pos: { r, c, n }, out: null });
+/** A live marker on notch `n` of square `(r, c)`, facing that square. */
+export const facing = (r: number, c: number, n: number): Marker => ({
+  pos: { r, c, n },
+  out: null,
+});
 
 /** A marker that hasn't been placed yet. */
 export const unplaced: Marker = { pos: null, out: null };

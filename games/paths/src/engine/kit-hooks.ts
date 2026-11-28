@@ -11,12 +11,12 @@ import {
   type WorstCase,
 } from "@your-move/sdk";
 
-import { at } from "./at.js";
+import { ascending, at } from "./at.js";
 import { edgeNotchCount } from "./geometry.js";
 import { movement } from "./movement.js";
 import { freeEdgeNotches, legalPlacements } from "./rules.js";
 import { HAND_SIZE, type Action, type Options, type Placed } from "./schemas.js";
-import { ascending, copyState, faced, placeMarker, placeTile, setup, type State } from "./state.js";
+import { copyState, faced, placeMarker, placeTile, setup, type State } from "./state.js";
 import { ROTATIONS, TILE_COUNT } from "./tiles.js";
 
 /** One of `items`, chosen with `rng`. */
@@ -96,22 +96,63 @@ function optionInputs(): readonly unknown[] {
   ];
 }
 
-/** How many random games `worstCase` searches, and how many inputs it keeps. */
+/** How many random games `worstCase` searches, and how many states it keeps. */
 const SEARCH_GAMES = 6;
 const KEEP = 4;
 
+/** A candidate input and the tile paths `validate` + `apply` trace for it. */
+interface Candidate {
+  readonly cost: number;
+  readonly eliminates: boolean;
+  readonly input: WorstCase<State, Action>;
+}
+
 /**
- * The most expensive inputs for the CPU budget (02 §6.6, paths §7): seeded random games are
- * played to their end, and at every tile turn each legal placement is costed by the length of the
- * traces it makes. The longest ones are kept, plus the longest that puts the mover out (where
- * `validate` tries every other tile and rotation in hand).
+ * The costliest placement at `state` for the seat to act, and the costliest one that puts the
+ * mover out, if any is legal. A placement's cost is what `validate` and `apply` actually trace:
+ * the placement itself once in each, plus, under `avoidIfPossible` when it puts the mover out,
+ * every tile and rotation in hand (`validate` looks for one that wouldn't, paths §3 step 4).
+ */
+function candidates(state: State, seat: Seat): { best: Candidate; eliminating?: Candidate } {
+  const traced = (placed: Placed): { length: number; eliminates: boolean } => {
+    const moved = movement(state.board, state.markers, faced(state, seat), placed);
+    return {
+      length: moved.moves.reduce((sum, move) => sum + move.path.length, 0),
+      eliminates: moved.eliminated.includes(seat),
+    };
+  };
+  const hand = at(state.hands, seat).flatMap((tileId) =>
+    Array.from({ length: ROTATIONS }, (_, rotation) => traced({ tileId, rotation })),
+  );
+  const everyOption = hand.reduce((sum, option) => sum + option.length, 0);
+  const avoid = state.options.selfElimination === "avoidIfPossible";
+  const costed = legalPlacements(state, seat).map((placed): Candidate => {
+    const { length, eliminates } = traced(placed);
+    return {
+      cost: 2 * length + (avoid && eliminates ? everyOption : 0),
+      eliminates,
+      input: { state, seat, action: tileAction(placed) },
+    };
+  });
+  const byCost = costed.sort((a, b) => b.cost - a.cost);
+  const best = at(byCost, 0);
+  const eliminating = byCost.find((candidate) => candidate.eliminates);
+  return eliminating === undefined ? { best } : { best, eliminating };
+}
+
+/**
+ * The most expensive inputs for the CPU budget (02 §6.6, paths §7). A heuristic search, not a
+ * proof: seeded random games are played to their end, every tile turn is costed by
+ * {@link candidates}, and the `KEEP` costliest states are kept (one input each), plus the costliest
+ * placement that puts the mover out if none of those does.
  */
 function worstCase(
   options: Options,
   seats: number,
   rng: RandomSource,
 ): readonly WorstCase<State, Action>[] {
-  const found: { cost: number; eliminates: boolean; input: WorstCase<State, Action> }[] = [];
+  const best: Candidate[] = [];
+  const eliminating: Candidate[] = [];
   for (let game = 0; game < SEARCH_GAMES; game += 1) {
     let state = setup({ options, seats, rng });
     while (state.turn !== null) {
@@ -120,23 +161,19 @@ function worstCase(
         state = placeMarker(state, seat, pick(freeEdgeNotches(state), rng)).state;
         continue;
       }
-      for (const placed of legalPlacements(state, seat)) {
-        const moved = movement(state.board, state.markers, faced(state, seat), placed);
-        found.push({
-          // How much work the placement makes: the tile paths every moved marker crosses.
-          cost: moved.moves.reduce((sum, move) => sum + move.path.length, 0),
-          eliminates: moved.eliminated.includes(seat),
-          input: { state, seat, action: tileAction(placed) },
-        });
-      }
+      const found = candidates(state, seat);
+      best.push(found.best);
+      if (found.eliminating !== undefined) eliminating.push(found.eliminating);
       state = placeTile(state, seat, pick(legalPlacements(state, seat), rng), rng).state;
     }
   }
-  const byCost = [...found].sort((a, b) => b.cost - a.cost);
-  const kept = byCost.slice(0, KEEP);
-  const eliminating = byCost.find((entry) => entry.eliminates);
-  if (eliminating !== undefined && !kept.includes(eliminating)) kept.push(eliminating);
-  return kept.map((entry) => entry.input);
+  const byCost = (a: Candidate, b: Candidate): number => b.cost - a.cost;
+  const kept = best.sort(byCost).slice(0, KEEP);
+  const [worstExit] = eliminating.sort(byCost);
+  if (worstExit !== undefined && !kept.some((candidate) => candidate.eliminates)) {
+    kept.push(worstExit);
+  }
+  return kept.map((candidate) => candidate.input);
 }
 
 export const testHooks: GameTestHooks<Options, State, Action> = {

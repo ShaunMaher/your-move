@@ -9,7 +9,10 @@ import type { Seat } from "@your-move/sdk";
 import { at } from "./at.js";
 import { across, samePosition, type NotchPosition } from "./geometry.js";
 import type { Marker, Move, Placed } from "./schemas.js";
-import { partner, ROTATIONS } from "./tiles.js";
+import { partner } from "./tiles.js";
+
+/** The paths on a tile. */
+const PATHS_PER_TILE = 4;
 
 /** The board: `board[r][c]` is the tile placed on square `(r, c)`, or null. */
 export type Board = readonly (readonly (Placed | null)[])[];
@@ -67,8 +70,9 @@ function trace(
   const steps: string[] = [];
   const reversed: string[] = [];
   let pos = start;
-  // Every tile path is travelled at most once, so a trace crosses at most 4 paths per square.
-  const limit = size * size * (ROTATIONS * 2) + 1;
+  // Every tile path is travelled at most once, so a trace crosses at most 4 paths per square;
+  // one more pass finds the empty square it stops at.
+  const limit = size * size * PATHS_PER_TILE + 1;
   for (let step = 0; step < limit; step += 1) {
     const tile = tileAt(pos.r, pos.c);
     if (tile === null) return { path, end: pos, steps, reversed };

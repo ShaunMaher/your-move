@@ -7,7 +7,7 @@ import { seededRandom } from "@your-move/testkit";
 import { describe, expect, it } from "vitest";
 
 import {
-  at,
+  facing,
   game,
   noRandom,
   OPTIONS,
@@ -34,7 +34,7 @@ const HEAD_ON = placedFor([
 ]);
 
 /** Markers far from the action, one per seat, on distinct notches of the bottom row. */
-const away = (c: number): ReturnType<typeof at> => at(5, c, 4);
+const away = (c: number): ReturnType<typeof facing> => facing(5, c, 4);
 
 describe("setup (paths §2)", () => {
   it("shuffles all 35 tiles into the deck and starts the marker phase with seat 0", () => {
@@ -57,7 +57,7 @@ describe("the marker phase (paths §2)", () => {
   it("puts the marker on the edge notch and passes to the next player, drawing nothing", () => {
     const state = game({ phase: "markers", markers: [unplaced, unplaced, unplaced], moves: 0 });
     const { state: next, record } = placeMarker(state, 0, 47);
-    expect(next.markers[0]).toEqual(at(0, 0, 7));
+    expect(next.markers[0]).toEqual(facing(0, 0, 7));
     expect(next).toMatchObject({ phase: "markers", turn: 1, moves: 1 });
     expect(record).toEqual({
       type: "place-marker",
@@ -74,11 +74,11 @@ describe("the marker phase (paths §2)", () => {
   it("deals a full hand to each player in turn order from the top of the deck once all have placed", () => {
     const state = game({
       phase: "markers",
-      markers: [at(0, 0, 0), at(0, 1, 0), unplaced],
+      markers: [facing(0, 0, 0), facing(0, 1, 0), unplaced],
       turn: 2,
     });
     const { state: next } = placeMarker(state, 2, 24);
-    expect(next.markers[2]).toEqual(at(5, 5, 4));
+    expect(next.markers[2]).toEqual(facing(5, 5, 4));
     expect(next.hands).toEqual([
       [0, 1, 2],
       [3, 4, 5],
@@ -92,7 +92,7 @@ describe("the marker phase (paths §2)", () => {
     const state = game({
       options: { handSize: 1 },
       phase: "markers",
-      markers: [at(0, 0, 0), out(1, "declined"), unplaced],
+      markers: [facing(0, 0, 0), out(1, "declined"), unplaced],
       turn: 2,
     });
     const { state: next } = placeMarker(state, 2, 24);
@@ -101,7 +101,11 @@ describe("the marker phase (paths §2)", () => {
   });
 
   it("moves on to the next player without a marker when the one to act declines", () => {
-    const state = game({ phase: "markers", markers: [at(0, 0, 0), unplaced, unplaced], turn: 1 });
+    const state = game({
+      phase: "markers",
+      markers: [facing(0, 0, 0), unplaced, unplaced],
+      turn: 1,
+    });
     const { state: next, record } = leave(state, 1, noRandom, "decline");
     expect(next.markers[1]).toEqual(out(10, "declined"));
     expect(next.turn).toBe(2);
@@ -118,7 +122,7 @@ describe("the marker phase (paths §2)", () => {
   it("starts the tile phase when the last player without a marker leaves", () => {
     const state = game({
       phase: "markers",
-      markers: [at(0, 0, 0), at(0, 1, 0), unplaced],
+      markers: [facing(0, 0, 0), facing(0, 1, 0), unplaced],
       turn: 2,
     });
     const { state: next } = leave(state, 2, noRandom, "decline");
@@ -127,7 +131,7 @@ describe("the marker phase (paths §2)", () => {
   });
 
   it("ends with the last player standing when everyone else leaves, even before any tile", () => {
-    const state = game({ phase: "markers", markers: [unplaced, at(0, 1, 0)], turn: 0 });
+    const state = game({ phase: "markers", markers: [unplaced, facing(0, 1, 0)], turn: 0 });
     const { state: next } = leave(state, 0, noRandom, "resign");
     expect(next).toMatchObject({ endReason: "last-standing", turn: null });
     expect(toAct(next)).toEqual([]);
@@ -144,7 +148,7 @@ describe("the marker phase (paths §2)", () => {
 describe("a tile turn (paths §3)", () => {
   it("places the tile on the square the mover faces, moves the marker and draws one tile", () => {
     const state = game({
-      markers: [at(0, 2, 0), away(5)],
+      markers: [facing(0, 2, 0), away(5)],
       hands: [
         [SAFE.tileId, 1, 2],
         [3, 4, 5],
@@ -152,7 +156,7 @@ describe("a tile turn (paths §3)", () => {
     });
     const { state: next, record } = placeTile(state, 0, SAFE, noRandom);
     expect(next.board[0]![2]).toEqual(SAFE);
-    expect(next.markers[0]).toEqual(at(1, 2, 0));
+    expect(next.markers[0]).toEqual(facing(1, 2, 0));
     // Hands are kept in ascending order; the deck's front tile here is tile 0.
     expect(state.deck[0]).toBe(0);
     expect(next.hands[0]).toEqual([0, 1, 2]);
@@ -175,7 +179,7 @@ describe("a tile turn (paths §3)", () => {
   it("puts out a mover led off the board: no draw, and its hand goes back into the deck", () => {
     const state = game({
       options: { selfElimination: "allowed" },
-      markers: [at(0, 2, 0), away(4), away(5)],
+      markers: [facing(0, 2, 0), away(4), away(5)],
       hands: [
         [KILLER.tileId, 9],
         [3, 4, 5],
@@ -201,7 +205,7 @@ describe("a tile turn (paths §3)", () => {
   it("is deterministic and never changes its input", () => {
     const state = game({
       options: { selfElimination: "allowed" },
-      markers: [at(0, 2, 0), away(4), away(5)],
+      markers: [facing(0, 2, 0), away(4), away(5)],
       hands: [[KILLER.tileId, 9], [3], [6]],
       deck: [],
       tokenHolder: 2,
@@ -217,7 +221,7 @@ describe("a tile turn (paths §3)", () => {
 describe("running out of tiles (paths §4)", () => {
   it("draws nothing from an empty deck, and the mover takes the token if nobody holds it", () => {
     const state = game({
-      markers: [at(0, 2, 0), away(5)],
+      markers: [facing(0, 2, 0), away(5)],
       hands: [[SAFE.tileId, 1], [3]],
       deck: [],
     });
@@ -228,7 +232,7 @@ describe("running out of tiles (paths §4)", () => {
 
   it("leaves the token where it is when someone already holds it", () => {
     const state = game({
-      markers: [at(0, 2, 0), away(5)],
+      markers: [facing(0, 2, 0), away(5)],
       hands: [[SAFE.tileId, 1], [3]],
       deck: [],
       tokenHolder: 1,
@@ -320,7 +324,7 @@ describe("running out of tiles (paths §4)", () => {
 
   it("passes the token on when its holder is eliminated by a tile", () => {
     const state = game({
-      markers: [at(0, 0, 0), at(0, 0, 7), away(5)],
+      markers: [facing(0, 0, 0), facing(0, 0, 7), away(5)],
       hands: [[DROPS_LEFT.tileId, 10], [], [12]],
       deck: [],
       tokenHolder: 1,
@@ -331,12 +335,25 @@ describe("running out of tiles (paths §4)", () => {
     expect(next.tokenHolder).toBe(2);
     expect(next.turn).toBe(2);
   });
+  it("hands the token to the mover when it is the next player short after the holder put out", () => {
+    // The mover has just placed a tile, so it is short; seat 2 after the holder is full.
+    const state = game({
+      markers: [facing(0, 0, 0), facing(0, 0, 7), away(5)],
+      hands: [[DROPS_LEFT.tileId, 10], [], [12, 13, 14]],
+      deck: [],
+      tokenHolder: 1,
+    });
+    const { state: next, record } = placeTile(state, 0, DROPS_LEFT, noRandom);
+    expect(record.eliminated).toEqual([1]);
+    expect(next.tokenHolder).toBe(0);
+    expect(next.hands[0]).toEqual([10]);
+  });
 });
 
 describe("skipping empty hands (paths §3 step 7)", () => {
   it("skips survivors with no tiles, lists them in the record and never puts them in toAct", () => {
     const state = game({
-      markers: [at(0, 2, 0), away(4), away(5)],
+      markers: [facing(0, 2, 0), away(4), away(5)],
       hands: [[SAFE.tileId, 1], [], [2]],
       deck: [],
     });
@@ -347,7 +364,7 @@ describe("skipping empty hands (paths §3 step 7)", () => {
 
   it("comes back round to the mover when nobody else holds a tile", () => {
     const state = game({
-      markers: [at(0, 2, 0), away(4), away(5)],
+      markers: [facing(0, 2, 0), away(4), away(5)],
       hands: [[SAFE.tileId, 1], [], []],
       deck: [],
     });
@@ -387,7 +404,7 @@ describe("skipping empty hands (paths §3 step 7)", () => {
 describe("end of game and ranking (paths §5)", () => {
   it("ends with the last player standing when a tile puts the other one out", () => {
     const state = game({
-      markers: [at(0, 0, 0), at(0, 0, 7)],
+      markers: [facing(0, 0, 0), facing(0, 0, 7)],
       hands: [[DROPS_LEFT.tileId], [10]],
     });
     const { state: next } = placeTile(state, 0, DROPS_LEFT, seededRandom(2));
@@ -403,7 +420,7 @@ describe("end of game and ranking (paths §5)", () => {
 
   it("gives a simultaneous wipe-out a shared first place", () => {
     const state = game({
-      markers: [at(1, 0, 0), at(1, 0, 7)],
+      markers: [facing(1, 0, 0), facing(1, 0, 7)],
       board: [{ r: 0, c: 0, placed: SAFE }],
       hands: [[HEAD_ON.tileId], [10]],
     });
@@ -421,7 +438,7 @@ describe("end of game and ranking (paths §5)", () => {
 
   it("ranks a collision's players together, below the survivor", () => {
     const state = game({
-      markers: [at(1, 0, 0), at(1, 0, 7), away(5)],
+      markers: [facing(1, 0, 0), facing(1, 0, 7), away(5)],
       board: [{ r: 0, c: 0, placed: SAFE }],
       hands: [[HEAD_ON.tileId], [10], [11]],
     });
@@ -436,9 +453,14 @@ describe("end of game and ranking (paths §5)", () => {
     });
   });
 
-  it("ends with a shared win when no surviving player holds a tile (board full)", () => {
-    const state = game({ markers: [at(0, 2, 0), away(5)], hands: [[SAFE.tileId], []], deck: [] });
+  it("ends with a shared win when no surviving player holds a tile (board full), listing no skips", () => {
+    const state = game({
+      markers: [facing(0, 2, 0), away(5)],
+      hands: [[SAFE.tileId], []],
+      deck: [],
+    });
     const { state: next, record } = placeTile(state, 0, SAFE, noRandom);
+    // Seat 1 holds nothing, but a move that ends the game skips nobody (paths §3 step 7).
     expect(record.skipped).toEqual([]);
     expect(result(next)).toEqual({
       ranking: [

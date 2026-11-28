@@ -34,7 +34,7 @@ In turn order, each player puts their marker on a free notch on the edge of the 
 1. Choose a tile from your hand and turn it any way you like. It always goes on the square your marker faces.
 2. Every marker facing that square follows the path it now stands on, across the new tile and on across any tiles it leads into, until it faces an empty square again. Other players' markers can move too.
 3. A marker that is led off the edge of the board is out. Two markers that meet head on along the same path both end up off the board, so both are out.
-4. If any tile and turn in your hand keeps your own marker on the board, you must play one of those. Only when every choice would take you off the board must you play one anyway. (The game's creator can switch this rule off.)
+4. If any tile and turn in your hand keeps your own marker on the board, you must play one of those. Only when every choice would take you off the board must you play one anyway. (The game's creator can switch this rule off.) So when this rule is on and you run yourself off the board, everyone can tell that every tile in your hand would have done the same.
 5. If you're still in, draw a tile.
 
 Players who are out put their tiles back: they're shuffled into the deck and dealt straight out to the players who are short of tiles.

@@ -17,7 +17,7 @@ import {
   type Transition,
 } from "@your-move/sdk";
 
-import { at } from "./at.js";
+import { ascending, at } from "./at.js";
 import { edgeNotch } from "./geometry.js";
 import { livePosition, movement, type Square } from "./movement.js";
 import type {
@@ -65,9 +65,6 @@ export function copyState(state: State): State {
     })),
   };
 }
-
-/** Sorts numbers ascending. */
-export const ascending = (a: number, b: number): number => a - b;
 
 /** Shuffles the deck; nobody holds tiles until the marker phase is over (paths §2). */
 export function setup(ctx: { options: Options; seats: number; rng: RandomSource }): State {

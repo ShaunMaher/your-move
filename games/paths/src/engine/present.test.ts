@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { at, game, out, placedFor, STRAIGHT, unplaced } from "../test-support.js";
+import { facing, game, out, placedFor, STRAIGHT, unplaced } from "../test-support.js";
 import { describe as describeRecord, summary, view } from "./present.js";
 import { viewSchema, type PublicRecord } from "./schemas.js";
 
@@ -8,7 +8,7 @@ const SAFE = placedFor(STRAIGHT);
 
 describe("view (paths §7)", () => {
   const state = game({
-    markers: [at(1, 2, 0), out(4, "resigned"), at(5, 5, 4)],
+    markers: [facing(1, 2, 0), out(4, "resigned"), facing(5, 5, 4)],
     board: [{ r: 0, c: 2, placed: SAFE }],
     hands: [[1, 2], [], [3, 4, 5]],
     deck: [6, 7],
@@ -52,12 +52,12 @@ describe("view (paths §7)", () => {
     seen.yourHand?.push(30);
     seen.markers[0]!.pos = null;
     expect(state.hands[0]).toEqual([1, 2]);
-    expect(state.markers[0]).toEqual(at(1, 2, 0));
+    expect(state.markers[0]).toEqual(facing(1, 2, 0));
   });
 });
 
 describe("summary (paths §7)", () => {
-  const state = game({ markers: [at(1, 2, 0), out(4), at(5, 5, 4)], turn: 2 });
+  const state = game({ markers: [facing(1, 2, 0), out(4), facing(5, 5, 4)], turn: 2 });
 
   it("counts the players left and says whose turn it is", () => {
     expect(summary(state, 2)).toEqual({ headline: ["2 left of 3 · ", "your turn"] });
@@ -66,7 +66,7 @@ describe("summary (paths §7)", () => {
   });
 
   it("names the winner, or a shared win, once over", () => {
-    const won = { ...state, markers: [at(1, 2, 0), out(4), out(6)], turn: null };
+    const won = { ...state, markers: [facing(1, 2, 0), out(4), out(6)], turn: null };
     expect(summary({ ...won, endReason: "last-standing" }, 1)).toEqual({
       headline: [{ seat: 0 }, " won"],
     });

@@ -115,20 +115,29 @@ export type EndReason = (typeof END_REASONS)[number];
 const PHASES = ["markers", "tiles"] as const;
 export type Phase = (typeof PHASES)[number];
 
-/** A seat's or the public view (paths §7). */
+/** A hand: at most `HAND_SIZE.max` tiles. */
+const hand = z.array(tileId).max(HAND_SIZE.max);
+
+/**
+ * The longest movement trace: its start, then at most every tile path on the board once (each
+ * square's 4 paths).
+ */
+const MAX_PATH = MAX_BOARD_SIZE * MAX_BOARD_SIZE * 4 + 1;
+
+/** A seat's or the public view (paths §7); every array bounded by the largest game. */
 export const viewSchema = z
   .object({
     boardSize: z.literal(BOARD_SIZES),
     phase: z.enum(PHASES),
-    board: z.array(z.array(placedSchema.nullable())),
-    markers: z.array(markerSchema),
-    toAct: z.array(seat),
+    board: z.array(z.array(placedSchema.nullable()).max(MAX_BOARD_SIZE)).max(MAX_BOARD_SIZE),
+    markers: z.array(markerSchema).max(PLAYERS.max),
+    toAct: z.array(seat).max(PLAYERS.max),
     deckCount: count,
-    handCounts: z.array(count),
+    handCounts: z.array(count).max(PLAYERS.max),
     /** The viewer's own hand; null for the public view. */
-    yourHand: z.array(tileId).nullable(),
+    yourHand: hand.nullable(),
     /** Everyone's remaining hand once the game is over; null while it is in progress. */
-    hands: z.array(z.array(tileId)).nullable(),
+    hands: z.array(hand).max(PLAYERS.max).nullable(),
     tokenHolder: seat.nullable(),
     endReason: z.enum(END_REASONS).nullable(),
   })
@@ -136,16 +145,16 @@ export const viewSchema = z
 export type View = z.infer<typeof viewSchema>;
 
 /** One marker's movement: its start, then the notch it left each tile it crossed by (paths §7). */
-const moveSchema = z.object({ seat, path: z.array(positionSchema).min(2) }).strict();
+const moveSchema = z.object({ seat, path: z.array(positionSchema).min(2).max(MAX_PATH) }).strict();
 export type Move = z.infer<typeof moveSchema>;
 
 /** The fields every record has (paths §7). */
 const outcome = {
   seat,
-  moves: z.array(moveSchema),
-  eliminated: z.array(seat),
-  collided: z.array(z.tuple([seat, seat])),
-  skipped: z.array(seat),
+  moves: z.array(moveSchema).max(PLAYERS.max),
+  eliminated: z.array(seat).max(PLAYERS.max),
+  collided: z.array(z.tuple([seat, seat])).max(PLAYERS.max / 2),
+  skipped: z.array(seat).max(PLAYERS.max),
 };
 
 /**

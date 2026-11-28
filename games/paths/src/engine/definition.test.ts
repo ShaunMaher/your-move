@@ -2,7 +2,7 @@ import { OK, RESERVED_ERROR_CODES } from "@your-move/sdk";
 import { seededRandom } from "@your-move/testkit";
 import { describe, expect, it } from "vitest";
 
-import { at, game, OPTIONS, placedFor, STRAIGHT } from "../test-support.js";
+import { facing, game, OPTIONS, placedFor, STRAIGHT } from "../test-support.js";
 import { pathsV1 } from "./definition.js";
 import { engines } from "./index.js";
 import { recordSchema } from "./schemas.js";
@@ -43,14 +43,17 @@ describe("the paths definition (02 §2)", () => {
   it("dispatches each action, resignation and timeout to its transition", () => {
     const markers = game({
       phase: "markers",
-      markers: [at(0, 0, 0), { pos: null, out: null }],
+      markers: [facing(0, 0, 0), { pos: null, out: null }],
       turn: 1,
     });
     expect(
       pathsV1.apply(markers, 1, { type: "place-marker", edgeNotch: 5 }, seededRandom(1)).record
         .type,
     ).toBe("place-marker");
-    const tiles = game({ markers: [at(0, 2, 0), at(5, 5, 4)], hands: [[SAFE.tileId], [1]] });
+    const tiles = game({
+      markers: [facing(0, 2, 0), facing(5, 5, 4)],
+      hands: [[SAFE.tileId], [1]],
+    });
     const played = pathsV1.apply(tiles, 0, { type: "place-tile", ...SAFE }, seededRandom(1));
     expect(played.record.type).toBe("place-tile");
     expect(recordSchema.parse(played.record)).toEqual(played.record);

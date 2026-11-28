@@ -5,7 +5,7 @@
 import { OK } from "@your-move/sdk";
 import { describe, expect, it } from "vitest";
 
-import { at, game, out, placedFor, STRAIGHT, unplaced } from "../test-support.js";
+import { facing, game, out, placedFor, STRAIGHT, unplaced } from "../test-support.js";
 import { movement } from "./movement.js";
 import { freeEdgeNotches, legalPlacements, validate } from "./rules.js";
 import type { Action } from "./schemas.js";
@@ -22,8 +22,12 @@ const SAFE = placedFor(STRAIGHT).tileId;
 const TURN_ONCE = 5;
 
 describe("validate: the error order (paths §7)", () => {
-  const markers = game({ phase: "markers", markers: [at(0, 0, 0), unplaced, unplaced], turn: 1 });
-  const tiles = game({ markers: [at(0, 0, 0), at(5, 5, 4)], hands: [[SAFE], [1]] });
+  const markers = game({
+    phase: "markers",
+    markers: [facing(0, 0, 0), unplaced, unplaced],
+    turn: 1,
+  });
+  const tiles = game({ markers: [facing(0, 0, 0), facing(5, 5, 4)], hands: [[SAFE], [1]] });
 
   it.each([
     ["a seat that isn't to act", markers, 0, marker(5), "NOT_TO_ACT"],
@@ -60,13 +64,16 @@ describe("validate: the error order (paths §7)", () => {
 
 describe("validate: the self-elimination rule (paths §3 step 4)", () => {
   it("refuses a placement that puts the mover out when another tile in hand avoids it", () => {
-    const state = game({ markers: [at(0, 2, 0), at(5, 5, 4)], hands: [[KILLER, SAFE], []] });
+    const state = game({
+      markers: [facing(0, 2, 0), facing(5, 5, 4)],
+      hands: [[KILLER, SAFE], []],
+    });
     expect(validate(state, 0, tile(KILLER))).toEqual({ code: "SELF_ELIMINATION_AVOIDABLE" });
     expect(validate(state, 0, tile(SAFE))).toEqual(OK);
   });
 
   it("refuses it when another rotation of the same tile avoids it", () => {
-    const state = game({ markers: [at(0, 2, 0), at(5, 5, 4)], hands: [[TURN_ONCE], []] });
+    const state = game({ markers: [facing(0, 2, 0), facing(5, 5, 4)], hands: [[TURN_ONCE], []] });
     expect(validate(state, 0, tile(TURN_ONCE, 0))).toEqual({ code: "SELF_ELIMINATION_AVOIDABLE" });
     expect(validate(state, 0, tile(TURN_ONCE, 1))).toEqual(OK);
     expect(legalPlacements(state, 0).every((placed) => placed.rotation !== 0)).toBe(true);
@@ -89,7 +96,7 @@ describe("validate: the self-elimination rule (paths §3 step 4)", () => {
     ]);
     const hand = [SAFE, TURN_ONCE, 20];
     const state = game({
-      markers: [at(0, 0, 0), at(5, 5, 4)],
+      markers: [facing(0, 0, 0), facing(5, 5, 4)],
       board: [
         { r: 0, c: 1, placed: beside },
         { r: 1, c: 0, placed: below },
@@ -106,7 +113,7 @@ describe("validate: the self-elimination rule (paths §3 step 4)", () => {
   it("allows a placement that puts the mover out under the `allowed` variant", () => {
     const state = game({
       options: { selfElimination: "allowed" },
-      markers: [at(0, 2, 0), at(5, 5, 4)],
+      markers: [facing(0, 2, 0), facing(5, 5, 4)],
       hands: [[KILLER, SAFE], []],
     });
     expect(validate(state, 0, tile(KILLER))).toEqual(OK);
@@ -116,7 +123,7 @@ describe("validate: the self-elimination rule (paths §3 step 4)", () => {
   it("looks only at the mover's own marker: putting another player out is fine", () => {
     // Seat 1 faces the same square from the left edge. Tile 3 turned once joins 0–5 (seat 0 goes
     // down, onto the board) and 7–1 (seat 1 runs off the top edge).
-    const state = game({ markers: [at(0, 0, 0), at(0, 0, 7)], hands: [[3], []] });
+    const state = game({ markers: [facing(0, 0, 0), facing(0, 0, 7)], hands: [[3], []] });
     expect(TILES[3]!.pairs).toEqual([
       [0, 1],
       [2, 4],
