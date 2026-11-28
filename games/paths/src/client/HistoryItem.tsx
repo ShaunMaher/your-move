@@ -7,6 +7,7 @@ import { formatText, type HistoryItemProps } from "@your-move/sdk/client";
 import type { ReactElement } from "react";
 
 import { engines, recordSchema } from "../engine/index.js";
+import { distinct } from "./text.js";
 
 export function HistoryItem({
   record,
@@ -15,8 +16,9 @@ export function HistoryItem({
   names,
 }: HistoryItemProps): ReactElement {
   const parsed = recordSchema.safeParse(record);
+  const shown = distinct(names);
   if (gameVersion !== engines[1].version || !parsed.success) {
-    return <span>{formatText(describe, names)}</span>;
+    return <span>{formatText(describe, shown)}</span>;
   }
-  return <span>{formatText(engines[1].describe(parsed.data), names)}</span>;
+  return <span>{formatText(engines[1].describe(parsed.data), shown)}</span>;
 }

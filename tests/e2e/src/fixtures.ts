@@ -168,7 +168,7 @@ export const test = base.extend<
     await use(players.map((player) => player.page));
     const found: Violation[][] = [];
     for (const player of players) {
-      found.push(await player.violations().catch(() => []));
+      found.push(await player.violations());
       await player.close().catch(() => undefined);
     }
     expect(found.flat(), "Content-Security-Policy violations (third and fourth players)").toEqual(

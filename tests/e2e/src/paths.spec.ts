@@ -136,10 +136,11 @@ test("four people play a paths game from a join link and the last marker left wi
   // Tile turns. Whoever is to play does. Until someone has gone out, each mover prefers a tile that
   // puts their own marker off the board (this game's option allows it): corner squares have
   // three other edge notches, so some tile and turn in a hand of three almost always does, and
-  // the test fails if five turns by four players never find one.
+  // the test goes on past five turns (to eight) until one is found, and fails if none is. No start
+  // lets every tile eliminate (rule.test.ts counts which can't), so this is near-certain, not certain.
   let placed = 0;
   let eliminated: string | null = null;
-  for (let turn = 0; turn < 5; turn += 1) {
+  for (let turn = 0; turn < 5 || (eliminated === null && turn < 8); turn += 1) {
     for (const page of pages) await refocus(page);
     await expect
       .poll(
@@ -166,15 +167,23 @@ test("four people play a paths game from a join link and the last marker left wi
       await expect(tilesOnBoard(page)).toHaveCount(placed, FAR);
     }
   }
-  // The elimination is seen by everyone: the player is out in every page's list.
+  // The elimination is seen by everyone: the player is out in every page's list, and the pages
+  // agree on who is still in (another seat may have gone out too, forced or by a collision).
   expect(
     eliminated,
     "someone's hand had a tile that puts their marker off the board",
   ).not.toBeNull();
   const names: string[] = SEATS.map((seat) => seat.name);
-  for (const page of pages) {
-    await expect.poll(() => alive(page, names), FAR).toEqual(names.filter((n) => n !== eliminated));
-  }
+  await expect
+    .poll(async () => {
+      const lists = await Promise.all(pages.map((page) => alive(page, names)));
+      const first = JSON.stringify(lists[0]);
+      return (
+        lists.every((list) => JSON.stringify(list) === first) &&
+        !lists[0]?.includes(eliminated ?? "")
+      );
+    }, FAR)
+    .toBe(true);
   await expectAccessible(ann);
   // The dark theme's colours are checked too.
   await ann.emulateMedia({ colorScheme: "dark" });
@@ -184,7 +193,7 @@ test("four people play a paths game from a join link and the last marker left wi
   await shotBothThemes(cy, "paths-board-390");
 
   // Everyone still in but one resigns, one after another: the last marker left wins.
-  const standing = await alive(bob, names);
+  const standing = await alive(ann, names);
   const winner = standing[0] ?? "Ann";
   for (const name of standing.slice(1)) {
     const page = pages[names.indexOf(name)];

@@ -227,9 +227,11 @@ Options = {
 ## 8. UI notes (games/paths client)
 
 - Squares are `min(56 pt, (viewport width − 2 × 16 px) / 6)`, so the board fits a 320 px screen
-  (48 px squares; sizes here are CSS px, `pt` meaning the same as elsewhere in the spec). The board is as wide as the shell's content column up to `6 × 56 pt`, so the
-  page's 16 px gutters give exactly that formula; markers on the board's edge notches hang half
-  outside the board, into the gutter.
+  (48 px squares) and is 448 px wide on wide screens (56 pt is 74.67 px). The board is as wide as
+  the shell's content column up to `6 × 56 pt`, so the page's 16 px gutters give exactly that
+  formula; markers on the board's edge notches hang half outside the board, into the gutter. The
+  touch-target minimum is separate and in CSS px: every tappable control is at least 44 × 44 CSS px
+  (WCAG 2.5.5).
 - **Layout**, top to bottom: the players (marker, name, tiles held or "out"), the turn line, the
   board, a live status line, then the hand and its two buttons, or in the marker phase the notch
   picker. The board owns the players and the turn (02 §3). The page order keeps the board's top
@@ -269,12 +271,11 @@ Options = {
   square, then pick one of its free edge notches from large buttons. Occupied notches are
   disabled. Picking a notch places the marker (the second step is the action); "Choose another
   square" goes back. Every button the picker shows, "Choose another square" included, is at least
-  44 × 44 CSS px (WCAG 2.5.5; the "pt" of the rest of the spec means CSS px), and the e2e measures
-  them.
+  44 × 44 CSS px, and the e2e measures them. The square's notches are drawn on the board, the one
+  a button is focused or hovered on larger, and focus moves to the first notch button.
   - Trade-off, accepted for the alpha: with no confirm after the notch, a mis-tap on a 44 px
     button is a permanent marker; the picker's separate step, the notch dots on the board and the
-    focus-and-hover aim mark keep that rare. A "Place marker" confirm is the change if it isn't. The square's notches are drawn on the board, the one a button is focused or
-  hovered on larger, and focus moves to the first notch button.
+    focus-and-hover aim mark keep that rare. A "Place marker" confirm is the change if it isn't.
 - **Markers** are told apart by shape as well as colour, in the Okabe–Ito colour set, by seat: blue
   circle, orange square, green triangle, pink diamond, sky-blue star, red hexagon, yellow cross, grey
   ring. Each is drawn with a dark and a light outline so it shows on a tile or an empty square of

@@ -123,6 +123,18 @@ describe("HistoryItem", () => {
     expect(screen.getByText("Ann placed a tile — Bo ran off the board")).toBeTruthy();
   });
 
+  it("tells seats that share a display name apart by their markers", () => {
+    render(
+      <HistoryItem
+        record={{ type: "resign", seat: 1, ...base }}
+        describe={["stored"]}
+        gameVersion={1}
+        names={["Ann", "Ann"]}
+      />,
+    );
+    expect(screen.getByText("Ann (orange square) resigned")).toBeTruthy();
+  });
+
   it("falls back to the stored text for a record or version it doesn't know", () => {
     render(
       <HistoryItem

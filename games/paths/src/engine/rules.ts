@@ -17,8 +17,13 @@ import { ROTATIONS } from "./tiles.js";
 export interface SelfElimination {
   /** Whether placing it would put the mover's own marker off the board. */
   readonly eliminates: boolean;
-  /** Whether some tile and rotation in the mover's hand would keep their marker on the board. */
-  readonly safeExists: boolean;
+  /**
+   * Whether some tile and rotation in the mover's hand would keep their marker on the board; null
+   * when that wasn't searched for, which is unless the variant is on and this placement
+   * eliminates (so the `allowed` variant, and a safe placement, trace nothing extra: the kit's
+   * cost model, `candidates` in kit-hooks.ts, counts the search only in that case).
+   */
+  readonly safeExists: boolean | null;
   /** Whether the rule refuses it: it eliminates, another choice doesn't, and the variant is on. */
   readonly blocked: boolean;
 }
@@ -49,15 +54,15 @@ export function selfElimination(
   placed: Placed,
 ): SelfElimination {
   const eliminates = eliminatesSelf(board, markers, seat, target, placed);
-  // Trivially true when this placement is itself safe; only asked when it isn't.
   const safeExists =
-    !eliminates ||
-    hand.some((tileId) =>
-      Array.from({ length: ROTATIONS }, (_, rotation) => rotation).some(
-        (rotation) => !eliminatesSelf(board, markers, seat, target, { tileId, rotation }),
-      ),
-    );
-  return { eliminates, safeExists, blocked: avoidIfPossible && eliminates && safeExists };
+    avoidIfPossible && eliminates
+      ? hand.some((tileId) =>
+          Array.from({ length: ROTATIONS }, (_, rotation) => rotation).some(
+            (rotation) => !eliminatesSelf(board, markers, seat, target, { tileId, rotation }),
+          ),
+        )
+      : null;
+  return { eliminates, safeExists, blocked: safeExists === true };
 }
 
 /** Every tile and rotation in `seat`'s hand, with whether it puts the mover out. */

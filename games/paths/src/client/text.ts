@@ -17,11 +17,16 @@ import { notchName } from "./layout.js";
  * display name get their marker's look added ("Ann (orange square)"), so text never says only "Ann".
  */
 export function seatNames(game: GameEnvelope, seats: number): string[] {
-  const names = Array.from({ length: seats }, (_, seat) => {
-    const player = game.players.find((row) => row.seat === seat);
-    return player?.displayName ?? `Seat ${String(seat + 1)}`;
-  });
-  // People may share a display name (a join link takes anyone): the marker tells them apart.
+  return distinct(
+    Array.from({ length: seats }, (_, seat) => {
+      const player = game.players.find((row) => row.seat === seat);
+      return player?.displayName ?? `Seat ${String(seat + 1)}`;
+    }),
+  );
+}
+
+/** People may share a display name (a join link takes anyone): the marker tells them apart. */
+export function distinct(names: readonly string[]): string[] {
   return names.map((name, seat) =>
     names.filter((other) => other === name).length > 1 ? `${name} (${lookName(seat)})` : name,
   );
