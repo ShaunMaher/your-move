@@ -192,9 +192,18 @@ Verify on a real device during M2.
   of the owner's 3 changes per 30 days (§8).
 - **Until onboarding is complete** (`users.onboarded_at` NULL) the account is invisible to other
   players: it is treated exactly like an unknown address when someone adds that email (§6.1),
-  claims no invitations, and gets `403 ONBOARDING_REQUIRED` from the game list, game creation,
-  accept, join-link lookup and join, and from creating API tokens and AI accounts (05) — the
-  **gated endpoints**, which also apply to a re-prompted user. Completing onboarding sets `onboarded_at` and claims email-invite seats (§6.4).
+  claims no invitations, and gets `403 ONBOARDING_REQUIRED` from the game list, game creation
+  (a rematch included), accept, join-link lookup and join, the recent-players list, `add-player`,
+  and from creating API tokens and AI accounts (05) — the **gated endpoints**, which also apply
+  to a re-prompted user (alpha A21; `add-player` since A19 review S-2). Completing onboarding sets
+  `onboarded_at` and claims email-invite seats (§6.4). The display name and the age confirmation
+  may come in one `PATCH /api/v1/me` or in two, in either order; the request that leaves both
+  done completes onboarding. A name set before then is not a rename (no budget used, nothing
+  logged), and a re-prompted user sends the age confirmation alone.
+- **Under-age exit and onboarding racing**: the short deletion applies only while `onboarded_at`
+  is still NULL, checked in the same atomic batch that deletes; if onboarding completed first, the
+  exit is judged again for the account as it now is (a re-prompt: this session signed out;
+  onboarding no longer needed: `409 WRONG_STATUS`).
 
 ### 5.1 Display-name rules
 

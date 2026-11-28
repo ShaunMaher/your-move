@@ -242,8 +242,12 @@ provider with a larger quota.
 
 ## 5. Privacy
 
-- Collect only: email, display name, the age-confirmation time, game data, uploaded word lists
-  and their rights attestations, session metadata (user agent; HMAC'd IP in audit events).
+- Collect only: email, display name, the age-confirmation time (and the `MIN_AGE` then in force),
+  game data, uploaded word lists and their rights attestations, session metadata (user agent;
+  HMAC'd IP in audit events), and a device's push subscription while notifications are on (04
+  `push_subscriptions`). The privacy page (`/privacy`, 07 §1) describes only what the instance
+  actually keeps and does: a retention step or feature that isn't built yet is not claimed there
+  (alpha A21).
 - Minimum age `MIN_AGE` (default 13) confirmed at onboarding (06 §5). The privacy page states it,
   says children play only through a parent's or carer's account, and user-facing copy doesn't
   market the service to children. A privacy review is required before any child accounts (Q20,

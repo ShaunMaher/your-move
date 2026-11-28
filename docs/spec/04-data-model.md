@@ -101,7 +101,7 @@ At most 3 *live* challenges per (email, purpose); issuing a 4th burns the oldest
 | state | TEXT | `invited` · `joined` · `declined` · `left` · `removed` (lobby) · `playing` · `out` (seated, active/finished) · `dropped` (unfilled invitation at start); `declined`/`left`/`removed`/`dropped` rows stay after start with `seat` NULL (02 §4) |
 | out_reason | TEXT NULL | `eliminated` · `resigned` · `timed_out` · `declined` (out before a first action; never ranked, 02 §4) · `cancelled` (operator cancel of an active game, 02 §4) |
 | joined_via | TEXT NULL | `creator` · `added` (auto-joined past opponent) · `invitation` (accepted — including an invited user who joins through the link, 02 §4) · `email_invite` · `join_link` |
-| delivery | TEXT NOT NULL DEFAULT 'normal' | for `invited` rows: `normal` · `hidden` (over the target's inbound cap, 06 §6.7: shown only in their collapsed *Hidden invitations*, no notification) · `inert` (blocked pair, or a typed address that resolves to a user already added in the same request: never delivered, never claimable, never accepted, `user_id` NULL for the latter, 06 §6.1). The creator sees all three the same way (Q3) |
+| delivery | TEXT NOT NULL DEFAULT 'normal' | for `invited` rows: `normal` · `hidden` (over the target's inbound cap, 06 §6.7: shown only in their collapsed *Hidden invitations*, no notification) · `inert` (blocked pair, a typed address that resolves to a user already added in the same request, or an email-invite seat whose address took the under-age exit: never delivered, never claimable, never accepted, `user_id` NULL for the latter two, 06 §6.1, §5). The creator sees all three the same way (Q3) |
 | removed_at | INTEGER NULL | when the creator removed this seat. A removed row never comes back through any join link, rotated or new (06 §6.8) |
 | joined_at | INTEGER NULL | for `seat_order = join`, and "who joined later" in the start-time block check (02 §4). A row with `joined_at` NULL never exposes a display name or user id in any response (05 §Common types) |
 | to_act | INTEGER NOT NULL DEFAULT 0 | 1 if this seat is in `toAct` — denormalised for "your turn" queries; updated in the same transition |
@@ -474,8 +474,12 @@ Accounts that never finished onboarding (`onboarded_at` NULL) hold no game rows 
 claimed only at onboarding, 06 §6.4), so their deletion — immediately when the user says they're
 under `MIN_AGE`, or by the sweep 7 days after creation (06 §5) — is steps 1, 3, 4 and 5, with no
 step-up code. The under-age exit also adds the address to `email_suppressions` (reason
-`unsubscribed`) and makes every `invited` email seat for it `inert`, so no more invite emails
-arrive. A user **re-prompted** after a `MIN_AGE` rise who says they're under it is only signed out
+`unsubscribed`; an existing row keeps its reason) and makes every `invited` email seat for it
+(no user, `invite_email` the address) `inert`, so no more invite emails arrive; it keeps its
+`invite_email`, so the creator sees the seat as before (Q3). The exit's `under_age_exit` event is
+written beside `account_deleted`, both before the users row goes. All of it is one atomic batch
+whose every statement applies only while the user's `onboarded_at` is still NULL (06 §5), so it
+can't race an onboarding that claims seats meanwhile. A user **re-prompted** after a `MIN_AGE` rise who says they're under it is only signed out
 of that session; their account is deleted only through the normal step-up path (06 §5, §7).
 
 If a step fails, the deletion is retried from the start by the next sweep (a `deletion_requested_at`
