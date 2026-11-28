@@ -9,21 +9,38 @@ import { describe, expect, it } from "vitest";
 import type { GamePlayerRecord, GameRecord, JoinLinkTimes } from "../db/repositories.js";
 import { hashJoinToken, joinUrl, linkTimes, newJoinToken } from "./join-links.js";
 import {
-  accept,
+  accept as acceptWith,
+  type Blocked,
   cancel,
   decline,
   expire,
   type GameContext,
+  isBlockedAccept,
   isRefusal,
   joinVerdict,
   joinWrites,
   LOBBY_LIFETIME_MS,
   openSeats,
   removeSeat,
-  start,
-  startAtCreation,
+  start as startWith,
+  startAtCreation as startAtCreationWith,
 } from "./lifecycle.js";
 import { cryptoRandom } from "./random.js";
+
+/** No blocks among anyone (04 `blocks`). */
+const NO_BLOCKS: Blocked = () => false;
+
+/** An accept with no blocks: a write set or a refusal, never a block's decline. */
+function accept(ctx: GameContext, viewer: GamePlayerRecord, now: number) {
+  const outcome = acceptWith(ctx, viewer, now, NO_BLOCKS);
+  if (isBlockedAccept(outcome)) throw new Error("an accept with no blocks found one");
+  return outcome;
+}
+
+const start = (ctx: GameContext, viewer: GamePlayerRecord, now: number) =>
+  startWith(ctx, viewer, now, NO_BLOCKS);
+
+const startAtCreation = (ctx: GameContext, now: number) => startAtCreationWith(ctx, now, NO_BLOCKS);
 
 const DAY = 86_400_000;
 const CREATED = 1_000_000;

@@ -66,9 +66,22 @@ interface RecentOpponent {
 }
 
 /** One block (04 `blocks`): `blockerId` blocked `blockedId`. */
-interface BlockPair {
+export interface BlockPair {
   readonly blockerId: string;
   readonly blockedId: string;
+}
+
+/** One of a user's blocks, as `GET /api/v1/blocks` lists them (05 §Blocks). */
+export interface BlockedUser {
+  readonly userId: string;
+  readonly displayName: string | null;
+  readonly createdAt: number;
+}
+
+/** Where a page of {@link UserRepo.blocksOf} continues: after this block, newest first. */
+export interface BlockCursor {
+  readonly createdAt: number;
+  readonly userId: string;
 }
 
 export interface UserRepo {
@@ -104,6 +117,28 @@ export interface UserRepo {
    * direction. Ids that match no user simply match nothing.
    */
   blocksAmong(userIds: readonly string[]): Promise<BlockPair[]>;
+  /**
+   * Whether `viewerId` may block `otherId` (05 §Blocks): another human account that is a past
+   * opponent of the viewer (04 `past_opponents`), or holds or held any `game_players` row, in any
+   * state, in a game where the viewer also has a row, or whom the viewer already blocks (so a
+   * repeat is the same answer). Never the viewer and never an AI account.
+   */
+  canBlock(viewerId: string, otherId: string): Promise<boolean>;
+  /**
+   * Records `blockerId`'s block of `blockedId` (an existing one keeps its `created_at`) and deletes
+   * the pair's `past_opponents` rows both ways, in one atomic batch (04 invariant 6).
+   */
+  block(blockerId: string, blockedId: string, createdAt: number): Promise<void>;
+  /** Deletes `blockerId`'s block of `blockedId`; true if there was one. Nothing else changes. */
+  unblock(blockerId: string, blockedId: string): Promise<boolean>;
+  /**
+   * The user's own blocks (05 `GET /api/v1/blocks`) with the blocked users' current names,
+   * newest first (then by user id), after `after` if given, at most `limit`.
+   */
+  blocksOf(
+    blockerId: string,
+    page: { readonly after?: BlockCursor; readonly limit: number },
+  ): Promise<BlockedUser[]>;
   update(id: string, set: UserUpdate): Promise<void>;
   /**
    * Every column change of a `PATCH /api/v1/me` (05): the display name and the age confirmation,
@@ -429,12 +464,14 @@ export const UNPLAYED = {
 
 /**
  * What a finished game's players see of its rematch (05 `rematch`): a few columns of the rematch
- * and one user's own row state in it, if any.
+ * and one user's own row state and delivery in it, if any.
  */
 export interface RematchRead {
   readonly game: Pick<GameRecord, "id" | "status" | "createdAt" | "actionCount" | "endReason">;
   /** The user's `game_players.state` in the rematch; null when they hold no row. */
   readonly viewerState: GamePlayerRecord["state"] | null;
+  /** That row's `delivery` (an `inert` invitation shows as no place in it, Q29); null with no row. */
+  readonly viewerDelivery: GamePlayerRecord["delivery"] | null;
 }
 
 /** Which of a user's games to list (05 `GET /api/v1/games`). */
@@ -533,6 +570,21 @@ export interface GameRepo {
    * is a member (04 §Membership: not a declined, left or inert row), oldest first: the lobbies lazy expiry looks at (02 §4).
    */
   overdueLobbies(userId: string, createdBefore: number, limit: number): Promise<string[]>;
+  /**
+   * Up to `limit` ids of `lobby` games created after `createdAfter` (not yet due to expire),
+   * oldest first, where a block by `viewerId` of `otherId` takes effect (06 §6.10, 05 §Blocks):
+   * the viewer is a member (a joined row, or a `normal` or `hidden` invitation) and `otherId`
+   * holds an `invited` or `joined` row the viewer can already tell is theirs: one that has been
+   * joined, or, when the viewer created the lobby, an invitation they picked by id (`invite_email`
+   * NULL; a typed one keeps its address while invited). No other lobby is listed, so the block
+   * never tells the viewer who an unattributed row is (Q3).
+   */
+  blockableLobbies(
+    viewerId: string,
+    otherId: string,
+    createdAfter: number,
+    limit: number,
+  ): Promise<string[]>;
   /** How many `lobby`/`active` games the user created (05 `TOO_MANY_GAMES`). */
   countLiveCreated(userId: string): Promise<number>;
   /**

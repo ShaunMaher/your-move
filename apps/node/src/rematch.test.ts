@@ -120,7 +120,7 @@ describe("who may ask for a rematch (05, 06 §6.11)", () => {
 });
 
 describe("the first call creates the rematch (05)", () => {
-  it("through the creation path: the same setup, the caller first, the others added at once", async () => {
+  it("through the creation path: the same setup, the caller first, the others invited", async () => {
     const [a, b, c] = [await signUp(h, "Ada"), await signUp(h, "Bo"), await signUp(h, "Cy")];
     const game = await finished([a, b, c], {
       options: { lives: 1, handSize: 4 },
@@ -136,16 +136,33 @@ describe("the first call creates the rematch (05)", () => {
       turnTimeoutDays: 5,
       seatOrder: "join",
       aiAssistance: "off",
-      // Every seat filled by past opponents added at once: it starts at creation.
-      status: "active",
-      yourSeat: 0,
+      // Two people carried over are two picks: every pick is an invitation (Q29, 06 §6.1), so it
+      // waits for their accepts.
+      status: "lobby",
+      yourSeat: null,
     });
     // The caller first, then the others in their old seat order (02 §4 `join`).
     const oldOrder = game.players
       .filter((player) => player.userId !== c.id)
       .sort((x, y) => (x.seat ?? 0) - (y.seat ?? 0))
-      .map((player) => player.userId);
-    expect(made.players.map((player) => player.userId)).toEqual([c.id, ...oldOrder]);
+      .map((player) => player.userId ?? "");
+    expect(
+      h.query("SELECT user_id, state FROM game_players WHERE game_id = ? ORDER BY rowid", made.id),
+    ).toEqual([
+      { user_id: c.id, state: "joined" },
+      ...oldOrder.map((id) => ({ user_id: id, state: "invited" })),
+    ]);
+    const byId = new Map([a, b].map((player) => [player.id, player]));
+    for (const id of oldOrder) {
+      const player = byId.get(id);
+      if (player === undefined) throw new Error("not carried over");
+      expect((await transition(h, player, made.id, "accept")).status).toBe(200);
+    }
+    const started = (await getGame(h, c, made.id)).game;
+    expect(started.status).toBe("active");
+    expect(
+      [...started.players].sort((x, y) => (x.seat ?? 0) - (y.seat ?? 0)).map((p) => p.userId),
+    ).toEqual([c.id, ...oldOrder]);
     expect(made.players.find((player) => player.isCreator)?.userId).toBe(c.id);
     expect(linkOf(game.id)).toBe(made.id);
     // The caller's remembered options are neither read nor written.

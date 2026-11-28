@@ -528,6 +528,201 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         expect(await repos.users.blocksAmong([])).toEqual([]);
       });
 
+      describe("blocks made by their users (05 §Blocks, alpha A23)", () => {
+        const pair = (a: string, b: string) =>
+          target.sql(
+            "INSERT INTO past_opponents (user_id, other_id, last_finished_at) VALUES (?, ?, ?), (?, ?, ?)",
+            a,
+            b,
+            T0,
+            b,
+            a,
+            T0,
+          );
+        const pairsOf = (id: string) =>
+          target.sql(
+            "SELECT user_id, other_id FROM past_opponents WHERE user_id = ? OR other_id = ?",
+            id,
+            id,
+          );
+
+        it("may block a past opponent, someone sharing any game row, or someone already blocked", async () => {
+          const [a, past, shared, stranger, blocked] = [
+            await human(),
+            await human(),
+            await human(),
+            await human(),
+            await human(),
+          ];
+          await pair(a, past);
+          // A finished game whose rows are kept in any state: `dropped` here.
+          const game = newGame({ status: "finished", createdBy: a });
+          await repos.games.create(game, [
+            player({ userId: a, joinedVia: "creator", seat: 0, state: "out" }),
+            player({ userId: shared, state: "dropped", joinedAt: null }),
+          ]);
+          await block(a, blocked);
+          const agent = crypto.randomUUID();
+          await repos.users.create({
+            id: agent,
+            kind: "agent",
+            ownerUserId: past,
+            createdAt: T0,
+            updatedAt: T0,
+          });
+          await pair(a, agent);
+          expect(await repos.users.canBlock(a, past)).toBe(true);
+          expect(await repos.users.canBlock(a, shared)).toBe(true);
+          expect(await repos.users.canBlock(shared, a)).toBe(true);
+          expect(await repos.users.canBlock(a, blocked)).toBe(true);
+          expect(await repos.users.canBlock(a, stranger)).toBe(false);
+          expect(await repos.users.canBlock(a, a)).toBe(false);
+          expect(await repos.users.canBlock(a, agent)).toBe(false);
+          expect(await repos.users.canBlock(a, crypto.randomUUID())).toBe(false);
+        });
+
+        it("writes a block with its pair's past opponents deleted both ways, once", async () => {
+          const [a, b, c] = [await human(), await human(), await human()];
+          await pair(a, b);
+          await pair(a, c);
+          await repos.users.block(b, a, T0 + 5);
+          await repos.users.block(b, a, T0 + 9);
+          expect(await repos.users.blocksOf(b, { limit: 10 })).toEqual([
+            { userId: a, displayName: null, createdAt: T0 + 5 },
+          ]);
+          expect((await pairsOf(b)).length).toBe(0);
+          expect((await pairsOf(c)).length).toBe(2);
+          expect(await repos.users.unblock(a, b)).toBe(false);
+          expect(await repos.users.unblock(b, a)).toBe(true);
+          expect(await repos.users.unblock(b, a)).toBe(false);
+          expect(await repos.users.blocksOf(b, { limit: 10 })).toEqual([]);
+          // Unblocking brings no pair back.
+          expect((await pairsOf(b)).length).toBe(0);
+        });
+
+        it("lists a user's blocks newest first, then by id, from a cursor", async () => {
+          const a = await human();
+          const others = [await human(), await human(), await human()];
+          await repos.users.block(a, others[0] ?? "", T0 + 1);
+          await repos.users.block(a, others[1] ?? "", T0 + 2);
+          await repos.users.block(a, others[2] ?? "", T0 + 2);
+          await repos.users.update(others[0] ?? "", { displayName: "Zed", updatedAt: T0 });
+          const all = await repos.users.blocksOf(a, { limit: 10 });
+          const tied = [others[1] ?? "", others[2] ?? ""].sort().reverse();
+          expect(all.map((row) => row.userId)).toEqual([...tied, others[0]]);
+          expect(all[2]?.displayName).toBe("Zed");
+          const last = all[0];
+          if (last === undefined) throw new Error("no rows");
+          expect(
+            (
+              await repos.users.blocksOf(a, {
+                after: { createdAt: last.createdAt, userId: last.userId },
+                limit: 1,
+              })
+            ).map((row) => row.userId),
+          ).toEqual([tied[1]]);
+        });
+
+        it("lists the lobbies a block changes: only rows the viewer can tell are theirs", async () => {
+          const [viewer, other, third] = [await human(), await human(), await human()];
+          const lobby = async (
+            rows: readonly NewGamePlayer[],
+            overrides: Partial<NewGame> = {},
+          ): Promise<string> => {
+            const game = newGame({ seats: 4, ...overrides });
+            await repos.games.create(game, [...rows]);
+            return game.id;
+          };
+          const at = (n: number) => ({ createdAt: T0 + n });
+          // The other has joined the viewer's lobby: listed.
+          const joined = await lobby(
+            [
+              player({ userId: viewer, joinedVia: "creator" }),
+              player({ userId: other, joinedVia: "invitation" }),
+            ],
+            at(1),
+          );
+          // The viewer's own pick: listed.
+          const picked = await lobby(
+            [
+              player({ userId: viewer, joinedVia: "creator" }),
+              player({ userId: other, state: "invited", joinedAt: null }),
+            ],
+            at(2),
+          );
+          // The viewer typed the other's address: never listed (Q3).
+          await lobby(
+            [
+              player({ userId: viewer, joinedVia: "creator" }),
+              player({
+                userId: other,
+                state: "invited",
+                joinedAt: null,
+                inviteEmail: address(other),
+              }),
+            ],
+            at(3),
+          );
+          // The other's invitation in someone else's lobby: never listed.
+          await lobby(
+            [
+              player({ userId: third, joinedVia: "creator" }),
+              player({ userId: viewer, joinedVia: "invitation" }),
+              player({ userId: other, state: "invited", joinedAt: null }),
+            ],
+            at(4),
+          );
+          // The other created it and the viewer holds an invitation: listed.
+          const theirs = await lobby(
+            [
+              player({ userId: other, joinedVia: "creator" }),
+              player({ userId: viewer, state: "invited", joinedAt: null }),
+            ],
+            at(5),
+          );
+          // The viewer's row is inert: never listed (no membership).
+          await lobby(
+            [
+              player({ userId: other, joinedVia: "creator" }),
+              player({ userId: viewer, state: "invited", joinedAt: null, delivery: "inert" }),
+            ],
+            at(6),
+          );
+          // The other declined: nothing to change.
+          await lobby(
+            [
+              player({ userId: viewer, joinedVia: "creator" }),
+              player({ userId: other, state: "declined", joinedAt: null }),
+            ],
+            at(7),
+          );
+          // Started, or too old: never listed.
+          await lobby(
+            [
+              player({ userId: viewer, joinedVia: "creator", seat: 0, state: "playing" }),
+              player({ userId: other, seat: 1, state: "playing" }),
+            ],
+            { ...at(8), status: "active" },
+          );
+          await lobby(
+            [
+              player({ userId: viewer, joinedVia: "creator" }),
+              player({ userId: other, joinedVia: "invitation" }),
+            ],
+            { createdAt: T0 - 10 },
+          );
+          expect(await repos.games.blockableLobbies(viewer, other, T0 - 1, 10)).toEqual([
+            joined,
+            picked,
+            theirs,
+          ]);
+          expect(await repos.games.blockableLobbies(viewer, other, T0 - 1, 2)).toEqual([
+            joined,
+            picked,
+          ]);
+        });
+      });
+
       it("finds a user's overdue lobbies, oldest first (lazy expiry)", async () => {
         const user = await human();
         const other = await human();
@@ -1132,6 +1327,7 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         expect(await repos.games.rematchRead(game.id, other)).toEqual({
           game: { id: game.id, status: "lobby", createdAt: T0, actionCount: 0, endReason: null },
           viewerState: "invited",
+          viewerDelivery: "normal",
         });
         expect((await repos.games.rematchRead(game.id, creator))?.viewerState).toBe("joined");
         expect((await repos.games.rematchRead(game.id, await human()))?.viewerState).toBeNull();

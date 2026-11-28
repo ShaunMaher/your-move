@@ -16,6 +16,7 @@ import {
 } from "@your-move/sdk";
 
 import type {
+  BlockPair,
   GamePlayerRecord,
   GamePlayerUpdate,
   GameRecord,
@@ -44,6 +45,28 @@ export interface GameContext {
 export interface FinalViews {
   readonly seats: readonly { readonly view: unknown; readonly summary: unknown }[];
   readonly public: { readonly view: unknown; readonly summary: unknown };
+}
+
+/** Whether two users have a block between them, in either direction (04 `blocks`). */
+export type Blocked = (a: string, b: string) => boolean;
+
+/** {@link Blocked} over the block pairs read for a set of users. */
+export function blockedBy(pairs: readonly BlockPair[]): Blocked {
+  const keys = new Set(pairs.map((pair) => `${pair.blockerId} ${pair.blockedId}`));
+  return (a, b) => keys.has(`${a} ${b}`) || keys.has(`${b} ${a}`);
+}
+
+/** The user ids holding rows in a game, for its block lookup (once each). */
+export function rowUserIds(players: readonly GamePlayerRecord[]): string[] {
+  return [...new Set(players.flatMap((row) => (row.userId === null ? [] : [row.userId])))];
+}
+
+/**
+ * An accept that found a block with a joined member (05 `/accept`, alpha A23): the invitation is
+ * declined, written exactly as the holder's own decline, and the answer is `404`.
+ */
+export interface BlockedAccept {
+  readonly blockedAccept: GameWriteSet;
 }
 
 /** A refusal, as `{ code }` of the framework error table (05 §Errors). */
@@ -262,22 +285,54 @@ function lobbyCounts(players: readonly GamePlayerRecord[]): { joined: number; in
   };
 }
 
+/** Too few joined players remain once the start's block re-check removed some (02 §4 step 1). */
+const TOO_FEW = { tooFew: true } as const;
+
 /**
- * The start transition's writes (02 §4 Start, steps 2–5): `validateStart`, unjoined rows out of
- * the game, seats by the seat order (a `random` order drawn from the recorded randomness), `setup`
- * and the first clocks. Step 1, the block re-check, has nothing to check until blocks exist (M4).
+ * The joined rows in joining order, split by the start's block re-check (02 §4 Start, step 1):
+ * each row with a block against one kept before it is removed, so of a blocked pair the one who
+ * joined later goes. The creator comes first, then in joining order (02 §4 seat order `join`).
+ * Rows that joined in the same millisecond keep the order they were added in (the sort is stable,
+ * and the rows come in that order): past opponents added at creation sit in the order the creator
+ * listed them.
  */
-function startWrites(ctx: GameContext, now: number): GameWriteSet | GameError {
-  const { definition, game } = ctx;
-  // The creator first, then in joining order (02 §4 seat order `join`). Rows that joined in the
-  // same millisecond keep the order they were added in (the sort is stable, and the rows come in
-  // that order): past opponents added at creation sit in the order the creator listed them.
-  const joined = ctx.players
+function blockChecked(
+  players: readonly GamePlayerRecord[],
+  blocked: Blocked,
+): { kept: GamePlayerRecord[]; removed: Set<string> } {
+  const joined = players
     .filter((row) => row.state === "joined")
     .sort((a, b) => {
       const creator = Number(b.joinedVia === "creator") - Number(a.joinedVia === "creator");
       return creator !== 0 ? creator : (a.joinedAt ?? 0) - (b.joinedAt ?? 0);
     });
+  const kept: GamePlayerRecord[] = [];
+  const removed = new Set<string>();
+  for (const row of joined) {
+    const { userId } = row;
+    const clash =
+      userId !== null &&
+      kept.some((other) => other.userId !== null && blocked(userId, other.userId));
+    if (clash) removed.add(row.id);
+    else kept.push(row);
+  }
+  return { kept, removed };
+}
+
+/**
+ * The start transition's writes (02 §4 Start): the block re-check (a later-joined member of a
+ * blocked pair is `removed`; too few left is {@link TOO_FEW}), `validateStart`, unjoined rows out
+ * of the game, seats by the seat order (a `random` order drawn from the recorded randomness),
+ * `setup` and the first clocks.
+ */
+function startWrites(
+  ctx: GameContext,
+  now: number,
+  blocked: Blocked,
+): GameWriteSet | GameError | typeof TOO_FEW {
+  const { definition, game } = ctx;
+  const { kept: joined, removed } = blockChecked(ctx.players, blocked);
+  if (joined.length < definition.players(ctx.options).min) return TOO_FEW;
   const checked = definition.validateStart(ctx.options, joined.length);
   if (isGameError(checked)) return checked;
 
@@ -312,6 +367,10 @@ function startWrites(ctx: GameContext, now: number): GameWriteSet | GameError {
             timeoutRemindersSent: 0,
           },
         };
+      }
+      // Removed by the block re-check (02 §4 step 1), as a Remove would.
+      if (removed.has(row.id)) {
+        return { id: row.id, set: { seat: null, inviteEmail: null, ...removedSet(now) } };
       }
       // Out of the game: declined, left and removed rows keep their state, unfilled invitations
       // are dropped; none keeps a seat or a typed address (02 §4 step 3, 06 §6.5).
@@ -353,12 +412,21 @@ function autoStarts(
  * AI assistance allowed with another person keeps it in the lobby, and a `validateStart` refusal
  * simply leaves it there; null when it doesn't start.
  */
-export function startAtCreation(ctx: GameContext, now: number): GameWriteSet | null {
+export function startAtCreation(
+  ctx: GameContext,
+  now: number,
+  blocked: Blocked,
+): GameWriteSet | null {
   if (ctx.game.status !== "lobby" || !autoStarts(ctx.game, ctx.players, ctx.joinLink, now)) {
     return null;
   }
-  const writes = startWrites(ctx, now);
-  return isGameError(writes) ? null : writes;
+  const writes = startWrites(ctx, now, blocked);
+  return isStart(writes) ? writes : null;
+}
+
+/** Whether {@link startWrites} gave a start, not a refusal of one. */
+function isStart(writes: GameWriteSet | GameError | typeof TOO_FEW): writes is GameWriteSet {
+  return !isGameError(writes) && !("tooFew" in writes);
 }
 
 /** Merges the start's writes after another transition's row updates. */
@@ -366,15 +434,17 @@ function withStart(
   ctx: GameContext,
   rowUpdate: { id: string; set: GamePlayerUpdate },
   now: number,
+  blocked: Blocked,
 ): GameWriteSet {
   const players = ctx.players.map((row) =>
     row.id === rowUpdate.id ? { ...row, ...rowUpdate.set } : row,
   );
   const plain: GameWriteSet = { game: { updatedAt: now }, updatePlayers: [rowUpdate] };
   if (!autoStarts(ctx.game, players, ctx.joinLink, now)) return plain;
-  const started = startWrites({ ...ctx, players }, now);
-  // An automatic start that validateStart refuses simply doesn't happen (02 §4 step 2).
-  if (isGameError(started)) return plain;
+  const started = startWrites({ ...ctx, players }, now, blocked);
+  // An automatic start that the block re-check or validateStart refuses simply doesn't happen
+  // (02 §4 steps 1 and 2).
+  if (!isStart(started)) return plain;
   return {
     ...started,
     updatePlayers: (started.updatePlayers ?? []).map((update) =>
@@ -390,6 +460,7 @@ export function start(
   ctx: GameContext,
   viewer: GamePlayerRecord,
   now: number,
+  blocked: Blocked,
 ): GameWriteSet | Refusal {
   if (viewer.joinedVia !== "creator") return { refused: "NOT_ALLOWED" };
   if (ctx.game.status !== "lobby" || now >= lobbyExpiresAt(ctx.game)) {
@@ -397,7 +468,9 @@ export function start(
   }
   const { min } = ctx.definition.players(ctx.options);
   if (lobbyCounts(ctx.players).joined < min) return { refused: "NOT_ENOUGH_PLAYERS" };
-  const writes = startWrites(ctx, now);
+  const writes = startWrites(ctx, now, blocked);
+  // Too few left once the block re-check removed some: nothing is written (02 §4 step 1).
+  if ("tooFew" in writes) return { refused: "NOT_ENOUGH_PLAYERS" };
   if (isGameError(writes)) {
     return {
       refused: "INVALID_SEATS",
@@ -410,12 +483,18 @@ export function start(
   return writes;
 }
 
-/** `POST /accept`: the holder of an invitation, in the lobby; may start the game (02 §4). */
+/**
+ * `POST /accept`: the holder of an invitation, in the lobby; may start the game (02 §4). A block in
+ * either direction between the holder and any joined member declines the invitation instead,
+ * exactly as the holder's own decline would (05, alpha A23): the caller writes it and answers
+ * `404`.
+ */
 export function accept(
   ctx: GameContext,
   viewer: GamePlayerRecord,
   now: number,
-): GameWriteSet | Refusal {
+  blocked: Blocked,
+): GameWriteSet | BlockedAccept | Refusal {
   if (
     ctx.game.status !== "lobby" ||
     viewer.state !== "invited" ||
@@ -423,7 +502,27 @@ export function accept(
   ) {
     return { refused: "WRONG_STATUS" };
   }
-  return withStart(ctx, { id: viewer.id, set: acceptedSet(now) }, now);
+  const { userId } = viewer;
+  const clash =
+    userId !== null &&
+    ctx.players.some(
+      (row) =>
+        row.state === "joined" &&
+        row.userId !== null &&
+        row.userId !== userId &&
+        blocked(userId, row.userId),
+    );
+  if (clash) {
+    const declined = declineInLobby(ctx, viewer, now);
+    if (isRefusal(declined)) return declined;
+    return { blockedAccept: declined };
+  }
+  return withStart(ctx, { id: viewer.id, set: acceptedSet(now) }, now, blocked);
+}
+
+/** Whether an accept found a block and declined instead (05 `/accept`). */
+export function isBlockedAccept(value: object): value is BlockedAccept {
+  return "blockedAccept" in value;
 }
 
 /**
@@ -603,8 +702,45 @@ export function removeSeat(
   if (row.state !== "invited" && row.state !== "joined") return { refused: "NOT_FOUND" };
   return {
     game: { updatedAt: now },
-    updatePlayers: [{ id: row.id, set: { state: "removed", removedAt: now, inviteEmail: null } }],
+    updatePlayers: [{ id: row.id, set: { ...removedSet(now), inviteEmail: null } }],
   };
+}
+
+/** A removed row (02 §4): by the creator's Remove, a block, or the start's block re-check. */
+function removedSet(now: number) {
+  return { state: "removed" as const, removedAt: now };
+}
+
+/**
+ * What a block by `viewer` of `otherId` writes in one lobby they share (06 §6.10, 05 §Blocks), or
+ * null when it changes nothing there. Only where the viewer can already tell the other's row is
+ * theirs: a joined row, or the viewer's own pick as the creator (`invite_email` NULL while
+ * invited). Then the creator removes their seat, exactly as `…/remove-seat`; anyone else declines
+ * their own, exactly as `…/decline` (an invited or joined seat alike, 02 §4), so neither the blocked
+ * person nor anyone else can tell it from that action. Every other row is left alone: acting on it
+ * would say whose it is (Q3); the accept, join, claim and start checks keep the pair apart there.
+ */
+export function blockEffect(
+  ctx: GameContext,
+  viewer: GamePlayerRecord,
+  otherId: string,
+  now: number,
+): GameWriteSet | null {
+  const other = ctx.players.find((row) => row.userId === otherId);
+  if (other === undefined || ctx.game.status !== "lobby" || now >= lobbyExpiresAt(ctx.game)) {
+    return null;
+  }
+  const creator = viewer.joinedVia === "creator";
+  const attributable =
+    other.state === "joined" ||
+    (creator && other.state === "invited" && other.inviteEmail === null);
+  const member =
+    viewer.state === "joined" || (viewer.state === "invited" && viewer.delivery !== "inert");
+  if (!attributable || !member) return null;
+  const writes = creator
+    ? removeSeat(ctx, viewer, other.id, now)
+    : declineInLobby(ctx, viewer, now);
+  return isRefusal(writes) ? null : writes;
 }
 
 /** What a join link offers one signed-in user (06 §6.8), the same for the lookup and the join. */

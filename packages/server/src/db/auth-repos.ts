@@ -8,6 +8,7 @@ import {
   asc,
   desc,
   eq,
+  exists,
   gt,
   gte,
   inArray,
@@ -18,6 +19,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 
 import type { NormalisedEmail } from "../accounts/email.js";
 import { type Database, runBatch, runBatchEndingWith, type Statement } from "./database.js";
@@ -183,6 +185,91 @@ export function userRepo(db: Database): UserRepo {
         .select({ blockerId: blocks.blockerId, blockedId: blocks.blockedId })
         .from(blocks)
         .where(and(inArray(blocks.blockerId, ids), inArray(blocks.blockedId, ids)));
+    },
+    async canBlock(viewerId, otherId) {
+      if (viewerId === otherId) return false;
+      const mine = alias(gamePlayers, "mine");
+      const theirs = alias(gamePlayers, "theirs");
+      const row = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(
+          and(
+            eq(users.id, otherId),
+            eq(users.kind, "human"),
+            or(
+              // Already blocked: a repeat is the same answer (05 §Blocks).
+              exists(
+                db
+                  .select({ one: sql`1` })
+                  .from(blocks)
+                  .where(and(eq(blocks.blockerId, viewerId), eq(blocks.blockedId, otherId))),
+              ),
+              exists(
+                db
+                  .select({ one: sql`1` })
+                  .from(pastOpponents)
+                  .where(
+                    and(eq(pastOpponents.userId, viewerId), eq(pastOpponents.otherId, otherId)),
+                  ),
+              ),
+              exists(
+                db
+                  .select({ one: sql`1` })
+                  .from(mine)
+                  .innerJoin(theirs, eq(theirs.gameId, mine.gameId))
+                  .where(and(eq(mine.userId, viewerId), eq(theirs.userId, otherId))),
+              ),
+            ),
+          ),
+        )
+        .get();
+      return row !== undefined;
+    },
+    async block(blockerId, blockedId, createdAt) {
+      await runBatch(db, [
+        db.insert(blocks).values({ blockerId, blockedId, createdAt }).onConflictDoNothing(),
+        // Never a past-opponent pair with a block either way (04 invariant 6).
+        db
+          .delete(pastOpponents)
+          .where(
+            or(
+              and(eq(pastOpponents.userId, blockerId), eq(pastOpponents.otherId, blockedId)),
+              and(eq(pastOpponents.userId, blockedId), eq(pastOpponents.otherId, blockerId)),
+            ),
+          ),
+      ]);
+    },
+    async unblock(blockerId, blockedId) {
+      const removed = await db
+        .delete(blocks)
+        .where(and(eq(blocks.blockerId, blockerId), eq(blocks.blockedId, blockedId)))
+        .returning({ id: blocks.blockedId });
+      return removed.length > 0;
+    },
+    async blocksOf(blockerId, page) {
+      const { after } = page;
+      return db
+        .select({
+          userId: blocks.blockedId,
+          displayName: users.displayName,
+          createdAt: blocks.createdAt,
+        })
+        .from(blocks)
+        .innerJoin(users, eq(users.id, blocks.blockedId))
+        .where(
+          and(
+            eq(blocks.blockerId, blockerId),
+            after === undefined
+              ? undefined
+              : or(
+                  lt(blocks.createdAt, after.createdAt),
+                  and(eq(blocks.createdAt, after.createdAt), lt(blocks.blockedId, after.userId)),
+                ),
+          ),
+        )
+        .orderBy(desc(blocks.createdAt), desc(blocks.blockedId))
+        .limit(page.limit);
     },
     async rememberGameOptions(id, remember) {
       // Only the two keys change, in SQL, so a concurrent change to any other setting survives

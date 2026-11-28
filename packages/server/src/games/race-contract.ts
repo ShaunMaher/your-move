@@ -252,6 +252,7 @@ export function gameRaceContract(
         },
         games: installed,
         onboardingClaims: 8,
+        blockLobbies: 6,
       });
     });
 

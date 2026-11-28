@@ -14,7 +14,12 @@ describe("workerRuntime", () => {
   it("claims at most 8 seats at onboarding, and runs 1 lobby, 1 claim and 2 nudges a sweep", () => {
     const platform = {} as Platform;
     workerRuntime(platform, []);
-    expect(createApp).toHaveBeenCalledWith({ platform, games: [], onboardingClaims: 8 });
+    expect(createApp).toHaveBeenCalledWith({
+      platform,
+      games: [],
+      onboardingClaims: 8,
+      blockLobbies: 6,
+    });
     expect(createSweep).toHaveBeenCalledWith({
       platform,
       games: [],

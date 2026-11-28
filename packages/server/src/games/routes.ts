@@ -41,6 +41,7 @@ import { ApiError } from "../http/api-error.js";
 import { background, logBackgroundFailure } from "../http/background.js";
 import type { AppEnv, Platform } from "../platform.js";
 import { sendAddedPushes, sendNewInvitationPushes, sendTransitionPushes } from "../push/notify.js";
+import { registerBlockRoutes } from "./block-routes.js";
 import { createGame, type InvitationNotices } from "./create.js";
 import { expireIfOverdue, expireOverdueLobbies, loadCurrent } from "./expiry.js";
 import { sendInviteMail } from "./invite-mail.js";
@@ -48,11 +49,15 @@ import { joinUrl } from "./join-links.js";
 import { registerJoinRoutes } from "./join-routes.js";
 import {
   accept,
+  type Blocked,
+  blockedBy,
+  type BlockedAccept,
   cancel,
   decline,
   endedUnplayed,
   type GameContext,
   lobbyExpiresAt,
+  isBlockedAccept,
   isModuleOutcome,
   isRefusal,
   moduleTransition,
@@ -60,6 +65,7 @@ import {
   type Refusal,
   removeSeat,
   resign,
+  rowUserIds,
   SERVER_ATTEMPTS,
   start,
   startAtCreation,
@@ -104,6 +110,8 @@ export interface GameRouteOptions {
   readonly keys: () => Promise<Subkeys>;
   /** Each transition's source of randomness (WebCrypto in production, seeded in tests). */
   readonly random: RandomFactory;
+  /** Lobbies one block changes at most (05 §Blocks, 09 §3): Node 50, the Worker 6. */
+  readonly blockLobbies: number;
 }
 
 /** OpenAPI's `{id}` path parameters as Hono's `:id`, for middleware registration. */
@@ -263,6 +271,15 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
   };
 
   /**
+   * The blocks among a lobby's users (02 §4: checked on accept and at start); none are read for a
+   * game past its lobby, where no transition checks them.
+   */
+  const blocksIn = async (loaded: LoadedGame): Promise<Blocked> =>
+    loaded.game.status === "lobby"
+      ? blockedBy(await repos.users.blocksAmong(rowUserIds(loaded.players)))
+      : () => false;
+
+  /**
    * Applies a write set from the version it was computed at, with the actor's own unread marker
    * moved to the version it creates, in the same transition.
    */
@@ -318,7 +335,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     const loaded = await repos.games.load(gameId);
     const creator = loaded === null ? undefined : memberRow(loaded.players, user.id);
     if (loaded === null || creator === undefined) return;
-    const writes = startAtCreation(contextOf(loaded), now());
+    const writes = startAtCreation(contextOf(loaded), now(), await blocksIn(loaded));
     if (writes !== null) await applyAs(loaded, writes, creator);
   };
 
@@ -331,7 +348,8 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       ctx: GameContext,
       viewer: GamePlayerRecord,
       at: number,
-    ) => GameWriteSet | ModuleOutcome | Refusal,
+      blocked: Blocked,
+    ) => GameWriteSet | ModuleOutcome | BlockedAccept | Refusal,
     gate?: (user: UserRecord) => void,
   ) => {
     const user = userOf(c);
@@ -340,8 +358,14 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     const { loaded, viewer } = await loadMember(gameId, user);
     const ctx = contextOf(loaded);
     if (loaded.game.version !== expectedVersion) throw ApiError.of("STALE_GAME");
-    const outcome = run(ctx, viewer, now());
+    const outcome = run(ctx, viewer, now(), await blocksIn(loaded));
     if (isRefusal(outcome)) throw refusal(outcome);
+    if (isBlockedAccept(outcome)) {
+      // Declined as the holder's own decline would be, then the `404` of a game they can no
+      // longer see (05 `/accept`).
+      await commit(c, loaded, outcome.blockedAccept, viewer, null);
+      throw ApiError.of("NOT_FOUND");
+    }
     await commit(
       c,
       loaded,
@@ -512,15 +536,18 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       if (viewer.state === "invited") {
         // TODO(M3): a token accepting an invitation here needs the `join` scope as well as
         // `games:create` (05 §Token scopes, 10 M3 acceptance); only sessions reach this today.
-        const outcome = accept(contextOf(loaded), viewer, now());
+        const outcome = accept(contextOf(loaded), viewer, now(), await blocksIn(loaded));
         if (isRefusal(outcome)) throw refusal(outcome);
+        const blocked = isBlockedAccept(outcome);
         try {
-          await commit(c, loaded, outcome, viewer, null);
+          await commit(c, loaded, blocked ? outcome.blockedAccept : outcome, viewer, null);
         } catch (error) {
           const lost = error instanceof ApiError && error.code === "STALE_GAME";
           if (!lost || attempt >= REMATCH_ACCEPT_ATTEMPTS) throw error;
           continue;
         }
+        // A block found on accept declined the invitation: the `404` of `/accept` (05).
+        if (blocked) throw ApiError.of("NOT_FOUND");
       }
       return (await gameWithView(rematchId, user)).game;
     }
@@ -844,6 +871,16 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     contextOf,
     gameWithView,
     describeResource,
+  });
+
+  registerBlockRoutes(app, {
+    platform,
+    userOf,
+    onboarded,
+    limit,
+    contextOf,
+    applyAs,
+    lobbiesPerCall: options.blockLobbies,
   });
 
   app.openapi(markSeenRoute, async (c) => {

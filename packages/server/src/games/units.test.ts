@@ -8,18 +8,21 @@ import type { GamePlayerRecord, GameRecord } from "../db/repositories.js";
 import { ApiError } from "../http/api-error.js";
 import { EngineFault, guardEngine } from "./engine-fault.js";
 import {
-  accept,
+  accept as acceptWith,
+  type Blocked,
   cancel,
   decline,
   endedUnplayed,
   expire,
+  type GameContext,
+  isBlockedAccept,
   isModuleOutcome,
   isRefusal,
   LOBBY_LIFETIME_MS,
   removeSeat,
   rerank,
-  start,
-  startAtCreation,
+  start as startWith,
+  startAtCreation as startAtCreationWith,
 } from "./lifecycle.js";
 import { addableUserIds, rematchOf } from "./present.js";
 import { cryptoRandom, recorded } from "./random.js";
@@ -30,6 +33,21 @@ import {
   ResourceConfigError,
 } from "./resources.js";
 import { lastOptionsOf, mergeOptions, rememberedInput, whoCanAddMeOf } from "./settings.js";
+
+/** No blocks among anyone (04 `blocks`). */
+const NO_BLOCKS: Blocked = () => false;
+
+/** An accept with no blocks: a write set or a refusal, never a block's decline. */
+function accept(ctx: GameContext, viewer: GamePlayerRecord, now: number) {
+  const outcome = acceptWith(ctx, viewer, now, NO_BLOCKS);
+  if (isBlockedAccept(outcome)) throw new Error("an accept with no blocks found one");
+  return outcome;
+}
+
+const start = (ctx: GameContext, viewer: GamePlayerRecord, now: number) =>
+  startWith(ctx, viewer, now, NO_BLOCKS);
+
+const startAtCreation = (ctx: GameContext, now: number) => startAtCreationWith(ctx, now, NO_BLOCKS);
 
 describe("rerank (02 §4 Ranking)", () => {
   it("drops declined seats and re-ranks the rest with standard competition ranking", () => {
@@ -549,7 +567,11 @@ describe("a finished game's rematch as one of its players sees it (05 `rematch`,
     viewerState: GamePlayerRecord["state"] | null,
     status: Status = "lobby",
     now = 2000,
-  ) => rematchOf({ game: game(status), viewerState }, now)?.you;
+  ) =>
+    rematchOf(
+      { game: game(status), viewerState, viewerDelivery: viewerState === null ? null : "normal" },
+      now,
+    )?.you;
 
   it("is joined for a joined or seated row, invited for an invitation, none otherwise", () => {
     expect(
@@ -562,7 +584,9 @@ describe("a finished game's rematch as one of its players sees it (05 `rematch`,
       "joined",
       "none",
     ]);
-    expect(rematchOf({ game: game(), viewerState: "joined" }, 2000)).toEqual({
+    expect(
+      rematchOf({ game: game(), viewerState: "joined", viewerDelivery: "normal" }, 2000),
+    ).toEqual({
       gameId: "r",
       you: "joined",
     });
@@ -570,20 +594,28 @@ describe("a finished game's rematch as one of its players sees it (05 `rematch`,
 
   it("is null once its lobby is past its expiry: it has ended unplayed", () => {
     expect(
-      rematchOf({ game: game(), viewerState: "invited" }, 1000 + LOBBY_LIFETIME_MS),
+      rematchOf(
+        { game: game(), viewerState: "invited", viewerDelivery: "normal" },
+        1000 + LOBBY_LIFETIME_MS,
+      ),
     ).toBeNull();
     expect(at("invited", "lobby", 999 + LOBBY_LIFETIME_MS)).toBe("invited");
   });
 
   it("is null once the rematch ended unplayed, so it may be replaced (A15-P-2, R2-1, S2-1)", () => {
     for (const status of ["cancelled", "expired", "declined"] as const) {
-      expect(rematchOf({ game: game(status), viewerState: "invited" }, 2000)).toBeNull();
+      expect(
+        rematchOf({ game: game(status), viewerState: "invited", viewerDelivery: "normal" }, 2000),
+      ).toBeNull();
     }
     // Every declined ending is a seat refusing before it acted (02 §2.1 rule 9), even after
     // others played.
     expect(endedUnplayed(game("declined", 3, "declined"))).toBe(true);
     // A cancel or expiry after moves was played, and an operator's cancel is never unplayed.
-    expect(rematchOf({ game: game("cancelled", 3), viewerState: "out" }, 2000)?.you).toBe("joined");
+    expect(
+      rematchOf({ game: game("cancelled", 3), viewerState: "out", viewerDelivery: "normal" }, 2000)
+        ?.you,
+    ).toBe("joined");
     expect(endedUnplayed(game("expired", 1))).toBe(false);
     expect(endedUnplayed(game("cancelled", 0, "operator_cancelled"))).toBe(false);
     expect(endedUnplayed(game("cancelled", 0, "cancelled"))).toBe(true);
