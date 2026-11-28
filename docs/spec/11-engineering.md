@@ -167,7 +167,8 @@ allow-list and the no-writes-to-built-ins rule — dependency-cruiser can't see 
   `release/<yyyy-mm-dd>` or `renovate/*`.
 - **Conventional Commits** (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`, `build:`,
   `ci:`; `!` for breaking), enforced by commitlint on every commit in an MR and on the MR title
-  (squash commits use the title). Renovate is configured with `:semanticCommits` so its commits
+  (squash commits use the title). A subject may start with a slice, finding or issue ID, so
+  sentence case is allowed. Renovate is configured with `:semanticCommits` so its commits
   pass; release commits are `chore(release): version packages`.
 - **lefthook** pre-commit hooks (installed by `pnpm install`): Prettier and ESLint on staged files,
   gitleaks on the staged diff. Pre-push: `pnpm typecheck`. Hooks are a convenience; CI is the gate.

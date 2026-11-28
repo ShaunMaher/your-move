@@ -2,7 +2,8 @@
 // the MR title.
 // Headers over the 100-character limit that reached the shared stack branches before CI ran on
 // them (alpha, 2026-11). They can't be reworded without rewriting published history, so these
-// exact headers are exempt; every new commit keeps the limit.
+// exact headers are exempt (commitlint skips the whole message, not just the length rule); every
+// new commit keeps the limit.
 const GRANDFATHERED_LONG_HEADERS = new Set([
   "fix(web): end the session for a different user, announce sign-ins, clear game state when none is found",
   "test(node): typed-address blocks, whoCanAddMe nobody, and the M4 note on picked blocks (A12-P-2, P-3, P-7)",

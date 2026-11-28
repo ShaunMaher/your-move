@@ -45,6 +45,7 @@ regexes = [
   '''BTBZMqHH6r4Tts7J_aSIgg''',
   # A made-up key name the request-log test plants in a request body to prove the log never
   # repeats unknown keys (packages/server/src/app.test.ts). Already in history, so it can't carry
-  # an inline gitleaks:allow; only this exact value is allowed.
-  '''planted_key_9c1e''',
+  # an inline gitleaks:allow. Anchored, so only this exact value is allowed, never a secret that
+  # merely contains it.
+  '''^planted_key_9c1e$''',
 ]
