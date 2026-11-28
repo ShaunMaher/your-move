@@ -747,6 +747,23 @@ describe("a join link through sign-in and onboarding (06 §6.8, 07 §1)", () => 
     expect(window.location.href).not.toContain(TOKEN);
   });
 
+  it("brings someone signed in but not yet onboarded back to the link after onboarding", async () => {
+    const { api } = fakeApi({
+      ...signedIn({ ...ME, displayName: null, needsOnboarding: true }),
+      "PATCH /api/v1/me": json(ME),
+      "POST /api/v1/join/lookup": json({ game: PREVIEW }),
+      "GET /api/v1/catalog": json({ games: [] }),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Welcome to Family Games" });
+    expect(window.location.pathname).toBe("/welcome");
+    typeInto("Display name", "Sam");
+    click("Continue");
+    expect(await screen.findByRole("button", { name: "Join" })).toBeDefined();
+    expect(window.location.pathname).toBe("/join");
+    expect(window.location.href).not.toContain(TOKEN);
+  });
+
   it("forgets the link when the session ends, so the next person isn't offered it", () => {
     expect(keptJoinToken()).toBe(TOKEN);
     clearClientState();
