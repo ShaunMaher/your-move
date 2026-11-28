@@ -4,9 +4,14 @@
  * built-in word list for property tests. Never imported by the engine, client or manifest, and
  * left out of the published files.
  */
-import { createWordList, toResourceMeta } from "@your-move/dictionary";
-import { buildBuiltin } from "@your-move/dictionary/builder";
-import type { ResourceMeta, Resources } from "@your-move/sdk";
+import {
+  createWordList,
+  formatWordList,
+  toResourceMeta,
+  type WordList,
+} from "@your-move/dictionary";
+import type { buildBuiltin } from "@your-move/dictionary/builder";
+import type { GameEnvelope, ResourceMeta, Resources } from "@your-move/sdk";
 
 import type { BoardTile } from "./engine/board.js";
 import { latestRuleset } from "./engine/rulesets/index.js";
@@ -109,6 +114,15 @@ export function dictionary(words: string): Resources {
   return { dictionary: { id: BUILTIN_ID, version: 1, has: (word) => set.has(word) } };
 }
 
+/**
+ * A word list over these words, in any order, as the shell hands a public list to the board
+ * (02 §3): the server's binary search over the sorted text, with `follows` for the no-play
+ * search (words §10.8).
+ */
+export function wordList(words: Iterable<string>, id = BUILTIN_ID): WordList {
+  return createWordList(id, 1, formatWordList(words));
+}
+
 /** Every tile in a state: board, racks and bag, sorted. */
 export function tilesIn(state: State): string[] {
   return [
@@ -159,7 +173,9 @@ export function state(
 let built: ReturnType<typeof buildBuiltin> | undefined;
 
 /** The built-in dictionary, built in memory from its sources once per test file. */
-function builtList(): ReturnType<typeof buildBuiltin> {
+async function builtList(): ReturnType<typeof buildBuiltin> {
+  // Loaded on demand: the builder reads files at load time, which the client tests (jsdom) can't.
+  const { buildBuiltin } = await import("@your-move/dictionary/builder");
   built ??= buildBuiltin(BUILTIN_ID);
   return built;
 }
@@ -177,4 +193,42 @@ export async function realDictionary(): Promise<{ meta: ResourceMeta; resources:
 export async function realWordList(): Promise<string[]> {
   const { text } = await builtList();
   return text.split("\n").filter((word) => word !== "");
+}
+
+/** A minimal active-game envelope (05 §Common types) with the given display names. */
+export function envelope(
+  names: readonly (string | null)[],
+  yourSeat: number | null,
+  fields: Partial<GameEnvelope> = {},
+): GameEnvelope {
+  return {
+    id: "g1",
+    gameType: "words",
+    gameVersion: 1,
+    options: options(),
+    status: "active",
+    version: 3,
+    endReason: null,
+    turnTimeoutDays: 14,
+    seatOrder: "join",
+    aiAssistance: "off",
+    available: true,
+    resources: [],
+    players: names.map((displayName, seat) => ({
+      seat,
+      userId: displayName === null ? null : `u${String(seat)}`,
+      displayName,
+      kind: "human",
+      state: "playing",
+      isYou: seat === yourSeat,
+      isCreator: seat === 0,
+    })),
+    yourSeat,
+    toAct: [0],
+    yourTurn: yourSeat === 0,
+    yourInvitation: null,
+    createdAt: 0,
+    lastActionAt: null,
+    ...fields,
+  };
 }

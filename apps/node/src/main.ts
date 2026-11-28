@@ -8,7 +8,8 @@
  * 3. scrub secrets from `process.env`;
  * 4. check code generation from strings is really off, then load the generated game registry with
  *    a dynamic `import()`, and refuse to start unless it matches `installed.json`;
- * 5. serve.
+ * 5. check the gmail token's scope and account (when that is the provider), then serve and start
+ *    the sweep's timer (03 §8).
  */
 import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -18,17 +19,28 @@ import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
 import {
   createJsonLogger,
+  createSweep,
+  GameConfigError,
   installedSchema,
   isLocalDev,
   registryMismatches,
+  ResourceConfigError,
 } from "@your-move/server";
 
 import installedJson from "../../../generated/installed.json" with { type: "json" };
 import { codeGenerationFromStringsAllowed } from "./code-generation.js";
+import { DictionariesError, nodeDictionaries } from "./dictionaries.js";
 import { scrubSecrets } from "./env.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
 import { createNodeApp } from "./server.js";
-import { isRefusal, startup, type Started } from "./startup.js";
+import { isRefusal, startup, type Started, verifyEmail, verifyPush } from "./startup.js";
+import {
+  NODE_CLAIMS_PER_RUN,
+  NODE_JOIN_LINKS_PER_RUN,
+  NODE_LOBBIES_PER_RUN,
+  NODE_NUDGES_PER_RUN,
+  startSweeper,
+} from "./sweeper.js";
 
 function exitWith(message: string): never {
   console.error(message);
@@ -41,6 +53,10 @@ const { values: args } = parseArgs({
     migrations: {
       type: "string",
       default: fileURLToPath(new URL("migrations", import.meta.url)),
+    },
+    dictionaries: {
+      type: "string",
+      default: fileURLToPath(new URL("dictionaries", import.meta.url)),
     },
   },
 });
@@ -110,12 +126,43 @@ if (mismatches.length > 0) {
   exitWith(`The game registry does not match installed.json:\n  - ${mismatches.join("\n  - ")}`);
 }
 
-// 5. Serve.
-const app = createNodeApp({
-  platform: createNodePlatform({ repos: storage.repos, config, nodeConfig, log, now }),
-  games,
-  staticRoot: args.static,
+// 5. Serve. The gmail provider first checks its token's scope and account (09 §2): a token that
+// could do more than send, or belongs to another user, refuses the start. The games' and
+// dictionaries' configuration is checked as the app is built (02 §2.1 rule 8); a refusal names
+// the variable, never its value.
+const platform = createNodePlatform({
+  repos: storage.repos,
+  config,
+  nodeConfig,
+  log,
+  now,
+  dictionaries: nodeDictionaries(args.dictionaries),
 });
+try {
+  await verifyEmail(platform.email);
+  await verifyPush(platform.push);
+} catch (error) {
+  if (isRefusal(error)) exitWith(`Refusing to start: ${error.message}`);
+  throw error;
+}
+let app: ReturnType<typeof createNodeApp>;
+try {
+  app = createNodeApp({
+    platform,
+    games,
+    staticRoot: args.static,
+    dictionariesRoot: args.dictionaries,
+  });
+} catch (error) {
+  if (
+    error instanceof GameConfigError ||
+    error instanceof ResourceConfigError ||
+    error instanceof DictionariesError
+  ) {
+    exitWith(error.message);
+  }
+  throw error;
+}
 // Background work (emails) is per request and tracked, so shutdown waits for it (03 §4).
 const background = createBackgroundTracker();
 const server = serve(
@@ -130,11 +177,24 @@ const server = serve(
   },
 );
 
+// Scheduled work (03 §8): the alpha's sweep expires overdue lobbies, claims pending email-invite
+// seats and sends due email nudges.
+const sweeper = startSweeper(
+  createSweep({
+    platform,
+    games,
+    nudgesPerRun: NODE_NUDGES_PER_RUN,
+    claimsPerRun: NODE_CLAIMS_PER_RUN,
+    lobbiesPerRun: NODE_LOBBIES_PER_RUN,
+    joinLinksPerRun: NODE_JOIN_LINKS_PER_RUN,
+  }),
+);
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     log.info("shutting down", { signal });
     server.close(() => {
-      void background.drain().finally(() => {
+      void Promise.all([sweeper.stop(), background.drain()]).finally(() => {
         storage.close();
         process.exit(0);
       });

@@ -1,21 +1,11 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist",
-    "tsBuildInfoFile": "dist/.tsbuildinfo",
-    // Node types for the tests (kit-words.test.ts reads and writes its generated file). The
-    // engine stays off Node through the engine lint and the import rules (02 §7.5), as the
-    // example game keeps its engine off the DOM.
-    "types": ["node"]
-  },
-  "include": ["src"],
+  // Solution file: the engine (built to dist/, no DOM library), the client (built to dist/, with
+  // the DOM) and the package's own config files (type-checked only), so all are type-checked and
+  // lintable (11 §2).
+  "files": [],
   "references": [
-    { "path": "../../packages/sdk" },
-    { "path": "../../packages/testkit" },
-    // Tests only, never the engine: the board-size cap is tied to the dictionaries' word-length
-    // cap (words §9.1), and the property tests build the real word list (test-support.ts).
-    { "path": "../../packages/dictionary/tsconfig.runtime.json" },
-    { "path": "../../packages/dictionary/tsconfig.build.json" }
+    { "path": "./tsconfig.engine.json" },
+    { "path": "./tsconfig.client.json" },
+    { "path": "./tsconfig.config.json" }
   ]
 }

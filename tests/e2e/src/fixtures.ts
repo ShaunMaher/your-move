@@ -1,17 +1,54 @@
 /**
  * Shared fixtures, used by every spec: each worker warms its browser before its first test, and
- * every test fails on a Content-Security-Policy violation (07 §4).
+ * every test fails on a Content-Security-Policy violation (07 §4). `friend` is a second person's
+ * page, for tests where two people play.
  */
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 
 import { WARMUP_TIMEOUT_MS } from "./budgets.js";
 
 interface Violation {
   readonly directive: string;
   readonly blocked: string;
+  /** Where and what, to make a failure diagnosable: the script's file and line, and the blocked text. */
+  readonly where: string;
 }
 
-export const test = base.extend<{ cspViolations: Violation[] }, { browserWarmup: undefined }>({
+/**
+ * Starts recording `securitypolicyviolation` events in every frame of a page; the returned
+ * function gives what was recorded. Must be called before the page navigates.
+ */
+async function trackCspViolations(page: Page): Promise<() => Promise<Violation[]>> {
+  await page.addInitScript(() => {
+    const violations: { directive: string; blocked: string; where: string }[] = [];
+    Object.defineProperty(window, "__cspViolations", { value: violations });
+    document.addEventListener("securitypolicyviolation", (event) => {
+      if ((window as unknown as { __ignoreCsp?: boolean }).__ignoreCsp === true) return;
+      violations.push({
+        directive: event.violatedDirective,
+        blocked: event.blockedURI,
+        where: `${event.sourceFile}:${String(event.lineNumber)} ${event.sample.slice(0, 80)}`,
+      });
+    });
+  });
+  return async () => {
+    const found: Violation[] = [];
+    for (const frame of page.frames()) {
+      const inFrame = await frame
+        .evaluate(
+          () => (window as unknown as { __cspViolations?: Violation[] }).__cspViolations ?? [],
+        )
+        .catch(() => []);
+      found.push(...inFrame);
+    }
+    return found;
+  };
+}
+
+export const test = base.extend<
+  { cspViolations: Violation[]; friend: Page },
+  { browserWarmup: undefined }
+>({
   /**
    * Opens and loads the shell once, in a throwaway context, as soon as the worker's browser has
    * launched and under a budget of its own. The cold first page of a fresh browser (its first
@@ -36,27 +73,37 @@ export const test = base.extend<{ cspViolations: Violation[] }, { browserWarmup:
   ],
   cspViolations: [
     async ({ page }, use) => {
-      await page.addInitScript(() => {
-        const violations: { directive: string; blocked: string }[] = [];
-        Object.defineProperty(window, "__cspViolations", { value: violations });
-        document.addEventListener("securitypolicyviolation", (event) => {
-          violations.push({ directive: event.violatedDirective, blocked: event.blockedURI });
-        });
-      });
+      const collect = await trackCspViolations(page);
       const violations: Violation[] = [];
       await use(violations);
-      for (const frame of page.frames()) {
-        const found = await frame
-          .evaluate(
-            () => (window as unknown as { __cspViolations?: Violation[] }).__cspViolations ?? [],
-          )
-          .catch(() => []);
-        violations.push(...found);
-      }
+      violations.push(...(await collect()));
       expect(violations, "Content-Security-Policy violations").toEqual([]);
     },
     { auto: true },
   ],
+  /**
+   * A second person: a page in a context of its own (separate cookies and storage) with the
+   * project's device settings, for tests where two people play each other. It fails the test on a
+   * Content-Security-Policy violation like the first.
+   */
+  friend: async ({ browser }, use, testInfo) => {
+    const { baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch } =
+      testInfo.project.use;
+    const context = await browser.newContext({
+      ...(baseURL === undefined ? {} : { baseURL }),
+      ...(viewport === undefined ? {} : { viewport }),
+      ...(userAgent === undefined ? {} : { userAgent }),
+      ...(deviceScaleFactor === undefined ? {} : { deviceScaleFactor }),
+      ...(isMobile === undefined ? {} : { isMobile }),
+      ...(hasTouch === undefined ? {} : { hasTouch }),
+    });
+    const page = await context.newPage();
+    const collect = await trackCspViolations(page);
+    await use(page);
+    const violations = await collect();
+    await context.close();
+    expect(violations, "Content-Security-Policy violations (second player)").toEqual([]);
+  },
 });
 
 export { expect };

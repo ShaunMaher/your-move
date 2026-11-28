@@ -7,7 +7,7 @@ import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { sha256Hex } from "../hash.js";
-import { parseIndex } from "../manifest.js";
+import { parseIndex, servedFileName, servedPath } from "../manifest.js";
 import { buildAll, buildBuiltin } from "./files.js";
 
 /** This package's directory, with the committed dictionaries. */
@@ -77,6 +77,28 @@ describe("buildAll", () => {
       index.dictionaries[1],
     );
     expect(existsSync(join(out, "stale"))).toBe(false);
+  });
+
+  it("publishes the served layout: each list under its versioned, hashed name, and the index", async () => {
+    writeFileSync(join(dir, "removals-global.txt"), "");
+    await addDictionary("one", "aa\ncc\n");
+    const out = join(dir, "generated");
+    await buildAll(dir, out);
+
+    const index = parseIndex(JSON.parse(readFileSync(join(out, "index.json"), "utf8")));
+    const manifest = index.dictionaries[0];
+    if (manifest === undefined) throw new Error("no manifest");
+    const name = servedFileName(manifest);
+    expect(name).toBe(`one-v1.${manifest.wordsSha256.slice(0, 16)}.txt`);
+    expect(servedPath(manifest)).toBe(`/assets/dictionaries/${name}`);
+    for (const suffix of ["", ".gz", ".br"]) {
+      expect(readFileSync(join(out, "served", `${name}${suffix}`))).toStrictEqual(
+        readFileSync(join(out, "one", `words.txt${suffix}`)),
+      );
+    }
+    expect(
+      parseIndex(JSON.parse(readFileSync(join(out, "served", "index.json"), "utf8"))),
+    ).toStrictEqual(index);
   });
 
   it("refuses a dictionary whose id isn't its directory name", async () => {

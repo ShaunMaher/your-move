@@ -29,11 +29,10 @@ export type Bundle = (typeof BUNDLES)[number];
 
 /**
  * Whether the web bundle imports each game's client entry point (through the generated client map).
- * It doesn't until M3 (10 M3: the game shell), so until then the web record isn't required to hold
- * the client entries; set this to `true` when the web app first imports `generated/client-games`.
- * Tests pass both settings to `uncheckedInputs`.
+ * It does since the game shell (alpha A4), so the web record must hold the client entries. Tests
+ * pass both settings to `uncheckedInputs`.
  */
-const WEB_BUNDLES_GAME_CLIENTS = false;
+const WEB_BUNDLES_GAME_CLIENTS = true;
 
 /** What `games:verify` checked in one package, by role (absolute paths). */
 export interface CheckedPackage {

@@ -13,17 +13,36 @@ import {
   createApp,
   createConsoleEmailSender,
   createJsonLogger,
+  createSweep,
+  type EmailSender,
   type Env,
+  type InstalledGame,
+  NO_DICTIONARIES,
   parseConfig,
   type Platform,
+  type RandomFactory,
   type Repositories,
+  type SweepReport,
 } from "@your-move/server";
 
 import { migrate } from "./db/migrate.js";
 import { nodeRepositories, openSqlite } from "./db/sqlite.js";
+import { nodeDictionaries } from "./dictionaries.js";
+import type { NodeConfig } from "./node-config.js";
 import { createBackgroundTracker, createNodePlatform } from "./platform.js";
+import { NODE_ONBOARDING_CLAIMS } from "./server.js";
+import {
+  NODE_CLAIMS_PER_RUN,
+  NODE_JOIN_LINKS_PER_RUN,
+  NODE_LOBBIES_PER_RUN,
+  NODE_NUDGES_PER_RUN,
+} from "./sweeper.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
+/** The dictionary package's served layout (built by `pnpm build`, or the tests' global setup). */
+const DICTIONARIES = fileURLToPath(
+  new URL("../../../packages/dictionary/generated/served", import.meta.url),
+);
 
 export const T0 = Date.UTC(2026, 0, 1, 9, 0, 0);
 export const MINUTE = 60_000;
@@ -61,6 +80,8 @@ interface SendOptions {
   /** `Origin`; default the instance's own, `null` to omit. */
   readonly origin?: string | null;
   readonly headers?: Record<string, string>;
+  /** A body sent as is, instead of `body` as JSON (set its `Content-Type` in `headers`). */
+  readonly rawBody?: string;
 }
 
 export interface Harness {
@@ -72,6 +93,8 @@ export interface Harness {
   request(method: string, path: string, body?: unknown, options?: SendOptions): Promise<Response>;
   /** How many background tasks (`waitUntil` calls) requests have scheduled so far. */
   backgroundScheduled(): number;
+  /** Settles once every background task started so far has finished. */
+  drain(): Promise<void>;
   /** Captured emails, after all background work has finished. */
   emails(): Promise<readonly CapturedEmail[]>;
   /** The newest email to `to`, or undefined. */
@@ -81,8 +104,14 @@ export interface Harness {
   /** Signs in and returns the cookie pair (`name=value`). */
   signIn(email: string, options?: SendOptions): Promise<string>;
   readonly logs: Record<string, unknown>[];
+  /** Every route and middleware registration of the app, as Hono lists them (`:param` paths). */
+  routes(): readonly { readonly method: string; readonly path: string }[];
+  /** Runs the sweep once (03 §8), as the Node timer would. */
+  sweep(): Promise<SweepReport>;
   /** Runs one SQL statement directly, for state no endpoint sets yet (e.g. suspension, M3). */
   exec(sql: string, ...params: (string | number | null)[]): void;
+  /** Runs one SQL query directly and returns its rows, for checking what was stored. */
+  query(sql: string, ...params: (string | number | null)[]): Record<string, unknown>[];
   close(): void;
 }
 
@@ -102,8 +131,30 @@ export function cookieOf(response: Response): string {
 }
 
 export interface HarnessOptions {
+  /** Proxy settings instead of the default `xff` from loopback. */
+  readonly nodeConfig?: Pick<NodeConfig, "trustProxy" | "trustProxyHops" | "trustProxyPeers">;
   /** Wraps the repositories, e.g. to slow one path down in a test of the timing test itself. */
   readonly wrapRepos?: (repos: Repositories) => Repositories;
+  /** Replaces the capturing email sender (e.g. one that fails). */
+  readonly sender?: EmailSender;
+  /** The sweep's nudges per run; Node's own by default. */
+  readonly nudgesPerRun?: number;
+  /** The sweep's invite claims per run; Node's own by default. */
+  readonly claimsPerRun?: number;
+  /** The sweep's lobby expiries per run; Node's own by default. */
+  readonly lobbiesPerRun?: number;
+  /** The sweep's expired join links per run; Node's own by default. */
+  readonly joinLinksPerRun?: number;
+  /** Seats completing onboarding claims; Node's own by default. */
+  readonly onboardingClaims?: number;
+  /** Wraps the capturing email sender (e.g. to fail some messages and still capture the rest). */
+  readonly wrapSender?: (capture: EmailSender) => EmailSender;
+  /** The installed games (the generated registry); none by default. */
+  readonly games?: readonly InstalledGame[];
+  /** The games' randomness; WebCrypto by default, a seeded source in the game tests. */
+  readonly random?: RandomFactory;
+  /** Where Web Push requests go (with VAPID configured); the tests never reach a push service. */
+  readonly pushFetch?: typeof fetch;
 }
 
 export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {}): Harness {
@@ -118,17 +169,46 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     now,
     sink: (line) => logs.push(JSON.parse(line) as Record<string, unknown>),
   });
-  const config = parseConfig(env, { runtime: "node", installedGames: [] });
+  const games = options.games ?? [];
+  const config = parseConfig(env, {
+    runtime: "node",
+    installedGames: games.map((game) => ({
+      type: game.manifest.type,
+      enabledByDefault: game.enabledByDefault,
+    })),
+  });
   const capture = createConsoleEmailSender(log, now);
   const platform = createNodePlatform({
     repos: (options.wrapRepos ?? ((repos) => repos))(nodeRepositories(sqlite)),
     config,
-    nodeConfig: { trustProxy: "xff", trustProxyHops: 1, trustProxyPeers: ["127.0.0.0/8"] },
+    nodeConfig: options.nodeConfig ?? {
+      trustProxy: "xff",
+      trustProxyHops: 1,
+      trustProxyPeers: ["127.0.0.0/8"],
+    },
     log,
     now,
-    smtp: capture,
+    // Without games nothing reads a word list, so the tests of sign-in need no dictionary build.
+    dictionaries: games.length === 0 ? NO_DICTIONARIES : nodeDictionaries(DICTIONARIES),
+    smtp: options.sender ?? options.wrapSender?.(capture) ?? capture,
+    pushFetch:
+      options.pushFetch ??
+      (() => Promise.reject(new Error("a test reached for the network to send a push"))),
   });
-  const app = createApp({ platform, games: [] });
+  const app = createApp({
+    platform,
+    games,
+    onboardingClaims: options.onboardingClaims ?? NODE_ONBOARDING_CLAIMS,
+    ...(options.random === undefined ? {} : { random: options.random }),
+  });
+  const sweep = createSweep({
+    platform,
+    games,
+    nudgesPerRun: options.nudgesPerRun ?? NODE_NUDGES_PER_RUN,
+    claimsPerRun: options.claimsPerRun ?? NODE_CLAIMS_PER_RUN,
+    lobbiesPerRun: options.lobbiesPerRun ?? NODE_LOBBIES_PER_RUN,
+    joinLinksPerRun: options.joinLinksPerRun ?? NODE_JOIN_LINKS_PER_RUN,
+  });
   const background = createBackgroundTracker();
   let scheduled = 0;
   const countedContext = (): ReturnType<typeof background.context> => {
@@ -151,7 +231,7 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     else if (ip !== null) headers["X-Forwarded-For"] = ip;
     if (options.origin !== null) headers["Origin"] = options.origin ?? origin;
     if (options.cookie) headers["Cookie"] = options.cookie;
-    let payload: string | undefined;
+    let payload: string | undefined = options.rawBody;
     if (body !== undefined) {
       payload = JSON.stringify(body);
       headers["Content-Type"] ??= "application/json";
@@ -181,6 +261,7 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
     },
     request,
     backgroundScheduled: () => scheduled,
+    drain: () => background.drain(),
     emails,
     lastEmail,
     async requestCode(email, options) {
@@ -199,8 +280,13 @@ export function createHarness(env: Env = PROD_ENV, options: HarnessOptions = {})
       return cookieOf(response);
     },
     logs,
+    routes: () => app.routes.map((route) => ({ method: route.method, path: route.path })),
+    sweep,
     exec(sql, ...params) {
       sqlite.prepare(sql).run(...params);
+    },
+    query(sql, ...params) {
+      return sqlite.prepare(sql).all(...params);
     },
     close() {
       sqlite.close();

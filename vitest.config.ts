@@ -15,7 +15,10 @@ const ROOTS = globSync(["{apps,packages,games,tests}/*/package.json", "scripts/p
 const TIMING = process.env["YM_TIMING"] === "1";
 const TIMING_FILE = "src/auth-timing.test.ts";
 
-/** Every workspace package with tests. A package with its own vitest.config.ts uses it. */
+/**
+ * Every workspace package with tests. A package with its own vitest.config.ts uses it, and must
+ * apply the timing switch itself if it holds the timing file (apps/node does).
+ */
 function projects(): (string | TestProjectInlineConfiguration)[] {
   return ROOTS.map((root) =>
     existsSync(`${root}/vitest.config.ts`)
@@ -82,6 +85,9 @@ export default defineConfig({
         // The D1 adapter: exercised by the D1 repository contract suite (tests/contract), which
         // runs workerd and so runs in CI's arm64 test:worker job, outside the coverage run.
         "apps/worker/src/d1.ts",
+        // The Worker's dictionary loader: it reads the static-assets binding, so it runs only in
+        // workerd, under the Worker contract suite (tests/contract, CI's test:worker job).
+        "apps/worker/src/dictionaries.ts",
         // The shared repository contract suite and its entry point: test code that ships in src/
         // so both adapters' tests can import it (@your-move/server/testing).
         "packages/server/src/db/repository-contract.ts",

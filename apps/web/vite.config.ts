@@ -2,7 +2,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, type Plugin, type UserConfig } from "vite";
+
+import { defines } from "./vite-plugin/defines.js";
+import { serviceWorker } from "./vite-plugin/service-worker.js";
 
 /**
  * Records every module the build read in generated/bundles/web.json, for `pnpm games:check-inputs`
@@ -36,12 +39,25 @@ function recordInputs(): Plugin {
  * The SPA build (07 §4 CSP compatibility): no inlined assets (`data:` scripts or fonts would
  * break the CSP) and hashed output under /assets/ (cached immutably, 03 §9).
  */
-export default defineConfig({
-  plugins: [react(), recordInputs()],
+const config: UserConfig = {
+  plugins: [react(), recordInputs(), serviceWorker()],
+  define: defines,
   build: {
     assetsInlineLimit: 0,
     assetsDir: "assets",
     sourcemap: true,
     modulePreload: { polyfill: false },
   },
+};
+
+export default defineConfig(({ command, mode }) => {
+  // A production build under NODE_ENV=test (vitest's default) or development bundles React's
+  // development build: the service worker never registers in it, and it ships by accident.
+  const env = process.env["NODE_ENV"];
+  if (command === "build" && mode === "production" && env !== undefined && env !== "production") {
+    throw new Error(
+      `The web build is a production build but NODE_ENV is "${env}". Unset NODE_ENV or set it to "production" (a build spawned from a test run must not inherit the test's).`,
+    );
+  }
+  return config;
 });

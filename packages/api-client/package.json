@@ -32,6 +32,7 @@
     "openapi-fetch": "catalog:"
   },
   "devDependencies": {
+    "@your-move/sdk": "workspace:*",
     "vitest": "catalog:"
   }
 }

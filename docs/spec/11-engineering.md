@@ -98,6 +98,17 @@ in CI from the first commit. Changing a standard needs an ADR (§10).
   in a CI job of their own, never alongside another suite, are run locally before any change to
   the paths they time is handed off, and are re-measured rather than retried when they fail
   (ADR 0006).
+- Two causes of load-dependent flakes in UI tests, found by looping a file under CPU load: React runs
+  passive effects (`useEffect`) after the commit, and under load a `findBy*` can resolve, and the
+  test act, before they have run. So a test never asserts an effect's result (the address bar, a
+  `data-theme` attribute, focus) synchronously after a `findBy*`: it uses `waitFor`, or flushes
+  with `await act(() => Promise.resolve())` before acting on state an effect may still overwrite.
+- The tunnel stack test (`apps/node/src/tunnel-stack.test.ts`, which runs
+  `apps/node/scripts/check-tunnel-routing.sh` against a real compose stack) needs a Docker engine
+  and the app image, so it is skipped unless `TUNNEL_STACK_IMAGE` names one. Run it after any
+  change to `apps/node/docker-compose.tunnel.yml`, to `TRUST_PROXY_PEERS` or to the `app-front`
+  alias: `docker build -f apps/node/Dockerfile .`, then
+  `TUNNEL_STACK_IMAGE=<image> pnpm exec vitest run --project apps/node src/tunnel-stack.test.ts`.
 - Every bug fix lands with a test that failed before the fix.
 
 ## 5. Architecture rules
@@ -156,7 +167,8 @@ allow-list and the no-writes-to-built-ins rule — dependency-cruiser can't see 
   `release/<yyyy-mm-dd>` or `renovate/*`.
 - **Conventional Commits** (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`, `build:`,
   `ci:`; `!` for breaking), enforced by commitlint on every commit in an MR and on the MR title
-  (squash commits use the title). Renovate is configured with `:semanticCommits` so its commits
+  (squash commits use the title). A subject may start with a slice, finding or issue ID, so
+  sentence case is allowed. Renovate is configured with `:semanticCommits` so its commits
   pass; release commits are `chore(release): version packages`.
 - **lefthook** pre-commit hooks (installed by `pnpm install`): Prettier and ESLint on staged files,
   gitleaks on the staged diff. Pre-push: `pnpm typecheck`. Hooks are a convenience; CI is the gate.
@@ -204,7 +216,8 @@ store and mise's tools are cached inside the project directory, keyed by `pnpm-l
 architecture writes them (validate on amd64), and every job checks pnpm uses the cached store.
 Jobs run unprivileged (no Docker-in-Docker); untagged jobs run on the amd64 shared runner, whose
 CPU must offer x86-64-v2 (SSE4.2): workerd's linux-64 build fails to start without it. Until it
-does, the Worker half of the contract suite runs in its own job on the arm64 runner, which also
+does, the workerd tests (the Worker half of the contract suite, the D1 repository contract suite
+and the gmail redirect test) run in their own job on the arm64 runner, which also
 writes the arm64 caches (M0 review CI-1). Stages, in order:
 
 1. **validate** — `pnpm games:generate` first (§3), then `prettier --check`, ESLint, `tsc -b`,

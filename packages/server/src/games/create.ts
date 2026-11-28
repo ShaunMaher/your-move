@@ -1,0 +1,518 @@
+/**
+ * Creating a game (docs/spec/05-api.md `POST /api/v1/games`, 02 §4 Creating, 06 §6.1): option
+ * resolution with remembered options, the seat count, the turn timeout, the invitees, resource
+ * authorisation and `validateStart`, the creator's game caps and rate limits, then one atomic
+ * insert of the lobby.
+ *
+ * Every valid address gets a seat and the same response, with the same reads and writes, whether
+ * it belongs to an onboarded user (an invitation), to nobody or to an account that hasn't finished
+ * onboarding (an email-invite seat, claimed at onboarding, 06 §6.4). An email-invite seat's address
+ * is sent the invite email after the response, unless suppressed or capped (alpha A17,
+ * `invite-mail.ts`); a user's invitation gets the generic invitation push and, with email nudges
+ * on, the invitation email, from the same one background task (06 §6.2, alpha A20). Per-pair
+ * counts use the typed address's `emailId`, never the user it resolves to (Q3). An invitation over
+ * the target's inbound cap is `hidden` (06 §6.7).
+ *
+ * A past opponent picked by `userId` (alpha A12) must be one the creator may pick (no block either
+ * way, `INVALID_INVITEES` otherwise) and is added at once (`joined`, `joined_via = added`), unless
+ * AI assistance is allowed or their stored `whoCanAddMe` is `nobody`, when it is an invitation
+ * (02 §4, 06 §6.2). Picked invitees are seated before
+ * typed addresses, whatever their order in the request, so a typed address never changes how a
+ * picked one is seated: an address that resolves to a picked user, or to a user with a block
+ * against anyone seated before it, gets an `inert` seat instead (06 §6.1). The route starts a game
+ * whose seats are all filled this way (05 Created), unless a join link was asked for: it is created
+ * in the same batch, its token returned once for the response's URL, and the game waits for the
+ * creator's Start (06 §6.8, alpha A18).
+ */
+import type { z } from "@hono/zod-openapi";
+import { isGameError, type GameError, type OptionsContext } from "@your-move/sdk";
+import type { CreateGameBodySchema } from "@your-move/shared";
+
+import { normaliseAddress, type NormalisedEmail } from "../accounts/email.js";
+import { checkLimits, type LimitCheck, limitOf } from "../auth/limits.js";
+import { emailId, type Subkeys } from "../crypto/subkeys.js";
+import type { NewGamePlayer, UserRecord } from "../db/repositories.js";
+import { ApiError } from "../http/api-error.js";
+import type { Platform } from "../platform.js";
+import { expireOverdueLobbies } from "./expiry.js";
+import { type InviteMail, type MailTarget, planInviteMail } from "./invite-mail.js";
+import { hashJoinToken, linkTimes, newJoinToken } from "./join-links.js";
+import { LOBBY_LIFETIME_MS } from "./lifecycle.js";
+import type { GameType } from "./registry.js";
+import type { ResourceProvider } from "./resources.js";
+import {
+  emailNudgesOf,
+  lastOptionsOf,
+  mergeOptions,
+  rememberedInput,
+  whoCanAddMeOf,
+} from "./settings.js";
+
+type CreateGameBody = z.infer<typeof CreateGameBodySchema>;
+
+/** `TOO_MANY_GAMES` (05): live games a user created, in total and per invitee. */
+const MAX_LIVE_CREATED = 50;
+const MAX_LIVE_CREATED_PER_PAIR = 5;
+/** `last_seen_version` of a row its user has never seen (04): below every game version. */
+const NEVER_SEEN = -1;
+
+export interface CreateDeps {
+  readonly platform: Platform;
+  readonly resources: ResourceProvider;
+  readonly keys: Subkeys;
+}
+
+/** `INVALID_OPTIONS` with the module's code and detail (05 §Errors, module errors). */
+function invalidOptions(error: GameError): ApiError {
+  return ApiError.of("INVALID_OPTIONS", {
+    code: error.code,
+    ...(error.detail === undefined ? {} : { detail: error.detail }),
+  });
+}
+
+/**
+ * Resolves the option input with the remembered options merged in; if the module rejects that, once
+ * more with the request's input alone (05 §Remembered options).
+ */
+function resolve(
+  type: GameType,
+  input: unknown,
+  remembered: unknown,
+  ctx: OptionsContext,
+): { options: unknown; input: unknown } {
+  const merged = mergeOptions(input, remembered);
+  const first = type.latest.resolveOptions(merged, ctx);
+  if (!isGameError(first)) return { options: first, input: merged };
+  if (merged === input) throw invalidOptions(first);
+  const second = type.latest.resolveOptions(input, ctx);
+  if (isGameError(second)) throw invalidOptions(second);
+  return { options: second, input };
+}
+
+/** The seat count (05 `seats`): default max if min = max, else min; within `players(options)`. */
+function seatCount(type: GameType, options: unknown, seats: number | undefined): number {
+  const { min, max } = type.latest.players(options);
+  const count = seats ?? (min === max ? max : min);
+  if (!Number.isInteger(count) || count < min || count > max) {
+    throw ApiError.of("INVALID_SEAT_COUNT");
+  }
+  return count;
+}
+
+/** The turn timeout (02 §4): whole days, 1–30, validated by the framework. */
+function timeoutDays(type: GameType, options: unknown, days: number | undefined): number {
+  const value = days ?? type.latest.defaultTurnTimeoutDays(options);
+  if (!Number.isInteger(value) || value < 1 || value > 30) throw ApiError.of("INVALID_TIMEOUT");
+  return value;
+}
+
+/** The invitees: typed addresses, normalised, and past opponents picked by id. */
+interface Invitees {
+  readonly emails: readonly NormalisedEmail[];
+  readonly picked: readonly string[];
+}
+
+/** The invitees, checked (05 `INVALID_INVITEES`, `CANNOT_PLAY_SELF`). */
+function invitees(body: CreateGameBody, creator: UserRecord, seats: number): Invitees {
+  if (body.invitees.length > seats - 1) throw ApiError.of("INVALID_INVITEES");
+  const emails: NormalisedEmail[] = [];
+  const picked: string[] = [];
+  for (const invitee of body.invitees) {
+    if ("userId" in invitee) {
+      picked.push(invitee.userId);
+      continue;
+    }
+    const address = normaliseAddress(invitee.email);
+    if (address === null) throw ApiError.of("INVALID_INVITEES");
+    emails.push(address);
+  }
+  if ((creator.email !== null && emails.includes(creator.email)) || picked.includes(creator.id)) {
+    throw ApiError.of("CANNOT_PLAY_SELF");
+  }
+  // Only literal duplicates are refused, so the response never says whose address it is (06 §6.1).
+  if (new Set(emails).size !== emails.length || new Set(picked).size !== picked.length) {
+    throw ApiError.of("INVALID_INVITEES");
+  }
+  return { emails, picked };
+}
+
+/**
+ * Every picked id must be a past opponent the creator may pick: no block either way, an onboarded
+ * human (06 §6.1). Anything else is `INVALID_INVITEES`, the same answer whatever the reason.
+ */
+async function checkPicked(deps: CreateDeps, creator: UserRecord, picked: readonly string[]) {
+  if (picked.length === 0) return;
+  const pickable = new Set(await deps.platform.repos.users.pickableOpponents(creator.id, picked));
+  if (picked.some((id) => !pickable.has(id))) throw ApiError.of("INVALID_INVITEES");
+}
+
+/**
+ * Whether a picked past opponent is added at once (02 §4, 06 §6.2): under their `whoCanAddMe`
+ * default, `pastOpponents`, unless AI assistance is allowed, so every person sees the AI setting
+ * before they're in. A stored `nobody` makes it an invitation (the Settings choice is M4's). AI
+ * seats arrive with AI accounts (M8).
+ */
+function addsAtOnce(aiAssistance: "off" | "allowed", user: UserRecord | undefined): boolean {
+  return (
+    aiAssistance === "off" && user !== undefined && whoCanAddMeOf(user.settings) === "pastOpponents"
+  );
+}
+
+/** The blocks among a set of users, as a lookup either way round (04 `blocks`). */
+async function blockLookup(deps: CreateDeps, userIds: readonly string[]) {
+  const pairs = await deps.platform.repos.users.blocksAmong(userIds);
+  const keys = new Set(pairs.map((pair) => `${pair.blockerId} ${pair.blockedId}`));
+  return (a: string, b: string): boolean => keys.has(`${a} ${b}`) || keys.has(`${b} ${a}`);
+}
+
+/**
+ * Whether a user's invitation may be mailed the invitation email (06 §6.2): an onboarded human
+ * (as every invitee here is) with email nudges on and `email_id` set, neither suspended nor being
+ * deleted, as the nudge sweep requires (03 §7). Suppression is checked with every address's.
+ */
+function getsInvitationEmail(user: UserRecord): boolean {
+  return (
+    emailNudgesOf(user.settings) &&
+    user.emailId !== null &&
+    user.suspendedAt === null &&
+    user.deletionRequestedAt === null
+  );
+}
+
+/** Stands in for "no user" in the past-opponent lookup, so it runs the same for every address. */
+const NO_USER = "";
+const DAY = 86_400_000;
+
+/**
+ * The inbound invitation cap (06 §6.7, 08 T20): a user receives at most 1 invitation a day from
+ * any one creator who isn't a past opponent, and 3 a day in total from such creators; over the cap
+ * the invitation is `hidden`. Counted from the live `invites` rows of the last day for the target's
+ * `emailId` (alpha A20 review S-1, F-17): a lobby that ended unplayed or a seat its creator
+ * removed stops counting, so throwaway lobbies can't push a real invitation into *Hidden*. The same
+ * read for every typed address whatever it resolves to (Q3), with a placeholder user for an
+ * address that has none; nothing is written. The creator's response is the same either way.
+ * Returns each address's delivery.
+ */
+async function inboundDelivery(
+  deps: CreateDeps,
+  creator: UserRecord,
+  emailIds: readonly string[],
+  invitable: readonly (UserRecord | null)[],
+  now: number,
+): Promise<("normal" | "hidden")[]> {
+  if (emailIds.length === 0) return [];
+  const { repos, config } = deps.platform;
+  const targets = emailIds.map((emailHash, i) => ({
+    emailHash,
+    userId: invitable[i]?.id ?? NO_USER,
+  }));
+  const [opponents, received] = await Promise.all([
+    repos.users.pastOpponentsOf(
+      creator.id,
+      targets.map((target) => target.userId),
+    ),
+    repos.invites.receivedSince(creator.id, now - DAY, targets),
+  ]);
+  const pastOpponents = new Set(opponents);
+  const perCreator = limitOf(config, "INVITATIONS_RECEIVED_PAIR_DAY");
+  const total = limitOf(config, "INVITATIONS_RECEIVED_DAY");
+  return targets.map((target, i) => {
+    const counts = received[i] ?? { fromCreator: 0, total: 0 };
+    const stranger = target.userId === NO_USER || !pastOpponents.has(target.userId);
+    return stranger && (counts.fromCreator >= perCreator || counts.total >= total)
+      ? "hidden"
+      : "normal";
+  });
+}
+
+/** A created game: its id, the past opponents added to it at once, and its invitations' notices. */
+export interface CreatedGame {
+  readonly gameId: string;
+  /** User ids of the picked past opponents seated as `joined` (02 §4), in request order. */
+  readonly added: readonly string[];
+  /**
+   * What to tell the invitees after the response (06 §6.2, §6.3); null when there is nothing to
+   * tell: no address typed and no pick seated as an invitation. Whenever it isn't null the caller
+   * schedules one background task for it, whatever it carries, so the work doesn't say which
+   * addresses are mailed or pushed to (Q3).
+   */
+  readonly invitations: InvitationNotices | null;
+  /** The join link's token when one was asked for, for the one response that shows it. */
+  readonly joinToken: string | null;
+}
+
+/** A new game's invitation notices: its emails, and the users seated with a `normal` invitation. */
+export interface InvitationNotices {
+  readonly mail: InviteMail;
+  /** For the generic invitation push (06 §6.2), in request order. */
+  readonly invited: readonly string[];
+}
+
+/**
+ * Creates the game. Throws {@link ApiError} for every refusal.
+ *
+ * With `rematchOf`, the game is that finished game's rematch (05 `POST /api/v1/games/:id/rematch`):
+ * the body carries the finished game's stored options, which are resolved again without the
+ * creator's remembered options and don't change them; `body.seats` below the module's minimum
+ * is `REMATCH_UNAVAILABLE`; and the game is created only if the finished game has no rematch yet
+ * (or one that ended unplayed, which it replaces), linked to it in the same batch. Null when it
+ * already had a live or played one: nothing was created.
+ */
+export async function createGame(
+  deps: CreateDeps,
+  creator: UserRecord,
+  type: GameType | undefined,
+  body: CreateGameBody,
+  rematchOf?: string,
+): Promise<CreatedGame | null> {
+  const { platform, resources, keys } = deps;
+  const { repos, config } = platform;
+  if (type?.enabled !== true) throw ApiError.of("UNKNOWN_GAME");
+
+  const ctx: OptionsContext = {
+    config: type.config,
+    resources: resources.listForUser("dictionary", creator.id),
+  };
+  // A rematch repeats a game's resolved options: nothing of the creator's last choices is merged.
+  const remembered =
+    rematchOf === undefined ? lastOptionsOf(creator.settings, type.type) : undefined;
+  const { options, input } = resolve(type, body.options, remembered, ctx);
+  // A rematch has a seat for each person carried over; too few for the game is its own answer
+  // (05 `REMATCH_UNAVAILABLE`), whatever the module's range says.
+  if (rematchOf !== undefined && (body.seats ?? 0) < type.latest.players(options).min) {
+    throw ApiError.of("REMATCH_UNAVAILABLE");
+  }
+  const seats = seatCount(type, options, body.seats);
+  const turnTimeoutDays = timeoutDays(type, options, body.turnTimeoutDays);
+  const { emails, picked } = invitees(body, creator, seats);
+
+  const requested = type.latest.resources(options);
+  for (const resource of requested) {
+    // Normally resolveOptions has refused already: it sees only what the creator may use.
+    if (!resources.authorizeForNewGame(resource.kind, resource.id, creator.id)) {
+      throw ApiError.of("INVALID_OPTIONS", { code: resources.unknownCode(resource.kind) });
+    }
+  }
+  const startable = type.latest.validateStart(options, seats);
+  if (isGameError(startable)) {
+    throw ApiError.of("INVALID_SEATS", {
+      code: startable.code,
+      ...(startable.detail === undefined ? {} : { detail: startable.detail }),
+    });
+  }
+
+  await checkPicked(deps, creator, picked);
+  const pickedUsers = new Map((await repos.users.findByIds(picked)).map((user) => [user.id, user]));
+
+  const emailIds = await Promise.all(emails.map((email) => emailId(keys, email)));
+  // The live-game caps are read before the insert, so concurrent creates can pass them together
+  // and go a few games over. That is accepted: the atomic daily limits below (30 games a day, 5 a
+  // pair) bound how far, and the caps exist to stop slow accumulation (A2 review S-7).
+  // An overdue lobby isn't live: expire the creator's before counting them (lazy expiry).
+  await expireOverdueLobbies(repos, creator.id, platform.now().getTime());
+  const live = await repos.games.countLiveCreated(creator.id);
+  const perPair = await Promise.all([
+    ...emailIds.map((hash) => repos.games.countLiveCreatedWithInvite(creator.id, hash)),
+    // A picked past opponent's pair is (creator, userId) (06 §6.7).
+    ...picked.map((id) => repos.games.countLiveCreatedWithUser(creator.id, id)),
+  ]);
+  if (live >= MAX_LIVE_CREATED || perPair.some((count) => count >= MAX_LIVE_CREATED_PER_PAIR)) {
+    throw ApiError.of("TOO_MANY_GAMES");
+  }
+
+  const now = platform.now().getTime();
+  const checks: LimitCheck[] = [
+    // Counted for every typed address, whatever it turns out to be (08 §4).
+    ...(emails.length === 0
+      ? []
+      : (["EMAIL_INVITEES_USER_HOUR", "EMAIL_INVITEES_USER_DAY"] as const).map(
+          (name): LimitCheck => ({ name, key: creator.id, amount: emails.length }),
+        )),
+    { name: "GAMES_CREATED_USER_DAY", key: creator.id, amount: 1 },
+    ...emailIds.map((hash): LimitCheck => ({
+      name: "GAMES_CREATED_PAIR_DAY",
+      key: `${creator.id}:${hash}`,
+      amount: 1,
+    })),
+    ...picked.map((id): LimitCheck => ({
+      name: "GAMES_CREATED_PAIR_DAY",
+      key: `${creator.id}:user:${id}`,
+      amount: 1,
+    })),
+    // A link asked for at creation counts like one made in the lobby (08 §4).
+    ...(body.joinLink === true
+      ? [{ name: "JOIN_LINKS_CREATED_USER_DAY" as const, key: creator.id, amount: 1 }]
+      : []),
+  ];
+  const limits = await checkLimits(repos, config, now, checks);
+  if (limits.some((limit) => limit.exceeded)) throw ApiError.of("RATE_LIMITED");
+
+  // The same lookup and the same row for every address, whatever it resolves to (Q3).
+  const found = await Promise.all(emails.map((email) => repos.users.findByEmail(email)));
+  const invitable = found.map((user) =>
+    user?.kind === "human" && user.onboardedAt !== null ? user : null,
+  );
+  const delivery = await inboundDelivery(deps, creator, emailIds, invitable, now);
+  // One lookup for every request, with a placeholder for each address that resolves to no one,
+  // so the reads don't depend on what the addresses turn out to be (Q3).
+  const blocked = await blockLookup(deps, [
+    creator.id,
+    ...picked,
+    ...invitable.map((user) => user?.id ?? NO_USER),
+  ]);
+  const aiAssistance = body.aiAssistance ?? "off";
+  /** Users holding a row so far, in seating order: the creator, then each invitee. */
+  const seated: string[] = [creator.id];
+  const blockedWithSeated = (userId: string) => seated.some((other) => blocked(userId, other));
+
+  const pickedRows = picked.map((userId): NewGamePlayer => {
+    // A block with the creator was refused above; one with an earlier picked invitee gives an
+    // `inert` seat (06 §6.1).
+    const inert = blockedWithSeated(userId);
+    seated.push(userId);
+    const base = { id: crypto.randomUUID(), userId, lastSeenVersion: NEVER_SEEN };
+    if (inert) return { ...base, state: "invited", delivery: "inert" };
+    if (!addsAtOnce(aiAssistance, pickedUsers.get(userId))) {
+      return { ...base, state: "invited", delivery: "normal" };
+    }
+    // Unread until they open it, like an invitation (04 `last_seen_version`).
+    return { ...base, state: "joined", joinedVia: "added", joinedAt: now };
+  });
+  const emailRows = emails.map((email, i): NewGamePlayer => {
+    const user = invitable[i] ?? null;
+    // Already added in this request: an `inert` email-only seat, so the response never confirms
+    // whose address it is (06 §6.1).
+    const duplicate = user !== null && seated.includes(user.id);
+    const inert = duplicate || (user !== null && blockedWithSeated(user.id));
+    if (user !== null && !duplicate) seated.push(user.id);
+    return {
+      id: crypto.randomUUID(),
+      userId: duplicate ? null : (user?.id ?? null),
+      inviteEmail: email,
+      state: "invited",
+      delivery: inert ? "inert" : (delivery[i] ?? "normal"),
+      // Never seen: a new invitation is unread (A2 review P-6).
+      lastSeenVersion: NEVER_SEEN,
+    };
+  });
+  // Each typed address with its emailId, its `invites` row and whether it may be mailed, paired
+  // once: an email-invite seat with `normal` delivery, or a user's `normal` invitation when the
+  // user gets the invitation email; never an `inert` seat or one the inbound cap made `hidden`
+  // (06 §6.2, §6.3). Worked out in memory from what was read for every address alike (Q3).
+  const addresses = emails.map((email, i): MailTarget => {
+    const emailId = emailIds[i];
+    const row = emailRows[i];
+    if (emailId === undefined || row === undefined) throw new Error("typed addresses out of step");
+    const user = row.userId == null ? null : (invitable[i] ?? null);
+    const normal = row.delivery === "normal";
+    return {
+      email,
+      emailId,
+      // The seat's own id, so the inbound cap can tell a live invitation from one removed (04).
+      inviteId: row.id,
+      seat: user === null ? "emailInvite" : "invitation",
+      mailable: normal && (user === null ? invitable[i] === null : getsInvitationEmail(user)),
+    };
+  });
+  // Each pick seated as an invitation, `inert` ones too, so the work doesn't depend on which.
+  const picks = pickedRows.flatMap((row): MailTarget[] => {
+    const user = row.userId == null ? undefined : pickedUsers.get(row.userId);
+    if (row.state !== "invited" || user?.email == null) return [];
+    return [
+      {
+        email: user.email,
+        emailId: user.emailId ?? NO_USER,
+        inviteId: null,
+        seat: "invitation",
+        mailable: row.delivery === "normal" && getsInvitationEmail(user),
+      },
+    ];
+  });
+  const mail = await planInviteMail(
+    { platform, keys },
+    { creator, gameName: type.manifest.name, addresses, picked: picks },
+    now,
+  );
+  // Who gets the generic invitation push: every `normal` invitation with a user (06 §6.2).
+  const invited = [...pickedRows, ...emailRows].flatMap((row) =>
+    row.state === "invited" && row.delivery === "normal" && row.userId != null ? [row.userId] : [],
+  );
+  const gameId = crypto.randomUUID();
+  const players: NewGamePlayer[] = [
+    {
+      id: crypto.randomUUID(),
+      userId: creator.id,
+      state: "joined",
+      joinedVia: "creator",
+      joinedAt: now,
+    },
+    ...pickedRows,
+    ...emailRows,
+  ];
+  const game = {
+    id: gameId,
+    gameType: type.type,
+    gameVersion: type.latest.version,
+    options: JSON.stringify(options),
+    status: "lobby" as const,
+    createdBy: creator.id,
+    seats,
+    turnTimeoutDays,
+    seatOrder: body.seatOrder ?? "join",
+    // Off whenever a seat is open or two people play (02 §4), which is every game until AI
+    // accounts exist (M3); the creator may still allow it.
+    aiAssistance,
+    lastActionAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const joinToken = body.joinLink === true ? newJoinToken() : null;
+  const extras = {
+    ...(joinToken === null
+      ? {}
+      : {
+          joinLink: {
+            tokenHash: await hashJoinToken(joinToken),
+            ...linkTimes({ createdAt: now }, now),
+          },
+        }),
+    resources: requested.map((resource) => ({
+      kind: resource.kind,
+      resourceId: resource.id,
+      version: resource.version ?? null,
+    })),
+    // One for every typed address (a pick has none).
+    invites: addresses.flatMap((address) =>
+      address.inviteId === null
+        ? []
+        : [
+            {
+              id: address.inviteId,
+              inviterId: creator.id,
+              emailHash: address.emailId,
+              // Set by the background task once the sender has accepted the email (04).
+              sentAt: null,
+              expiresAt: now + LOBBY_LIFETIME_MS,
+            },
+          ],
+    ),
+  };
+  if (rematchOf === undefined) {
+    await repos.games.create(game, players, extras);
+    await repos.users.rememberGameOptions(creator.id, {
+      gameType: type.type,
+      input: rememberedInput(input),
+      updatedAt: now,
+    });
+  } else if (!(await repos.games.createRematch(rematchOf, game, players, extras))) {
+    return null;
+  }
+  return {
+    gameId,
+    added: pickedRows.flatMap((row) =>
+      row.state === "joined" && row.userId != null ? [row.userId] : [],
+    ),
+    invitations: emails.length === 0 && picks.length === 0 ? null : { mail, invited },
+    joinToken,
+  };
+}

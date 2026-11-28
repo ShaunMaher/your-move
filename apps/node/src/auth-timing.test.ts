@@ -47,17 +47,47 @@
  * z > 4 for power. Its pass and power bounds overlapped, and on the same laptop its power check
  * measured z = 1.77 to 5.25.
  *
+ * Game creation with one typed address (alpha A17 review S-7, the last describe below): the same
+ * design, each request from a creator of its own. Measured on the same laptop, 600 pairs, three
+ * consecutive runs on 2026-11-27 (median request about 2.8 ms): known vs unknown −0.23% to
+ * +0.52%; suppressed vs unknown −0.88% to −0.12%; hidden vs unknown −1.69% to −0.73% (the unknown
+ * address's per-address and instance counters are real rows, the hidden one's the long-lived
+ * `silent` row: an insert against an update, 06 §6.6's recorded residual); two planted SELECTs
+ * +3.88% to +4.08%. One planted SELECT is about 2.5% of a creation, under the bound, so the power
+ * check plants two (ADR 0006 addendum). Alpha A20 added a known account with email nudges on (its
+ * invitation is mailed after the response, like the unknown arm's invite email): one run on
+ * 2026-11-28, +0.26% against unknown (known +0.08%, two planted SELECTs +3.35% in the same run).
+ * Its review S-1 moved the inbound cap to one read of live `invites` rows and added an address
+ * whose earlier invitations' lobby was cancelled (rows read, none counting): one run on
+ * 2026-11-28, load about 3, +0.97% against unknown; in the same run hidden −0.30% (the inbound
+ * cap no longer writes, so its insert-against-update residual is gone), known with nudges on
+ * +0.39%, two planted SELECTs +3.39%.
+ *
+ * A join-link lookup refused for a block with a member vs one refused because the game is full
+ * (alpha A18, 06 §6.8): the same design, one joiner looking up a fresh lobby of the same shape each
+ * time. Measured on the same laptop, 600 pairs, three consecutive runs on 2026-11-28 (median
+ * request about 0.95 ms): −0.53% to +0.23%; one planted SELECT on the blocked path +6.23% to
+ * +6.77%.
+ *
  * Because this is a measurement, it needs a quiet machine (ADR 0006). CI runs this file only in
  * its own `test:timing` job, never alongside the rest of the suite. A coder runs it locally before
- * handing off any change to the sign-in paths: about 25 s here.
+ * handing off any change to the sign-in paths, to creating a game with typed addresses or to the
+ * join-link lookup: about 75 s here.
  */
 import { performance } from "node:perf_hooks";
 import { setImmediate } from "node:timers/promises";
 
-import { normaliseAddress, type Repositories } from "@your-move/server";
+import {
+  deriveSubkeys,
+  emailId as emailIdOf,
+  normaliseAddress,
+  type Repositories,
+  toBase64Url,
+} from "@your-move/server";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createHarness, type Harness, PROD_ENV, T0 } from "./test-harness.js";
+import { gameHarness, sha256Hex, signUp } from "./games-support.js";
+import { createHarness, DAY, type Harness, PROD_ENV, T0 } from "./test-harness.js";
 
 /** Pairs measured per comparison: each pair is one request of each arm. */
 const PAIRS = 600;
@@ -70,6 +100,12 @@ const BOUND = 0.03;
  */
 const TIMEOUT_MS = 30_000;
 const HEAVY_TIMEOUT_MS = 75_000;
+/**
+ * Each game-creation comparison: 1,200 creations and 1,200 unmeasured sign-ups, measured at about
+ * 10 s locally (9.9–10.2 s, and 10.1 s with two planted SELECTs, 2026-11-28); about 10× that, as
+ * above. Re-measure from the first `test:timing` jobs, never retry (ADR 0004, ADR 0006).
+ */
+const CREATE_TIMEOUT_MS = 100_000;
 
 let h: Harness | null = null;
 afterEach(() => {
@@ -350,5 +386,359 @@ describe("enumeration parity: timing (06 §3.2, statistical test)", () => {
       expect(result.shift).toBeGreaterThan(BOUND);
     },
     TIMEOUT_MS,
+  );
+});
+
+/**
+ * Creating a game with one typed address (06 §6.1, §6.3, §6.6, Q3; alpha A17 review S-7): the
+ * same response, work and timing whether the address belongs to an onboarded user (an invitation,
+ * no email), to nobody (an email-invite seat that is mailed after the response), to a suppressed
+ * address, or is a seat the inbound cap makes `hidden` (neither mailed). Each measured request
+ * comes from a creator of its own, signed up unmeasured, so every request starts from the same
+ * creator state; the emails go out in the background and are settled outside the measurement.
+ */
+describe("enumeration parity: timing of creating a game with a typed address (06 §6.1)", () => {
+  /** The creators' and the instance's own caps raised out of the way of 2,400 creations. */
+  const RAISED = {
+    LIMIT_OTP_EMAIL_GLOBAL_HOUR: "1000000",
+    LIMIT_OTP_EMAIL_GLOBAL_DAY: "1000000",
+    LIMIT_NEW_ACCOUNTS_IP_DAY: "1000000",
+    LIMIT_OTP_REQUEST_IP_HOUR: "1000000",
+    LIMIT_OTP_VERIFY_IP_HOUR: "1000000",
+    LIMIT_INVITE_EMAILS_GLOBAL_DAY: "1000000",
+  };
+
+  /** Sends one creation by the creator prepared for that address. */
+  const creations =
+    (harness: Harness, cookies: Map<string, string>) => (email: string, from: string) =>
+      harness.request(
+        "POST",
+        "/api/v1/games",
+        { gameType: "words", invitees: [{ email }] },
+        { ip: from, cookie: cookies.get(email) ?? "" },
+      );
+
+  /** Gives each address a fresh, onboarded creator before its measured creation. */
+  const withCreator =
+    (cookies: Map<string, string>) =>
+    (arm: Arm): Arm => ({
+      ...arm,
+      prepare: async (harness, email, from) => {
+        await arm.prepare?.(harness, email, from);
+        cookies.set(email, (await signUp(harness, "Creator")).cookie);
+      },
+    });
+
+  const emailIdFor = async (harness: Harness, text: string): Promise<string> => {
+    const email = normaliseAddress(text);
+    if (email === null) throw new Error("bad test address");
+    return emailIdOf(await deriveSubkeys(harness.platform.config.appSecret), email);
+  };
+
+  const suppressedArm: Arm = {
+    make: async (harness, i) => {
+      const email = await unknownArm.make(harness, i);
+      harness.exec(
+        "INSERT INTO email_suppressions (email_hash, reason, created_at) VALUES (?, 'unsubscribed', ?)",
+        await emailIdFor(harness, email),
+        T0,
+      );
+      return email;
+    },
+  };
+
+  /** Each harness's filler lobbies, open and cancelled, holding earlier invitations. */
+  const fillerLobbies = new WeakMap<Harness, Map<string, { gameId: string; creatorId: string }>>();
+  const fillerLobby = async (harness: Harness, status: "lobby" | "cancelled" = "lobby") => {
+    const lobbies =
+      fillerLobbies.get(harness) ?? new Map<string, { gameId: string; creatorId: string }>();
+    fillerLobbies.set(harness, lobbies);
+    const known = lobbies.get(status);
+    if (known !== undefined) return known;
+    const creatorId = crypto.randomUUID();
+    await harness.platform.repos.users.create({
+      id: creatorId,
+      email: normaliseAddress(`filler-${creatorId}@example.org`),
+      displayName: "Filler",
+      onboardedAt: T0,
+      createdAt: T0,
+      updatedAt: T0,
+    });
+    const gameId = crypto.randomUUID();
+    await harness.platform.repos.games.create(
+      {
+        id: gameId,
+        gameType: "words",
+        gameVersion: 1,
+        options: JSON.stringify({}),
+        status,
+        createdBy: creatorId,
+        seats: 2,
+        turnTimeoutDays: 3,
+        seatOrder: "join",
+        aiAssistance: "off",
+        lastActionAt: T0,
+        createdAt: T0,
+        updatedAt: T0,
+      },
+      [
+        {
+          id: crypto.randomUUID(),
+          userId: creatorId,
+          state: "joined",
+          joinedVia: "creator",
+          joinedAt: T0,
+        },
+      ],
+    );
+    const lobby = { gameId, creatorId };
+    lobbies.set(status, lobby);
+    return lobby;
+  };
+
+  /** Three earlier invitations of the address in the filler lobby of that status. */
+  const invitedThrice = async (harness: Harness, email: string, status: "lobby" | "cancelled") => {
+    const { gameId, creatorId } = await fillerLobby(harness, status);
+    const hash = await emailIdFor(harness, email);
+    for (let n = 0; n < 3; n++) {
+      harness.exec(
+        "INSERT INTO invites (id, game_id, inviter_id, email_hash, sent_at, expires_at) VALUES (?, ?, ?, ?, NULL, ?)",
+        crypto.randomUUID(),
+        gameId,
+        creatorId,
+        hash,
+        T0 + 14 * DAY,
+      );
+    }
+  };
+
+  /**
+   * An address whose three earlier invitations were in a lobby since cancelled: they no longer
+   * count (06 §6.7, alpha A20 review S-1), so its seat is `normal` and mailed, read alike.
+   */
+  const cancelledArm: Arm = {
+    make: async (harness, i) => {
+      const email = await unknownArm.make(harness, i);
+      await invitedThrice(harness, email, "cancelled");
+      return email;
+    },
+  };
+
+  /**
+   * An address that already had its 3 invitations today, in a live lobby (06 §6.7 counts live
+   * `invites` rows, alpha A20 review S-1): the next stranger's is `hidden`.
+   */
+  const hiddenArm: Arm = {
+    make: async (harness, i) => {
+      const email = await unknownArm.make(harness, i);
+      await invitedThrice(harness, email, "lobby");
+      return email;
+    },
+  };
+
+  /**
+   * A known, onboarded account with email nudges on (`email_id` set): its invitation is mailed
+   * the invitation email after the response, like the unknown arm's invite email (alpha A20).
+   */
+  const nudgedArm: Arm = {
+    make: async (harness, i) => {
+      const email = await knownArm.make(harness, i);
+      harness.exec(
+        `UPDATE users SET settings = '{"emailNudges":true}', email_id = ? WHERE email = ?`,
+        await emailIdFor(harness, email),
+        email,
+      );
+      return email;
+    },
+  };
+
+  for (const [label, arm] of [
+    ["known vs unknown", knownArm],
+    ["known with nudges on vs unknown", nudgedArm],
+    ["suppressed vs unknown", suppressedArm],
+    ["hidden vs unknown", hiddenArm],
+    ["earlier invitations cancelled vs unknown", cancelledArm],
+  ] as const) {
+    it(
+      `POST /api/v1/games with one typed address: ${label}`,
+      async () => {
+        h = gameHarness(RAISED);
+        const cookies = new Map<string, string>();
+        const creator = withCreator(cookies);
+        const result = await compare(h, creations(h, cookies), creator(arm), creator(unknownArm));
+        // The hidden arm's seat really was hidden, and the unknown arm's mailed: not vacuous.
+        if (label.startsWith("hidden")) {
+          expect(
+            h.query("SELECT count(*) AS n FROM game_players WHERE delivery = 'hidden'")[0]?.["n"],
+          ).toBe(PAIRS);
+        }
+        // The unknown arm's every invite email was sent; the nudged arm's invitation emails too.
+        expect(
+          h.query("SELECT count(*) AS n FROM invites WHERE sent_at IS NOT NULL")[0]?.["n"],
+        ).toBe(label.includes("nudges") || label.includes("cancelled") ? 2 * PAIRS : PAIRS);
+        report(`create ${label}`, result);
+        expectIndistinguishable(result);
+      },
+      CREATE_TIMEOUT_MS,
+    );
+  }
+
+  it(
+    "has power: two extra indexed SELECTs on the known path are detected",
+    async () => {
+      // A creation is about 2.8 ms, so the 3% bound is about 85 µs: one planted SELECT (about
+      // 70 µs, as above) sits just under it, two above. The bound is the same as sign-in's.
+      const twoMoreSelects = (repos: Repositories): Repositories => ({
+        ...repos,
+        users: {
+          ...repos.users,
+          async findByEmail(email) {
+            const user = await repos.users.findByEmail(email);
+            if (user !== null) {
+              await repos.users.findById(user.id);
+              await repos.users.findById(user.id);
+            }
+            return user;
+          },
+        },
+      });
+      h = gameHarness(RAISED, { wrapRepos: twoMoreSelects });
+      const cookies = new Map<string, string>();
+      const creator = withCreator(cookies);
+      const result = await compare(
+        h,
+        creations(h, cookies),
+        creator(knownArm),
+        creator(unknownArm),
+      );
+      report("create with two planted SELECTs", result);
+      expect(result.shift).toBeGreaterThan(BOUND);
+    },
+    CREATE_TIMEOUT_MS,
+  );
+});
+
+describe("block parity: timing of a join-link lookup (06 §6.8)", () => {
+  /** One joiner looks up every link, so the joiner's own hourly limit is raised out of the way. */
+  const RAISED = { LIMIT_JOIN_LINK_USER_HOUR: "1000000" };
+
+  /** A fresh 22-character token, and its SHA-256 as stored (04 `join_links`). */
+  const freshToken = async (): Promise<{ token: string; hash: string }> => {
+    const token = toBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+    return { token, hash: await sha256Hex(token) };
+  };
+
+  /**
+   * Lobbies of the same shape for both arms, written directly (no creation caps): the creator and
+   * one joined member, with a live link. `blocked`: three seats, one open, the member has blocked
+   * the joiner. Otherwise two seats, both held: full. Both answer the same `404`.
+   */
+  const lobbyArm = (creatorId: string, memberId: string, seats: 2 | 3): Arm => ({
+    make: async (harness) => {
+      const { token, hash } = await freshToken();
+      await harness.platform.repos.games.create(
+        {
+          id: crypto.randomUUID(),
+          gameType: "words",
+          gameVersion: 1,
+          options: JSON.stringify({}),
+          status: "lobby",
+          createdBy: creatorId,
+          seats,
+          turnTimeoutDays: 3,
+          seatOrder: "join",
+          aiAssistance: "off",
+          lastActionAt: T0,
+          createdAt: T0,
+          updatedAt: T0,
+        },
+        [
+          {
+            id: crypto.randomUUID(),
+            userId: creatorId,
+            state: "joined",
+            joinedVia: "creator",
+            joinedAt: T0,
+          },
+          {
+            id: crypto.randomUUID(),
+            userId: memberId,
+            state: "joined",
+            joinedVia: "join_link",
+            joinedAt: T0,
+          },
+        ],
+        { joinLink: { tokenHash: hash, createdAt: T0, expiresAt: T0 + 7 * DAY } },
+      );
+      return token;
+    },
+  });
+
+  const setUp = async (harness: Harness) => {
+    const [creator, blocker, bystander, joiner] = [
+      await signUp(harness, "Creator"),
+      await signUp(harness, "Blocker"),
+      await signUp(harness, "Bystander"),
+      await signUp(harness, "Joiner"),
+    ];
+    harness.exec(
+      "INSERT INTO blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)",
+      blocker.id,
+      joiner.id,
+      T0,
+    );
+    const lookups = (token: string, from: string) =>
+      harness.request(
+        "POST",
+        "/api/v1/join/lookup",
+        { token },
+        { ip: from, cookie: joiner.cookie },
+      );
+    const blockedArm = lobbyArm(creator.id, blocker.id, 3);
+    const fullArm = lobbyArm(creator.id, bystander.id, 2);
+    // Both arms really are refused, and alike: not a vacuous comparison.
+    for (const arm of [blockedArm, fullArm]) {
+      const answer = await lookups(await arm.make(harness, -1), ip(300_000));
+      expect([answer.status, await answer.json()]).toEqual([
+        404,
+        { error: { code: "NOT_FOUND", message: "Not found." } },
+      ]);
+    }
+    return { lookups, blockedArm, fullArm };
+  };
+
+  it(
+    "POST /api/v1/join/lookup: a block with a member vs a full game",
+    async () => {
+      h = gameHarness(RAISED);
+      const { lookups, blockedArm, fullArm } = await setUp(h);
+      const result = await compare(h, lookups, blockedArm, fullArm);
+      report("join lookup blocked vs full", result);
+      expectIndistinguishable(result);
+    },
+    HEAVY_TIMEOUT_MS,
+  );
+
+  it(
+    "has power: one extra indexed SELECT on the blocked path is detected",
+    async () => {
+      const oneMoreSelect = (repos: Repositories): Repositories => ({
+        ...repos,
+        users: {
+          ...repos.users,
+          async blocksAmong(ids) {
+            const pairs = await repos.users.blocksAmong(ids);
+            if (pairs.length > 0) await repos.users.findById(ids[0] ?? "");
+            return pairs;
+          },
+        },
+      });
+      h = gameHarness(RAISED, { wrapRepos: oneMoreSelect });
+      const { lookups, blockedArm, fullArm } = await setUp(h);
+      const result = await compare(h, lookups, blockedArm, fullArm);
+      report("join lookup with a planted SELECT", result);
+      expect(result.shift).toBeGreaterThan(BOUND);
+    },
+    HEAVY_TIMEOUT_MS,
   );
 });

@@ -16,6 +16,9 @@ export function assertRange(maxExclusive: number): void;
 export type ExitReason = "resign" | "decline";
 
 // @public
+export function formatText(text: Text, names: readonly string[]): string;
+
+// @public
 export type FrameworkError = z.infer<typeof frameworkErrorSchema>;
 
 // @public
@@ -64,7 +67,6 @@ export interface GameDefinition<Options = unknown, State = unknown, Action = unk
     readonly previewSchema?: Schema<PreviewResult>;
     // (undocumented)
     readonly recordSchema: Schema<PublicRecord>;
-    // (undocumented)
     resolveOptions(input: unknown, ctx: OptionsContext): Options | GameError;
     // (undocumented)
     resources(options: Options): readonly ResourceRequest[];
@@ -127,6 +129,7 @@ export const gameEnvelopeSchema: z.ZodObject<{
         off: "off";
         allowed: "allowed";
     }>;
+    seats: z.ZodOptional<z.ZodNumber>;
     available: z.ZodBoolean;
     resources: z.ZodArray<z.ZodObject<{
         kind: z.ZodLiteral<"dictionary">;
@@ -186,6 +189,14 @@ export const gameEnvelopeSchema: z.ZodObject<{
     canAddPlayers: z.ZodOptional<z.ZodArray<z.ZodObject<{
         userId: z.ZodString;
         displayName: z.ZodString;
+    }, z.core.$strip>>>;
+    rematch: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        gameId: z.ZodString;
+        you: z.ZodEnum<{
+            invited: "invited";
+            joined: "joined";
+            none: "none";
+        }>;
     }, z.core.$strip>>>;
     createdAt: z.ZodNumber;
     lastActionAt: z.ZodNullable<z.ZodNumber>;
@@ -468,6 +479,7 @@ export const submitResultSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             off: "off";
             allowed: "allowed";
         }>;
+        seats: z.ZodOptional<z.ZodNumber>;
         available: z.ZodBoolean;
         resources: z.ZodArray<z.ZodObject<{
             kind: z.ZodLiteral<"dictionary">;
@@ -527,6 +539,14 @@ export const submitResultSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         canAddPlayers: z.ZodOptional<z.ZodArray<z.ZodObject<{
             userId: z.ZodString;
             displayName: z.ZodString;
+        }, z.core.$strip>>>;
+        rematch: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            gameId: z.ZodString;
+            you: z.ZodEnum<{
+                invited: "invited";
+                joined: "joined";
+                none: "none";
+            }>;
         }, z.core.$strip>>>;
         createdAt: z.ZodNumber;
         lastActionAt: z.ZodNullable<z.ZodNumber>;

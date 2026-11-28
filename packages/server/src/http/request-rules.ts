@@ -3,16 +3,20 @@
  * state-changing requests, JSON-only bodies and the 16 kB body limit.
  *
  * The exemptions are listed here and nowhere else (05): the unsubscribe route is exempt from both
- * rules and the dictionary upload route from the JSON rule only. Neither exists yet (M4, M6).
+ * rules (mail clients post its one-click form cross-origin, RFC 8058), and the dictionary upload
+ * route (M6) will be exempt from the JSON rule only.
  */
-import type { MiddlewareHandler } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 
+import { UNSUBSCRIBE_PATH } from "../email/unsubscribe-token.js";
+import type { AppEnv } from "../platform.js";
+
 /** Paths exempt from the Origin rule (05 §Conventions). */
-const ORIGIN_EXEMPT: ReadonlySet<string> = new Set<string>([]);
+const ORIGIN_EXEMPT: ReadonlySet<string> = new Set<string>([UNSUBSCRIBE_PATH]);
 /** Paths exempt from the JSON rule (05 §Conventions). */
-const JSON_EXEMPT: ReadonlySet<string> = new Set<string>([]);
+const JSON_EXEMPT: ReadonlySet<string> = new Set<string>([UNSUBSCRIBE_PATH]);
 
 const STATE_CHANGING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const BODY_LIMIT_BYTES = 16 * 1024;
@@ -31,6 +35,7 @@ export interface RequestRuleOptions {
   readonly reject: (
     status: 400 | 403 | 415,
     code: "BAD_REQUEST" | "BAD_ORIGIN" | "UNSUPPORTED_MEDIA_TYPE",
+    c: Context<AppEnv>,
   ) => Response;
 }
 
@@ -43,13 +48,13 @@ export interface RequestRuleOptions {
  *   names another origin is refused too: with no CORS, no legitimate browser sends one;
  * - a request with a body must be `application/json`, else `415`.
  */
-export function requestRules(options: RequestRuleOptions): MiddlewareHandler {
+export function requestRules(options: RequestRuleOptions): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const path = c.req.path;
     const cookie = options.hasSessionCookie(c.req.header("Cookie"));
     const bearer = c.req.header("Authorization") !== undefined;
     // A cookie and a bearer token on one request are refused everywhere (05 §Conventions).
-    if (cookie && bearer) return options.reject(400, "BAD_REQUEST");
+    if (cookie && bearer) return options.reject(400, "BAD_REQUEST", c);
     const bearerOnly = !cookie && bearer;
     if (STATE_CHANGING.has(c.req.method) && !ORIGIN_EXEMPT.has(path) && !bearerOnly) {
       const origin = c.req.header("Origin");
@@ -57,7 +62,7 @@ export function requestRules(options: RequestRuleOptions): MiddlewareHandler {
         (cookie && origin !== options.origin) ||
         (origin !== undefined && origin !== options.origin)
       ) {
-        return options.reject(403, "BAD_ORIGIN");
+        return options.reject(403, "BAD_ORIGIN", c);
       }
     }
     if (!JSON_EXEMPT.has(path)) {
@@ -67,7 +72,7 @@ export function requestRules(options: RequestRuleOptions): MiddlewareHandler {
       // route's validator parses the same bytes.
       const text = c.req.raw.body === null ? "" : await c.req.text();
       if (text.length > 0 && !isJson(c.req.header("Content-Type"))) {
-        return options.reject(415, "UNSUPPORTED_MEDIA_TYPE");
+        return options.reject(415, "UNSUPPORTED_MEDIA_TYPE", c);
       }
       if (text.length === 0 && c.req.header("Content-Type") !== undefined) {
         // An empty body with a content type is no input: drop the type, so endpoints that take

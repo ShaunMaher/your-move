@@ -1,16 +1,28 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ConfigError, type Installed } from "@your-move/server";
+import {
+  ConfigError,
+  DISABLED_PUSH_SENDER,
+  GmailTokenRefused,
+  type Installed,
+  VapidKeyError,
+} from "@your-move/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { lockPath } from "./db/instance-lock.js";
 import { SecretFileError } from "./env.js";
-import { isRefusal, startup } from "./startup.js";
+import { isRefusal, startup, verifyEmail, verifyPush } from "./startup.js";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/server/migrations", import.meta.url));
+/** Every committed migration: a new database applies them all. */
+const KNOWN = (
+  JSON.parse(readFileSync(join(MIGRATIONS, "meta", "_journal.json"), "utf8")) as {
+    entries: unknown[];
+  }
+).entries.length;
 const INSTALLED: Installed = {};
 
 let dir: string;
@@ -67,7 +79,7 @@ describe("startup (02 §7.3, M2a review S-6)", () => {
       migrationsFolder: MIGRATIONS,
     });
     expect(started.env["APP_SECRET"]).toBe(APP_SECRET);
-    expect(started.storage.migrations).toEqual({ applied: 1, known: 1 });
+    expect(started.storage.migrations).toEqual({ applied: KNOWN, known: KNOWN });
     started.storage.close();
   });
 
@@ -84,5 +96,58 @@ describe("startup (02 §7.3, M2a review S-6)", () => {
 
   it("treats other errors as crashes, not refusals", () => {
     expect(isRefusal(new Error("boom"))).toBe(false);
+  });
+});
+
+describe("verifyEmail (09 §2)", () => {
+  const sender = { send: () => Promise.resolve() };
+
+  it("passes providers without a check and a token that checks out", async () => {
+    await expect(verifyEmail(sender)).resolves.toBeUndefined();
+    await expect(
+      verifyEmail({ ...sender, verifyCredentials: () => Promise.resolve() }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses to start for a token that isn't send-only or isn't the sender's", async () => {
+    const refusal = verifyEmail({
+      ...sender,
+      verifyCredentials: () => Promise.reject(new GmailTokenRefused("wrong scope")),
+    });
+    await expect(refusal).rejects.toThrow("wrong scope (09 §2)");
+    await refusal.catch((error: unknown) => {
+      expect(isRefusal(error)).toBe(true);
+    });
+  });
+
+  it("passes other failures through", async () => {
+    await expect(
+      verifyEmail({ ...sender, verifyCredentials: () => Promise.reject(new Error("boom")) }),
+    ).rejects.toThrow("boom");
+  });
+});
+
+describe("verifyPush (09 §1)", () => {
+  const sender = {
+    enabled: true,
+    send: () => Promise.resolve({ kind: "delivered" as const }),
+  };
+
+  it("passes a key pair that checks out, and push left off", async () => {
+    await expect(
+      verifyPush({ ...sender, verifyKeys: () => Promise.resolve() }),
+    ).resolves.toBeUndefined();
+    await expect(verifyPush(DISABLED_PUSH_SENDER)).resolves.toBeUndefined();
+  });
+
+  it("refuses to start when the private key isn't the public key's", async () => {
+    const refusal = verifyPush({
+      ...sender,
+      verifyKeys: () => Promise.reject(new VapidKeyError("not a matching pair")),
+    });
+    await expect(refusal).rejects.toThrow("not a matching pair (09 §1)");
+    await refusal.catch((error: unknown) => {
+      expect(isRefusal(error)).toBe(true);
+    });
   });
 });

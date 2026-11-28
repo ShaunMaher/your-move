@@ -10,10 +10,21 @@ import { wordsV1 } from "./definition.js";
 
 export const engines = { 1: wordsV1 } satisfies GameEngines;
 
+export { analyseViewPlay, previewViewPlay } from "./analysis.js";
+export { premiumAt, tilePoints, type PlayAnalysis } from "./board.js";
 export { isCompatible, type DictionaryTraits } from "./compatibility.js";
+export {
+  HINT_MAX_STEPS,
+  searchPlays,
+  type Lexicon,
+  type PlaySearch,
+  type SearchOutcome,
+} from "./moves.js";
 export { findRuleset, latestRuleset, RULESETS, type RulesetRegistry } from "./rulesets/index.js";
 export {
+  BLANK,
   premiumCounts,
+  totalTiles,
   type Premium,
   type Ruleset,
   type RulesetData,
@@ -28,6 +39,7 @@ export {
   type Action,
   type Catalog,
   type Options,
+  type Placement,
   type PreviewResult,
   type PublicRecord,
   type View,

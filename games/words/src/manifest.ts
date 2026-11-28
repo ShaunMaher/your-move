@@ -40,6 +40,8 @@ On your turn you do one of these:
 
 After a play you draw back up to a full rack, or as many tiles as the bag has left.
 
+When no word can be made from your tiles anywhere on the board, the board says so and suggests a swap, or a pass when the bag is too low to swap. It never shows a play. Every player gets this hint in every game, and it uses only the board, your own rack and the word list, never anyone else's tiles.
+
 ## Scoring
 
 - Each word you make scores the points of its letters. A blank scores nothing.

@@ -133,9 +133,18 @@
             "type": "string",
             "enum": ["pastOpponents", "nobody"],
             "description": "Who can add me to games (06 §6.2)."
+          },
+          "emailNudges": {
+            "type": "boolean",
+            "description": "Email me \"It's your turn\" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default."
+          },
+          "theme": {
+            "type": "string",
+            "enum": ["system", "light", "dark"],
+            "description": "Colour theme: \"system\" follows the device, \"light\" and \"dark\" override it (07 §5). \"system\" by default."
           }
         },
-        "required": ["whoCanAddMe"]
+        "required": ["whoCanAddMe", "emailNudges", "theme"]
       },
       "OtpVerify": {
         "type": "object",
@@ -173,6 +182,22 @@
             "type": "string",
             "maxLength": 256,
             "description": "1–24 characters; no links, addresses, long digit runs or reserved words (06 §5.1). Setting it completes onboarding."
+          },
+          "settings": { "$ref": "#/components/schemas/UserSettingsPatch" }
+        },
+        "additionalProperties": false
+      },
+      "UserSettingsPatch": {
+        "type": "object",
+        "properties": {
+          "emailNudges": {
+            "type": "boolean",
+            "description": "Email me \"It's your turn\" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default."
+          },
+          "theme": {
+            "type": "string",
+            "enum": ["system", "light", "dark"],
+            "description": "Colour theme: \"system\" follows the device, \"light\" and \"dark\" override it (07 §5). \"system\" by default."
           }
         },
         "additionalProperties": false
@@ -188,6 +213,1082 @@
           }
         },
         "required": ["code"],
+        "additionalProperties": false
+      },
+      "PushSubscription": {
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "The subscription's endpoint: an `https` URL at an allow-listed push service (08 T12), as `PushSubscription.endpoint` gives it.",
+            "example": "https://fcm.googleapis.com/fcm/send/abc123"
+          },
+          "keys": {
+            "type": "object",
+            "properties": {
+              "p256dh": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "description": "Unpadded base64url of the 65-byte uncompressed P-256 public key."
+              },
+              "auth": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "description": "Unpadded base64url of the 16-byte auth secret."
+              }
+            },
+            "required": ["p256dh", "auth"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["endpoint", "keys"],
+        "additionalProperties": false
+      },
+      "PushUnsubscribe": {
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "The subscription's endpoint: an `https` URL at an allow-listed push service (08 T12), as `PushSubscription.endpoint` gives it.",
+            "example": "https://fcm.googleapis.com/fcm/send/abc123"
+          }
+        },
+        "required": ["endpoint"],
+        "additionalProperties": false
+      },
+      "Catalog": {
+        "type": "object",
+        "properties": {
+          "games": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string" },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "The latest rules version."
+                },
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "icon": {
+                  "type": "string",
+                  "description": "Sanitised SVG markup (02 §7.2). Render it only as an image from a `data:` URL, never inline."
+                },
+                "players": {
+                  "type": "object",
+                  "properties": { "min": { "type": "integer" }, "max": { "type": "integer" } },
+                  "required": ["min", "max"],
+                  "additionalProperties": false
+                },
+                "defaultTurnTimeoutDays": { "type": "integer", "minimum": 1, "maximum": 30 },
+                "defaults": {
+                  "description": "The option input the new-game form starts from: your last options for this type if they still resolve, otherwise `{}` (module defaults)."
+                },
+                "catalog": { "description": "The module's catalog: its own schema (02 §2)." }
+              },
+              "required": [
+                "type",
+                "version",
+                "name",
+                "description",
+                "icon",
+                "players",
+                "defaultTurnTimeoutDays"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["games"],
+        "additionalProperties": false
+      },
+      "Rules": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "version": { "type": "integer", "minimum": 1 },
+          "markdown": { "type": "string" }
+        },
+        "required": ["type", "version", "markdown"],
+        "additionalProperties": false
+      },
+      "CreatedGame": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "gameType": { "type": "string" },
+              "gameVersion": { "type": "integer", "minimum": 1 },
+              "options": {},
+              "status": {
+                "type": "string",
+                "enum": ["lobby", "active", "finished", "declined", "cancelled", "expired"]
+              },
+              "version": { "type": "integer", "minimum": 0 },
+              "endReason": { "type": ["string", "null"] },
+              "turnTimeoutDays": { "type": "integer", "minimum": 1, "maximum": 30 },
+              "seatOrder": { "type": "string", "enum": ["join", "random"] },
+              "aiAssistance": { "type": "string", "enum": ["off", "allowed"] },
+              "seats": { "type": "integer", "minimum": 1 },
+              "available": { "type": "boolean" },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": { "type": "string", "enum": ["dictionary"] },
+                    "id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "distribution": { "type": "string", "enum": ["public", "serverOnly"] },
+                    "uploadedBy": { "type": "string" },
+                    "downloadUrl": { "type": "string" }
+                  },
+                  "required": ["kind", "id", "name"]
+                }
+              },
+              "players": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "playerId": { "type": "string" },
+                    "seat": { "type": ["integer", "null"], "minimum": 0 },
+                    "userId": { "type": ["string", "null"] },
+                    "displayName": { "type": ["string", "null"] },
+                    "kind": { "type": "string", "enum": ["human", "agent"] },
+                    "aiOwnerName": { "type": "string" },
+                    "invitedAs": { "type": "string" },
+                    "state": {
+                      "type": "string",
+                      "enum": ["invited", "joined", "declined", "left", "removed", "playing", "out"]
+                    },
+                    "outReason": {
+                      "type": "string",
+                      "enum": ["eliminated", "resigned", "timed_out", "declined", "cancelled"]
+                    },
+                    "rank": { "type": "integer", "minimum": 1 },
+                    "score": { "type": "number" },
+                    "deadline": { "type": "integer", "minimum": 0 },
+                    "isYou": { "type": "boolean" },
+                    "isCreator": { "type": "boolean" }
+                  },
+                  "required": [
+                    "seat",
+                    "userId",
+                    "displayName",
+                    "kind",
+                    "state",
+                    "isYou",
+                    "isCreator"
+                  ]
+                }
+              },
+              "yourSeat": { "type": ["integer", "null"], "minimum": 0 },
+              "toAct": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+              "yourTurn": { "type": "boolean" },
+              "yourInvitation": { "type": ["string", "null"], "enum": ["normal", "hidden", null] },
+              "joinLink": {
+                "type": "object",
+                "properties": {
+                  "active": { "type": "boolean" },
+                  "expiresAt": { "type": ["integer", "null"], "minimum": 0 }
+                },
+                "required": ["active", "expiresAt"]
+              },
+              "canAddPlayers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "userId": { "type": "string" },
+                    "displayName": { "type": "string" }
+                  },
+                  "required": ["userId", "displayName"]
+                }
+              },
+              "rematch": {
+                "type": ["object", "null"],
+                "properties": {
+                  "gameId": { "type": "string" },
+                  "you": { "type": "string", "enum": ["joined", "invited", "none"] }
+                },
+                "required": ["gameId", "you"]
+              },
+              "createdAt": { "type": "integer", "minimum": 0 },
+              "lastActionAt": { "type": ["integer", "null"], "minimum": 0 }
+            },
+            "required": [
+              "id",
+              "gameType",
+              "gameVersion",
+              "options",
+              "status",
+              "version",
+              "endReason",
+              "turnTimeoutDays",
+              "seatOrder",
+              "aiAssistance",
+              "available",
+              "resources",
+              "players",
+              "yourSeat",
+              "toAct",
+              "yourTurn",
+              "yourInvitation",
+              "createdAt",
+              "lastActionAt"
+            ]
+          },
+          "joinLinkUrl": {
+            "type": "string",
+            "description": "The join link asked for with `joinLink`, shown only here: `PUBLIC_URL/join#<token>`."
+          }
+        },
+        "required": ["game"],
+        "additionalProperties": false
+      },
+      "CreateGameRequest": {
+        "type": "object",
+        "properties": {
+          "gameType": { "type": "string", "maxLength": 64 },
+          "options": {
+            "description": "The module's option input. Omitted top-level keys are filled from your last options for this type (05 §Remembered options)."
+          },
+          "seats": {
+            "type": "number",
+            "description": "Seat count within the module's `players(options)`; default max if min = max, else min."
+          },
+          "turnTimeoutDays": {
+            "type": "number",
+            "description": "Whole days, 1–30 (`INVALID_TIMEOUT` otherwise); default the module's `defaultTurnTimeoutDays`."
+          },
+          "seatOrder": {
+            "type": "string",
+            "enum": ["join", "random"],
+            "description": "Default `join`."
+          },
+          "aiAssistance": {
+            "type": "string",
+            "enum": ["off", "allowed"],
+            "description": "Default `off` while any seat is open or two or more people play (02 §4); fixed at creation."
+          },
+          "invitees": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "email": {
+                      "type": "string",
+                      "maxLength": 320,
+                      "description": "An address to invite. The response never reveals whether it has an account (06 §6.1)."
+                    }
+                  },
+                  "required": ["email"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "description": "A past opponent's id, from `GET /api/v1/players/recent` (06 §6.1). They are added at once (`joined`) unless AI assistance is allowed, when they get an invitation (02 §4); anyone else is `INVALID_INVITEES`."
+                    }
+                  },
+                  "required": ["userId"],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "maxItems": 16,
+            "description": "At most `seats - 1` people: addresses to invite, or past opponents to add by `userId`."
+          },
+          "joinLink": {
+            "type": "boolean",
+            "description": "Create a join link for the seats left open (06 §6.8). Its URL is in the response, the only time it is shown; the game then waits for your Start."
+          }
+        },
+        "required": ["gameType", "invitees"],
+        "additionalProperties": false
+      },
+      "AddPlayerRequest": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "The player to add: a `userId` from the finished game's `canAddPlayers`."
+          }
+        },
+        "required": ["userId"],
+        "additionalProperties": false
+      },
+      "RecentPlayers": {
+        "type": "object",
+        "properties": {
+          "players": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "userId": { "type": "string" },
+                "displayName": { "type": "string" },
+                "lastPlayedAt": {
+                  "type": "integer",
+                  "description": "When your latest finished game together ended (ms since the epoch)."
+                }
+              },
+              "required": ["userId", "displayName", "lastPlayedAt"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["players"],
+        "additionalProperties": false
+      },
+      "GameList": {
+        "type": "object",
+        "properties": {
+          "games": { "type": "array", "items": { "$ref": "#/components/schemas/GameSummary" } },
+          "nextCursor": { "type": ["string", "null"] }
+        },
+        "required": ["games", "nextCursor"],
+        "additionalProperties": false
+      },
+      "GameSummary": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "gameType": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["lobby", "active", "finished", "declined", "cancelled", "expired"]
+          },
+          "endReason": { "type": ["string", "null"] },
+          "aiAssistance": { "type": "string", "enum": ["off", "allowed"] },
+          "yourTurn": { "type": "boolean" },
+          "yourInvitation": { "type": ["string", "null"], "enum": ["normal", "hidden", null] },
+          "players": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "playerId": { "type": "string" },
+                "seat": { "type": ["integer", "null"], "minimum": 0 },
+                "userId": { "type": ["string", "null"] },
+                "displayName": { "type": ["string", "null"] },
+                "kind": { "type": "string", "enum": ["human", "agent"] },
+                "aiOwnerName": { "type": "string" },
+                "invitedAs": { "type": "string" },
+                "state": {
+                  "type": "string",
+                  "enum": ["invited", "joined", "declined", "left", "removed", "playing", "out"]
+                },
+                "outReason": {
+                  "type": "string",
+                  "enum": ["eliminated", "resigned", "timed_out", "declined", "cancelled"]
+                },
+                "rank": { "type": "integer", "minimum": 1 },
+                "score": { "type": "number" },
+                "deadline": { "type": "integer", "minimum": 0 },
+                "isYou": { "type": "boolean" },
+                "isCreator": { "type": "boolean" }
+              },
+              "required": ["seat", "userId", "displayName", "kind", "state", "isYou", "isCreator"]
+            }
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "headline": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    { "type": "string" },
+                    {
+                      "type": "object",
+                      "properties": { "seat": { "type": "integer", "minimum": 0 } },
+                      "required": ["seat"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "scores": { "type": "array", "items": { "type": "number" } }
+            },
+            "required": ["headline"],
+            "additionalProperties": false
+          },
+          "lastAction": {
+            "type": ["object", "null"],
+            "properties": {
+              "describe": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    { "type": "string" },
+                    {
+                      "type": "object",
+                      "properties": { "seat": { "type": "integer", "minimum": 0 } },
+                      "required": ["seat"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "byYou": { "type": "boolean" }
+            },
+            "required": ["describe", "byYou"],
+            "additionalProperties": false
+          },
+          "lastActionAt": { "type": "integer" },
+          "unread": { "type": "boolean" },
+          "version": { "type": "integer", "minimum": 0 }
+        },
+        "required": [
+          "id",
+          "gameType",
+          "status",
+          "endReason",
+          "aiAssistance",
+          "yourTurn",
+          "yourInvitation",
+          "players",
+          "summary",
+          "lastAction",
+          "lastActionAt",
+          "unread",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "GameWithView": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "gameType": { "type": "string" },
+              "gameVersion": { "type": "integer", "minimum": 1 },
+              "options": {},
+              "status": {
+                "type": "string",
+                "enum": ["lobby", "active", "finished", "declined", "cancelled", "expired"]
+              },
+              "version": { "type": "integer", "minimum": 0 },
+              "endReason": { "type": ["string", "null"] },
+              "turnTimeoutDays": { "type": "integer", "minimum": 1, "maximum": 30 },
+              "seatOrder": { "type": "string", "enum": ["join", "random"] },
+              "aiAssistance": { "type": "string", "enum": ["off", "allowed"] },
+              "seats": { "type": "integer", "minimum": 1 },
+              "available": { "type": "boolean" },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": { "type": "string", "enum": ["dictionary"] },
+                    "id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "distribution": { "type": "string", "enum": ["public", "serverOnly"] },
+                    "uploadedBy": { "type": "string" },
+                    "downloadUrl": { "type": "string" }
+                  },
+                  "required": ["kind", "id", "name"]
+                }
+              },
+              "players": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "playerId": { "type": "string" },
+                    "seat": { "type": ["integer", "null"], "minimum": 0 },
+                    "userId": { "type": ["string", "null"] },
+                    "displayName": { "type": ["string", "null"] },
+                    "kind": { "type": "string", "enum": ["human", "agent"] },
+                    "aiOwnerName": { "type": "string" },
+                    "invitedAs": { "type": "string" },
+                    "state": {
+                      "type": "string",
+                      "enum": ["invited", "joined", "declined", "left", "removed", "playing", "out"]
+                    },
+                    "outReason": {
+                      "type": "string",
+                      "enum": ["eliminated", "resigned", "timed_out", "declined", "cancelled"]
+                    },
+                    "rank": { "type": "integer", "minimum": 1 },
+                    "score": { "type": "number" },
+                    "deadline": { "type": "integer", "minimum": 0 },
+                    "isYou": { "type": "boolean" },
+                    "isCreator": { "type": "boolean" }
+                  },
+                  "required": [
+                    "seat",
+                    "userId",
+                    "displayName",
+                    "kind",
+                    "state",
+                    "isYou",
+                    "isCreator"
+                  ]
+                }
+              },
+              "yourSeat": { "type": ["integer", "null"], "minimum": 0 },
+              "toAct": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+              "yourTurn": { "type": "boolean" },
+              "yourInvitation": { "type": ["string", "null"], "enum": ["normal", "hidden", null] },
+              "joinLink": {
+                "type": "object",
+                "properties": {
+                  "active": { "type": "boolean" },
+                  "expiresAt": { "type": ["integer", "null"], "minimum": 0 }
+                },
+                "required": ["active", "expiresAt"]
+              },
+              "canAddPlayers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "userId": { "type": "string" },
+                    "displayName": { "type": "string" }
+                  },
+                  "required": ["userId", "displayName"]
+                }
+              },
+              "rematch": {
+                "type": ["object", "null"],
+                "properties": {
+                  "gameId": { "type": "string" },
+                  "you": { "type": "string", "enum": ["joined", "invited", "none"] }
+                },
+                "required": ["gameId", "you"]
+              },
+              "createdAt": { "type": "integer", "minimum": 0 },
+              "lastActionAt": { "type": ["integer", "null"], "minimum": 0 }
+            },
+            "required": [
+              "id",
+              "gameType",
+              "gameVersion",
+              "options",
+              "status",
+              "version",
+              "endReason",
+              "turnTimeoutDays",
+              "seatOrder",
+              "aiAssistance",
+              "available",
+              "resources",
+              "players",
+              "yourSeat",
+              "toAct",
+              "yourTurn",
+              "yourInvitation",
+              "createdAt",
+              "lastActionAt"
+            ]
+          },
+          "view": {
+            "description": "The module's `view` for your seat (null in the lobby and for invitations); its shape is the installed game's `view` schema."
+          }
+        },
+        "required": ["game", "view"],
+        "additionalProperties": false
+      },
+      "History": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/HistoryItem" } },
+          "nextCursor": { "type": ["string", "null"] }
+        },
+        "required": ["items", "nextCursor"],
+        "additionalProperties": false
+      },
+      "HistoryItem": {
+        "type": "object",
+        "properties": {
+          "seq": { "type": "integer", "minimum": 1 },
+          "seat": { "type": "integer", "minimum": 0 },
+          "kind": { "type": "string", "enum": ["action", "resign", "timeout", "decline"] },
+          "record": { "description": "The module's public record (02 §2.1 rule 5)." },
+          "describe": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "properties": { "seat": { "type": "integer", "minimum": 0 } },
+                  "required": ["seat"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "via": {
+            "type": "string",
+            "enum": ["app", "token", "system"],
+            "description": "How the transition was made: the app, an API token (an AI move, 02 §9.1) or the server itself (a timeout)."
+          },
+          "createdAt": { "type": "integer" }
+        },
+        "required": ["seq", "seat", "kind", "record", "describe", "via", "createdAt"],
+        "additionalProperties": false
+      },
+      "ActionResult": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "gameType": { "type": "string" },
+              "gameVersion": { "type": "integer", "minimum": 1 },
+              "options": {},
+              "status": {
+                "type": "string",
+                "enum": ["lobby", "active", "finished", "declined", "cancelled", "expired"]
+              },
+              "version": { "type": "integer", "minimum": 0 },
+              "endReason": { "type": ["string", "null"] },
+              "turnTimeoutDays": { "type": "integer", "minimum": 1, "maximum": 30 },
+              "seatOrder": { "type": "string", "enum": ["join", "random"] },
+              "aiAssistance": { "type": "string", "enum": ["off", "allowed"] },
+              "seats": { "type": "integer", "minimum": 1 },
+              "available": { "type": "boolean" },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": { "type": "string", "enum": ["dictionary"] },
+                    "id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "distribution": { "type": "string", "enum": ["public", "serverOnly"] },
+                    "uploadedBy": { "type": "string" },
+                    "downloadUrl": { "type": "string" }
+                  },
+                  "required": ["kind", "id", "name"]
+                }
+              },
+              "players": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "playerId": { "type": "string" },
+                    "seat": { "type": ["integer", "null"], "minimum": 0 },
+                    "userId": { "type": ["string", "null"] },
+                    "displayName": { "type": ["string", "null"] },
+                    "kind": { "type": "string", "enum": ["human", "agent"] },
+                    "aiOwnerName": { "type": "string" },
+                    "invitedAs": { "type": "string" },
+                    "state": {
+                      "type": "string",
+                      "enum": ["invited", "joined", "declined", "left", "removed", "playing", "out"]
+                    },
+                    "outReason": {
+                      "type": "string",
+                      "enum": ["eliminated", "resigned", "timed_out", "declined", "cancelled"]
+                    },
+                    "rank": { "type": "integer", "minimum": 1 },
+                    "score": { "type": "number" },
+                    "deadline": { "type": "integer", "minimum": 0 },
+                    "isYou": { "type": "boolean" },
+                    "isCreator": { "type": "boolean" }
+                  },
+                  "required": [
+                    "seat",
+                    "userId",
+                    "displayName",
+                    "kind",
+                    "state",
+                    "isYou",
+                    "isCreator"
+                  ]
+                }
+              },
+              "yourSeat": { "type": ["integer", "null"], "minimum": 0 },
+              "toAct": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+              "yourTurn": { "type": "boolean" },
+              "yourInvitation": { "type": ["string", "null"], "enum": ["normal", "hidden", null] },
+              "joinLink": {
+                "type": "object",
+                "properties": {
+                  "active": { "type": "boolean" },
+                  "expiresAt": { "type": ["integer", "null"], "minimum": 0 }
+                },
+                "required": ["active", "expiresAt"]
+              },
+              "canAddPlayers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "userId": { "type": "string" },
+                    "displayName": { "type": "string" }
+                  },
+                  "required": ["userId", "displayName"]
+                }
+              },
+              "rematch": {
+                "type": ["object", "null"],
+                "properties": {
+                  "gameId": { "type": "string" },
+                  "you": { "type": "string", "enum": ["joined", "invited", "none"] }
+                },
+                "required": ["gameId", "you"]
+              },
+              "createdAt": { "type": "integer", "minimum": 0 },
+              "lastActionAt": { "type": ["integer", "null"], "minimum": 0 }
+            },
+            "required": [
+              "id",
+              "gameType",
+              "gameVersion",
+              "options",
+              "status",
+              "version",
+              "endReason",
+              "turnTimeoutDays",
+              "seatOrder",
+              "aiAssistance",
+              "available",
+              "resources",
+              "players",
+              "yourSeat",
+              "toAct",
+              "yourTurn",
+              "yourInvitation",
+              "createdAt",
+              "lastActionAt"
+            ]
+          },
+          "view": {
+            "description": "The module's `view` for your seat (null in the lobby and for invitations); its shape is the installed game's `view` schema."
+          },
+          "record": { "description": "The transition's public record." },
+          "describe": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "properties": { "seat": { "type": "integer", "minimum": 0 } },
+                  "required": ["seat"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "required": ["game", "view", "record", "describe"],
+        "additionalProperties": false
+      },
+      "SubmitActionRequest": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The game `version` the client last saw (03 §5.2)."
+          },
+          "action": { "description": "The module's action." }
+        },
+        "required": ["expectedVersion"],
+        "additionalProperties": false
+      },
+      "PreviewResult": {
+        "type": "object",
+        "properties": { "preview": { "description": "The module's preview result." } },
+        "additionalProperties": false
+      },
+      "PreviewRequest": {
+        "type": "object",
+        "properties": { "action": { "description": "A full module action." } },
+        "additionalProperties": false
+      },
+      "TransitionRequest": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The game `version` the client last saw (03 §5.2)."
+          }
+        },
+        "required": ["expectedVersion"],
+        "additionalProperties": false
+      },
+      "RemoveSeatRequest": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The game `version` the client last saw (03 §5.2)."
+          },
+          "playerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "The row to remove: a `playerId` from the lobby's `players` (creator only)."
+          }
+        },
+        "required": ["expectedVersion", "playerId"],
+        "additionalProperties": false
+      },
+      "JoinLink": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "`PUBLIC_URL/join#<token>`: the token is in the fragment, so it never reaches a server log. Shown only now."
+          },
+          "expiresAt": {
+            "type": "integer",
+            "description": "When the link stops working: 7 days from now or the lobby's expiry, whichever is first; it also ends at the start, a rotation or a revoke."
+          }
+        },
+        "required": ["url", "expiresAt"],
+        "additionalProperties": false
+      },
+      "JoinPreview": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "gameType": { "type": "string" },
+              "options": {},
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": { "type": "string", "enum": ["dictionary"] },
+                    "id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "distribution": { "type": "string", "enum": ["public", "serverOnly"] },
+                    "uploadedBy": { "type": "string" },
+                    "downloadUrl": { "type": "string" }
+                  },
+                  "required": ["kind", "id", "name"]
+                }
+              },
+              "turnTimeoutDays": { "type": "integer", "minimum": 1, "maximum": 30 },
+              "seatOrder": { "type": "string", "enum": ["join", "random"] },
+              "aiAssistance": { "type": "string", "enum": ["off", "allowed"] },
+              "creatorName": { "type": ["string", "null"] },
+              "players": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "displayName": { "type": ["string", "null"] },
+                    "kind": { "type": "string", "enum": ["human", "agent"] },
+                    "aiOwnerName": { "type": "string" }
+                  },
+                  "required": ["displayName", "kind"],
+                  "additionalProperties": false
+                }
+              },
+              "openSeats": { "type": "integer", "minimum": 0 },
+              "expiresAt": { "type": "integer", "description": "When the link stops working." },
+              "youAreIn": {
+                "type": "boolean",
+                "enum": [true],
+                "description": "Present when you've already joined the game: open it instead of joining."
+              }
+            },
+            "required": [
+              "id",
+              "gameType",
+              "options",
+              "resources",
+              "turnTimeoutDays",
+              "seatOrder",
+              "aiAssistance",
+              "creatorName",
+              "players",
+              "openSeats",
+              "expiresAt"
+            ],
+            "additionalProperties": false,
+            "description": "What the link shows anyone signed in who has it (06 §6.8): only the players who have joined."
+          }
+        },
+        "required": ["game"],
+        "additionalProperties": false
+      },
+      "JoinTokenRequest": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{22}$/u",
+            "description": "The join link's fragment, as given: 22 base64url characters (anything else is `400 BAD_REQUEST`). A well-formed token that isn't a live link's is the same `404`."
+          }
+        },
+        "required": ["token"],
+        "additionalProperties": false
+      },
+      "JoinedGame": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "gameType": { "type": "string" },
+              "gameVersion": { "type": "integer", "minimum": 1 },
+              "options": {},
+              "status": {
+                "type": "string",
+                "enum": ["lobby", "active", "finished", "declined", "cancelled", "expired"]
+              },
+              "version": { "type": "integer", "minimum": 0 },
+              "endReason": { "type": ["string", "null"] },
+              "turnTimeoutDays": { "type": "integer", "minimum": 1, "maximum": 30 },
+              "seatOrder": { "type": "string", "enum": ["join", "random"] },
+              "aiAssistance": { "type": "string", "enum": ["off", "allowed"] },
+              "seats": { "type": "integer", "minimum": 1 },
+              "available": { "type": "boolean" },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": { "type": "string", "enum": ["dictionary"] },
+                    "id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "distribution": { "type": "string", "enum": ["public", "serverOnly"] },
+                    "uploadedBy": { "type": "string" },
+                    "downloadUrl": { "type": "string" }
+                  },
+                  "required": ["kind", "id", "name"]
+                }
+              },
+              "players": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "playerId": { "type": "string" },
+                    "seat": { "type": ["integer", "null"], "minimum": 0 },
+                    "userId": { "type": ["string", "null"] },
+                    "displayName": { "type": ["string", "null"] },
+                    "kind": { "type": "string", "enum": ["human", "agent"] },
+                    "aiOwnerName": { "type": "string" },
+                    "invitedAs": { "type": "string" },
+                    "state": {
+                      "type": "string",
+                      "enum": ["invited", "joined", "declined", "left", "removed", "playing", "out"]
+                    },
+                    "outReason": {
+                      "type": "string",
+                      "enum": ["eliminated", "resigned", "timed_out", "declined", "cancelled"]
+                    },
+                    "rank": { "type": "integer", "minimum": 1 },
+                    "score": { "type": "number" },
+                    "deadline": { "type": "integer", "minimum": 0 },
+                    "isYou": { "type": "boolean" },
+                    "isCreator": { "type": "boolean" }
+                  },
+                  "required": [
+                    "seat",
+                    "userId",
+                    "displayName",
+                    "kind",
+                    "state",
+                    "isYou",
+                    "isCreator"
+                  ]
+                }
+              },
+              "yourSeat": { "type": ["integer", "null"], "minimum": 0 },
+              "toAct": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+              "yourTurn": { "type": "boolean" },
+              "yourInvitation": { "type": ["string", "null"], "enum": ["normal", "hidden", null] },
+              "joinLink": {
+                "type": "object",
+                "properties": {
+                  "active": { "type": "boolean" },
+                  "expiresAt": { "type": ["integer", "null"], "minimum": 0 }
+                },
+                "required": ["active", "expiresAt"]
+              },
+              "canAddPlayers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "userId": { "type": "string" },
+                    "displayName": { "type": "string" }
+                  },
+                  "required": ["userId", "displayName"]
+                }
+              },
+              "rematch": {
+                "type": ["object", "null"],
+                "properties": {
+                  "gameId": { "type": "string" },
+                  "you": { "type": "string", "enum": ["joined", "invited", "none"] }
+                },
+                "required": ["gameId", "you"]
+              },
+              "createdAt": { "type": "integer", "minimum": 0 },
+              "lastActionAt": { "type": ["integer", "null"], "minimum": 0 }
+            },
+            "required": [
+              "id",
+              "gameType",
+              "gameVersion",
+              "options",
+              "status",
+              "version",
+              "endReason",
+              "turnTimeoutDays",
+              "seatOrder",
+              "aiAssistance",
+              "available",
+              "resources",
+              "players",
+              "yourSeat",
+              "toAct",
+              "yourTurn",
+              "yourInvitation",
+              "createdAt",
+              "lastActionAt"
+            ]
+          }
+        },
+        "required": ["game"],
+        "additionalProperties": false
+      },
+      "SeenRequest": {
+        "type": "object",
+        "properties": { "version": { "type": "integer", "minimum": 0 } },
+        "required": ["version"],
         "additionalProperties": false
       }
     },
@@ -521,8 +1622,8 @@
         "x-scope": "session",
         "security": [{ "sessionCookie": [] }],
         "tags": ["Account"],
-        "summary": "Change the display name; completes onboarding",
-        "description": "Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`).",
+        "summary": "Change the display name or settings; completes onboarding",
+        "description": "Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`). `settings` changes only the keys given.",
         "requestBody": {
           "required": true,
           "content": {
@@ -691,6 +1792,1912 @@
           },
           "429": {
             "description": "Too many step-up codes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/push/subscriptions": {
+      "post": {
+        "operationId": "subscribePush",
+        "x-scope": "session",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Push"],
+        "summary": "Save this device's push subscription",
+        "description": "Session only. An idempotent upsert bound to the current session. An endpoint already stored for another account or session moves to this one only with the same keys, or once that session has ended; otherwise nothing changes. At most 10 per account; the least recently useful is evicted. The subscription is deleted with its session.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/PushSubscription" } }
+          }
+        },
+        "responses": {
+          "204": { "description": "Saved." },
+          "400": {
+            "description": "Invalid request, or an endpoint or keys that 08 T12 refuses (`BAD_REQUEST`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many writes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "unsubscribePush",
+        "x-scope": "session",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Push"],
+        "summary": "Remove a push subscription",
+        "description": "Session only. Removes the subscription with this endpoint if it belongs to you; otherwise does nothing.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/PushUnsubscribe" } }
+          }
+        },
+        "responses": {
+          "204": { "description": "Removed, or there was nothing of yours to remove." },
+          "400": {
+            "description": "Invalid request, or an endpoint or keys that 08 T12 refuses (`BAD_REQUEST`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many writes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/catalog": {
+      "get": {
+        "operationId": "getCatalog",
+        "x-scope": "read",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "The game types you can create, with their options catalog",
+        "description": "Enabled game types only (`ENABLED_GAMES`). The module catalog sees the enabled built-in dictionaries; it never contains word-list contents, hashes or sizes.",
+        "responses": {
+          "200": {
+            "description": "The catalog.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Catalog" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/types/{type}/rules": {
+      "get": {
+        "operationId": "getGameRules",
+        "x-scope": "public",
+        "tags": ["Games"],
+        "summary": "A game type's rules, as Markdown",
+        "description": "Public. From the installed manifest (02 §7.2); the latest rules version unless `version` is given.",
+        "parameters": [
+          {
+            "schema": { "type": "string", "maxLength": 64 },
+            "required": true,
+            "name": "type",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,8}$/u",
+              "description": "A rules version; default the latest."
+            },
+            "required": false,
+            "description": "A rules version; default the latest.",
+            "name": "version",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The rules.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Rules" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "Unknown game type or rules version (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games": {
+      "post": {
+        "operationId": "createGame",
+        "x-scope": "games:create",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Create a game",
+        "description": "Every valid address gets a seat and the same response, whatever it turns out to be (Q3). A past opponent picked by `userId` is added at once. The game starts at once (`active`) only if every seat is filled by past opponents added that way and no join link was asked for; otherwise it waits in the lobby.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/CreateGameRequest" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The game.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/CreatedGame" } }
+            }
+          },
+          "400": {
+            "description": "`UNKNOWN_GAME`, `INVALID_OPTIONS` (`detail: { code, detail? }` with the module's code), `INVALID_SEAT_COUNT`, `INVALID_TIMEOUT`, `INVALID_INVITEES`, `CANNOT_PLAY_SELF` or `BAD_REQUEST`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN`, `ONBOARDING_REQUIRED` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "409": {
+            "description": "`INVALID_SEATS` (the module's `validateStart`, `detail: { code, detail? }`) or `TOO_MANY_GAMES`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many games, email invitees or join links (`RATE_LIMITED`); nothing is created.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listGames",
+        "x-scope": "read",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Your games",
+        "description": "Newest activity first, 50 per page: every lobby and active game; finished games from the last 90 days; declined, cancelled and expired ones from the last 7 days.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["lobby", "active", "finished", "declined", "cancelled", "expired"]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": { "type": "string", "maxLength": 64 },
+            "required": false,
+            "name": "gameType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": ["true", "hidden"],
+              "description": "`true`: only your invitations; `hidden`: only hidden ones."
+            },
+            "required": false,
+            "description": "`true`: only your invitations; `hidden`: only hidden ones.",
+            "name": "invitations",
+            "in": "query"
+          },
+          {
+            "schema": { "type": "string", "maxLength": 200 },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Your games.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/GameList" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`ONBOARDING_REQUIRED` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/rematch": {
+      "post": {
+        "operationId": "rematchGame",
+        "x-scope": "games:create",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Rematch a finished game",
+        "description": "A player of a `finished` game asks for its rematch: the same game type, options (resolved again), turn timeout, seat order and AI setting, with every other player who acted in it and whose account still exists picked by `userId`, one seat each (`409 REMATCH_UNAVAILABLE` if that is fewer than the game's minimum), created exactly as `POST /api/v1/games` would (`201`, you are the creator). A finished game has one rematch at a time: while it is live or was played, every player's call answers `200` with it, accepting your invitation in it if you hold one; one that ended unplayed (any declined ending, or cancelled or expired before any action, never an operator's cancel) is replaced by the next call. Anyone who wasn't a player of the game, or isn't a member of its rematch any more, gets `404`. Takes no input: an empty body or `{}`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The game's existing rematch (with your invitation accepted, if you held one).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/CreatedGame" } }
+            }
+          },
+          "201": {
+            "description": "The rematch, created now.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/CreatedGame" } }
+            }
+          },
+          "400": {
+            "description": "As `POST /api/v1/games`: `UNKNOWN_GAME`, `INVALID_OPTIONS` (the stored options no longer resolve; `detail: { code, detail? }` with the module's code), `INVALID_SEAT_COUNT`, `INVALID_INVITEES` (another player can't be picked) or `BAD_REQUEST`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN`, `ONBOARDING_REQUIRED` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, you weren't a player of it, or you're no longer a member of its rematch (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "409": {
+            "description": "`WRONG_STATUS` (the game isn't `finished`, or the rematch's lobby ended meanwhile), `REMATCH_UNAVAILABLE` (too few players left for the game), `STALE_GAME` (accepting or creating it kept losing races; try again), `INVALID_SEATS` (`detail: { code, detail? }`), `TOO_MANY_GAMES` or `GAME_UNAVAILABLE`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many games or game writes (`RATE_LIMITED`); nothing is created.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/add-player": {
+      "post": {
+        "operationId": "addPlayer",
+        "x-scope": "games:create",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Add a link joiner to your players",
+        "description": "The creator of a `finished` game answers yes to \"Add <name> to your players?\" for someone in its `canAddPlayers`: you and that player become past opponents (both ways, never the other players), so either of you can pick the other for a game or a rematch. Not a transition: the game's `version` is unchanged. `204` also when repeated, and when the pair isn't written (a block between you either way, or an account suspended or being deleted), which writes nothing and answers the same, so the answer never says whether, or why (06 §6.9, §6.11).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/AddPlayerRequest" } }
+          }
+        },
+        "responses": {
+          "204": { "description": "Answered: added, already added, or a silent no-op." },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, you're not its creator, it isn't `finished`, or that player didn't join it through a link and act in it (`NOT_FOUND`, the same in every case).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many game writes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/players/recent": {
+      "get": {
+        "operationId": "listRecentPlayers",
+        "x-scope": "games:create",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Your past opponents, to pick for a new game",
+        "description": "People you've finished a game with, both having acted (04 `past_opponents`), newest first, at most 50, across all game types; never anyone with a block between you either way (06 §6.9).",
+        "responses": {
+          "200": {
+            "description": "Your past opponents.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/RecentPlayers" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`ONBOARDING_REQUIRED` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}": {
+      "get": {
+        "operationId": "getGame",
+        "x-scope": "read",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "A game and your view of it",
+        "description": "`view` is the module's view for your seat while active, null in the lobby, and your own final view after a started game ends.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The game.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/GameWithView" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, or you're not a member of it (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/history": {
+      "get": {
+        "operationId": "getGameHistory",
+        "x-scope": "read",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "A game's public history",
+        "description": "Oldest first, 100 per page. Empty for games that never started.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": { "type": "string", "maxLength": 32 },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The history.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/History" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, or you're not a member of it (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/actions": {
+      "post": {
+        "operationId": "submitAction",
+        "x-scope": "play",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Make a move",
+        "description": "Checks in order: membership with a seat (`404`), `active` (`409 GAME_NOT_ACTIVE`, `GAME_UNAVAILABLE`), `expectedVersion` (`409 STALE_GAME`), your turn (`409 NOT_YOUR_TURN`), the action schema (`400 INVALID_ACTION`), then the module's `validate` (`400` with its `{ code, detail }`).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/SubmitActionRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The move was made.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ActionResult" } }
+            }
+          },
+          "400": {
+            "description": "`INVALID_ACTION`, a module error code with its detail, or `BAD_REQUEST`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, or you're not a member of it (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "409": {
+            "description": "`GAME_NOT_ACTIVE`, `GAME_UNAVAILABLE`, `STALE_GAME` or `NOT_YOUR_TURN`; refetch the game.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many requests (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/preview": {
+      "post": {
+        "operationId": "previewAction",
+        "x-scope": "read",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Preview a move without making it",
+        "description": "Runs the membership, status, turn and schema checks of `/actions`, then the module's `preview`. `404` also for a game type without previews.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/PreviewRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The preview.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/PreviewResult" } }
+            }
+          },
+          "400": {
+            "description": "`INVALID_ACTION`, a module error code with its detail, or `BAD_REQUEST`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, or you're not a member of it (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "409": {
+            "description": "`GAME_NOT_ACTIVE`, `GAME_UNAVAILABLE` or `NOT_YOUR_TURN`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many requests (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/start": {
+      "post": {
+        "operationId": "startGame",
+        "x-scope": "games:create",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Start a game from the lobby",
+        "description": "Creator only, with at least the minimum number of seats joined. Unfilled seats are dropped.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/TransitionRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The game after the transition.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/GameWithView" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, or you're not a member of it (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "409": {
+            "description": "`STALE_GAME`, `WRONG_STATUS`, `NOT_ENOUGH_PLAYERS`, `INVALID_SEATS` (`detail: { code, detail? }`) or `GAME_UNAVAILABLE` (this build no longer has the game's engine).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many game writes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/accept": {
+      "post": {
+        "operationId": "acceptInvitation",
+        "x-scope": "join",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Accept an invitation",
+        "description": "The holder of an invitation, in the lobby. The game starts by itself once every seat is joined.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/TransitionRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The game after the transition.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/GameWithView" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`ONBOARDING_REQUIRED`, `BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, or you're not a member of it (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "409": {
+            "description": "`STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many game writes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/decline": {
+      "post": {
+        "operationId": "declineGame",
+        "x-scope": "play",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Decline an invitation or a game you haven't acted in",
+        "description": "An invited or joined player other than the creator, in the lobby (`204`: you are no longer a member); or any playing seat before its first action (`200`). Never a loss: too few players left ends the game `declined` with no ranking.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/TransitionRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The game after the transition.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/GameWithView" } }
+            }
+          },
+          "204": { "description": "Done; you are no longer a member of the game." },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`NOT_ALLOWED` (the creator in the lobby: cancel instead), `BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, or you're not a member of it (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "409": {
+            "description": "`STALE_GAME`, `ALREADY_ACTED`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many game writes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/resign": {
+      "post": {
+        "operationId": "resignGame",
+        "x-scope": "play",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Resign",
+        "description": "Any playing seat of an active game. A resignation is a loss.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/TransitionRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The game after the transition.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/GameWithView" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, or you're not a member of it (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "409": {
+            "description": "`STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many game writes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/cancel": {
+      "post": {
+        "operationId": "cancelGame",
+        "x-scope": "games:create",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Cancel a game in the lobby",
+        "description": "Creator only, in the lobby.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/TransitionRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The game after the transition.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/GameWithView" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, or you're not a member of it (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "409": {
+            "description": "`STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many game writes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/remove-seat": {
+      "post": {
+        "operationId": "removeSeat",
+        "x-scope": "games:create",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Remove a player from the lobby",
+        "description": "Creator only, in the lobby: an invited or joined row of this game, never your own, becomes `removed` (a typed address is cleared). A remove never ends the lobby, and the person removed can't come back into this game through any join link, a rotated or new one included (06 §6.8).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/RemoveSeatRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The game after the removal.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/GameWithView" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, you're not a member of it, or no such seat to remove in it (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "409": {
+            "description": "`STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many game writes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/join-link": {
+      "post": {
+        "operationId": "createJoinLink",
+        "x-scope": "games:create",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Create or rotate the lobby's join link",
+        "description": "Creator only, in the lobby. Replaces any link the game has (the old one stops working; nobody removed from the lobby, or who declined, comes back through any link). Anyone signed in with the link sees the game type, options and the joined players' names, and can take an open seat; the game then waits for your Start. Changes no game state, so the game's `version` stays the same. Takes no input: an empty body or `{}`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new link.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/JoinLink" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, or you're not a member of it (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "409": {
+            "description": "`WRONG_STATUS` (the lobby has ended).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many join links today (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "revokeJoinLink",
+        "x-scope": "games:create",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Revoke the lobby's join link",
+        "description": "Creator only. The link stops working at once; nobody who joined through it is removed, and the lobby never ends because of it. `204` also when there is no live link.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": { "description": "Revoked." },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, or you're not a member of it (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many game writes (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/join/lookup": {
+      "post": {
+        "operationId": "lookUpJoinLink",
+        "x-scope": "join",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "See the game a join link is for",
+        "description": "Nothing is joined: joining needs `POST /api/v1/join`. Counts toward your join-link limits, as a join does.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/JoinTokenRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The game.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/JoinPreview" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), a cookie and a bearer token together, or no client address on a proxied deployment.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`ONBOARDING_REQUIRED`, `BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or the creator removed you (`NOT_FOUND`, the same in every case).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many join-link lookups and joins from you or your network (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/join": {
+      "post": {
+        "operationId": "joinGame",
+        "x-scope": "join",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Join a game through its join link",
+        "description": "Takes an open seat, or accepts the invitation you already hold in the game. Never starts the game: its creator does. Retried on the server when another change to the game wins a race.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/JoinTokenRequest" } }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "You've joined.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/JoinedGame" } }
+            }
+          },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), a cookie and a bearer token together, or no client address on a proxied deployment.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`ONBOARDING_REQUIRED`, `BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or the creator removed you (`NOT_FOUND`, the same in every case).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "409": {
+            "description": "`ALREADY_JOINED`, `STALE_GAME` (every retry lost a race; try again) or `GAME_UNAVAILABLE`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many join-link lookups and joins from you or your network (`RATE_LIMITED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "500": {
+            "description": "Unexpected error.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/seen": {
+      "post": {
+        "operationId": "markGameSeen",
+        "x-scope": "play",
+        "security": [{ "sessionCookie": [] }],
+        "tags": ["Games"],
+        "summary": "Mark a game's activity as read",
+        "description": "Not a transition: it changes only your own unread marker.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "The game id."
+            },
+            "required": true,
+            "description": "The game id.",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/SeenRequest" } }
+          }
+        },
+        "responses": {
+          "204": { "description": "Marked." },
+          "400": {
+            "description": "Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "401": {
+            "description": "No valid session (`UNAUTHENTICATED`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "403": {
+            "description": "`BAD_ORIGIN` or `SUSPENDED`.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "404": {
+            "description": "No such game, or you're not a member of it (`NOT_FOUND`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "413": {
+            "description": "Body over 16 kB (`TOO_LARGE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "415": {
+            "description": "A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`).",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
+            }
+          },
+          "429": {
+            "description": "Too many game writes (`RATE_LIMITED`).",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } }
             }

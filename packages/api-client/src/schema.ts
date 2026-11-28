@@ -142,8 +142,8 @@ export interface paths {
     options?: never;
     head?: never;
     /**
-     * Change the display name; completes onboarding
-     * @description Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`).
+     * Change the display name or settings; completes onboarding
+     * @description Session only. The first display name completes onboarding (06 §5). After onboarding, at most 3 changes per 30 days (`429`). `settings` changes only the keys given.
      */
     patch: operations["updateMe"];
     trace?: never;
@@ -162,6 +162,438 @@ export interface paths {
      * @description Session only. Emails a `delete_account` step-up code (06 §7).
      */
     post: operations["requestDeleteAccountCode"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/push/subscriptions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Save this device's push subscription
+     * @description Session only. An idempotent upsert bound to the current session. An endpoint already stored for another account or session moves to this one only with the same keys, or once that session has ended; otherwise nothing changes. At most 10 per account; the least recently useful is evicted. The subscription is deleted with its session.
+     */
+    post: operations["subscribePush"];
+    /**
+     * Remove a push subscription
+     * @description Session only. Removes the subscription with this endpoint if it belongs to you; otherwise does nothing.
+     */
+    delete: operations["unsubscribePush"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/catalog": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * The game types you can create, with their options catalog
+     * @description Enabled game types only (`ENABLED_GAMES`). The module catalog sees the enabled built-in dictionaries; it never contains word-list contents, hashes or sizes.
+     */
+    get: operations["getCatalog"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/types/{type}/rules": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * A game type's rules, as Markdown
+     * @description Public. From the installed manifest (02 §7.2); the latest rules version unless `version` is given.
+     */
+    get: operations["getGameRules"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Your games
+     * @description Newest activity first, 50 per page: every lobby and active game; finished games from the last 90 days; declined, cancelled and expired ones from the last 7 days.
+     */
+    get: operations["listGames"];
+    put?: never;
+    /**
+     * Create a game
+     * @description Every valid address gets a seat and the same response, whatever it turns out to be (Q3). A past opponent picked by `userId` is added at once. The game starts at once (`active`) only if every seat is filled by past opponents added that way and no join link was asked for; otherwise it waits in the lobby.
+     */
+    post: operations["createGame"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/{id}/rematch": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rematch a finished game
+     * @description A player of a `finished` game asks for its rematch: the same game type, options (resolved again), turn timeout, seat order and AI setting, with every other player who acted in it and whose account still exists picked by `userId`, one seat each (`409 REMATCH_UNAVAILABLE` if that is fewer than the game's minimum), created exactly as `POST /api/v1/games` would (`201`, you are the creator). A finished game has one rematch at a time: while it is live or was played, every player's call answers `200` with it, accepting your invitation in it if you hold one; one that ended unplayed (any declined ending, or cancelled or expired before any action, never an operator's cancel) is replaced by the next call. Anyone who wasn't a player of the game, or isn't a member of its rematch any more, gets `404`. Takes no input: an empty body or `{}`.
+     */
+    post: operations["rematchGame"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/{id}/add-player": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Add a link joiner to your players
+     * @description The creator of a `finished` game answers yes to "Add <name> to your players?" for someone in its `canAddPlayers`: you and that player become past opponents (both ways, never the other players), so either of you can pick the other for a game or a rematch. Not a transition: the game's `version` is unchanged. `204` also when repeated, and when the pair isn't written (a block between you either way, or an account suspended or being deleted), which writes nothing and answers the same, so the answer never says whether, or why (06 §6.9, §6.11).
+     */
+    post: operations["addPlayer"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/players/recent": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Your past opponents, to pick for a new game
+     * @description People you've finished a game with, both having acted (04 `past_opponents`), newest first, at most 50, across all game types; never anyone with a block between you either way (06 §6.9).
+     */
+    get: operations["listRecentPlayers"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * A game and your view of it
+     * @description `view` is the module's view for your seat while active, null in the lobby, and your own final view after a started game ends.
+     */
+    get: operations["getGame"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/{id}/history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * A game's public history
+     * @description Oldest first, 100 per page. Empty for games that never started.
+     */
+    get: operations["getGameHistory"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/{id}/actions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Make a move
+     * @description Checks in order: membership with a seat (`404`), `active` (`409 GAME_NOT_ACTIVE`, `GAME_UNAVAILABLE`), `expectedVersion` (`409 STALE_GAME`), your turn (`409 NOT_YOUR_TURN`), the action schema (`400 INVALID_ACTION`), then the module's `validate` (`400` with its `{ code, detail }`).
+     */
+    post: operations["submitAction"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/{id}/preview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview a move without making it
+     * @description Runs the membership, status, turn and schema checks of `/actions`, then the module's `preview`. `404` also for a game type without previews.
+     */
+    post: operations["previewAction"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/{id}/start": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start a game from the lobby
+     * @description Creator only, with at least the minimum number of seats joined. Unfilled seats are dropped.
+     */
+    post: operations["startGame"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/{id}/accept": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Accept an invitation
+     * @description The holder of an invitation, in the lobby. The game starts by itself once every seat is joined.
+     */
+    post: operations["acceptInvitation"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/{id}/decline": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Decline an invitation or a game you haven't acted in
+     * @description An invited or joined player other than the creator, in the lobby (`204`: you are no longer a member); or any playing seat before its first action (`200`). Never a loss: too few players left ends the game `declined` with no ranking.
+     */
+    post: operations["declineGame"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/{id}/resign": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Resign
+     * @description Any playing seat of an active game. A resignation is a loss.
+     */
+    post: operations["resignGame"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/{id}/cancel": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Cancel a game in the lobby
+     * @description Creator only, in the lobby.
+     */
+    post: operations["cancelGame"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/{id}/remove-seat": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Remove a player from the lobby
+     * @description Creator only, in the lobby: an invited or joined row of this game, never your own, becomes `removed` (a typed address is cleared). A remove never ends the lobby, and the person removed can't come back into this game through any join link, a rotated or new one included (06 §6.8).
+     */
+    post: operations["removeSeat"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/{id}/join-link": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create or rotate the lobby's join link
+     * @description Creator only, in the lobby. Replaces any link the game has (the old one stops working; nobody removed from the lobby, or who declined, comes back through any link). Anyone signed in with the link sees the game type, options and the joined players' names, and can take an open seat; the game then waits for your Start. Changes no game state, so the game's `version` stays the same. Takes no input: an empty body or `{}`.
+     */
+    post: operations["createJoinLink"];
+    /**
+     * Revoke the lobby's join link
+     * @description Creator only. The link stops working at once; nobody who joined through it is removed, and the lobby never ends because of it. `204` also when there is no live link.
+     */
+    delete: operations["revokeJoinLink"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/join/lookup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * See the game a join link is for
+     * @description Nothing is joined: joining needs `POST /api/v1/join`. Counts toward your join-link limits, as a join does.
+     */
+    post: operations["lookUpJoinLink"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/join": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Join a game through its join link
+     * @description Takes an open seat, or accepts the invitation you already hold in the game. Never starts the game: its creator does. Retried on the server when another change to the game wins a race.
+     */
+    post: operations["joinGame"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/games/{id}/seen": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Mark a game's activity as read
+     * @description Not a transition: it changes only your own unread marker.
+     */
+    post: operations["markGameSeen"];
     delete?: never;
     options?: never;
     head?: never;
@@ -234,6 +666,13 @@ export interface components {
        * @enum {string}
        */
       whoCanAddMe: "pastOpponents" | "nobody";
+      /** @description Email me "It's your turn" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default. */
+      emailNudges: boolean;
+      /**
+       * @description Colour theme: "system" follows the device, "light" and "dark" override it (07 §5). "system" by default.
+       * @enum {string}
+       */
+      theme: "system" | "light" | "dark";
     };
     OtpVerify: {
       /**
@@ -254,6 +693,16 @@ export interface components {
     PatchMe: {
       /** @description 1–24 characters; no links, addresses, long digit runs or reserved words (06 §5.1). Setting it completes onboarding. */
       displayName?: string;
+      settings?: components["schemas"]["UserSettingsPatch"];
+    };
+    UserSettingsPatch: {
+      /** @description Email me "It's your turn" after a game has waited 24 hours for me, at most once a day per game (03 §7). Off by default. */
+      emailNudges?: boolean;
+      /**
+       * @description Colour theme: "system" follows the device, "light" and "dark" override it (07 §5). "system" by default.
+       * @enum {string}
+       */
+      theme?: "system" | "light" | "dark";
     };
     DeleteMe: {
       /**
@@ -261,6 +710,536 @@ export interface components {
        * @example 1234 5678
        */
       code: string;
+    };
+    PushSubscription: {
+      /**
+       * @description The subscription's endpoint: an `https` URL at an allow-listed push service (08 T12), as `PushSubscription.endpoint` gives it.
+       * @example https://fcm.googleapis.com/fcm/send/abc123
+       */
+      endpoint: string;
+      keys: {
+        /** @description Unpadded base64url of the 65-byte uncompressed P-256 public key. */
+        p256dh: string;
+        /** @description Unpadded base64url of the 16-byte auth secret. */
+        auth: string;
+      };
+    };
+    PushUnsubscribe: {
+      /**
+       * @description The subscription's endpoint: an `https` URL at an allow-listed push service (08 T12), as `PushSubscription.endpoint` gives it.
+       * @example https://fcm.googleapis.com/fcm/send/abc123
+       */
+      endpoint: string;
+    };
+    Catalog: {
+      games: {
+        type: string;
+        /** @description The latest rules version. */
+        version: number;
+        name: string;
+        description: string;
+        /** @description Sanitised SVG markup (02 §7.2). Render it only as an image from a `data:` URL, never inline. */
+        icon: string;
+        players: {
+          min: number;
+          max: number;
+        };
+        defaultTurnTimeoutDays: number;
+        /** @description The option input the new-game form starts from: your last options for this type if they still resolve, otherwise `{}` (module defaults). */
+        defaults?: unknown;
+        /** @description The module's catalog: its own schema (02 §2). */
+        catalog?: unknown;
+      }[];
+    };
+    Rules: {
+      type: string;
+      version: number;
+      markdown: string;
+    };
+    CreatedGame: {
+      game: {
+        id: string;
+        gameType: string;
+        gameVersion: number;
+        options: unknown;
+        /** @enum {string} */
+        status: "lobby" | "active" | "finished" | "declined" | "cancelled" | "expired";
+        version: number;
+        endReason: string | null;
+        turnTimeoutDays: number;
+        /** @enum {string} */
+        seatOrder: "join" | "random";
+        /** @enum {string} */
+        aiAssistance: "off" | "allowed";
+        seats?: number;
+        available: boolean;
+        resources: {
+          /** @enum {string} */
+          kind: "dictionary";
+          id: string;
+          name: string;
+          /** @enum {string} */
+          distribution?: "public" | "serverOnly";
+          uploadedBy?: string;
+          downloadUrl?: string;
+        }[];
+        players: {
+          playerId?: string;
+          seat: number | null;
+          userId: string | null;
+          displayName: string | null;
+          /** @enum {string} */
+          kind: "human" | "agent";
+          aiOwnerName?: string;
+          invitedAs?: string;
+          /** @enum {string} */
+          state: "invited" | "joined" | "declined" | "left" | "removed" | "playing" | "out";
+          /** @enum {string} */
+          outReason?: "eliminated" | "resigned" | "timed_out" | "declined" | "cancelled";
+          rank?: number;
+          score?: number;
+          deadline?: number;
+          isYou: boolean;
+          isCreator: boolean;
+        }[];
+        yourSeat: number | null;
+        toAct: number[];
+        yourTurn: boolean;
+        /** @enum {string|null} */
+        yourInvitation: "normal" | "hidden" | null;
+        joinLink?: {
+          active: boolean;
+          expiresAt: number | null;
+        };
+        canAddPlayers?: {
+          userId: string;
+          displayName: string;
+        }[];
+        rematch?: {
+          gameId: string;
+          /** @enum {string} */
+          you: "joined" | "invited" | "none";
+        } | null;
+        createdAt: number;
+        lastActionAt: number | null;
+      };
+      /** @description The join link asked for with `joinLink`, shown only here: `PUBLIC_URL/join#<token>`. */
+      joinLinkUrl?: string;
+    };
+    CreateGameRequest: {
+      gameType: string;
+      /** @description The module's option input. Omitted top-level keys are filled from your last options for this type (05 §Remembered options). */
+      options?: unknown;
+      /** @description Seat count within the module's `players(options)`; default max if min = max, else min. */
+      seats?: number;
+      /** @description Whole days, 1–30 (`INVALID_TIMEOUT` otherwise); default the module's `defaultTurnTimeoutDays`. */
+      turnTimeoutDays?: number;
+      /**
+       * @description Default `join`.
+       * @enum {string}
+       */
+      seatOrder?: "join" | "random";
+      /**
+       * @description Default `off` while any seat is open or two or more people play (02 §4); fixed at creation.
+       * @enum {string}
+       */
+      aiAssistance?: "off" | "allowed";
+      /** @description At most `seats - 1` people: addresses to invite, or past opponents to add by `userId`. */
+      invitees: (
+        | {
+            /** @description An address to invite. The response never reveals whether it has an account (06 §6.1). */
+            email: string;
+          }
+        | {
+            /** @description A past opponent's id, from `GET /api/v1/players/recent` (06 §6.1). They are added at once (`joined`) unless AI assistance is allowed, when they get an invitation (02 §4); anyone else is `INVALID_INVITEES`. */
+            userId: string;
+          }
+      )[];
+      /** @description Create a join link for the seats left open (06 §6.8). Its URL is in the response, the only time it is shown; the game then waits for your Start. */
+      joinLink?: boolean;
+    };
+    AddPlayerRequest: {
+      /** @description The player to add: a `userId` from the finished game's `canAddPlayers`. */
+      userId: string;
+    };
+    RecentPlayers: {
+      players: {
+        userId: string;
+        displayName: string;
+        /** @description When your latest finished game together ended (ms since the epoch). */
+        lastPlayedAt: number;
+      }[];
+    };
+    GameList: {
+      games: components["schemas"]["GameSummary"][];
+      nextCursor: string | null;
+    };
+    GameSummary: {
+      id: string;
+      gameType: string;
+      /** @enum {string} */
+      status: "lobby" | "active" | "finished" | "declined" | "cancelled" | "expired";
+      endReason: string | null;
+      /** @enum {string} */
+      aiAssistance: "off" | "allowed";
+      yourTurn: boolean;
+      /** @enum {string|null} */
+      yourInvitation: "normal" | "hidden" | null;
+      players: {
+        playerId?: string;
+        seat: number | null;
+        userId: string | null;
+        displayName: string | null;
+        /** @enum {string} */
+        kind: "human" | "agent";
+        aiOwnerName?: string;
+        invitedAs?: string;
+        /** @enum {string} */
+        state: "invited" | "joined" | "declined" | "left" | "removed" | "playing" | "out";
+        /** @enum {string} */
+        outReason?: "eliminated" | "resigned" | "timed_out" | "declined" | "cancelled";
+        rank?: number;
+        score?: number;
+        deadline?: number;
+        isYou: boolean;
+        isCreator: boolean;
+      }[];
+      summary: {
+        headline: (
+          | string
+          | {
+              seat: number;
+            }
+        )[];
+        scores?: number[];
+      };
+      lastAction: {
+        describe: (
+          | string
+          | {
+              seat: number;
+            }
+        )[];
+        byYou: boolean;
+      } | null;
+      lastActionAt: number;
+      unread: boolean;
+      version: number;
+    };
+    GameWithView: {
+      game: {
+        id: string;
+        gameType: string;
+        gameVersion: number;
+        options: unknown;
+        /** @enum {string} */
+        status: "lobby" | "active" | "finished" | "declined" | "cancelled" | "expired";
+        version: number;
+        endReason: string | null;
+        turnTimeoutDays: number;
+        /** @enum {string} */
+        seatOrder: "join" | "random";
+        /** @enum {string} */
+        aiAssistance: "off" | "allowed";
+        seats?: number;
+        available: boolean;
+        resources: {
+          /** @enum {string} */
+          kind: "dictionary";
+          id: string;
+          name: string;
+          /** @enum {string} */
+          distribution?: "public" | "serverOnly";
+          uploadedBy?: string;
+          downloadUrl?: string;
+        }[];
+        players: {
+          playerId?: string;
+          seat: number | null;
+          userId: string | null;
+          displayName: string | null;
+          /** @enum {string} */
+          kind: "human" | "agent";
+          aiOwnerName?: string;
+          invitedAs?: string;
+          /** @enum {string} */
+          state: "invited" | "joined" | "declined" | "left" | "removed" | "playing" | "out";
+          /** @enum {string} */
+          outReason?: "eliminated" | "resigned" | "timed_out" | "declined" | "cancelled";
+          rank?: number;
+          score?: number;
+          deadline?: number;
+          isYou: boolean;
+          isCreator: boolean;
+        }[];
+        yourSeat: number | null;
+        toAct: number[];
+        yourTurn: boolean;
+        /** @enum {string|null} */
+        yourInvitation: "normal" | "hidden" | null;
+        joinLink?: {
+          active: boolean;
+          expiresAt: number | null;
+        };
+        canAddPlayers?: {
+          userId: string;
+          displayName: string;
+        }[];
+        rematch?: {
+          gameId: string;
+          /** @enum {string} */
+          you: "joined" | "invited" | "none";
+        } | null;
+        createdAt: number;
+        lastActionAt: number | null;
+      };
+      /** @description The module's `view` for your seat (null in the lobby and for invitations); its shape is the installed game's `view` schema. */
+      view: unknown;
+    };
+    History: {
+      items: components["schemas"]["HistoryItem"][];
+      nextCursor: string | null;
+    };
+    HistoryItem: {
+      seq: number;
+      seat: number;
+      /** @enum {string} */
+      kind: "action" | "resign" | "timeout" | "decline";
+      /** @description The module's public record (02 §2.1 rule 5). */
+      record: unknown;
+      describe: (
+        | string
+        | {
+            seat: number;
+          }
+      )[];
+      /**
+       * @description How the transition was made: the app, an API token (an AI move, 02 §9.1) or the server itself (a timeout).
+       * @enum {string}
+       */
+      via: "app" | "token" | "system";
+      createdAt: number;
+    };
+    ActionResult: {
+      game: {
+        id: string;
+        gameType: string;
+        gameVersion: number;
+        options: unknown;
+        /** @enum {string} */
+        status: "lobby" | "active" | "finished" | "declined" | "cancelled" | "expired";
+        version: number;
+        endReason: string | null;
+        turnTimeoutDays: number;
+        /** @enum {string} */
+        seatOrder: "join" | "random";
+        /** @enum {string} */
+        aiAssistance: "off" | "allowed";
+        seats?: number;
+        available: boolean;
+        resources: {
+          /** @enum {string} */
+          kind: "dictionary";
+          id: string;
+          name: string;
+          /** @enum {string} */
+          distribution?: "public" | "serverOnly";
+          uploadedBy?: string;
+          downloadUrl?: string;
+        }[];
+        players: {
+          playerId?: string;
+          seat: number | null;
+          userId: string | null;
+          displayName: string | null;
+          /** @enum {string} */
+          kind: "human" | "agent";
+          aiOwnerName?: string;
+          invitedAs?: string;
+          /** @enum {string} */
+          state: "invited" | "joined" | "declined" | "left" | "removed" | "playing" | "out";
+          /** @enum {string} */
+          outReason?: "eliminated" | "resigned" | "timed_out" | "declined" | "cancelled";
+          rank?: number;
+          score?: number;
+          deadline?: number;
+          isYou: boolean;
+          isCreator: boolean;
+        }[];
+        yourSeat: number | null;
+        toAct: number[];
+        yourTurn: boolean;
+        /** @enum {string|null} */
+        yourInvitation: "normal" | "hidden" | null;
+        joinLink?: {
+          active: boolean;
+          expiresAt: number | null;
+        };
+        canAddPlayers?: {
+          userId: string;
+          displayName: string;
+        }[];
+        rematch?: {
+          gameId: string;
+          /** @enum {string} */
+          you: "joined" | "invited" | "none";
+        } | null;
+        createdAt: number;
+        lastActionAt: number | null;
+      };
+      /** @description The module's `view` for your seat (null in the lobby and for invitations); its shape is the installed game's `view` schema. */
+      view: unknown;
+      /** @description The transition's public record. */
+      record: unknown;
+      describe: (
+        | string
+        | {
+            seat: number;
+          }
+      )[];
+    };
+    SubmitActionRequest: {
+      /** @description The game `version` the client last saw (03 §5.2). */
+      expectedVersion: number;
+      /** @description The module's action. */
+      action?: unknown;
+    };
+    PreviewResult: {
+      /** @description The module's preview result. */
+      preview?: unknown;
+    };
+    PreviewRequest: {
+      /** @description A full module action. */
+      action?: unknown;
+    };
+    TransitionRequest: {
+      /** @description The game `version` the client last saw (03 §5.2). */
+      expectedVersion: number;
+    };
+    RemoveSeatRequest: {
+      /** @description The game `version` the client last saw (03 §5.2). */
+      expectedVersion: number;
+      /** @description The row to remove: a `playerId` from the lobby's `players` (creator only). */
+      playerId: string;
+    };
+    JoinLink: {
+      /** @description `PUBLIC_URL/join#<token>`: the token is in the fragment, so it never reaches a server log. Shown only now. */
+      url: string;
+      /** @description When the link stops working: 7 days from now or the lobby's expiry, whichever is first; it also ends at the start, a rotation or a revoke. */
+      expiresAt: number;
+    };
+    JoinPreview: {
+      /** @description What the link shows anyone signed in who has it (06 §6.8): only the players who have joined. */
+      game: {
+        id: string;
+        gameType: string;
+        options: unknown;
+        resources: {
+          /** @enum {string} */
+          kind: "dictionary";
+          id: string;
+          name: string;
+          /** @enum {string} */
+          distribution?: "public" | "serverOnly";
+          uploadedBy?: string;
+          downloadUrl?: string;
+        }[];
+        turnTimeoutDays: number;
+        /** @enum {string} */
+        seatOrder: "join" | "random";
+        /** @enum {string} */
+        aiAssistance: "off" | "allowed";
+        creatorName: string | null;
+        players: {
+          displayName: string | null;
+          /** @enum {string} */
+          kind: "human" | "agent";
+          aiOwnerName?: string;
+        }[];
+        openSeats: number;
+        /** @description When the link stops working. */
+        expiresAt: number;
+        /**
+         * @description Present when you've already joined the game: open it instead of joining.
+         * @enum {boolean}
+         */
+        youAreIn?: true;
+      };
+    };
+    JoinTokenRequest: {
+      /** @description The join link's fragment, as given: 22 base64url characters (anything else is `400 BAD_REQUEST`). A well-formed token that isn't a live link's is the same `404`. */
+      token: string;
+    };
+    JoinedGame: {
+      game: {
+        id: string;
+        gameType: string;
+        gameVersion: number;
+        options: unknown;
+        /** @enum {string} */
+        status: "lobby" | "active" | "finished" | "declined" | "cancelled" | "expired";
+        version: number;
+        endReason: string | null;
+        turnTimeoutDays: number;
+        /** @enum {string} */
+        seatOrder: "join" | "random";
+        /** @enum {string} */
+        aiAssistance: "off" | "allowed";
+        seats?: number;
+        available: boolean;
+        resources: {
+          /** @enum {string} */
+          kind: "dictionary";
+          id: string;
+          name: string;
+          /** @enum {string} */
+          distribution?: "public" | "serverOnly";
+          uploadedBy?: string;
+          downloadUrl?: string;
+        }[];
+        players: {
+          playerId?: string;
+          seat: number | null;
+          userId: string | null;
+          displayName: string | null;
+          /** @enum {string} */
+          kind: "human" | "agent";
+          aiOwnerName?: string;
+          invitedAs?: string;
+          /** @enum {string} */
+          state: "invited" | "joined" | "declined" | "left" | "removed" | "playing" | "out";
+          /** @enum {string} */
+          outReason?: "eliminated" | "resigned" | "timed_out" | "declined" | "cancelled";
+          rank?: number;
+          score?: number;
+          deadline?: number;
+          isYou: boolean;
+          isCreator: boolean;
+        }[];
+        yourSeat: number | null;
+        toAct: number[];
+        yourTurn: boolean;
+        /** @enum {string|null} */
+        yourInvitation: "normal" | "hidden" | null;
+        joinLink?: {
+          active: boolean;
+          expiresAt: number | null;
+        };
+        canAddPlayers?: {
+          userId: string;
+          displayName: string;
+        }[];
+        rematch?: {
+          gameId: string;
+          /** @enum {string} */
+          you: "joined" | "invited" | "none";
+        } | null;
+        createdAt: number;
+        lastActionAt: number | null;
+      };
+    };
+    SeenRequest: {
+      version: number;
     };
   };
   responses: never;
@@ -935,6 +1914,2310 @@ export interface operations {
         };
       };
       /** @description Too many step-up codes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  subscribePush: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PushSubscription"];
+      };
+    };
+    responses: {
+      /** @description Saved. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid request, or an endpoint or keys that 08 T12 refuses (`BAD_REQUEST`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many writes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  unsubscribePush: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PushUnsubscribe"];
+      };
+    };
+    responses: {
+      /** @description Removed, or there was nothing of yours to remove. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid request, or an endpoint or keys that 08 T12 refuses (`BAD_REQUEST`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many writes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getCatalog: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The catalog. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Catalog"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getGameRules: {
+    parameters: {
+      query?: {
+        /** @description A rules version; default the latest. */
+        version?: string;
+      };
+      header?: never;
+      path: {
+        type: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The rules. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Rules"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unknown game type or rules version (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  listGames: {
+    parameters: {
+      query?: {
+        status?: "lobby" | "active" | "finished" | "declined" | "cancelled" | "expired";
+        gameType?: string;
+        /** @description `true`: only your invitations; `hidden`: only hidden ones. */
+        invitations?: "true" | "hidden";
+        cursor?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Your games. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GameList"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `ONBOARDING_REQUIRED` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  createGame: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateGameRequest"];
+      };
+    };
+    responses: {
+      /** @description The game. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CreatedGame"];
+        };
+      };
+      /** @description `UNKNOWN_GAME`, `INVALID_OPTIONS` (`detail: { code, detail? }` with the module's code), `INVALID_SEAT_COUNT`, `INVALID_TIMEOUT`, `INVALID_INVITEES`, `CANNOT_PLAY_SELF` or `BAD_REQUEST`. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN`, `ONBOARDING_REQUIRED` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `INVALID_SEATS` (the module's `validateStart`, `detail: { code, detail? }`) or `TOO_MANY_GAMES`. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many games, email invitees or join links (`RATE_LIMITED`); nothing is created. */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  rematchGame: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["EmptyObject"];
+      };
+    };
+    responses: {
+      /** @description The game's existing rematch (with your invitation accepted, if you held one). */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CreatedGame"];
+        };
+      };
+      /** @description The rematch, created now. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CreatedGame"];
+        };
+      };
+      /** @description As `POST /api/v1/games`: `UNKNOWN_GAME`, `INVALID_OPTIONS` (the stored options no longer resolve; `detail: { code, detail? }` with the module's code), `INVALID_SEAT_COUNT`, `INVALID_INVITEES` (another player can't be picked) or `BAD_REQUEST`. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN`, `ONBOARDING_REQUIRED` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, you weren't a player of it, or you're no longer a member of its rematch (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `WRONG_STATUS` (the game isn't `finished`, or the rematch's lobby ended meanwhile), `REMATCH_UNAVAILABLE` (too few players left for the game), `STALE_GAME` (accepting or creating it kept losing races; try again), `INVALID_SEATS` (`detail: { code, detail? }`), `TOO_MANY_GAMES` or `GAME_UNAVAILABLE`. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many games or game writes (`RATE_LIMITED`); nothing is created. */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  addPlayer: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AddPlayerRequest"];
+      };
+    };
+    responses: {
+      /** @description Answered: added, already added, or a silent no-op. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, you're not its creator, it isn't `finished`, or that player didn't join it through a link and act in it (`NOT_FOUND`, the same in every case). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  listRecentPlayers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Your past opponents. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RecentPlayers"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `ONBOARDING_REQUIRED` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getGame: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The game. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GameWithView"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, or you're not a member of it (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getGameHistory: {
+    parameters: {
+      query?: {
+        cursor?: string;
+      };
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The history. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["History"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, or you're not a member of it (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  submitAction: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SubmitActionRequest"];
+      };
+    };
+    responses: {
+      /** @description The move was made. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActionResult"];
+        };
+      };
+      /** @description `INVALID_ACTION`, a module error code with its detail, or `BAD_REQUEST`. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, or you're not a member of it (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `GAME_NOT_ACTIVE`, `GAME_UNAVAILABLE`, `STALE_GAME` or `NOT_YOUR_TURN`; refetch the game. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many requests (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  previewAction: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PreviewRequest"];
+      };
+    };
+    responses: {
+      /** @description The preview. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PreviewResult"];
+        };
+      };
+      /** @description `INVALID_ACTION`, a module error code with its detail, or `BAD_REQUEST`. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, or you're not a member of it (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `GAME_NOT_ACTIVE`, `GAME_UNAVAILABLE` or `NOT_YOUR_TURN`. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many requests (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  startGame: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TransitionRequest"];
+      };
+    };
+    responses: {
+      /** @description The game after the transition. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GameWithView"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, or you're not a member of it (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `STALE_GAME`, `WRONG_STATUS`, `NOT_ENOUGH_PLAYERS`, `INVALID_SEATS` (`detail: { code, detail? }`) or `GAME_UNAVAILABLE` (this build no longer has the game's engine). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  acceptInvitation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TransitionRequest"];
+      };
+    };
+    responses: {
+      /** @description The game after the transition. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GameWithView"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `ONBOARDING_REQUIRED`, `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, or you're not a member of it (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  declineGame: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TransitionRequest"];
+      };
+    };
+    responses: {
+      /** @description The game after the transition. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GameWithView"];
+        };
+      };
+      /** @description Done; you are no longer a member of the game. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `NOT_ALLOWED` (the creator in the lobby: cancel instead), `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, or you're not a member of it (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `STALE_GAME`, `ALREADY_ACTED`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  resignGame: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TransitionRequest"];
+      };
+    };
+    responses: {
+      /** @description The game after the transition. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GameWithView"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, or you're not a member of it (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  cancelGame: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TransitionRequest"];
+      };
+    };
+    responses: {
+      /** @description The game after the transition. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GameWithView"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, or you're not a member of it (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  removeSeat: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RemoveSeatRequest"];
+      };
+    };
+    responses: {
+      /** @description The game after the removal. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GameWithView"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, you're not a member of it, or no such seat to remove in it (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `STALE_GAME`, `WRONG_STATUS` or `GAME_UNAVAILABLE` (this build no longer has the game's engine). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  createJoinLink: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["EmptyObject"];
+      };
+    };
+    responses: {
+      /** @description The new link. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["JoinLink"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, or you're not a member of it (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `WRONG_STATUS` (the lobby has ended). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many join links today (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  revokeJoinLink: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Revoked. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, or you're not a member of it (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  lookUpJoinLink: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["JoinTokenRequest"];
+      };
+    };
+    responses: {
+      /** @description The game. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["JoinPreview"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`), a cookie and a bearer token together, or no client address on a proxied deployment. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `ONBOARDING_REQUIRED`, `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or the creator removed you (`NOT_FOUND`, the same in every case). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many join-link lookups and joins from you or your network (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  joinGame: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["JoinTokenRequest"];
+      };
+    };
+    responses: {
+      /** @description You've joined. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["JoinedGame"];
+        };
+      };
+      /** @description Invalid request (`BAD_REQUEST`), a cookie and a bearer token together, or no client address on a proxied deployment. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `ONBOARDING_REQUIRED`, `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description The link doesn't work for you: unknown, revoked, rotated or expired; the game is full or has started; a block between you and someone in it; you declined or left it, or the creator removed you (`NOT_FOUND`, the same in every case). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `ALREADY_JOINED`, `STALE_GAME` (every retry lost a race; try again) or `GAME_UNAVAILABLE`. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many join-link lookups and joins from you or your network (`RATE_LIMITED`). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unexpected error. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  markGameSeen: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The game id. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SeenRequest"];
+      };
+    };
+    responses: {
+      /** @description Marked. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid request (`BAD_REQUEST`), or a cookie and a bearer token together. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No valid session (`UNAUTHENTICATED`). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description `BAD_ORIGIN` or `SUSPENDED`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description No such game, or you're not a member of it (`NOT_FOUND`). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Body over 16 kB (`TOO_LARGE`). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many game writes (`RATE_LIMITED`). */
       429: {
         headers: {
           [name: string]: unknown;

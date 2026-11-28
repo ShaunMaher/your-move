@@ -90,6 +90,9 @@ Attempt counting, consumption and rate limiting must be race-free under parallel
   in 10 minutes, "We will never ask you for this code — don't share it with anyone", "If you didn't
   request this, ignore this email", and the approximate request time. A link to the app is fine;
   it must not carry the code.
+- Addresses are normalised (04 conventions) before any limit, counter or lookup, identically for
+  every address, including the domain rule there: the address stored and counted is the address
+  the email is delivered to (09 §2), never a form a URL parser or mail server would rewrite.
 - Input field: `inputmode="numeric"`, `autocomplete="one-time-code"`, `pattern="[0-9]*"`,
   paste-friendly (strip spaces/dashes).
 - Optional, operator-configurable: Cloudflare Turnstile on `/otp/request` (works on both targets).
@@ -124,8 +127,21 @@ mostly painless.
   WebSockets (the server publishes a `session.revoked` control message to the user's realtime
   channel; sockets are tagged with their session id and closed with code `4401`). Sockets also have
   a 24 h maximum lifetime, so a missed revocation can't outlive a day (03 §6).
-- On sign-out the client also unsubscribes its push subscription and clears per-game local state
-  (rack order) — shared devices.
+- On sign-out (and logout-all) the client also unsubscribes its push subscription and clears
+  per-game local state — shared devices. Game modules keep per-user, per-game state only in
+  `localStorage` keys under the reserved prefix `ym.game.` (`ym.game.<gameType>.<userId>.<gameId>`,
+  02 §3, 07 §2), so one `clearClientState()` removes every such key, and nothing else of a
+  module's survives the session. It runs on sign-out and sign-out everywhere, in every open tab (a
+  `BroadcastChannel` message); a tab that becomes visible checks `/api/v1/me` again, and a launch
+  that finds no session clears the game keys too, so a session ended from another device clears
+  them as well. The shell's **public word-list cache**
+  (`dictionaries-v1`, 07 §4) deliberately survives sign-out: it holds only public, content-addressed
+  lists (each stored under the digest of its own contents) and nothing of any user. So does the shell's
+  `ym.install-dismissed` flag (07 §4): per device, no user data, and kept across sign-out on
+  purpose, the `ym.push-offered` flag (07 §4, alpha A8) and the `ym.theme` copy of the theme choice (07 §5, alpha A9), for the same reasons. The device's
+  push subscription does not survive: `clearClientState()` unsubscribes it in the browser (the
+  server already deleted its row with the session), and so does a launch that finds no session,
+  beside clearing the game keys (the return path is kept, as above).
 - **Suspension** (05 §Admin API): suspending a user deletes their sessions and revokes their tokens
   (with the same socket closing as above), cancels the lobbies they created and declines their
   pending invitations (realtime only); their active games continue and time out normally. The
@@ -190,7 +206,7 @@ Verify on a real device during M2.
   zero-width characters (U+200B–200F, U+FEFF; the joiner U+200D only when it isn't between two
   emoji code points, so emoji sequences such as families and flags work), anything containing
   `://`, `www.` or `@`, anything
-  that looks like a domain (`\p{L}\.\p{L}{2,}`, case-insensitive) or contains a run of ≥ 7 digits,
+  that looks like a domain (`\p{L}\.\p{L}{2,}`, case-insensitive) or contains 7 or more digits anywhere, counted with separators ignored and after NFKC folding, so circled, superscript and full-width digits count too (`555 123 4567`, `5-5-5-1-2-3-4`, `①②③④⑤⑥⑦`; alpha A17 review S-4, S2-4; applied when a name is set, never to stored names),
   and (case-insensitively) the configured `APP_NAME`, "admin", "support", "official", "staff".
   (Discourages spam via invite emails/push and impersonation.)
 - Not unique. The UI disambiguates where needed (e.g. "Sam (2)" is *not* done; instead the start-game
@@ -222,6 +238,16 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    seat, exactly as on the email path, so the response reveals neither whether a typed address has
    an account nor whether two other people have blocked each other.
 
+   Picked (`userId`) invitees are seated before typed addresses, whatever their order in the
+   request (alpha A12): "already added" and "earlier invitee" above always put a picked invitee
+   before every typed one, so a typed address can only ever get the `inert` seat itself and never
+   changes how a picked one is seated (which the creator would see, since an auto-join shows as
+   `joined`). Between two picked invitees with a block, the later one gets an `inert` invitation
+   instead of an auto-join; the creator sees it as invited rather than joined, so this one case
+   does tell the creator that two of their past opponents have a block between them. It can't arise
+   until blocks can be made (M4), and Q29 settles it before then (default: with two or more picks
+   in a request, every pick is an invitation).
+
    To limit typo invites, the players step shows each typed address back for confirmation before
    Create ("Check the address: …"). A row that has never been `joined` never shows a name or user
    id to anyone, in any state: while it's `invited` the creator sees the address they typed (or the
@@ -232,30 +258,83 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
 2. **Who can add me to games** (`users.settings.whoCanAddMe`, set in Settings):
    - `pastOpponents` (default): people I've finished a game with (04 `past_opponents`) can pick me
      from their list and I'm auto-joined and notified (push "<creator> added you to a game" +
-     realtime). Everyone else — including a
+     realtime; when the game starts at creation and it's my turn, the one push says "<creator>
+     added you to a game. Your turn.", 03 §7). Everyone else — including a
      past opponent who types my email — sends me an **invitation**. A game with AI seats or with
      AI assistance allowed is always an invitation too, so I see the AI setup before I'm in
      (02 §4).
    - `nobody`: every game is an invitation, even from past opponents.
 
+   Decision (alpha A12 review S2-2): a creator who picks someone whose setting is `nobody` sees that
+   seat as invited rather than joined, which reveals that person's global preference to their past
+   opponents. That is acceptable: it says nothing about an address or a block, and Q29's default
+   (every pick an invitation when a request picks two or more) hides it in group games.
+
    (There's no "anyone" setting: adding by email must never auto-join, or the creator would learn
    that the address has an account.)
 
    An invitation is an `invited` seat with my `user_id`. It shows under *Invitations* in my game
-   list with an in-app badge and a realtime update, plus a generic push that names nobody ("You have a new game invitation"), at most one per recipient per day — never
-   the inviter's display name, the game or anything else they chose. If I have email nudges on,
+   list with an in-app badge and a realtime update, plus a generic push that names nobody ("You
+   have a new game invitation"), at most one per recipient per day — never the inviter's display
+   name, the game or anything else they chose. If I have email nudges on,
    I get at most one email per invitation: a fixed "<Display Name> invited you to play <game name>"
-   template, sent via `waitUntil` when the invitation is created (or claimed), category `nudges`
+   template, sent via `waitUntil` when the invitation is created (a claim sends only the push,
+   below), category `nudges`
    (unsubscribe turns nudges off), counted toward the instance-wide invite-email cap (08 §4), never
    for `hidden` or `inert` invitations. I accept (`joined`) or decline; the invitation screen also
    offers **Block**. Invitations expire with the lobby.
+
+   Precisely (alpha A20). An invitation here is a `normal` `invited` row with a `user_id`: a typed
+   address of an onboarded user, a past opponent picked when their `whoCanAddMe` is `nobody` or the
+   game allows AI assistance (02 §4), or a claimed email-invite seat (§6.4).
+   - **The push** is sent in the background after the response, on alpha A8's sender (03 §7): body
+     "You have a new game invitation.", `url` `/` (the game list, where *Invitations* are), `tag`
+     `invitation`, so one notification stands for however many arrived. It reads the game when it
+     is sent and pushes only to invitees whose row is still a `normal` invitation in a `lobby`. The
+     daily limit is a counter per recipient in the fixed UTC day (`INVITATION_PUSHES_USER_DAY`,
+     08 §4), taken in the background only for a recipient with a live subscription and only the
+     first one in the day is sent; nothing in the request reads or writes it, so it says nothing
+     to a creator (Q3).
+   - **The email** (`invitationNudgeEmail`) goes only to an onboarded human with
+     `settings.emailNudges` true and `email_id` set, not suspended or being deleted, whose address
+     has no `email_suppressions` row of any reason (an `unsubscribed` row is the address's own
+     "don't send me invites", which this email is). Turning email nudges on in Settings is the
+     holder's own opt-in and deletes their address's `unsubscribed` row, never a `bounced` or
+     `complained` one (review A20-P-3, 04). Subject and first line: "<Display Name>
+     invited you to play <game name> on <APP_NAME>"; then a link to `PUBLIC_URL` (the invitation is
+     in the game list), why it was sent, and the Settings link and the `nudges` one-click
+     unsubscribe with its headers (05 §Email links); never the game's id, options, state or other
+     players, nor any address. For a typed address it is built, counted and scheduled exactly like
+     the invite email (§6.3, §6.6): "may be mailed" in §6.6's tiers covers this email too, so it is
+     sent only when the inviter's caps, the per-address cap and the instance-wide cap all passed,
+     and `invites.sent_at` records it. Strangers' invitations can use up a nudged user's 3 in 30
+     days, so a later invitation sends no email; the push still arrives (accepted residual F-24,
+     review A20-S-3). A picked invitee isn't a typed address: it counts nothing
+     toward the inviter's caps, and the shared caps under its real keys (its `email_id`) only when
+     it may be mailed, the `silent` counter otherwise, so the work doesn't depend on its setting.
+   - A claim (§6.4) sends the push, never the email: the seat's one email was the invite email
+     decided when the game was created (§6.3), so "at most one email per invitation" holds and no
+     cap is passed twice.
 3. Email-invite seats: `game_players.invite_email` set, `user_id` NULL, state `invited`. The game
    stays in `lobby` until all seats are joined or the creator starts it (02 §4). The invite email
    uses a fixed template, with no user-supplied free text other than display name:
    *"<Display Name> (<inviter email>) has invited you to play <game name> on <APP_NAME>."* + the turn
-   timeout + a link to `PUBLIC_URL` + short "how to add to your home screen" + one-click
-   unsubscribe ("Don't send me invites again", 05 §Email links). It isn't sent if the address is
-   suppressed or over an invite cap (§6.6); the seat is created either way.
+   timeout + how long the invitation stays open (the lobby's 14 days) + how to join (sign in at
+   `PUBLIC_URL` with this address: a link to `PUBLIC_URL` that carries nothing else, a sign-in code
+   by email, a display name, then the invitation waits in the game list) + short "how to add to
+   your home screen" + one-click unsubscribe ("Don't send me invites again", 05 §Email links:
+   purpose `invites`, the address's `emailId`, with the `List-Unsubscribe` headers). The subject is
+   *"<Display Name> invited you to play <game name> on <APP_NAME>"*. Nothing else about the game:
+   never its options, state or other players (alpha A17). Until turn timeouts exist (they aren't in
+   the alpha, 10) the email leaves the turn timeout out rather than promise a limit nothing
+   enforces. It is built for **every** typed address (the same work whatever the address turns out
+   to be, §6.1) and sent via `waitUntil` after the response, only for an email-invite seat with
+   `normal` delivery whose address isn't suppressed (any reason, 04 `email_suppressions`) and
+   that passed every invite cap (§6.6). A seat the inbound cap made `hidden` (§6.7) is never
+   mailed, exactly like a suppressed address (review A17-P-1): it would otherwise reach the person
+   with no badge and no list entry to match. The seat is created either way. The `invites` row's
+   `sent_at` is set by that background task once the sender has accepted the email, never before
+   the response; a failed send leaves it NULL.
 4. When a user **completes onboarding** (not merely verifies a code), every `invited`, non-`inert`
    email seat with matching `invite_email` in a `lobby` game where they hold no other row is
    claimed (guard, version check and retries in 02 §4): `user_id` set, `invite_email` kept for the
@@ -263,7 +342,9 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    to play — Accept / Decline"), with the same checks as a new invitation:
    - the full §6.1 block rule against the creator **and every other row** in the game (a block in
      either direction → `inert`);
-   - the inbound cap (§6.7; over it → `hidden`), counted atomically with the claim.
+   - the inbound cap (§6.7; over it → `hidden`). The cap is counted once, when the game is created
+     and for every typed address (§6.7); the claim reads the `delivery` stored on the seat then,
+     and counts nothing again.
 
    An `inert` seat is never claimed and never becomes deliverable.
 
@@ -271,6 +352,20 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    sends no realtime event to other members and changes nothing the creator sees. The sweep (03 §8)
    also claims any matching seat it finds for an onboarded user, which covers a game created while
    the invitee was completing onboarding and any claim that failed.
+
+   Precisely (alpha A17): the `PATCH /api/v1/me` that completes onboarding claims before it
+   answers, so the new user's game list already shows the invitations (unread: the row keeps the
+   `last_seen_version` of -1 it was created with). It claims at most a per-runtime number of seats,
+   oldest lobby first (Node 50, the Worker 8, sized by the Worker's per-request query budget,
+   09 §3; review A17-S-5); the sweep's claim step claims any beyond that on its next runs (03 §8),
+   so an address with more seats than the cap gets the rest within a sweep or a few. A claim
+   that fails there is logged by error class and never fails onboarding; the sweep claims it
+   later. A lobby at or past its expiry is never claimed into (it is about to expire, 02 §4). A
+   claim that makes a `normal` invitation sends the claimant the generic invitation push (§6.2;
+   alpha A20), in the background after the
+   onboarding response or from the sweep, and never the invitation email. At onboarding the
+   claimant has usually just signed in and has no push subscription yet, so that push is normally
+   a no-op (review A20-P-6); the sweep's claim is the one that usually reaches a device.
 5. Lobbies expire 14 days after creation → `expired`. When an email seat reaches any terminal
    state (accepted, game expired/cancelled/started without it, removed or declined), `invite_email`
    is cleared — we don't retain addresses the creator typed (the `invites` table keeps only the
@@ -279,22 +374,71 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    - **Email invitees per creator**: 10 per day and 5 per hour (08 §4), counted for every typed
      email whatever it turns out to be, so the limit reveals nothing. Over the limit the
      whole request is `429` and nothing is created.
-   - **Invite emails** (to addresses without an account): per inviter 5 / day and 20 / 30 days;
-     accounts younger than 7 days **that have not yet completed a game** get 2 / day; per target
+   - **Invite emails** (to email-invite seats: no account, or one that hasn't finished
+     onboarding; and, since alpha A20, the invitation email to a user with nudges on, §6.2): per
+     inviter 5 / day and 20 / 30 days;
+     accounts younger than 7 days **that have not yet completed a game** (have no past-opponent
+     row, §6.9: a finished game in which both players acted) get 2 / day; per target
      address 3 invite emails / 30 days across all inviters (counted in `rate_limits` keyed by the
      email HMAC, so the count survives invite deletion); instance-wide caps in 08 §4. Over these
-     limits, and for suppressed addresses, the seat is still created but **no email is sent** — the
-     response doesn't change.
+     limits, and for suppressed or `hidden` seats (§6.3), the seat is still created but **no email
+     is sent** — the response doesn't change. They are counted in two tiers, the same way for
+     every typed address (alpha A17 review S-1):
+     1. the **inviter's** caps (a day, 30 days, the new-account rate) count **every** typed address
+        as one attempt, whatever it resolves to — an onboarded user, no account, an un-onboarded
+        account, a suppressed address, a `hidden` seat — so how much allowance an address uses up
+        reveals nothing about it, and the inviter, the only one who can observe these caps, learns
+        nothing from them. Inviting existing players by address therefore uses up the inviter's
+        invite-email allowance too;
+     2. the **shared** caps (per target address, instance-wide) count under their real keys only an
+        address that may be mailed (an email-invite seat with `normal` delivery, not suppressed;
+        since alpha A20 also a `normal` invitation of a user who gets the invitation email, §6.2)
+        and passed the inviter's caps; every other address adds 1 to the never-read `silent`
+        counter of each instead (§3.2), so addresses that would never be mailed can't spend another
+        address's or the instance's budget;
+     3. the email is sent only when every cap passed, and never once the instance-wide cap has
+        been crossed in the current fixed UTC day: from its crossing (marked when its alert is
+        logged) to the end of that day nothing is sent, whatever the sliding estimate says
+        later, so an instance held at the cap answers a probe at most about once a day
+        (review A17-S2-1; the residual is accepted risk F-20).
+
+     Every typed address therefore writes the same number of counters and schedules the same
+     background task. Known residual (review A17-P-13): for a mailed address the per-target row
+     is typically inserted, while an unmailed one updates the long-lived `silent` row, so the
+     database work differs as an insert differs from an update; nothing of it is visible through
+     the API, and the statistical timing suite covers the timing class (ADR 0006). The background
+     task's own work differs by address too (an email sent or not; since alpha A20 the invitation
+     push and its daily counter): on Workers it runs in the request's `waitUntil`, after the
+     response; on Node it shares the server's event loop, so a creator's next request can wait a
+     little longer behind a send than behind nothing. That residual (review A20-S-6) needs the
+     creator to time their own following requests against an email provider's or push service's
+     latency; nothing of it is in any response.
 7. Game creation is also limited per pair (5 / day) and per user (30 / day), so a harasser can't
    spam declines-and-recreate. A **pair** is (creator, `userId`) for a picked past opponent and
    (creator, `emailId`) for every typed address, whatever it resolves to, so these limits (and the
-   per-pair cap on `lobby`/`active` games, 05) behave the same for every address (Q3). **Inbound cap**: a user receives at most **1 invitation per day from
-   any one creator** who isn't a past opponent, and **3 per day in total** from such creators. Over
-   the cap the invitation is created with `delivery = hidden`: it goes to a collapsed *Hidden
-   invitations* list (no badge, no push, no email), where the user can still accept or decline it,
-   and it expires with the lobby. The creator sees "Invited" either way. Active game caps (05) count
-   only games a user *created*, so other people's games can never lock a user out of creating their
-   own.
+   per-pair cap on `lobby`/`active` games, 05) behave the same for every address (Q3).
+   **Inbound cap**: a user receives at most **1 invitation per day from any one creator** who
+   isn't a past opponent, and **3 per day in total** from such creators. Over the cap the
+   invitation is created with `delivery = hidden`: it goes to a collapsed *Hidden invitations*
+   list (no badge, no push, no email), where the user can still accept or decline it, and it
+   expires with the lobby. Since alpha A20 (review S-1, which fixes F-17) the cap counts **live
+   invitations**, not creations: the `invites` rows for the target's `emailId` in games created
+   in the last 24 hours, from creators who aren't past opponents of the user the address belongs
+   to. The per-creator count takes the creator's rows of any delivery but `inert`; the total takes
+   `normal` ones. A row stops counting when its lobby ended unplayed (`cancelled`, `expired`, or
+   `declined` by someone else) or its seat was `removed`, so throwaway lobbies can't push a real
+   invitation into *Hidden*; the target's own decline keeps it counting, so declining doesn't
+   invite a re-invitation, and so does a game that started. Each `invites` row has its seat's
+   `game_players.id` as its id (04), which is how a removal is seen. It is one read per typed
+   address, the same statement whatever the address resolves to (a placeholder user when there is
+   none), and writes nothing (Q3). The read isn't serialised with the insert, so creations racing
+   for one target all read the same count: one stranger racing their own creations can get up
+   to the pair limit (`GAMES_CREATED_PAIR_DAY`, 5 a day) of `normal` invitations to that target,
+   and any number of strangers can race at once. The notices stay bounded (one invitation push a
+   day, 3 emails to an address in 30 days); only the target's list grows. Serialising the check
+   inside the create batch is M4's (10; review A20-P2-2, S2-1). The creator sees "Invited" either
+   way. Active game caps (05) count only games a user *created*, so other people's games can never
+   lock a user out of creating their own.
 8. **Join links** (for groups, and for players who'd rather share a link in a group chat than type
    emails):
    - Created by the creator for a `lobby` game's open seats (seats not held by an `invited` or
@@ -305,18 +449,28 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    - Valid until the game starts, the creator revokes/rotates it, the lobby expires, or 7 days —
      whichever is first. Revocation or expiry never ends the lobby by itself (02 §4).
    - While a link is live, or once anyone has joined through one, the game never starts
-     automatically: the creator sees who joined and presses Start (02 §4).
+     automatically: the creator sees who joined and presses Start (02 §4). Whether a game starts by
+     itself is judged only in the transition that accepts an invitation (a join through a link never
+     starts one); revoking or rotating a link, or its expiry, is no transition and never starts a
+     game, which then waits for the creator's Start or the next accept.
    - Joining requires being signed in and onboarded. A signed-out visitor signs up via OTP; the page
      keeps its own path and fragment in `sessionStorage` (only same-origin `/join` paths are
      accepted) and returns there afterwards. After reading the fragment the page calls
-     `history.replaceState` to plain `/join`, so the token doesn't linger in browser history, and it
+     `history.replaceState` to plain `/join`, so the token doesn't linger in the tab's session history
+     (the browser's own history database may still have recorded the visit: an accepted residual,
+     docs/security/findings.md F-23), and it
      clears the `sessionStorage` entry after a successful join or a `404`. Nothing ever joins
      automatically: the user always taps **Join**.
    - Refused with the indistinguishable `404` if the joiner has a block in either direction with the
-     creator **or any current member**, if they declined or left this game, or if they were removed
-     from it while this link was live (`removed_at ≥ join_links.created_at`; rotating the link
-     lets the creator re-admit them). A user who already holds a `normal` or `hidden` invitation in
-     the game accepts it by joining (`joined_via = invitation`); an `inert` row is never accepted.
+     creator **or anyone else holding a row in the game** (joined, invited, declined, left or
+     removed alike, 05), if they declined or left this game, or if the creator removed them from
+     it: a removal sticks across links, so no join link brings them back, neither a rotated one nor
+     a new one after a revoke or expiry (the creator can play with them in another game:
+     cancel this one and create a new one, inviting them by address or as a past opponent; alpha
+     A18 review S-3). A user who already holds a `normal` or `hidden` invitation in
+     the game accepts it by joining (`joined_via = invitation`); an `inert` row is never accepted, and
+     its holder gets the same `404`. The checks read the same rows for every outcome, so the
+     answer's work doesn't say which reason refused it.
    - A link join counts only against the joiner's own limits (lookup/join per user and per IP,
      08 §4), never against the creator's game caps.
    - The link reveals the game type, options, creator's display name and **joined** players'
@@ -329,13 +483,52 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    anyone's past opponent without the creator's say-so. A pair with a block in either direction is
    never recorded — not at the finish, not through that question (`canAddPlayers` still lists a
    blocked link joiner, so the prompt reveals nothing, but `add-player` is then a silent `204`
-   no-op that writes no pair) — and blocking someone deletes the relationship both
+   no-op that writes no pair; what follows it can still show the block, an item open for M4 in
+   08 T20) — and blocking someone deletes the relationship both
    ways. A test asserts that no `past_opponents` row ever exists for a blocked pair (04 invariant 6).
 10. **Blocks** apply between every pair of users in a game: they're checked when seats are added
     (§6.1), on accept, on join, and again at start (02 §4). Blocking someone you share a lobby with
     takes effect at once: if you created it, their seat is removed; otherwise your own seat is
     declined or left (05 §Blocks). You can block anyone who is a past opponent or who holds or held a
     row in a game with you, including from the invitation screen.
+
+11. **Rematch** (alpha A15, 05 `POST /api/v1/games/:id/rematch`). Any player of a `finished` game
+    may ask for its rematch; it is created as if they had picked every other player of that game by
+    `userId` in `POST /api/v1/games`, so every rule above applies to it unchanged (the past-opponent
+    and block checks of §6.1, `whoCanAddMe` of §6.2, the limits of §6.7) and nothing is checked
+    differently. Everyone involved already shared that game and knows who else played, so no
+    address is ever involved and no address-to-account link can arise. What each caller can observe:
+    - **Not a player of the game** (never seated, or a stranger guessing ids): `404 NOT_FOUND`, the
+      same code, body and reads as `GET /api/v1/games/:id` gives a non-member, before anything is
+      created or counted; only the per-user write limit every write counts applies. It never says
+      whether a rematch exists.
+    - **A player whose fellow player has since blocked them, or is suspended or being deleted, or
+      joined by link and was never added**: `400 INVALID_INVITEES`, before any limit is counted —
+      exactly what picking that person in `POST /api/v1/games` answers, for every one of those
+      reasons alike. It reveals nothing new: the same person has already left (or never joined) the
+      caller's "People you've played" list (`GET /api/v1/players/recent`), for the same set of
+      reasons. So in a game with a link joiner only its creator can start the rematch, and only
+      after adding them (§6.9): adding pairs the joiner with the creator alone, by design, so
+      every other player's rematch stays `INVALID_INVITEES`, and so does the joiner's own while
+      the game has another player who isn't their past opponent (alpha A19).
+    - **A player whose fellow player's account was deleted, or who never acted in that game**
+      (declined, or resigned or timed out before a first action): that person isn't carried over,
+      and the rematch has one seat fewer. When too few people remain for the game, the answer is
+      `409 REMATCH_UNAVAILABLE`, before any limit is counted. Both depend only on what every player
+      of the finished game already sees: "Deleted player" on its finished screen, and who acted in
+      its public history.
+    - **The rematch itself** is shown to every player of the finished game (`rematch`, 05), with
+      only their own place in it: joined, invited, or neither. A rematch that ended unplayed
+      (any declined ending, or cancelled or expired before any action, but never an operator's
+      cancel; 04 `rematch_game_id`) shows as no rematch (`null`) and may be replaced;
+      its status is one every member of it saw, and any player could have pressed Rematch anyway. An `inert` invitation (a block
+      between two picked players, which can't arise until M4, Q29) shows as invited, and accepting
+      it is `404`, the same as accepting an invitation whose block is found on accept (05); it shows
+      the player that a rematch was made, which they'd also learn from the other players.
+    - Status codes, error codes, caps and their timing class are those of `POST /api/v1/games` (and
+      of `POST …/accept` for the accept), whatever the other players' states. Two simultaneous
+      presses yield one game; the loser's own daily creation counters were already counted (its
+      own limits only, bounded by the write limit), an accepted cost.
 
 Privacy note: with Q3 resolved, signed-in users can no longer learn whether an address has an
 account from anything the server does on its own: responses, timing, limits, the lobby display,
@@ -352,8 +545,10 @@ to the account's email (same OTP machinery and limits as sign-in, purpose-bound 
 
 - **Account deletion** (purpose `delete_account`): the client requests a code
   (`POST /api/v1/me/delete/otp`), then calls `DELETE /api/v1/me { code }`. Then → 04 §Account
-  deletion. Sends a confirmation email afterwards. Immediate and irreversible (no grace period in
-  v1); backups age out per the documented retention (09 §4).
+  deletion. Sends a confirmation email afterwards, counted toward the instance-wide OTP email caps
+  (08 §4.2); over either cap the confirmation is skipped, since it only informs, and the account is
+  deleted all the same. Immediate and irreversible (no grace period in v1); backups age out per the
+  documented retention (09 §4).
 - **Creating an API token** (purpose `token_create`, §8): the code is sent with the create
   request.
 - **Creating an admin token** (purpose `token_admin`, §8, 05 §Admin API): a separate purpose, so a

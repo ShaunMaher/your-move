@@ -17,7 +17,7 @@ import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 
 import type { Database, Statement } from "../database.js";
 import type { GameWriteSet } from "../repositories.js";
-import { gameActions, gamePlayers, games } from "../schema.js";
+import { blocks, gameActions, gamePlayers, games, joinLinks, pastOpponents } from "../schema.js";
 
 /** True only while `token` is the game's stored write token: this transition won. */
 export function tokenGuard(gameId: string, token: string): SQL {
@@ -35,7 +35,7 @@ export function guardedInsert<T extends SQLiteTable>(
   table: T,
   row: T["$inferInsert"],
   guard: SQL,
-): Statement {
+) {
   const given = row as Record<string, unknown>;
   for (const key of Object.keys(given)) {
     if (!(key in getTableColumns(table))) throw new Error(`unknown column "${key}"`);
@@ -52,6 +52,11 @@ export function guardedInsert<T extends SQLiteTable>(
   return db.insert(table).select(sql`SELECT ${sql.join(values, sql`, `)} WHERE ${guard}`);
 }
 
+/** No block in either direction between the two users (04 invariant 6). */
+export function unblocked(a: string, b: string): SQL {
+  return sql`NOT EXISTS (SELECT 1 FROM ${blocks} WHERE (${blocks.blockerId} = ${a} AND ${blocks.blockedId} = ${b}) OR (${blocks.blockerId} = ${b} AND ${blocks.blockedId} = ${a}))`;
+}
+
 /** The statements of one transition, statement 1 first. */
 export function transitionStatements(
   db: Database,
@@ -61,10 +66,19 @@ export function transitionStatements(
   writes: GameWriteSet,
 ): [Statement, ...Statement[]] {
   const guard = tokenGuard(gameId, token);
+  const link = writes.requireJoinLink;
   const first = db
     .update(games)
     .set({ ...writes.game, version: sql`${games.version} + 1`, writeToken: token })
-    .where(and(eq(games.id, gameId), eq(games.version, expectedVersion)))
+    .where(
+      and(
+        eq(games.id, gameId),
+        eq(games.version, expectedVersion),
+        link === undefined
+          ? undefined
+          : sql`EXISTS (SELECT 1 FROM ${joinLinks} WHERE ${joinLinks.gameId} = ${gameId} AND ${joinLinks.tokenHash} = ${link.tokenHash} AND ${joinLinks.expiresAt} > ${link.now})`,
+      ),
+    )
     .returning({ id: games.id });
   const dependent: Statement[] = [
     ...(writes.insertPlayers ?? []).map((player) =>
@@ -79,6 +93,20 @@ export function transitionStatements(
     ...(writes.insertActions ?? []).map((action) =>
       guardedInsert(db, gameActions, { ...action, gameId }, guard),
     ),
+    ...(writes.pastOpponents ?? []).map((pair) =>
+      guardedInsert(
+        db,
+        pastOpponents,
+        pair,
+        and(guard, unblocked(pair.userId, pair.otherId)) ?? guard,
+      ).onConflictDoUpdate({
+        target: [pastOpponents.userId, pastOpponents.otherId],
+        set: { lastFinishedAt: pair.lastFinishedAt },
+      }),
+    ),
+    ...(writes.deleteJoinLink === true
+      ? [db.delete(joinLinks).where(and(eq(joinLinks.gameId, gameId), guard))]
+      : []),
   ];
   return [first, ...dependent];
 }

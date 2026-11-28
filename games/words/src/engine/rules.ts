@@ -14,16 +14,10 @@ import {
   type Seat,
 } from "@your-move/sdk";
 
+import { unknownWords } from "./analysis.js";
 import { analysePlay, type PlayAnalysis } from "./board.js";
 import { ERROR_CODES, type Action, type PreviewResult } from "./schemas.js";
 import { rackOf, rulesetOf, type State } from "./state.js";
-
-/** The words a play forms that aren't in the dictionary, each once, in the order formed. */
-function invalidWords(analysis: PlayAnalysis, res: Resources): string[] {
-  const words = [...new Set(analysis.words.map((scored) => scored.word))];
-  // Without a dictionary nothing can be checked, so no word is accepted.
-  return words.filter((word) => res.dictionary?.has(word) !== true);
-}
 
 /** Whether every tile is in the rack, counting repeats. */
 function inRack(rack: readonly string[], tiles: readonly string[]): boolean {
@@ -52,7 +46,8 @@ export function check(
     case "play": {
       const analysis = analysePlay(ruleset, state.board, rack, action.placements);
       if (isGameError(analysis)) return analysis;
-      const words = invalidWords(analysis, res);
+      // Without a dictionary nothing can be checked, so no word is accepted.
+      const words = unknownWords(analysis, (word) => res.dictionary?.has(word) === true);
       return words.length === 0 ? analysis : { code: ERROR_CODES.invalidWords, detail: { words } };
     }
     case "swap":

@@ -1,6 +1,6 @@
 /**
- * Builds what the suite runs against, exactly as the build stage does: the web app, the Node
- * server bundle and the Worker bundle with its `_headers`. Then starts the Node build
+ * Builds what the suite runs against, exactly as the build stage does: the built-in dictionaries,
+ * the web app, the Node server bundle and the Worker bundle with its `_headers`. Then starts the Node build
  * (`node apps/node/dist/main.js`) on a free port; the Worker half runs in Wrangler's test harness.
  * The builds record their bundler inputs in a temporary directory, not generated/bundles/, so a
  * test run never stands in for `pnpm build`'s records (02 §7.3).
@@ -19,6 +19,8 @@ import { CONTRACT_SECRETS, CONTRACT_VARS } from "./env.js";
 declare module "vitest" {
   export interface ProvidedContext {
     nodeUrl: string;
+    /** The Node build's database file, for seeding signed-in players (no email is readable). */
+    nodeDb: string;
   }
 }
 
@@ -57,10 +59,18 @@ export default async function setup(project: TestProject): Promise<() => void> {
   const build = (name: string) => {
     execFileSync("pnpm", ["--filter", name, "build"], {
       stdio: "inherit",
-      env: { ...process.env, PUBLIC_URL: CONTRACT_VARS.PUBLIC_URL, BUNDLE_INPUTS_DIR: records },
+      // Vitest sets NODE_ENV=test; a build inheriting it bundles React's development build into
+      // apps/web/dist, which is the one `pnpm build` made. Builds are production builds.
+      env: {
+        ...process.env,
+        NODE_ENV: "production",
+        PUBLIC_URL: CONTRACT_VARS.PUBLIC_URL,
+        BUNDLE_INPUTS_DIR: records,
+      },
     });
   };
   try {
+    build("@your-move/dictionary");
     build("@your-move/web");
     build("@your-move/node");
     build("@your-move/worker");
@@ -71,6 +81,7 @@ export default async function setup(project: TestProject): Promise<() => void> {
   const port = await freePort();
   // A fresh database, migrated by the Node build at startup.
   const data = mkdtempSync(join(tmpdir(), "contract-db-"));
+  const database = join(data, "app.sqlite");
   const child = spawn(process.execPath, ["--disallow-code-generation-from-strings", NODE_MAIN], {
     env: {
       ...process.env,
@@ -78,7 +89,7 @@ export default async function setup(project: TestProject): Promise<() => void> {
       ...CONTRACT_SECRETS,
       PORT: String(port),
       LOG_LEVEL: "warn",
-      DATABASE_PATH: join(data, "app.sqlite"),
+      DATABASE_PATH: database,
     },
     stdio: ["ignore", "inherit", "inherit"],
   });
@@ -92,6 +103,7 @@ export default async function setup(project: TestProject): Promise<() => void> {
     throw error;
   }
   project.provide("nodeUrl", url);
+  project.provide("nodeDb", database);
   return () => {
     child.kill("SIGTERM");
     rmSync(data, { recursive: true, force: true });

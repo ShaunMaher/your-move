@@ -3,8 +3,8 @@
  * committed migrations (or the folder `--migrations` names, which `gates:prove` uses for its
  * scratch copies):
  *
- * 1. the journal and each migration's text (scripts/src/db/migrations.ts): the rebuild rule and
- *    no transaction control;
+ * 1. the journal and each migration's text (scripts/src/db/migrations.ts): the rebuild and
+ *    dropped-column rules and no transaction control;
  * 2. structure (scripts/src/db/schema-compare.ts): the schema the migrations build must equal the
  *    schema built by a fresh drizzle-kit generation from `schema.ts` into an empty folder, so a
  *    hand edit to a committed `.sql` fails;
@@ -85,13 +85,20 @@ run(COMMAND, () => {
   // 2. Structure: committed migrations against a generation from empty.
   withScratch((fresh) => {
     generate(fresh);
-    const differences = compareSchemas(describeMigrations(migrations), describeMigrations(fresh));
-    problems.push(
-      ...differences.map(
-        (difference) =>
-          `the committed migrations build a different schema from schema.ts: ${difference}`,
-      ),
-    );
+    try {
+      const differences = compareSchemas(describeMigrations(migrations), describeMigrations(fresh));
+      problems.push(
+        ...differences.map(
+          (difference) =>
+            `the committed migrations build a different schema from schema.ts: ${difference}`,
+        ),
+      );
+    } catch (error) {
+      // Reported with the text problems above rather than instead of them.
+      problems.push(
+        `the committed migrations can't be compared with schema.ts: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   });
 
   // 3. Regeneration over the committed folder.

@@ -28,7 +28,19 @@ hangs slow to fail and would blur what the tests are measuring.
   - Each worker first opens the app once in a throwaway context, under a 90 s warm-up budget. That
     is 3× the first-page times that failed.
   - Browser launch gets an explicit 120 s, about 2× the slowest successful CI launch.
-  - Tests keep 30 s.
+  - Tests keep 30 s, except the tests in which two people play a game: in `game.spec.ts` a full
+    game has its own budget (120 s, `GAME_TEST_TIMEOUT_MS`) and the short resign test 60 s
+    (`RESIGN_TEST_TIMEOUT_MS`), and the rematch in `opponents.spec.ts` (alpha A12: a short game
+    with a pass each, then a second game picked from the list; alpha A15: then a third from the
+    finished game's Rematch button, opened by both players) 90 s (`REMATCH_TEST_TIMEOUT_MS`, 5–6 s
+    locally before A15; with it 6–8 s with a warm browser, 12–15 s as a shard's first test), and
+    the no-play hint in `no-play.spec.ts` (alpha A14: the short game's steps and the word list's
+    download and search, no moves) 60 s (`NO_PLAY_TEST_TIMEOUT_MS`, 2–3 s locally), and the
+    email invite in `invites.spec.ts` (alpha A17: a game for an address with no account, the
+    second person's sign-up from its invitation email, a pass each and the unsubscribe page) 60 s
+    (`INVITE_TEST_TIMEOUT_MS`, 6–10 s locally). These are
+    margins over local measurements, not CI ones; each is re-measured
+    on the CI runner from the first pipeline that runs it, and then set from that.
   - CI runs one worker per job.
 - **Test kit CPU budget** (`KIT_CPU_BUDGET_MS`, 08 T25):
   - CI sets one calibrated value (20 ms, 4×) for every kit run.

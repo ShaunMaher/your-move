@@ -4,13 +4,15 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "./app.js";
+import { ApiError } from "./http/api-error.js";
+import { loggedIssues } from "./http/error-log.js";
 import { securityHeaders } from "./http/security-headers.js";
 import { createJsonLogger } from "./log.js";
-import { PROD_ENV, testPlatform } from "./test-support.js";
+import { PROD_ENV, TEST_VAPID, testPlatform } from "./test-support.js";
 
 function setup(env = PROD_ENV) {
   const platform = testPlatform(env);
-  const app = createApp({ platform, games: [] });
+  const app = createApp({ platform, games: [], onboardingClaims: 8 });
   return { platform, app };
 }
 
@@ -29,8 +31,8 @@ describe("GET /api/v1/config", () => {
     const { app } = setup({
       ...PROD_ENV,
       APP_NAME: "Family Games",
-      VAPID_PUBLIC_KEY: "vapid-public",
-      VAPID_PRIVATE_KEY: "vapid-private-secret",
+      VAPID_PUBLIC_KEY: TEST_VAPID.publicKey,
+      VAPID_PRIVATE_KEY: TEST_VAPID.privateKey,
       VAPID_SUBJECT: "mailto:ops@example.org",
     });
     const res = await app.request("/api/v1/config");
@@ -41,11 +43,12 @@ describe("GET /api/v1/config", () => {
       appShortName: "Family Games",
       operatorContact: "ops@example.org",
       minAge: 13,
-      vapidPublicKey: "vapid-public",
+      vapidPublicKey: TEST_VAPID.publicKey,
 
       uploadsEnabled: true,
     });
-    expect(body).not.toMatch(/vapid-private-secret|smtp:\/\//u);
+    expect(body).not.toContain(TEST_VAPID.privateKey);
+    expect(body).not.toMatch(/smtp:\/\//u);
   });
 
   it("omits optional keys that are not configured", async () => {
@@ -73,28 +76,70 @@ describe("GET /api/v1/openapi.json", () => {
       "/api/v1/auth/logout-all",
       "/api/v1/auth/otp/request",
       "/api/v1/auth/otp/verify",
+      "/api/v1/catalog",
       "/api/v1/config",
+      "/api/v1/games",
+      "/api/v1/games/types/{type}/rules",
+      "/api/v1/games/{id}",
+      "/api/v1/games/{id}/accept",
+      "/api/v1/games/{id}/actions",
+      "/api/v1/games/{id}/add-player",
+      "/api/v1/games/{id}/cancel",
+      "/api/v1/games/{id}/decline",
+      "/api/v1/games/{id}/history",
+      "/api/v1/games/{id}/join-link",
+      "/api/v1/games/{id}/preview",
+      "/api/v1/games/{id}/rematch",
+      "/api/v1/games/{id}/remove-seat",
+      "/api/v1/games/{id}/resign",
+      "/api/v1/games/{id}/seen",
+      "/api/v1/games/{id}/start",
       "/api/v1/health",
+      "/api/v1/join",
+      "/api/v1/join/lookup",
       "/api/v1/me",
       "/api/v1/me/delete/otp",
+      "/api/v1/players/recent",
+      "/api/v1/push/subscriptions",
     ]);
   });
 });
 
 describe("server-handled paths", () => {
-  it.each([
-    "/api/nope",
-    "/api/v1/nope",
-    "/api/v2/health",
-    "/__dev/emails",
-    "/manifest.webmanifest",
-  ])("%s is a JSON 404, never the SPA", async (path) => {
+  it.each(["/api/nope", "/api/v1/nope", "/api/v2/health", "/__dev/emails"])(
+    "%s is a JSON 404, never the SPA",
+    async (path) => {
+      const { app } = setup();
+      for (const method of ["GET", "POST"]) {
+        const res = await app.request(path, { method });
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual({ error: { code: "NOT_FOUND", message: "Not found." } });
+      }
+    },
+  );
+});
+
+describe("/manifest.webmanifest", () => {
+  it("is generated from APP_NAME and APP_SHORT_NAME at runtime", async () => {
+    const { app } = setup({ ...PROD_ENV, APP_NAME: "Family Games", APP_SHORT_NAME: "Games" });
+    const res = await app.request("/manifest.webmanifest");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/manifest+json");
+    expect(res.headers.get("Cache-Control")).toBe("no-cache");
+    const manifest = (await res.json()) as Record<string, unknown>;
+    expect(manifest).toMatchObject({
+      name: "Family Games",
+      short_name: "Games",
+      display: "standalone",
+      start_url: "/",
+      scope: "/",
+    });
+    expect(manifest["icons"]).toHaveLength(3);
+  });
+
+  it("answers anything but GET with a JSON 404", async () => {
     const { app } = setup();
-    for (const method of ["GET", "POST"]) {
-      const res = await app.request(path, { method });
-      expect(res.status).toBe(404);
-      expect(await res.json()).toEqual({ error: { code: "NOT_FOUND", message: "Not found." } });
-    }
+    expect((await app.request("/manifest.webmanifest", { method: "POST" })).status).toBe(404);
   });
 });
 
@@ -162,7 +207,7 @@ describe("errors and logging", () => {
         throw new TypeError("kaboom");
       },
     });
-    const app = createApp({ platform: { ...platform, config }, games: [] });
+    const app = createApp({ platform: { ...platform, config }, games: [], onboardingClaims: 8 });
     const failed = await app.request("/api/v1/config");
     expect(failed.status).toBe(500);
     const body = await failed.text();
@@ -189,7 +234,10 @@ describe("errors and logging", () => {
         throw error;
       },
     });
-    return { platform, app: createApp({ platform: { ...platform, config }, games: [] }) };
+    return {
+      platform,
+      app: createApp({ platform: { ...platform, config }, games: [], onboardingClaims: 8 }),
+    };
   }
 
   it.each([
@@ -307,9 +355,268 @@ describe("errors and logging", () => {
     const platform = testPlatform();
     let calls = 0;
     const now = (): Date => new Date(Date.UTC(2026, 0, 1) + 25 * calls++);
-    const app = createApp({ platform: { ...platform, now }, games: [] });
+    const app = createApp({ platform: { ...platform, now }, games: [], onboardingClaims: 8 });
     await app.request("/api/v1/health");
     expect(platform.lines.at(-1)).toMatchObject({ durationMs: 25 });
+  });
+
+  describe("the error code in the request log line (09 §5)", () => {
+    const OTP = "/api/v1/auth/otp/request";
+    const PLANTED = "planted-7f3a91c2";
+    const post = (body: string, headers: Record<string, string> = {}) => ({
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body,
+    });
+    const requestLine = (lines: Record<string, unknown>[]) =>
+      lines.filter((line) => line["msg"] === "request");
+
+    it("carries the code of an ApiError", async () => {
+      const { app, platform } = throwing(ApiError.of("NOT_FOUND"));
+      expect((await app.request("/api/v1/config")).status).toBe(404);
+      const lines = requestLine(platform.lines);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({ status: 404, code: "NOT_FOUND" });
+    });
+
+    it("carries a game module's own code", async () => {
+      const { app, platform } = throwing(ApiError.module("WORD_NOT_FOUND", { word: PLANTED }));
+      expect((await app.request("/api/v1/config")).status).toBe(400);
+      expect(requestLine(platform.lines)[0]).toMatchObject({ code: "WORD_NOT_FOUND" });
+    });
+
+    it("carries INTERNAL for an unhandled exception, without the message", async () => {
+      const { app, platform } = throwing(new TypeError(PLANTED));
+      await app.request("/api/v1/config");
+      expect(requestLine(platform.lines)[0]).toMatchObject({ status: 500, code: "INTERNAL" });
+    });
+
+    it("logs a validation failure's issue paths and codes, never values", async () => {
+      const { app, platform } = setup();
+      const res = await app.request(OTP, post(JSON.stringify({ email: PLANTED.repeat(30) })));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
+      const lines = requestLine(platform.lines);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({
+        status: 400,
+        code: "BAD_REQUEST",
+        route: OTP,
+        issues: "json.email:too_big",
+      });
+      expect(JSON.stringify(platform.lines)).not.toContain(PLANTED);
+    });
+
+    it("tells an address the handler refuses from a validation failure by its reason", async () => {
+      const { app, platform } = setup();
+      const res = await app.request(OTP, post(JSON.stringify({ email: `${PLANTED}@nodot` })));
+      expect(res.status).toBe(400);
+      const line = requestLine(platform.lines)[0];
+      expect(line).toMatchObject({ code: "BAD_REQUEST", reason: "invalid_email" });
+      expect(line).not.toHaveProperty("issues");
+      expect(JSON.stringify(platform.lines)).not.toContain(PLANTED);
+    });
+
+    it("logs an unknown key as an issue without naming the key", async () => {
+      const { app, platform } = setup();
+      await app.request(OTP, post(JSON.stringify({ email: "a@example.org", [PLANTED]: 1 })));
+      expect(requestLine(platform.lines)[0]).toMatchObject({ issues: "json:unrecognized_keys" });
+      expect(JSON.stringify(platform.lines)).not.toContain(PLANTED);
+    });
+
+    it("logs a body of the wrong shape by path and code", async () => {
+      const { app, platform } = setup();
+      await app.request(OTP, post(JSON.stringify({ email: 42 })));
+      expect(requestLine(platform.lines)[0]).toMatchObject({ issues: "json.email:invalid_type" });
+    });
+
+    it("carries the code of a JSON-rule refusal", async () => {
+      const { app, platform } = setup();
+      const res = await app.request(OTP, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: PLANTED,
+      });
+      expect(res.status).toBe(415);
+      expect(requestLine(platform.lines)[0]).toMatchObject({
+        status: 415,
+        code: "UNSUPPORTED_MEDIA_TYPE",
+      });
+      expect(JSON.stringify(platform.lines)).not.toContain(PLANTED);
+    });
+
+    it("carries the code of an Origin refusal", async () => {
+      const { app, platform } = setup();
+      const res = await app.request(OTP, post("{}", { Origin: "https://evil.example" }));
+      expect(res.status).toBe(403);
+      expect(requestLine(platform.lines)[0]).toMatchObject({ status: 403, code: "BAD_ORIGIN" });
+    });
+
+    it("carries the code of a body-limit refusal", async () => {
+      const { app, platform } = setup();
+      const res = await app.request(OTP, post(JSON.stringify({ email: "a".repeat(20_000) })));
+      expect(res.status).toBe(413);
+      expect(requestLine(platform.lines)[0]).toMatchObject({ status: 413, code: "TOO_LARGE" });
+    });
+
+    it("carries the code of unparseable JSON", async () => {
+      const { app, platform } = setup();
+      const res = await app.request(OTP, post(`{"email": "${PLANTED}"`));
+      expect(res.status).toBe(400);
+      expect(requestLine(platform.lines)[0]).toMatchObject({ status: 400, code: "BAD_REQUEST" });
+      expect(JSON.stringify(platform.lines)).not.toContain(PLANTED);
+    });
+
+    it("carries the code of a missing client address, with a fixed reason", async () => {
+      const platform = testPlatform(PROD_ENV);
+      const app = createApp({
+        platform: { ...platform, clientIp: () => ({ ok: false, reason: "missing" }) },
+        games: [],
+        onboardingClaims: 8,
+      });
+      const res = await app.request(OTP, post(JSON.stringify({ email: "a@example.org" })));
+      expect(res.status).toBe(400);
+      expect(requestLine(platform.lines)[0]).toMatchObject({
+        code: "BAD_REQUEST",
+        reason: "no_client_ip",
+      });
+      expect(JSON.stringify(platform.lines)).not.toContain("a@example.org");
+    });
+
+    describe("session-gate refusals", () => {
+      const ME = "/api/v1/me";
+      const NOW = Date.UTC(2026, 0, 1);
+      const TOKEN = "stale-token".padEnd(43, "x");
+      const COOKIE = { Cookie: `__Host-sid=${TOKEN}` };
+
+      it.each([
+        ["no cookie", {}, 401, "UNAUTHENTICATED"],
+        ["a bearer token alone", { Authorization: "Bearer x" }, 401, "UNAUTHENTICATED"],
+        [
+          "a cookie and a bearer token",
+          { ...COOKIE, Authorization: "Bearer x" },
+          400,
+          "BAD_REQUEST",
+        ],
+      ])("carries the code for %s", async (_, headers, status, code) => {
+        const { app, platform } = setup();
+        const res = await app.request(ME, { headers });
+        expect(res.status).toBe(status);
+        expect(requestLine(platform.lines)[0]).toMatchObject({ status, code });
+        expect(JSON.stringify(platform.lines)).not.toContain(TOKEN);
+      });
+
+      it("carries the code for a stale cookie", async () => {
+        const { app, platform } = signedInAs(null);
+        const res = await app.request(ME, { headers: COOKIE });
+        expect(res.status).toBe(401);
+        expect(requestLine(platform.lines)[0]).toMatchObject({ code: "UNAUTHENTICATED" });
+      });
+
+      /** An app whose session cookie resolves to a stored user with these fields. */
+      function signedInAs(user: Record<string, unknown> | null) {
+        const platform = testPlatform(PROD_ENV);
+        const repos = {
+          ...platform.repos,
+          sessions: {
+            ...platform.repos.sessions,
+            findByTokenHash: () =>
+              Promise.resolve(
+                user === null
+                  ? null
+                  : {
+                      session: {
+                        id: "s",
+                        createdAt: NOW,
+                        lastSeenAt: NOW,
+                        expiresAt: Number.MAX_SAFE_INTEGER,
+                      },
+                      user: { id: "u", suspendedAt: null, ...user },
+                    },
+              ),
+          },
+        };
+        return {
+          platform,
+          app: createApp({
+            platform: { ...platform, repos } as never,
+            games: [],
+            onboardingClaims: 8,
+          }),
+        };
+      }
+
+      it("carries SUSPENDED for a suspended account", async () => {
+        const { app, platform } = signedInAs({ suspendedAt: 1 });
+        const res = await app.request(ME, { headers: COOKIE });
+        expect(res.status).toBe(403);
+        expect(requestLine(platform.lines)[0]).toMatchObject({ status: 403, code: "SUSPENDED" });
+      });
+
+      it("gives requesting a deletion code for an account without an address the reason no_email", async () => {
+        const { app, platform } = signedInAs({ email: null, onboardedAt: 1 });
+        const res = await app.request("/api/v1/me/delete/otp", {
+          method: "POST",
+          headers: { ...COOKIE, Origin: "https://play.example.org" },
+        });
+        expect(res.status).toBe(400);
+        expect(requestLine(platform.lines)[0]).toMatchObject({
+          code: "BAD_REQUEST",
+          reason: "no_email",
+        });
+      });
+
+      it("gives turning nudges on for an account without an address the reason no_email", async () => {
+        const { app, platform } = signedInAs({ email: null, onboardedAt: 1 });
+        const res = await app.request(ME, {
+          method: "PATCH",
+          headers: {
+            ...COOKIE,
+            "Content-Type": "application/json",
+            Origin: "https://play.example.org",
+          },
+          body: JSON.stringify({ settings: { emailNudges: true } }),
+        });
+        expect(res.status).toBe(400);
+        expect(requestLine(platform.lines)[0]).toMatchObject({
+          code: "BAD_REQUEST",
+          reason: "no_email",
+        });
+      });
+    });
+
+    it("never logs an identifier-shaped unknown key of a strict object", async () => {
+      const { app, platform } = setup();
+      const key = "planted_key_9c1e";
+      await app.request(OTP, post(JSON.stringify({ email: "a@example.org", [key]: 1 })));
+      expect(requestLine(platform.lines)[0]).toMatchObject({ issues: "json:unrecognized_keys" });
+      expect(JSON.stringify(platform.lines)).not.toContain(key);
+    });
+
+    it("leaves a successful request without a code", async () => {
+      const { app, platform } = setup();
+      await app.request("/api/v1/health");
+      expect(requestLine(platform.lines)[0]).not.toHaveProperty("code");
+    });
+  });
+
+  describe("loggedIssues", () => {
+    it("caps the count and masks keys that could carry input", () => {
+      const issues = Array.from({ length: 9 }, () => ({
+        path: ["items", 3, "someone@example.org"],
+        code: "invalid_type",
+      }));
+      const logged = loggedIssues("json", issues);
+      expect(logged.split(",")).toHaveLength(5);
+      expect(logged).toContain("json.items.3.*:invalid_type");
+      expect(logged).not.toContain("someone");
+    });
+
+    it("drops an issue code that is not a plain Zod code", () => {
+      expect(loggedIssues("query", [{ path: [], code: "custom code with spaces" }])).toBe(
+        "query:unknown",
+      );
+    });
   });
 });
 

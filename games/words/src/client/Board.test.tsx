@@ -1,0 +1,1448 @@
+// @vitest-environment jsdom
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { GameEnvelope, GameError, SubmitResult } from "@your-move/sdk";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { Lexicon, PreviewResult } from "../engine/index.js";
+import { view } from "../engine/present.js";
+import type { State } from "../engine/state.js";
+import { board, envelope, rack, ruleset, state, wordList } from "../test-support.js";
+import "./dom-setup.js";
+import { Board } from "./Board.js";
+
+const CLASSIC = ruleset("classic");
+const [SR, SC] = CLASSIC.start;
+const NAMES = ["Ann", "Bo"];
+
+afterEach(() => {
+  vi.useRealTimers();
+  cleanup();
+  vi.restoreAllMocks();
+  localStorage.clear();
+});
+
+/** CAT through the start square; Ann holds S, X, E, a blank, A, B and C. */
+function fresh(fields: Partial<State> = {}): State {
+  return state({
+    racks: [rack("sxe?abc"), rack("eeeeeee")],
+    board: board(CLASSIC, [{ row: SR, col: SC - 1, word: "cat" }]),
+    scores: [12, 7],
+    ...fields,
+  });
+}
+
+const OK_PREVIEW: PreviewResult = { score: 6, words: [{ word: "cats", score: 6 }], bingo: false };
+const SENT: SubmitResult = { ok: true, game: envelope(NAMES, 0), view: null };
+
+interface Shell {
+  submit?: SubmitResult | Error;
+  preview?: PreviewResult | GameError | Error;
+  viewer?: number | null;
+  yourTurn?: boolean;
+  status?: "active" | "finished";
+  resources?: GameEnvelope["resources"];
+  gameVersion?: number;
+  lexicon?: Lexicon;
+  /** The id the shell gives the list: the game's own by default. */
+  listId?: string;
+}
+
+function setup(s: State = fresh(), shell: Shell = {}) {
+  const viewer = shell.viewer === undefined ? 0 : shell.viewer;
+  const submit = vi.fn(() =>
+    shell.submit instanceof Error
+      ? Promise.reject(shell.submit)
+      : Promise.resolve(shell.submit ?? SENT),
+  );
+  const preview = vi.fn(() =>
+    shell.preview instanceof Error
+      ? Promise.reject(shell.preview)
+      : Promise.resolve(shell.preview ?? OK_PREVIEW),
+  );
+  const game = envelope(NAMES, viewer, {
+    yourTurn: shell.yourTurn ?? viewer === s.turn,
+    toAct: s.finished === null ? [s.turn] : [],
+    ...(shell.status === undefined ? {} : { status: shell.status }),
+    ...(shell.resources === undefined ? {} : { resources: shell.resources }),
+    ...(shell.gameVersion === undefined ? {} : { gameVersion: shell.gameVersion }),
+  });
+  // The shell's resources: one object for the whole game, as the contract asks (02 §3).
+  const list = shell.lexicon;
+  const resources =
+    list === undefined
+      ? undefined
+      : {
+          dictionary: {
+            id: shell.listId ?? "enable",
+            version: 1,
+            has: (word: string) => list.has(word),
+            follows: (prefix: string) => list.follows(prefix),
+          },
+        };
+  const ui = (version: number, v = view(s, viewer)) => (
+    <Board
+      game={{ ...game, version }}
+      view={v}
+      submit={submit}
+      preview={preview}
+      {...(resources === undefined ? {} : { resources })}
+    />
+  );
+  const result = render(ui(3));
+  return {
+    submit,
+    preview,
+    ...result,
+    rerenderAt: (version: number, v = view(s, viewer)) => {
+      result.rerender(ui(version, v));
+    },
+  };
+}
+
+const square = (row: number, col: number): HTMLElement => {
+  const found = document.querySelector<HTMLElement>(
+    `[data-square="${String(row)},${String(col)}"]`,
+  );
+  if (found === null) throw new Error("no such square");
+  return found;
+};
+const rackTile = (name: string): HTMLElement => screen.getByRole("button", { name });
+const button = (name: string | RegExp): HTMLElement => screen.getByRole("button", { name });
+
+/** Taps a rack tile, then a square. */
+function place(tile: string, row: number, col: number): void {
+  fireEvent.click(rackTile(tile));
+  fireEvent.click(square(row, col));
+}
+
+describe("the table", () => {
+  it("shows the scores, whose turn it is, the bag and the last play", () => {
+    setup(
+      fresh({
+        lastMove: {
+          seat: 1,
+          type: "play",
+          placements: [{ row: SR, col: SC, tile: "a", letter: "a" }],
+          words: [{ word: "cat", score: 5 }],
+          score: 5,
+          bingo: false,
+        },
+      }),
+    );
+    const scores = screen.getByRole("list", { name: "Scores" });
+    expect(
+      within(scores)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual(["Ann (you) 12", "Bo 7"]);
+    expect(within(scores).getAllByRole("listitem")[0]?.getAttribute("aria-current")).toBe("true");
+    expect(screen.getByText(/in the bag · Bo played CAT for 5/u)).toBeTruthy();
+    expect(screen.getByText("Place tiles to make a word.")).toBeTruthy();
+    const chip = screen.getByRole("status");
+    expect(chip.textContent).toBe("Your turn");
+    expect(chip.getAttribute("data-yours")).toBe("true");
+  });
+
+  it("labels every square: position, premium (its face text first), start, tile and last play", () => {
+    setup();
+    expect(square(SR + 1, SC).getAttribute("aria-label")).toBe("Row 9, column 8, empty");
+    const tw = CLASSIC.premiums.flatMap((line, row) =>
+      Array.from(line).flatMap((code, col) => (code === "T" ? [[row, col] as const] : [])),
+    )[0] ?? [0, 0];
+    expect(square(tw[0], tw[1]).getAttribute("aria-label")).toBe(
+      `Row ${String(tw[0] + 1)}, column ${String(tw[1] + 1)}, 3W, triple word, empty`,
+    );
+    expect(square(SR, SC - 1).getAttribute("aria-label")).toBe("Row 8, column 7, C, 3 points");
+    expect(rackTile("S, 1 point")).toBeTruthy();
+    expect(rackTile("Blank tile")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^Row \d+, column \d+/u })).toHaveLength(225);
+  });
+
+  it("puts every square's visible text in its accessible name (WCAG 2.5.3)", () => {
+    setup();
+    const squares = screen.getAllByRole("button", { name: /^Row \d+, column \d+/u });
+    const faces = squares.flatMap((el) => {
+      const face = el.querySelector(".ym-w-face")?.textContent ?? "";
+      return face === "" ? [] : [{ face, name: el.getAttribute("aria-label") ?? "" }];
+    });
+    expect(faces.length).toBeGreaterThan(40);
+    for (const { face, name } of faces) expect(name).toContain(face);
+    // A tile's face reads "A 1" (letter, space, points), inside its name "A, 1 point".
+    const tiles = screen.getAllByRole("button", { name: /, \d+ points?/u });
+    for (const el of tiles.filter((t) => t.querySelector("small") !== null)) {
+      const face = el.textContent.replace(/\s+/gu, " ").trim();
+      const spoken = (el.getAttribute("aria-label") ?? "").replace(/[^\p{L}\p{N}]+/gu, " ");
+      expect(spoken.toLowerCase()).toContain(face.toLowerCase());
+    }
+  });
+
+  it("names the start square when it is empty and has no premium", () => {
+    setup(state({ racks: [rack("abcdefg"), rack("hijklmn")], rulesetId: "casual" }));
+    expect(square(SR, SC).getAttribute("aria-label")).toBe("Row 8, column 8, start square, empty");
+  });
+
+  it("marks the last play's tiles", () => {
+    const last = {
+      seat: 1,
+      type: "play" as const,
+      placements: [{ row: SR, col: SC, tile: "a", letter: "a" }],
+      words: [{ word: "cat", score: 5 }],
+      score: 5,
+      bingo: false,
+    };
+    setup(
+      fresh({
+        lastMove: last,
+      }),
+    );
+    expect(screen.getAllByRole("button", { name: /A, 1 point, last play/u })).toHaveLength(1);
+  });
+
+  it("says so when it doesn't know the rules version", () => {
+    const v = { ...view(fresh(), 0), ruleset: { id: "classic", version: 99 } };
+    render(<Board game={envelope(NAMES, 0)} view={v} submit={vi.fn()} preview={vi.fn()} />);
+    expect(screen.getByRole("alert").textContent).toContain("version of the rules");
+  });
+});
+
+describe("placing tiles by tap", () => {
+  it("selects a rack tile, places it on a square and returns it to the rack", () => {
+    setup();
+    const s = rackTile("S, 1 point");
+    fireEvent.click(s);
+    expect(s.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(s);
+    expect(s.getAttribute("aria-pressed")).toBe("false");
+    place("S, 1 point", SR + 1, SC);
+    expect(screen.queryByRole("button", { name: "S, 1 point" })).toBeNull();
+    expect(square(SR + 1, SC).getAttribute("aria-label")).toBe(
+      "Row 9, column 8, S, 1 point, your tile, not played yet",
+    );
+    // Pick the placed tile up, then tap the rack to take it back.
+    fireEvent.click(square(SR + 1, SC));
+    expect(square(SR + 1, SC).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(button("Return tile to rack"));
+    expect(rackTile("S, 1 point")).toBeTruthy();
+    expect(square(SR + 1, SC).getAttribute("aria-label")).toContain("empty");
+  });
+
+  it("moves a placed tile to another square", () => {
+    setup();
+    place("S, 1 point", SR + 1, SC);
+    fireEvent.click(square(SR + 1, SC));
+    fireEvent.click(square(SR + 2, SC));
+    expect(square(SR + 1, SC).getAttribute("aria-label")).toContain("empty");
+    expect(square(SR + 2, SC).getAttribute("aria-label")).toContain("S, 1 point");
+  });
+
+  it("puts a selected placed tile back in front of a rack tile", () => {
+    setup();
+    place("S, 1 point", SR + 1, SC);
+    fireEvent.click(square(SR + 1, SC));
+    fireEvent.click(rackTile("A, 1 point"));
+    const names = within(screen.getByRole("group", { name: "Your rack" }))
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("aria-label"));
+    expect(names.indexOf("S, 1 point")).toBe(names.indexOf("A, 1 point") - 1);
+  });
+
+  it("ignores taps on played tiles and on squares with nothing selected", () => {
+    setup();
+    fireEvent.click(square(SR, SC - 1));
+    fireEvent.click(square(SR + 1, SC));
+    expect(screen.getByText("Place tiles to make a word.")).toBeTruthy();
+  });
+
+  it("returns a placed tile with Backspace on its square", () => {
+    setup();
+    place("S, 1 point", SR + 1, SC);
+    fireEvent.keyDown(square(SR + 1, SC), { key: "Backspace" });
+    expect(rackTile("S, 1 point")).toBeTruthy();
+    fireEvent.keyDown(square(SR + 1, SC), { key: "Delete" });
+    fireEvent.keyDown(square(SR + 1, SC), { key: "a" });
+  });
+
+  it("recalls every placed tile", () => {
+    setup();
+    expect(button("Recall").hasAttribute("disabled")).toBe(true);
+    place("S, 1 point", SR, SC + 2);
+    place("X, 8 points", SR, SC + 3);
+    fireEvent.click(button("Recall"));
+    expect(rackTile("S, 1 point")).toBeTruthy();
+    expect(rackTile("X, 8 points")).toBeTruthy();
+  });
+
+  it("shuffles the rack without losing a tile", () => {
+    setup();
+    fireEvent.click(button("Shuffle"));
+    expect(
+      within(screen.getByRole("group", { name: "Your rack" })).getAllByRole("button"),
+    ).toHaveLength(7);
+    const saved: unknown = JSON.parse(localStorage.getItem("ym.game.words.u0.g1") ?? "null");
+    expect([...(saved as number[])].sort()).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it("writes nothing to storage until the player reorders the rack", () => {
+    setup();
+    expect(localStorage.length).toBe(0);
+    place("S, 1 point", SR, SC + 2);
+    fireEvent.click(button("Recall"));
+    expect(localStorage.length).toBe(0);
+    fireEvent.click(button("Shuffle"));
+    expect(Object.keys(localStorage)).toEqual(["ym.game.words.u0.g1"]);
+  });
+
+  it("stores only positions, under the per-user, per-game key the shell wipes", () => {
+    setup();
+    fireEvent.click(button("Shuffle"));
+    expect(Object.keys(localStorage)).toEqual(["ym.game.words.u0.g1"]);
+    expect(localStorage.getItem("ym.game.words.u0.g1")).toMatch(/^\[[\d,]+\]$/u);
+  });
+
+  it("keeps nothing for a game that is over, and clears what was kept", () => {
+    localStorage.setItem("ym.game.words.u0.g1", "[2,1,0,6,3,5,4]");
+    setup(fresh(), { status: "finished" });
+    expect(localStorage.getItem("ym.game.words.u0.g1")).toBeNull();
+  });
+
+  it("ignores an order that doesn't fit the rack, or one saved by another account", () => {
+    localStorage.setItem("ym.game.words.u0.g1", "[0,1,2]");
+    localStorage.setItem("ym.game.words.u1.g1", "[2,1,0,6,3,5,4]");
+    setup();
+    const names = within(screen.getByRole("group", { name: "Your rack" }))
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("aria-label"));
+    expect(names[0]).toBe("A, 1 point");
+  });
+
+  it("restores the rack order saved for the game", () => {
+    localStorage.setItem("ym.game.words.u0.g1", "[2,1,0,6,3,5,4]");
+    setup();
+    const names = within(screen.getByRole("group", { name: "Your rack" }))
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("aria-label"));
+    expect(names[0]).toBe("C, 3 points");
+    expect(names.at(-1)).toBe("S, 1 point");
+  });
+
+  it("works without storage", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    setup();
+    fireEvent.click(button("Shuffle"));
+    expect(rackTile("S, 1 point")).toBeTruthy();
+  });
+});
+
+describe("the blank", () => {
+  it("asks for a letter and shows the tile as that letter", () => {
+    setup();
+    place("Blank tile", SR, SC + 2);
+    const dialog = screen.getByRole("dialog", { name: "Choose a letter for the blank" });
+    expect(within(dialog).getAllByRole("button")).toHaveLength(27);
+    fireEvent.click(within(dialog).getByRole("button", { name: "S" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(square(SR, SC + 2).getAttribute("aria-label")).toBe(
+      "Row 8, column 10, Blank tile standing for S, your tile, not played yet",
+    );
+  });
+
+  it("takes the blank back to the rack when the picker is dismissed", () => {
+    setup();
+    place("Blank tile", SR, SC + 2);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(rackTile("Blank tile")).toBeTruthy();
+  });
+
+  it("closes with the Cancel button too", () => {
+    setup();
+    place("Blank tile", SR, SC + 2);
+    fireEvent.click(button("Cancel"));
+    expect(rackTile("Blank tile")).toBeTruthy();
+  });
+
+  it("keeps focus inside the dialog and returns it afterwards", () => {
+    setup();
+    const opener = rackTile("Blank tile");
+    opener.focus();
+    place("Blank tile", SR, SC + 2);
+    const dialog = screen.getByRole("dialog");
+    const buttons = within(dialog).getAllByRole("button");
+    expect(document.activeElement).toBe(buttons[0]);
+    buttons.at(-1)?.focus();
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    expect(document.activeElement).toBe(buttons[0]);
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(buttons.at(-1));
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(document.activeElement).not.toBe(dialog);
+  });
+
+  it("answers Escape only inside the dialog", () => {
+    setup();
+    place("Blank tile", SR, SC + 2);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("puts focus on the board when what opened the dialog is gone", () => {
+    setup();
+    rackTile("Blank tile").focus();
+    place("Blank tile", SR, SC + 2);
+    // The blank's rack button is unmounted while it sits on the board; cancelling brings back a
+    // new one, so focus can't go back to the old element.
+    fireEvent.click(button("Cancel"));
+    const target = document.activeElement;
+    expect(target?.getAttribute("data-square")).not.toBeNull();
+    expect(target?.getAttribute("tabindex")).toBe("0");
+  });
+});
+
+const PREVIEW_MS = 250;
+const SERVER_MS = 600;
+
+/** Moves fake time on and lets the promises it settles run. */
+async function advance(ms: number): Promise<void> {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+
+describe("the live preview", () => {
+  it("shows the local score at once, then the shell's answer", async () => {
+    const { preview } = setup();
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.getByText("+6")).toBeTruthy();
+    expect(screen.getByText(/CATS 6/u)).toBeTruthy();
+    expect(screen.getByText("Checking the words…")).toBeTruthy();
+    expect(await screen.findByText("All words are in the word list.")).toBeTruthy();
+    expect(preview).toHaveBeenCalledTimes(1);
+    expect(preview).toHaveBeenCalledWith({
+      type: "play",
+      placements: [{ row: SR, col: SC + 2, tile: "s" }],
+    });
+  });
+
+  it("shows the words the shell refuses and disables Play", async () => {
+    setup(fresh(), { preview: { code: "INVALID_WORDS", detail: { words: ["cats"] } } });
+    place("S, 1 point", SR, SC + 2);
+    expect(await screen.findByText("Not in the word list: CATS.")).toBeTruthy();
+    expect(button("Play").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("shows the engine's reason when the tiles can't be played there", () => {
+    const { preview } = setup();
+    place("S, 1 point", SR + 3, SC + 3);
+    expect(screen.getByText("Your play must touch a tile already on the board.")).toBeTruthy();
+    expect(button("Play").hasAttribute("disabled")).toBe(true);
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("explains each placement rule in words", () => {
+    setup();
+    place("S, 1 point", SR + 1, SC);
+    place("X, 8 points", SR + 2, SC + 1);
+    expect(screen.getByText("Tiles must all be in one row or one column.")).toBeTruthy();
+    place("E, 1 point", SR + 4, SC);
+    fireEvent.click(button("Recall"));
+    place("S, 1 point", SR + 1, SC - 1);
+    place("E, 1 point", SR + 3, SC - 1);
+    expect(screen.getByText("There is a gap between your tiles.")).toBeTruthy();
+  });
+
+  it.each([
+    ["a rate limit", { code: "RATE_LIMITED" }],
+    ["a stale game", { code: "STALE_GAME" }],
+    ["any other error", { code: "INTERNAL" }],
+  ])("treats %s as not having checked, and still allows the play", async (_what, error) => {
+    setup(fresh(), { preview: error });
+    place("S, 1 point", SR, SC + 2);
+    expect(await screen.findByText(/the server will when you play/u)).toBeTruthy();
+    expect(button("Play").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("disables Play for a refused placement the shell reports", async () => {
+    setup(fresh(), { preview: { code: "INVALID_PLACEMENT", detail: "GAP" } });
+    place("S, 1 point", SR, SC + 2);
+    expect(await screen.findByText("There is a gap between your tiles.")).toBeTruthy();
+    expect(button("Play").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("asks once for the same tiles, even when they are taken back and put down again", async () => {
+    vi.useFakeTimers();
+    const { preview } = setup();
+    place("S, 1 point", SR, SC + 2);
+    await advance(PREVIEW_MS);
+    expect(preview).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("All words are in the word list.")).toBeTruthy();
+    fireEvent.click(button("Recall"));
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.getByText("All words are in the word list.")).toBeTruthy();
+    await advance(5000);
+    expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits the whole debounce (249 ms: nothing, 250 ms: one question)", async () => {
+    vi.useFakeTimers();
+    const { preview } = setup();
+    place("S, 1 point", SR, SC + 2);
+    await advance(PREVIEW_MS - 1);
+    expect(preview).not.toHaveBeenCalled();
+    await advance(1);
+    expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts the wait again when the tiles change", async () => {
+    vi.useFakeTimers();
+    const { preview } = setup();
+    place("S, 1 point", SR, SC + 2);
+    await advance(PREVIEW_MS - 1);
+    place("E, 1 point", SR, SC + 3);
+    await advance(PREVIEW_MS - 1);
+    expect(preview).not.toHaveBeenCalled();
+    await advance(1);
+    expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("doesn't show a valid answer cached for an earlier version once the shell now refuses", async () => {
+    vi.useFakeTimers();
+    const { preview, rerenderAt } = setup();
+    place("S, 1 point", SR, SC + 2);
+    await advance(PREVIEW_MS);
+    expect(screen.getByText("All words are in the word list.")).toBeTruthy();
+    preview.mockImplementation(() =>
+      Promise.resolve({ code: "INVALID_WORDS", detail: { words: ["cats"] } } as GameError),
+    );
+    rerenderAt(4);
+    // At once the old answer is gone and Play waits for the new one.
+    expect(screen.queryByText("All words are in the word list.")).toBeNull();
+    await advance(PREVIEW_MS);
+    expect(screen.getByText("Not in the word list: CATS.")).toBeTruthy();
+    expect(button("Play").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("retries a check that couldn't be made when the tiles come back", async () => {
+    const preview = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(OK_PREVIEW);
+    const s = fresh();
+    const game = envelope(NAMES, 0, { toAct: [0], yourTurn: true });
+    render(<Board game={game} view={view(s, 0)} submit={vi.fn()} preview={preview} />);
+    place("S, 1 point", SR, SC + 2);
+    await screen.findByText(/the server will when you play/u);
+    fireEvent.click(button("Recall"));
+    place("S, 1 point", SR, SC + 2);
+    expect(await screen.findByText("All words are in the word list.")).toBeTruthy();
+    expect(preview).toHaveBeenCalledTimes(2);
+  });
+
+  it("waits longer before asking the server about a list only the server holds (599 ms, 600 ms)", async () => {
+    vi.useFakeTimers();
+    const { preview } = setup(fresh(), {
+      resources: [{ kind: "dictionary", id: "x", name: "X", distribution: "serverOnly" }],
+    });
+    place("S, 1 point", SR, SC + 2);
+    await advance(SERVER_MS - 1);
+    expect(preview).not.toHaveBeenCalled();
+    await advance(1);
+    expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the score alone when the shell can't answer, and still allows the play", async () => {
+    setup(fresh(), { preview: new Error("offline") });
+    place("S, 1 point", SR, SC + 2);
+    expect(await screen.findByText(/the server will when you play/u)).toBeTruthy();
+    expect(button("Play").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("uses the shell's score once it answers, bingo and all", async () => {
+    setup(fresh(), { preview: { score: 99, words: [{ word: "cats", score: 99 }], bingo: false } });
+    place("S, 1 point", SR, SC + 2);
+    expect(await screen.findByText("+99")).toBeTruthy();
+  });
+
+  it("only previews what is still on the board", async () => {
+    vi.useFakeTimers();
+    const { preview } = setup();
+    place("S, 1 point", SR, SC + 2);
+    fireEvent.click(button("Recall"));
+    await advance(5000);
+    expect(preview).not.toHaveBeenCalled();
+    expect(screen.getByText("Place tiles to make a word.")).toBeTruthy();
+  });
+
+  it("says when a play uses every tile", () => {
+    const full = state({ racks: [rack("jostled"), rack("eeeeeee")] });
+    setup(full);
+    const word = "jostled";
+    word.split("").forEach((letter, i) => {
+      place(
+        `${letter.toUpperCase()}, ${letter === "j" ? "8" : "1"} point${letter === "j" ? "s" : ""}`.replace(
+          "D, 1 point",
+          "D, 2 points",
+        ),
+        SR,
+        SC + i,
+      );
+    });
+    expect(screen.getByText(/uses every tile/u)).toBeTruthy();
+  });
+});
+
+describe("the status line", () => {
+  it("says which tile is selected and what to do next, for the keyboard path too", () => {
+    setup();
+    fireEvent.click(rackTile("S, 1 point"));
+    expect(screen.getByText("Tile S selected. Choose a square.")).toBeTruthy();
+    fireEvent.click(rackTile("S, 1 point"));
+    expect(screen.getByText("Place tiles to make a word.")).toBeTruthy();
+    fireEvent.click(rackTile("Blank tile"));
+    expect(screen.getByText("Blank tile selected. Choose a square.")).toBeTruthy();
+  });
+});
+
+describe("a browser that can't style the board", () => {
+  it("asks the player to update instead of showing an unstyled board", () => {
+    vi.stubGlobal("CSSStyleSheet", undefined);
+    try {
+      setup();
+      expect(screen.getByRole("alert").textContent).toBe("Please update your browser to play.");
+      expect(screen.queryByRole("group", { name: /^Board/u })).toBeNull();
+      expect(document.head.querySelector("style")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("rules versions", () => {
+  it("shows a game of a rules version this app doesn't know as an update notice", () => {
+    setup(fresh(), { gameVersion: 99 });
+    expect(screen.getByRole("alert").textContent).toContain("Reload the page to update");
+  });
+});
+
+describe("playing", () => {
+  it("submits the placed tiles and waits for the board to update", async () => {
+    const { submit } = setup();
+    place("S, 1 point", SR, SC + 2);
+    await screen.findByText("All words are in the word list.");
+    fireEvent.click(button("Play"));
+    expect(submit).toHaveBeenCalledWith({
+      type: "play",
+      placements: [{ row: SR, col: SC + 2, tile: "s" }],
+    });
+    expect(await screen.findByText("Sent. Waiting for the board to update.")).toBeTruthy();
+    expect(button("Play").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("submits a blank with its letter", () => {
+    const { submit } = setup();
+    place("Blank tile", SR, SC + 2);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "S" }));
+    fireEvent.click(button("Play"));
+    expect(submit).toHaveBeenCalledWith({
+      type: "play",
+      placements: [{ row: SR, col: SC + 2, tile: "?", letter: "s" }],
+    });
+  });
+
+  it("keeps the tentative tiles and says why when the server refuses", async () => {
+    setup(fresh(), { submit: { ok: false, error: { code: "STALE_GAME", message: "stale" } } });
+    place("S, 1 point", SR, SC + 2);
+    fireEvent.click(button("Play"));
+    expect((await screen.findByRole("alert")).textContent).toContain("The game moved on");
+    expect(square(SR, SC + 2).getAttribute("aria-label")).toContain("S, 1 point");
+    expect(button("Play").hasAttribute("disabled")).toBe(false);
+  });
+
+  it.each([
+    [
+      { code: "INVALID_WORDS", message: "", detail: { words: ["cats", "zz"] } },
+      "Not in the word list: CATS, ZZ.",
+    ],
+    [{ code: "INVALID_WORDS", message: "" }, "Not in the word list."],
+    [{ code: "NOT_YOUR_TURN", message: "" }, "It isn't your turn."],
+    [{ code: "GAME_NOT_ACTIVE", message: "" }, "This game is over."],
+    [{ code: "RATE_LIMITED" }, "Too many requests. Wait a moment and try again."],
+    [
+      { code: "SWAP_NOT_ALLOWED", message: "", detail: "BAG_TOO_SMALL" },
+      "There are too few tiles in the bag to swap.",
+    ],
+    [
+      { code: "SWAP_NOT_ALLOWED", message: "", detail: "TILE_NOT_IN_RACK" },
+      "Those tiles can't be swapped.",
+    ],
+    [
+      { code: "INVALID_PLACEMENT", message: "", detail: "ELSEWHERE" },
+      "Those tiles can't be played there.",
+    ],
+    [{ code: "INTERNAL", message: "" }, "That couldn't be done (INTERNAL)."],
+  ])("explains %j", async (error, text) => {
+    setup(fresh(), { submit: { ok: false, error } });
+    place("S, 1 point", SR, SC + 2);
+    fireEvent.click(button("Play"));
+    expect((await screen.findByRole("alert")).textContent).toBe(text);
+  });
+
+  it("says so when the request itself fails", async () => {
+    setup(fresh(), { submit: new Error("offline") });
+    place("S, 1 point", SR, SC + 2);
+    fireEvent.click(button("Play"));
+    expect((await screen.findByRole("alert")).textContent).toContain("Check your connection");
+    expect(button("Play").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("keeps the tentative tiles, the rack order and the zoom when the opponent plays", () => {
+    const { rerenderAt } = setup();
+    place("E, 1 point", SR - 1, SC);
+    place("S, 1 point", SR, SC + 2);
+    fireEvent.click(button("Zoom in"));
+    const grid = document.querySelector<HTMLElement>(".ym-w-grid");
+    const root = document.querySelector(".ym-w");
+    const zoomed = grid?.style.transform;
+    // The opponent plays CATS: the square under my S is now taken.
+    const next = fresh({ board: board(CLASSIC, [{ row: SR, col: SC - 1, word: "cats" }]) });
+    rerenderAt(4, view(next, 0));
+    expect(document.querySelector(".ym-w")).toBe(root);
+    expect(document.querySelector<HTMLElement>(".ym-w-grid")?.style.transform).toBe(zoomed);
+    expect(square(SR - 1, SC).getAttribute("aria-label")).toContain("your tile, not played yet");
+    expect(square(SR, SC + 2).getAttribute("aria-label")).toContain("S, 1 point");
+    expect(square(SR, SC + 2).getAttribute("aria-label")).not.toContain("your tile");
+    expect(rackTile("S, 1 point")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "E, 1 point" })).toBeNull();
+  });
+
+  it("keeps the tiles of a play that is still valid, and asks again about the new board", async () => {
+    const { rerenderAt, preview } = setup();
+    place("S, 1 point", SR, SC + 2);
+    await vi.waitFor(() => {
+      expect(preview).toHaveBeenCalledTimes(1);
+    });
+    rerenderAt(4);
+    await vi.waitFor(() => {
+      expect(preview).toHaveBeenCalledTimes(2);
+    });
+    expect(square(SR, SC + 2).getAttribute("aria-label")).toContain("your tile");
+  });
+
+  it("forgets that a play was sent when a new version arrives", async () => {
+    const { rerenderAt } = setup();
+    place("S, 1 point", SR, SC + 2);
+    fireEvent.click(button("Play"));
+    await screen.findByText("Sent. Waiting for the board to update.");
+    rerenderAt(4);
+    expect(screen.queryByText("Sent. Waiting for the board to update.")).toBeNull();
+  });
+
+  it("returns a placed tile the new rack no longer holds", () => {
+    const { rerenderAt } = setup();
+    place("S, 1 point", SR, SC + 2);
+    const next = fresh({ racks: [rack("xe?abcz"), rack("eeeeeee")] });
+    rerenderAt(4, view(next, 0));
+    expect(square(SR, SC + 2).getAttribute("aria-label")).toContain("empty");
+    expect(rackTile("Z, 10 points")).toBeTruthy();
+  });
+});
+
+describe("swapping and passing", () => {
+  it("swaps the chosen tiles", async () => {
+    const { submit } = setup();
+    fireEvent.click(button("Swap"));
+    const dialog = screen.getByRole("dialog", { name: "Swap tiles" });
+    expect(within(dialog).getByRole("button", { name: "Swap" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "X, 8 points" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Blank tile" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Blank tile" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Swap 1 tile" }));
+    expect(submit).toHaveBeenCalledWith({ type: "swap", tiles: ["x"] });
+    expect(await screen.findByText("Sent. Waiting for the board to update.")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("offers no swap while the bag is too small", () => {
+    const small = fresh({ bag: ["e", "e", "e"] });
+    const { submit } = setup(small);
+    fireEvent.click(button("Swap"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("at least 7 tiles; it holds 3");
+    expect(
+      within(dialog).getByRole("button", { name: "X, 8 points" }).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(submit).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("says the bag is empty", () => {
+    setup(fresh({ bag: [] }));
+    fireEvent.click(button("Swap"));
+    expect(screen.getByRole("dialog").textContent).toContain("it is empty");
+  });
+
+  it("passes after confirming, and not before", async () => {
+    const { submit } = setup();
+    fireEvent.click(button("Pass"));
+    expect(submit).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Pass your turn?" })).getByRole("button", {
+        name: "Cancel",
+      }),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(button("Pass"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Pass" }));
+    expect(submit).toHaveBeenCalledWith({ type: "pass" });
+    expect(await screen.findByText("Sent. Waiting for the board to update.")).toBeTruthy();
+  });
+
+  it("closes the dialog and shows the error when the server refuses", async () => {
+    setup(fresh(), { submit: { ok: false, error: { code: "NOT_YOUR_TURN", message: "" } } });
+    fireEvent.click(button("Pass"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Pass" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("It isn't your turn.");
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("when it isn't your turn", () => {
+  const PLAN = "Not your turn yet. Tiles you place now are only a plan.";
+  const props = () => ({ submit: vi.fn(), preview: vi.fn() });
+
+  it("names whose turn it is, quietly, and marks the acting seat", () => {
+    setup(fresh({ turn: 1 }), { yourTurn: false });
+    const chip = screen.getByRole("status");
+    expect(chip.textContent).toBe("Bo's turn");
+    expect(chip.getAttribute("data-yours")).toBe("false");
+    const seats = within(screen.getByRole("list", { name: "Scores" })).getAllByRole("listitem");
+    expect(seats.map((li) => li.getAttribute("aria-current"))).toEqual(["false", "true"]);
+    expect(screen.getByText(PLAN)).toBeTruthy();
+  });
+
+  it("names every seat that is to act, and nothing when nobody is", () => {
+    const s = fresh({ turn: 1 });
+    const game = envelope(NAMES, 1, { yourTurn: false, toAct: [0, 1] });
+    const { rerender } = render(<Board game={game} view={view(s, 0)} {...props()} />);
+    expect(screen.getByRole("status").textContent).toBe("Waiting for Ann and Bo");
+    rerender(<Board game={{ ...game, toAct: [] }} view={view(s, 0)} {...props()} />);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("draws and names placed tiles as planned, with the local score and no check or request", () => {
+    vi.useFakeTimers();
+    const { preview, submit } = setup(fresh({ turn: 1 }), { yourTurn: false });
+    place("S, 1 point", SR, SC + 2);
+    const tile = square(SR, SC + 2);
+    expect(tile.getAttribute("aria-label")).toBe(
+      "Row 8, column 10, Planned tile S, 1 point, not your turn, not played",
+    );
+    expect(tile.querySelector(".ym-w-tile")?.getAttribute("data-state")).toBe("planned");
+    expect(screen.getByText(PLAN)).toBeTruthy();
+    // The local score shows; the word list isn't asked.
+    expect(screen.getByText("+6")).toBeTruthy();
+    expect(screen.queryByText("Checking the words…")).toBeNull();
+    expect(screen.queryByText("All words are in the word list.")).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    for (const name of ["Play", "Swap", "Pass"]) {
+      expect(button(name).hasAttribute("disabled")).toBe(true);
+    }
+    expect(preview).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("still explains a plan the rules refuse, and keeps Play disabled", () => {
+    setup(fresh({ turn: 1 }), { yourTurn: false });
+    place("S, 1 point", SR, SC + 2);
+    place("E, 1 point", SR - 3, SC + 6);
+    expect(screen.queryByText("+6")).toBeNull();
+    expect(screen.getByText(PLAN)).toBeTruthy();
+    expect(button("Play").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("lets the plan be moved and recalled", () => {
+    setup(fresh({ turn: 1 }), { yourTurn: false });
+    place("S, 1 point", SR, SC + 2);
+    fireEvent.click(square(SR, SC + 2));
+    fireEvent.click(square(SR, SC + 3));
+    expect(square(SR, SC + 3).getAttribute("aria-label")).toContain("Planned tile S");
+    fireEvent.click(button("Recall"));
+    expect(square(SR, SC + 3).getAttribute("aria-label")).toContain("empty");
+  });
+
+  it("turns the plan into a real placement, in place, when the turn comes", async () => {
+    const game = envelope(NAMES, 0, { yourTurn: false, toAct: [1] });
+    const { rerender } = render(
+      <Board game={game} view={view(fresh({ turn: 1 }), 0)} {...props()} />,
+    );
+    place("S, 1 point", SR, SC + 2);
+    const preview = vi.fn(() => Promise.resolve(OK_PREVIEW));
+    rerender(
+      <Board
+        game={{ ...game, version: 4, yourTurn: true, toAct: [0] }}
+        view={view(fresh(), 0)}
+        submit={vi.fn()}
+        preview={preview}
+      />,
+    );
+    expect(screen.getByRole("status").textContent).toBe("Your turn");
+    expect(screen.getByRole("status").getAttribute("data-yours")).toBe("true");
+    const label = square(SR, SC + 2).getAttribute("aria-label") ?? "";
+    expect(label).toContain("your tile, not played yet");
+    expect(label).not.toContain("Planned");
+    expect(
+      square(SR, SC + 2)
+        .querySelector(".ym-w-tile")
+        ?.getAttribute("data-state"),
+    ).toBe("placed");
+    expect(screen.getByText("+6")).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(preview).toHaveBeenCalledTimes(1);
+    });
+    expect(button("Play").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("returns a planned tile to the rack when the opponent plays on its square", () => {
+    const game = envelope(NAMES, 0, { yourTurn: false, toAct: [1] });
+    const p = props();
+    const { rerender } = render(<Board game={game} view={view(fresh({ turn: 1 }), 0)} {...p} />);
+    place("S, 1 point", SR, SC + 2);
+    place("E, 1 point", SR - 1, SC);
+    // The opponent plays CATS: the square under my S is taken.
+    const next = fresh({
+      turn: 1,
+      board: board(CLASSIC, [{ row: SR, col: SC - 1, word: "cats" }]),
+    });
+    rerender(<Board game={{ ...game, version: 4 }} view={view(next, 0)} {...p} />);
+    expect(square(SR, SC + 2).getAttribute("aria-label")).toContain("S, 1 point");
+    expect(square(SR, SC + 2).getAttribute("aria-label")).not.toContain("lanned");
+    expect(rackTile("S, 1 point")).toBeTruthy();
+    expect(square(SR - 1, SC).getAttribute("aria-label")).toContain("Planned tile E");
+    expect(screen.getAllByRole("button", { name: /^Row \d+, column \d+/u })).toHaveLength(225);
+    expect(p.preview).not.toHaveBeenCalled();
+  });
+
+  it("moves and announces nothing when a new version takes the dragged tile's square mid-drag", () => {
+    const game = envelope(NAMES, 0, { yourTurn: false, toAct: [1] });
+    const p = props();
+    const { rerender } = render(<Board game={game} view={view(fresh({ turn: 1 }), 0)} {...p} />);
+    place("S, 1 point", SR, SC + 2);
+    fireEvent.pointerDown(square(SR, SC + 2), { pointerId: 1, clientX: 5, clientY: 5 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 400, clientY: 400 });
+    // The opponent plays CATS: the square under my S is taken, and the S is already on the rack.
+    const next = fresh({
+      turn: 1,
+      board: board(CLASSIC, [{ row: SR, col: SC - 1, word: "cats" }]),
+    });
+    rerender(<Board game={{ ...game, version: 4 }} view={view(next, 0)} {...p} />);
+    // Another tile is selected: a return that did nothing must not clear that either.
+    fireEvent.click(rackTile("E, 1 point"));
+    const racked = document.querySelectorAll("[data-rack-id]").length;
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 400, clientY: 400 });
+    expect(screen.queryByText("Tile S returned to the rack.")).toBeNull();
+    expect(document.querySelectorAll("[data-rack-id]")).toHaveLength(racked);
+    expect(screen.getByText("Tile E selected. Choose a square.")).toBeTruthy();
+  });
+
+  it.each([
+    ["a new version of the game", true],
+    ["the turn passing", false],
+  ])("closes an open dialog on %s, and nothing is sent", (_what, sameVersion) => {
+    const game = envelope(NAMES, 0);
+    const p = props();
+    const { rerender } = render(<Board game={game} view={view(fresh(), 0)} {...p} />);
+    fireEvent.click(button("Pass"));
+    expect(screen.getByRole("dialog", { name: "Pass your turn?" })).toBeTruthy();
+    rerender(
+      <Board
+        game={{
+          ...game,
+          version: sameVersion ? 4 : game.version,
+          ...(sameVersion ? {} : { yourTurn: false, toAct: [1] }),
+        }}
+        view={view(fresh({ turn: sameVersion ? 0 : 1 }), 0)}
+        {...p}
+      />,
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(p.submit).not.toHaveBeenCalled();
+    if (!sameVersion) {
+      // The turn comes back: the dialog does not.
+      rerender(<Board game={game} view={view(fresh(), 0)} {...p} />);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    }
+  });
+
+  it("drags a planned tile's ghost in the planned style", () => {
+    setup(fresh({ turn: 1 }), { yourTurn: false });
+    fireEvent.pointerDown(rackTile("S, 1 point"), { pointerId: 1, clientX: 5, clientY: 5 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 40, clientY: 40 });
+    expect(document.querySelector(".ym-w-ghost .ym-w-tile")?.getAttribute("data-state")).toBe(
+      "planned",
+    );
+  });
+
+  it("sends a planned tile dragged off the board back to the rack (every rectangle is empty here, so any drop is off the board), and sends nothing", () => {
+    vi.useFakeTimers();
+    const { preview, submit } = setup(fresh({ turn: 1 }), { yourTurn: false });
+    fireEvent.click(rackTile("S, 1 point"));
+    fireEvent.click(square(SR, SC + 3));
+    expect(square(SR, SC + 3).getAttribute("aria-label")).toContain("Planned tile S");
+    fireEvent.pointerDown(square(SR, SC + 3), { pointerId: 1, clientX: 5, clientY: 5 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 400, clientY: 400 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 400, clientY: 400 });
+    expect(square(SR, SC + 3).getAttribute("aria-label")).toContain("empty");
+    expect(screen.getByText("Tile S returned to the rack.")).toBeTruthy();
+    act(() => {
+      vi.advanceTimersByTime(PREVIEW_MS * 4);
+    });
+    expect(preview).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("says it is a plan even when nobody is to act", () => {
+    render(
+      <Board
+        game={envelope(NAMES, 0, { yourTurn: false, toAct: [] })}
+        view={view(fresh({ turn: 1 }), 0)}
+        {...props()}
+      />,
+    );
+    expect(screen.getByText(PLAN)).toBeTruthy();
+  });
+
+  it("shows a spectator the board and no rack", () => {
+    setup(fresh(), { viewer: null });
+    expect(screen.queryByRole("group", { name: "Your rack" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Play" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /^Row/u })).toHaveLength(225);
+  });
+});
+
+describe("a finished game", () => {
+  const over = (reason: "out" | "scoreless" | "resign" | "timeout" | "decline") =>
+    fresh({
+      finished: {
+        reason,
+        adjustments: [6, -6],
+        leaver: reason === "out" || reason === "scoreless" ? null : 1,
+      },
+      scores: [18, 1],
+      racks: [rack(""), rack("qzeeeee")],
+      lastMove:
+        reason === "out"
+          ? {
+              seat: 0,
+              type: "play",
+              placements: [{ row: 0, col: 0, tile: "a", letter: "a" }],
+              words: [{ word: "aa", score: 2 }],
+              score: 2,
+              bingo: false,
+            }
+          : {
+              seat: 1,
+              type: reason === "decline" ? "decline" : reason === "timeout" ? "timeout" : "resign",
+              score: 0,
+              bingo: false,
+            },
+    });
+
+  it.each([
+    ["out", "Ann used their last tile. The game is over."],
+    ["scoreless", "Too many turns in a row scored nothing. The game is over."],
+    ["resign", "Bo resigned. The game is over."],
+    ["timeout", "Bo ran out of time. The game is over."],
+    ["decline", "Bo declined the game."],
+  ] as const)("says how it ended (%s)", (reason, text) => {
+    setup(over(reason), { status: "finished" });
+    const summary = screen.getByRole("region", { name: "Game over" });
+    expect(within(summary).getByRole("heading").textContent).toBe(text);
+    expect(screen.queryByRole("group", { name: "Your rack" })).toBeNull();
+  });
+
+  it("shows the final scoring and the racks that were left", () => {
+    setup(over("out"), { status: "finished" });
+    const summary = screen.getByRole("region", { name: "Game over" });
+    const rows = within(summary)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent);
+    expect(rows[0]).toBe("Ann: 18 (tiles left: +6 points)");
+    expect(rows[1]).toContain("Bo: 1 (tiles left: −6 points)");
+    expect(within(summary).getByRole("img").getAttribute("aria-label")).toContain(
+      "Q, 10 points; Z, 10 points",
+    );
+  });
+
+  it("shows a resignation's scores as they were, with no adjustment", () => {
+    setup(over("resign"), { status: "finished" });
+    const rows = within(screen.getByRole("region", { name: "Game over" }))
+      .getAllByRole("listitem")
+      .map((li) => li.textContent);
+    expect(rows[0]).toBe("Ann: 18");
+  });
+
+  it("shows no change for a zero adjustment", () => {
+    const s = over("scoreless");
+    setup(
+      { ...s, finished: { reason: "scoreless", adjustments: [0, -6], leaver: null } },
+      { status: "finished" },
+    );
+    expect(screen.getByText(/tiles left: no change/u)).toBeTruthy();
+  });
+
+  it("falls back to 'a player' when there is no last move", () => {
+    setup({ ...over("resign"), lastMove: null }, { status: "finished" });
+    expect(screen.getByText("A player resigned. The game is over.")).toBeTruthy();
+  });
+});
+
+describe("the local preview", () => {
+  const PLAN_TEXT = "Not your turn yet. Tiles you place now are only a plan.";
+  const cats = (): Lexicon => wordList(["cat", "cats"]);
+  const waitOut = (): void => {
+    act(() => {
+      vi.advanceTimersByTime(PREVIEW_MS * 4);
+    });
+  };
+
+  it("checks the words at once from the game's own list, and asks the server nothing", () => {
+    vi.useFakeTimers();
+    const { preview } = setup(fresh(), { lexicon: cats() });
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.getByText("+6")).toBeTruthy();
+    expect(screen.getByText("All words are in the word list.")).toBeTruthy();
+    expect(screen.queryByText("Checking the words…")).toBeNull();
+    waitOut();
+    expect(preview).not.toHaveBeenCalled();
+    expect(button("Play").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("refuses the words the list lacks at once, with the engine's own text, and disables Play", () => {
+    vi.useFakeTimers();
+    const { preview } = setup(fresh(), { lexicon: wordList(["cat"]) });
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.getByText("Not in the word list: CATS.")).toBeTruthy();
+    expect(button("Play").hasAttribute("disabled")).toBe(true);
+    waitOut();
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("sends the play through submit, which the server decides", () => {
+    const { submit, preview } = setup(fresh(), { lexicon: cats() });
+    place("S, 1 point", SR, SC + 2);
+    fireEvent.click(button("Play"));
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("asks the server when there is no list", () => {
+    vi.useFakeTimers();
+    const { preview } = setup(fresh());
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.getByText("Checking the words…")).toBeTruthy();
+    waitOut();
+    expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks the server when the list isn't the game's own", () => {
+    vi.useFakeTimers();
+    const { preview } = setup(fresh(), { lexicon: cats(), listId: "another" });
+    place("S, 1 point", SR, SC + 2);
+    waitOut();
+    expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks the server when the list throws", () => {
+    vi.useFakeTimers();
+    const broken: Lexicon = {
+      has: () => {
+        throw new Error("broken");
+      },
+      follows: () => 0,
+    };
+    const { preview } = setup(fresh(), { lexicon: broken });
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.getByText("Checking the words…")).toBeTruthy();
+    waitOut();
+    expect(preview).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a planned play's words off turn from the list, with no request", () => {
+    vi.useFakeTimers();
+    const { preview, submit } = setup(fresh({ turn: 1 }), {
+      yourTurn: false,
+      lexicon: cats(),
+    });
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.getByText("+6")).toBeTruthy();
+    expect(screen.getByText("All words are in the word list.")).toBeTruthy();
+    expect(screen.getByText(PLAN_TEXT)).toBeTruthy();
+    waitOut();
+    expect(preview).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    expect(button("Play").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("shows a planned word the list lacks, off turn, without disabling anything new", () => {
+    vi.useFakeTimers();
+    const { preview } = setup(fresh({ turn: 1 }), { yourTurn: false, lexicon: wordList(["cat"]) });
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.getByText("Not in the word list: CATS.")).toBeTruthy();
+    waitOut();
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing and checks nothing off turn without a list", () => {
+    vi.useFakeTimers();
+    const { preview } = setup(fresh({ turn: 1 }), { yourTurn: false });
+    place("S, 1 point", SR, SC + 2);
+    expect(screen.queryByText("All words are in the word list.")).toBeNull();
+    waitOut();
+    expect(preview).not.toHaveBeenCalled();
+  });
+});
+
+describe("the no-play hint", () => {
+  const SWAP_HINT = "No word can be played with your tiles. Try swapping some.";
+  const PASS_HINT = "No word can be played with your tiles. You can pass.";
+  const PROMPT = "Place tiles to make a word.";
+  /** Only CAT and CATS are words: Ann's own rack can make CATS, AEIOULY nothing. */
+  const words = (): Lexicon & { asked: () => number } => {
+    const list = wordList(["cat", "cats"]);
+    let asked = 0;
+    return {
+      has: (word) => {
+        asked += 1;
+        return list.has(word);
+      },
+      follows: (prefix) => {
+        asked += 1;
+        return list.follows(prefix);
+      },
+      asked: () => asked,
+    };
+  };
+  const vowels = (fields: Partial<State> = {}): State =>
+    fresh({ racks: [rack("aeiouly"), rack("eeeeeee")], ...fields });
+  const status = (): string => document.querySelector(".ym-w-status[aria-live]")?.textContent ?? "";
+
+  /** Lets the search's slices run. */
+  async function settle(): Promise<void> {
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+  }
+
+  it("says nothing when the rack has a play", async () => {
+    vi.useFakeTimers();
+    const lexicon = words();
+    setup(fresh(), { lexicon });
+    await settle();
+    expect(lexicon.asked()).toBeGreaterThan(0);
+    expect(status()).toBe(PROMPT);
+  });
+
+  it("suggests a swap when there is no play and the bag allows one, in the live status line", async () => {
+    vi.useFakeTimers();
+    setup(vowels(), { lexicon: words() });
+    expect(status()).toBe(PROMPT);
+    await settle();
+    expect(status()).toBe(SWAP_HINT);
+    // A hint only: nothing is disabled or done for the player.
+    expect(button("Swap").hasAttribute("disabled")).toBe(false);
+    expect(button("Pass").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("suggests a pass when the bag is too small to swap", async () => {
+    vi.useFakeTimers();
+    setup(vowels({ bag: ["a", "b", "c", "d", "e", "f"] }), { lexicon: words() });
+    await settle();
+    expect(status()).toBe(PASS_HINT);
+  });
+
+  it("gives way to the play's own status while tiles are on the board, and comes back", async () => {
+    vi.useFakeTimers();
+    setup(vowels(), { lexicon: words() });
+    await settle();
+    place("E, 1 point", SR + 1, SC);
+    expect(status()).not.toContain("No word");
+    fireEvent.click(button("Recall"));
+    expect(status()).toBe(SWAP_HINT);
+  });
+
+  it("says nothing when the search can't finish or fails", async () => {
+    vi.useFakeTimers();
+    // Every prefix goes on and no word ends: the search runs out of steps.
+    const endless: Lexicon = { has: () => false, follows: () => (1 << 26) - 1 };
+    setup(fresh(), { lexicon: endless });
+    await settle();
+    expect(status()).toBe(PROMPT);
+    cleanup();
+    const broken: Lexicon = {
+      has: () => {
+        throw new Error("broken");
+      },
+      follows: () => 1,
+    };
+    setup(vowels(), { lexicon: broken });
+    await settle();
+    expect(status()).toBe(PROMPT);
+  });
+
+  it("ignores a list that isn't the game's own", async () => {
+    vi.useFakeTimers();
+    const lexicon = words();
+    setup(vowels(), { lexicon, listId: "another" });
+    await settle();
+    expect(lexicon.asked()).toBe(0);
+    expect(status()).toBe(PROMPT);
+  });
+
+  it("says nothing without a word list", async () => {
+    vi.useFakeTimers();
+    setup(vowels());
+    await settle();
+    expect(status()).toBe(PROMPT);
+  });
+
+  it("doesn't search off turn", async () => {
+    vi.useFakeTimers();
+    const lexicon = words();
+    setup(vowels({ turn: 1 }), { yourTurn: false, lexicon });
+    await settle();
+    expect(lexicon.asked()).toBe(0);
+    expect(status()).not.toContain("No word");
+  });
+
+  it("searches once per version of the game, and again for a new one", async () => {
+    vi.useFakeTimers();
+    const lexicon = words();
+    const { rerenderAt } = setup(vowels(), { lexicon });
+    await settle();
+    const once = lexicon.asked();
+    rerenderAt(3);
+    await settle();
+    expect(lexicon.asked()).toBe(once);
+    expect(status()).toBe(SWAP_HINT);
+    rerenderAt(4, view(fresh(), 0));
+    expect(status()).toBe(PROMPT);
+    await settle();
+    expect(lexicon.asked()).toBeGreaterThan(once);
+    expect(status()).toBe(PROMPT);
+  });
+
+  /**
+   * A list whose only words are CAT and CATS but whose prefixes run through every string of up
+   * to four of AEIOULY: the search over AEIOULY walks them all, over several slices, and finds
+   * nothing; a rack with S finds CATS.
+   */
+  const slow = (): Lexicon & { asked: () => number } => {
+    const letters = ["a", "e", "i", "o", "u", "l", "y"];
+    let strings = [""];
+    const all: string[] = [];
+    for (let length = 1; length <= 4; length += 1) {
+      strings = strings.flatMap((s) => letters.map((l) => s + l));
+      if (length >= 2) all.push(...strings);
+    }
+    const list = wordList([...all, "cat", "cats"]);
+    let asked = 0;
+    return {
+      has: (word) => {
+        asked += 1;
+        return word === "cat" || word === "cats";
+      },
+      follows: (prefix) => {
+        asked += 1;
+        return list.follows(prefix);
+      },
+      asked: () => asked,
+    };
+  };
+
+  /** Runs the next slice only. */
+  async function oneSlice(): Promise<void> {
+    await act(async () => {
+      await vi.advanceTimersToNextTimerAsync();
+    });
+  }
+
+  it("searches a new rack, never showing what the old one's search would have said (A14-P-3)", async () => {
+    vi.useFakeTimers();
+    const lexicon = slow();
+    const { rerenderAt } = setup(vowels(), { lexicon });
+    await oneSlice();
+    // Mid-search: a slice has run, the next is waiting, and nothing is shown yet.
+    expect(lexicon.asked()).toBeGreaterThan(0);
+    expect(vi.getTimerCount()).toBe(1);
+    expect(status()).toBe(PROMPT);
+    // The opponent plays; the new rack (with an S) can make CATS.
+    rerenderAt(4, view(fresh(), 0));
+    // The old search's next slice is gone: the one timer is the new search's first slice.
+    expect(vi.getTimerCount()).toBe(1);
+    await settle();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(status()).toBe(PROMPT);
+  });
+
+  it("searches again when the rack changes within a version (A14-P-4)", async () => {
+    vi.useFakeTimers();
+    const { rerenderAt } = setup(fresh(), { lexicon: words() });
+    await settle();
+    expect(status()).toBe(PROMPT);
+    rerenderAt(3, view(vowels(), 0));
+    await settle();
+    expect(status()).toBe(SWAP_HINT);
+  });
+
+  it("leaves no timer behind when the board goes away mid-search (A14-P-3)", async () => {
+    vi.useFakeTimers();
+    const lexicon = slow();
+    const { unmount } = setup(vowels(), { lexicon });
+    await oneSlice();
+    expect(vi.getTimerCount()).toBe(1);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("waits while a tile is being dragged, then goes on (A14-P-2)", async () => {
+    vi.useFakeTimers();
+    const lexicon = words();
+    setup(vowels(), { lexicon });
+    fireEvent.pointerDown(rackTile("A, 1 point"), {
+      pointerId: 1,
+      clientX: 10,
+      clientY: 10,
+      button: 0,
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(lexicon.asked()).toBe(0);
+    expect(status()).not.toContain("No word");
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    await settle();
+    expect(lexicon.asked()).toBeGreaterThan(0);
+    expect(status()).toBe(SWAP_HINT);
+  });
+
+  it("yields to the browser between slices", async () => {
+    vi.useFakeTimers();
+    const endless: Lexicon = { has: () => false, follows: () => (1 << 26) - 1 };
+    setup(fresh(), { lexicon: endless });
+    // Each slice is one timer; the first runs only after the board has rendered.
+    expect(vi.getTimerCount()).toBe(1);
+    await act(async () => {
+      await vi.advanceTimersToNextTimerAsync();
+    });
+    expect(vi.getTimerCount()).toBe(1);
+  });
+});

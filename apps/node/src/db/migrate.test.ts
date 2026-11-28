@@ -37,6 +37,13 @@ const TABLES = [
   "users",
 ];
 
+/** How many migrations the repository has; tests add theirs after the last. */
+const KNOWN = (
+  JSON.parse(readFileSync(join(MIGRATIONS, "meta", "_journal.json"), "utf8")) as {
+    entries: unknown[];
+  }
+).entries.length;
+
 let dir: string;
 
 beforeEach(() => {
@@ -63,7 +70,7 @@ function tables(path: string): string[] {
 let copies = 0;
 
 /**
- * A fresh copy of the migrations folder with one more migration, `millis` after the first, and
+ * A fresh copy of the migrations folder with one more migration, `millis` after the last, and
  * optionally others (in journal order before it).
  */
 function withExtraMigration(
@@ -78,12 +85,12 @@ function withExtraMigration(
   const journal = JSON.parse(readFileSync(journalPath, "utf8")) as {
     entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[];
   };
-  const first = journal.entries[0];
-  if (first === undefined) throw new Error("no migrations");
+  const last = journal.entries.at(-1);
+  if (last === undefined) throw new Error("no migrations");
   for (const extra of [...others, { sql, millis }]) {
     const idx = journal.entries.length;
     const tag = `000${String(idx)}_extra`;
-    journal.entries.push({ ...first, idx, when: first.when + extra.millis, tag });
+    journal.entries.push({ ...last, idx, when: last.when + extra.millis, tag });
     writeFileSync(join(folder, `${tag}.sql`), extra.sql);
   }
   writeFileSync(journalPath, JSON.stringify(journal));
@@ -94,8 +101,8 @@ describe("migrate", () => {
   it("creates every table of the data model, then has nothing left to do", () => {
     const path = join(dir, "app.sqlite");
     const sqlite = openSqlite(path);
-    expect(migrate(sqlite, MIGRATIONS)).toEqual({ applied: 1, known: 1 });
-    expect(migrate(sqlite, MIGRATIONS)).toEqual({ applied: 0, known: 1 });
+    expect(migrate(sqlite, MIGRATIONS)).toEqual({ applied: KNOWN, known: KNOWN });
+    expect(migrate(sqlite, MIGRATIONS)).toEqual({ applied: 0, known: KNOWN });
     sqlite.close();
     expect(tables(path).filter((name) => !name.startsWith("__"))).toEqual(TABLES);
   });
@@ -149,7 +156,7 @@ describe("migrate", () => {
     const sqlite = openSqlite(join(dir, "app.sqlite"));
     migrate(sqlite, MIGRATIONS);
     const folder = withExtraMigration("CREATE TABLE `extra` (`id` text PRIMARY KEY);", 1000);
-    expect(migrate(sqlite, folder)).toEqual({ applied: 1, known: 2 });
+    expect(migrate(sqlite, folder)).toEqual({ applied: 1, known: KNOWN + 1 });
     expect(sqlite.prepare("SELECT count(*) AS n FROM extra").get()).toEqual({ n: 0 });
     sqlite.close();
   });
@@ -191,7 +198,7 @@ describe("migrate", () => {
     const both = withExtraMigration("CREATE TABLE `late` (`id` text);", 2000, [
       { sql: "CREATE TABLE `early` (`id` text);", millis: 1000 },
     ]);
-    expect(migrate(sqlite, both)).toEqual({ applied: 1, known: 3 });
+    expect(migrate(sqlite, both)).toEqual({ applied: 1, known: KNOWN + 2 });
     expect(sqlite.prepare("SELECT count(*) AS n FROM early").get()).toEqual({ n: 0 });
     sqlite.close();
   });
@@ -232,7 +239,7 @@ describe("migrate", () => {
       const sqlite = openSqlite(join(dir, "app.sqlite"));
       migrate(sqlite, MIGRATIONS);
       breakForeignKey(sqlite);
-      expect(migrate(sqlite, MIGRATIONS)).toEqual({ applied: 0, known: 1 });
+      expect(migrate(sqlite, MIGRATIONS)).toEqual({ applied: 0, known: KNOWN });
       sqlite.close();
     });
 
@@ -269,7 +276,7 @@ describe("migrate", () => {
         1000,
       );
       expect(() => migrate(sqlite, folder)).toThrow(
-        /Migration 1 begins, ends or nests a transaction/u,
+        new RegExp(`Migration ${String(KNOWN)} begins, ends or nests a transaction`, "u"),
       );
       expect(sqlite.isTransaction).toBe(false);
       expect(
@@ -282,13 +289,65 @@ describe("migrate", () => {
       sqlite.close();
     });
 
+    it.each([
+      ["PRAGMA writable_schema = 1;", "uses a pragma other than foreign_keys"],
+      ["EXPLAIN PRAGMA writable_schema = 1;", "uses a pragma other than foreign_keys"],
+      ['PRAGMA main."legacy_alter_table" = ON;', "uses a pragma other than foreign_keys"],
+      ["PRAGMA defer_foreign_keys = 1;", "uses a pragma other than foreign_keys"],
+      ["ATTACH DATABASE ':memory:' AS aux;", "attaches or detaches a database"],
+      ["DETACH DATABASE aux;", "attaches or detaches a database"],
+      [
+        "CREATE TEMP TRIGGER `purge` AFTER INSERT ON main.`sessions` BEGIN DELETE FROM main.`sessions` WHERE 1; END;",
+        "creates a temporary table, index, trigger or view",
+      ],
+      // SQLite authorizes a temporary table's or view's schema row before its CREATE_TEMP_* action.
+      ["CREATE TEMPORARY TABLE `sessions` (`id` text);", "creates an object in the temp schema"],
+      ["CREATE TABLE temp.`x` (`y` text);", "creates an object in the temp schema"],
+      ["CREATE TEMP VIEW `v` AS SELECT 1;", "creates an object in the temp schema"],
+      ["CREATE VIEW temp.`v` AS SELECT 1;", "creates an object in the temp schema"],
+      [
+        "CREATE TRIGGER temp.`purge` AFTER INSERT ON main.`sessions` BEGIN DELETE FROM main.`sessions` WHERE 1; END;",
+        "creates an object in the temp schema",
+      ],
+    ])("refuses %j and applies nothing (B1-S-3, B1-S-4, B1-S2-1)", (statement, reason) => {
+      const sqlite = openSqlite(join(dir, "app.sqlite"));
+      const folder = withExtraMigration(
+        `CREATE TABLE \`extra\` (\`id\` text);\n--> statement-breakpoint\n${statement}`,
+        1000,
+      );
+      expect(() => migrate(sqlite, folder)).toThrow(
+        new RegExp(`Migration ${String(KNOWN)} ${reason}`, "u"),
+      );
+      expect(
+        sqlite
+          .prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name IN ('users', 'extra')")
+          .get(),
+      ).toEqual({ n: 0 });
+      expect(sqlite.prepare("SELECT count(*) AS n FROM sqlite_temp_schema").get()).toEqual({
+        n: 0,
+      });
+      // The authorizer is gone again: the connection may use pragmas.
+      expect(sqlite.prepare("PRAGMA journal_mode").get()).toEqual({ journal_mode: "wal" });
+      sqlite.close();
+    });
+
+    it("allows PRAGMA foreign_keys, which is a no-op inside the migration's transaction", () => {
+      const sqlite = openSqlite(join(dir, "app.sqlite"));
+      const folder = withExtraMigration(
+        "PRAGMA foreign_keys=OFF;--> statement-breakpoint\nCREATE TABLE `extra` (`id` text);--> statement-breakpoint\nPRAGMA foreign_keys=ON;",
+        1000,
+      );
+      expect(migrate(sqlite, folder)).toEqual({ applied: KNOWN + 1, known: KNOWN + 1 });
+      sqlite.close();
+    });
+
     it("allows a trigger's BEGIN … END body", () => {
       const sqlite = openSqlite(join(dir, "app.sqlite"));
       const folder = withExtraMigration(
         "CREATE TABLE `extra` (`id` text);\n--> statement-breakpoint\nCREATE TRIGGER `extra_t` AFTER INSERT ON `extra` BEGIN SELECT 1; END;",
         1000,
       );
-      expect(migrate(sqlite, folder)).toEqual({ applied: 2, known: 2 });
+      expect(migrate(sqlite, folder)).toEqual({ applied: KNOWN + 1, known: KNOWN + 1 });
       sqlite.close();
     });
   });

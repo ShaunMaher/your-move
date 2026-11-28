@@ -7,6 +7,11 @@ import { z } from "zod";
 
 const seat = z.number().int().min(0);
 const timestamp = z.number().int().min(0);
+/**
+ * Any value, but present: `z.unknown()` alone accepts a missing key, so an OpenAPI document
+ * generated from it would call the field optional although it is always there (02 §7.4).
+ */
+const present = () => z.unknown().refine((value): boolean => value !== undefined, "Required");
 
 /**
  * Display text: strings and `{ seat }` placeholders (02 §5).
@@ -108,13 +113,14 @@ export const gameEnvelopeSchema = z.object({
   id: z.string(),
   gameType: z.string(),
   gameVersion: z.number().int().min(1),
-  options: z.unknown(),
+  options: present(),
   status: gameStatusSchema,
   version: z.number().int().min(0),
   endReason: z.string().nullable(),
   turnTimeoutDays: z.number().int().min(1).max(30),
   seatOrder: z.enum(["join", "random"]),
   aiAssistance: z.enum(["off", "allowed"]),
+  seats: z.number().int().min(1).optional(),
   available: z.boolean(),
   resources: z.array(gameResourceSchema),
   players: z.array(gamePlayerSchema),
@@ -124,6 +130,10 @@ export const gameEnvelopeSchema = z.object({
   yourInvitation: z.enum(["normal", "hidden"]).nullable(),
   joinLink: z.object({ active: z.boolean(), expiresAt: timestamp.nullable() }).optional(),
   canAddPlayers: z.array(z.object({ userId: z.string(), displayName: z.string() })).optional(),
+  rematch: z
+    .object({ gameId: z.string(), you: z.enum(["joined", "invited", "none"]) })
+    .nullable()
+    .optional(),
   createdAt: timestamp,
   lastActionAt: timestamp.nullable(),
 });

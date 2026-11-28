@@ -13,7 +13,15 @@ Conventions:
 - JSON columns: `TEXT` containing JSON, parsed and validated by Zod on read.
 - Emails are stored **normalised**: trimmed, Unicode NFC, lower-cased. No provider-specific
   canonicalisation (dots / `+tags` are kept as typed). Must match a pragmatic address regex and be
-  ≤ 254 chars.
+  ≤ 254 chars. The stored domain is **ASCII**, so the stored address is the one mail is delivered
+  to (09 §2): a domain with any ASCII character other than letters, digits, `.` and `-`, or one
+  that NFKC would rewrite, is refused; an internationalised domain is stored as punycode with the
+  same number of labels. An address is accepted only if the mail builder can send it as it stands:
+  an ASCII dot-atom local part of at most 64 characters (no leading, trailing or consecutive
+  dots, no non-ASCII), labels of at most 63 characters, a domain of at most 253, and a top-level
+  label that isn't all digits; one shared rule, so the two can't drift (a non-ASCII local part is
+  refused, with the same `400` as any invalid address). `EMAIL_FROM` must satisfy the same rule
+  unless the provider is `console`. This happens before any limit or lookup, identically for every address.
 - Columns marked 🔒 are **secret game state** and must never be serialised to a client (02 §2.1
   rule 4, invariant 4 below).
 
@@ -26,8 +34,9 @@ Conventions:
 | kind | TEXT NOT NULL DEFAULT 'human' | `human` · `agent` (an AI account, 02 §9.2) |
 | owner_user_id | TEXT NULL FK → users ON DELETE CASCADE | set exactly when `kind = 'agent'`: the human who owns it (≤ 3 per owner) |
 | email | TEXT UNIQUE NULL | normalised; NOT NULL exactly when `kind = 'human'` (agents have no email and can't sign in) |
-| display_name | TEXT NULL | NULL until onboarding completed (06 §5). Wherever a name is shown (UI, push, email) and it is NULL, the fallback label "New player" is used |
-| settings | TEXT NOT NULL DEFAULT '{}' | JSON: `{ emailNudges: boolean, whoCanAddMe: "pastOpponents" \| "nobody" (default "pastOpponents", 06 §6.2), lastGameType?: string, lastOptions?: { [gameType]: unknown }, ... }` |
+| email_id | TEXT UNIQUE NULL | the address's `emailId` (09 §1.1), set exactly while `settings.emailNudges` is true — written when the user turns email nudges on, cleared when they are turned off (in Settings or by an unsubscribe) — so a `nudges` unsubscribe token, which carries only the `emailId` (05 §Email links), can find the account |
+| display_name | TEXT NULL | NULL until onboarding completed (06 §5). The display-name rules (06 §5.1) are checked when a name is set; a later change to them (e.g. alpha A17's digit count) never rewrites or refuses a stored name. Wherever a name is shown (UI, push, email) and it is NULL, the fallback label "New player" is used |
+| settings | TEXT NOT NULL DEFAULT '{}' | JSON: `{ emailNudges: boolean (default false, 03 §7), whoCanAddMe: "pastOpponents" \| "nobody" (default "pastOpponents", 06 §6.2), theme: "system" \| "light" \| "dark" (default "system", 07 §5), lastGameType?: string, lastOptions?: { [gameType]: unknown }, ... }` |
 | age_attested_at | INTEGER NULL | when the user confirmed they meet `MIN_AGE` (06 §5); NULL until onboarding completed |
 | age_attested_min_age | INTEGER NULL | the `MIN_AGE` value in force when they confirmed. If the operator raises `MIN_AGE` above it, the user is **re-prompted** (06 §5): `onboarded_at` is never cleared, the sweep never deletes them, but they get `403 ONBOARDING_REQUIRED` on the gated endpoints until they confirm again |
 | onboarded_at | INTEGER NULL | set when display name and age confirmation are both done (06 §5). Until then the account is treated as unknown for invitations and is deleted by the sweep after 7 days |
@@ -71,7 +80,7 @@ At most 3 *live* challenges per (email, purpose); issuing a 4th burns the oldest
 | seat_order | TEXT NOT NULL | `join` · `random` (02 §4) |
 | ai_assistance | TEXT NOT NULL | `off` · `allowed` (02 §9.3) — public |
 | state 🔒 | TEXT NULL | module `State` JSON; NULL in `lobby` (setup runs at start) |
-| setup_rng 🔒 | TEXT NULL | random draws consumed at start: seat-order draw, then `setup` (replay, 02 §5) |
+| setup_rng 🔒 | TEXT NULL | random draws consumed at start: seat-order draw, then `setup` (replay, 02 §5); JSON `[maxExclusive, value]` pairs, so a replay detects a changed draw range |
 | final_views | TEXT NULL | JSON `{ seats: { view, summary }[], public: { view, summary } }`, written on any terminal status after start (`finished`; `declined` before a first action; `cancelled` by an operator), except for an orphaned game whose engine is gone (02 §5, §7.3). A player only ever receives `seats[theirSeat]` |
 | version | INTEGER NOT NULL DEFAULT 0 | optimistic concurrency, 03 §5.2 |
 | write_token | TEXT NULL | per-transition guard token, 03 §5.2 |
@@ -79,6 +88,7 @@ At most 3 *live* challenges per (email, purpose); issuing a 4th burns the oldest
 | last_action_at | INTEGER NOT NULL | initialised to `created_at`; ordering |
 | end_reason | TEXT NULL | module `result().endReason`, or framework reasons `declined` / `cancelled` / `operator_cancelled` / `expired` |
 | created_at, updated_at, started_at, ended_at | INTEGER | |
+| rematch_game_id | TEXT NULL UNIQUE FK → games | a `finished` game's current rematch (05 `POST /api/v1/games/:id/rematch`, alpha A15): written in the same batch that inserts the rematch, by a conditional update that holds only while the game is `finished` and this column is NULL or names a game that **ended unplayed** (any `declined` ending (02 §2.1 rule 9: a seat refused before its first action, whatever others did), or `cancelled` or `expired` with no action logged (`action_count = 0`) — except an operator's cancel (`end_reason = operator_cancelled`), which is never unplayed), and every insert of that batch holds only while the update can (so a batch that loses the race writes nothing). Replaced only in that case: never while the linked game is in its lobby, active or finished, once it was cancelled or expired after an action, or when an operator cancelled it. Not a transition (the game's `version` is unchanged). Shown only to the game's players, as the envelope's `rematch` (05) |
 
 ### `game_players`
 | Column | Type | Notes |
@@ -92,13 +102,13 @@ At most 3 *live* challenges per (email, purpose); issuing a 4th burns the oldest
 | out_reason | TEXT NULL | `eliminated` · `resigned` · `timed_out` · `declined` (out before a first action; never ranked, 02 §4) · `cancelled` (operator cancel of an active game, 02 §4) |
 | joined_via | TEXT NULL | `creator` · `added` (auto-joined past opponent) · `invitation` (accepted — including an invited user who joins through the link, 02 §4) · `email_invite` · `join_link` |
 | delivery | TEXT NOT NULL DEFAULT 'normal' | for `invited` rows: `normal` · `hidden` (over the target's inbound cap, 06 §6.7: shown only in their collapsed *Hidden invitations*, no notification) · `inert` (blocked pair, or a typed address that resolves to a user already added in the same request: never delivered, never claimable, never accepted, `user_id` NULL for the latter, 06 §6.1). The creator sees all three the same way (Q3) |
-| removed_at | INTEGER NULL | when the creator removed this seat; compared with `join_links.created_at` (06 §6.8) |
+| removed_at | INTEGER NULL | when the creator removed this seat. A removed row never comes back through any join link, rotated or new (06 §6.8) |
 | joined_at | INTEGER NULL | for `seat_order = join`, and "who joined later" in the start-time block check (02 §4). A row with `joined_at` NULL never exposes a display name or user id in any response (05 §Common types) |
 | to_act | INTEGER NOT NULL DEFAULT 0 | 1 if this seat is in `toAct` — denormalised for "your turn" queries; updated in the same transition |
 | to_act_since | INTEGER NULL | per-seat timeout clock (02 §2.3) |
 | acted_once | INTEGER NOT NULL DEFAULT 0 | for "decline before first action" (02 §4) |
 | rank, score | INTEGER NULL | from module `result()`, re-ranked without `declined` seats (02 §4); NULL for everyone when the game ends `declined` |
-| last_seen_version | INTEGER NOT NULL DEFAULT 0 | unread badges |
+| last_seen_version | INTEGER NOT NULL DEFAULT 0 | unread badges: the game is unread while `games.version` is above it. A member's own transition sets it to the version it creates; an invitation, and a past opponent added at once (`joined_via = added`), starts at `-1`, so it is unread until seen |
 | last_nudged_at | INTEGER NULL | email nudge throttle |
 | timeout_reminders_sent | INTEGER NOT NULL DEFAULT 0 | 0–2 (02 §4) |
 
@@ -123,7 +133,7 @@ in state `joined`, `playing` or `out`, or an `invited` row with their `user_id` 
 | action 🔒 | TEXT NULL | the module action as submitted (secret: e.g. which tiles were swapped); NULL for other kinds |
 | record | TEXT NOT NULL | module `PublicRecord` JSON — public |
 | describe | TEXT NOT NULL | JSON `Text` from module `describe(record)` (02 §5) — public |
-| rng 🔒 | TEXT NULL | random draws consumed (replay) |
+| rng 🔒 | TEXT NULL | random draws consumed (replay), as `[maxExclusive, value]` pairs like `games.setup_rng` |
 | via | TEXT NOT NULL DEFAULT 'app' | `app` (cookie session) · `token` (an API token: an AI move, 02 §9.1) · `system` (timeouts). Public; history shows token moves as AI or AI-assisted |
 | created_at | INTEGER | |
 
@@ -158,10 +168,10 @@ in the same transition), and deleted in both directions when either user blocks 
 |---|---|---|
 | game_id | TEXT PK FK → games ON DELETE CASCADE | one live link per game |
 | token_hash | TEXT UNIQUE NOT NULL | SHA-256 of the 128-bit token; the raw token is shown only in the create/rotate response |
-| created_at, expires_at | INTEGER | expiry ≤ 7 days and ≤ lobby expiry; deleted at game start/revoke/rotate; swept when expired |
+| created_at, expires_at | INTEGER | expiry ≤ 7 days and ≤ lobby expiry; deleted at game start/revoke/rotate and when the lobby ends any other way (cancelled, declined, expired); swept when expired |
 
-A user whose row has `removed_at ≥ join_links.created_at` can't use the current link; rotating it
-issues a new token (and a newer `created_at`), which re-admits them (06 §6.8).
+A user whose row is `removed` (or `declined`, `left`) can't use any link of the game, the current
+one, a rotated one or a new one: a removal sticks across links (06 §6.8, alpha A18 review S-3).
 
 ### `invites`
 Tracks invitation emails (for rate limiting, expiry and abuse handling). Stores no raw address.
@@ -172,17 +182,28 @@ Tracks invitation emails (for rate limiting, expiry and abuse handling). Stores 
 | game_id | TEXT FK → games ON DELETE CASCADE | |
 | inviter_id | TEXT FK → users ON DELETE CASCADE | |
 | email_hash | TEXT | `emailId` (HMAC, 09 §1.1) of the normalised address |
-| sent_at | INTEGER NULL | |
+| sent_at | INTEGER NULL | when the sender accepted the invite email, set by the background task that sends it, never before the response (06 §6.3); or, for a typed address of a user with email nudges on, the invitation email (06 §6.2, alpha A20); NULL when none was sent (an invitation to a user without nudges, a suppressed address or `hidden` seat, a cap, a failed send) |
 | expires_at | INTEGER | = lobby expiry: 14 days from the game's `created_at` (02 §4) |
 
+Since alpha A20 (review S-1) an invite's `id` is its seat's `game_players.id`, so the inbound cap
+(06 §6.7) can tell a live invitation from one whose seat was removed or whose lobby ended unplayed;
+an older row's id matches no seat and counts until its lobby ends.
+
 ### `email_suppressions`
-Addresses that asked never to receive invite/nudge emails, or that hard-bounced.
+Addresses that must not get our non-OTP emails. `unsubscribed` (the invites unsubscribe, 05
+§Email links, and the under-age exit) stops invite emails and the invitation email to a user
+with nudges on (06 §6.2, alpha A20) only: the turn nudges have their own opt-out, the setting
+and `users.email_id` (03 §7). Turning email nudges on deletes the account's own address's
+`unsubscribed` row, the holder's explicit opt-in (alpha A20 review P-3); nothing else deletes a
+row. `bounced` and `complained` stop every non-OTP email, nudges included. One row per address: a `bounced` or `complained` row replaces an
+`unsubscribed` one (it stops more mail), never the reverse, and otherwise the first row stays;
+`created_at` is when the row's current reason was recorded.
 
 | Column | Type | Notes |
 |---|---|---|
 | email_hash | TEXT PK | the address's `emailId`: HMAC-SHA256 under the `email-id/v1` subkey (09 §1.1) of the normalised address — we don't keep the raw address of non-users |
-| reason | TEXT | `unsubscribed` · `bounced` · `complained` |
-| created_at | INTEGER | |
+| reason | TEXT | `unsubscribed` · `bounced` · `complained` (precedence below) |
+| created_at | INTEGER | when the current reason was recorded |
 
 OTP emails are transactional and still sent to suppressed addresses (the person is actively asking
 to sign in).
@@ -196,9 +217,9 @@ to sign in).
 | id | TEXT PK | |
 | user_id | TEXT FK ON DELETE CASCADE | |
 | session_id | TEXT FK → sessions ON DELETE CASCADE | subscription dies with the session (06 §4) |
-| endpoint | TEXT UNIQUE | validated per 08 T12; on conflict the row is reassigned to the current user/session (upsert) |
+| endpoint | TEXT UNIQUE | validated per 08 T12 and stored as the parsed URL (what every push is posted to); on conflict (upsert, keeping its id): the same user and session update its keys; another user or session takes it over only when the keys sent equal the stored ones (the same browser subscription) or the stored row's session is no longer live (06 §4; such a row gets no pushes, owner decision in the alpha A8 review round 2), and otherwise nothing changes and the answer is the same `204` (no ownership oracle, alpha A8 review); `created_at` and `last_success_at` are kept for the same user and start afresh when the endpoint changes hands |
 | p256dh, auth | TEXT | base64url; validated as a 65-byte uncompressed P-256 point and 16 bytes respectively |
-| created_at, last_success_at | INTEGER | delete on 404/410 from push service. Max 10 per user (oldest evicted) |
+| created_at, last_success_at | INTEGER | delete on 404/410 from push service. Max 10 per user: rows whose session isn't live are evicted first, then the least recently useful (by `COALESCE(last_success_at, created_at)`), in the same batch as the upsert; the subscription just saved is never the one evicted. Only rows whose session is live receive pushes (03 §7) |
 
 ### `dictionaries` (uploaded and operator dictionaries — built-ins live in the code registry)
 | Column | Type | Notes |
@@ -220,7 +241,7 @@ to sign in).
 Index on `owner_id`.
 
 ### `rate_limits`
-| key | TEXT | e.g. `otp:email:<hash>`, `otp:ip:<hash>`, `invite:user:<id>`, and the fixed keys `all` (instance-wide sends) and `silent` (requests that sent nothing; written, never read, 06 §3.2) |
+| key | TEXT | e.g. `otp:email:<hash>`, `otp:ip:<hash>`, `invite:user:<id>`, and the fixed keys `all` (instance-wide sends) and `silent` (requests, or typed addresses, that sent or counted nothing; written, never read, 06 §3.2, §6.6, §6.7) |
 | window_start | INTEGER | |
 | count | INTEGER | PK(key, window_start); swept hourly |
 
@@ -284,6 +305,9 @@ The schema (`schema.ts`) also makes these choices, which the tables above leave 
   `rate_limits(window_start)`, `api_tokens(created_by)`, `admin_audit` (`created_at`,
   `actor_user_id`), `auth_events` (`user_id`, `created_at`).
 - **`auth_events.user_id`** is a foreign key with `ON DELETE SET NULL` (account deletion step 4).
+- **`games.rematch_game_id`** is a foreign key with no `ON DELETE` action: games are never deleted,
+  and drizzle-kit's `ALTER TABLE … ADD` drops an action, which `pnpm db:check` would then report
+  against a fresh generation (alpha A15).
 
 ## Migrations
 
@@ -291,17 +315,28 @@ The schema (`schema.ts`) also makes these choices, which the tables above leave 
   reviewed and committed. `pnpm db:check` (CI's validate job) fails if:
   - the journal's entries aren't numbered in order with strictly increasing `when`, or the `.sql`
     files aren't exactly the journal's tags;
-  - a migration breaks one of the text rules below (transaction control, unreviewed table
-    rebuilds);
+  - a migration breaks one of the text rules below (one reading, refused statements, unreviewed
+    table rebuilds or dropped columns);
   - the schema the committed migrations build differs from the schema built by a fresh drizzle-kit
     generation from `schema.ts` into an empty folder. Each is applied to its own in-memory SQLite
-    database and compared by what SQLite reports: every table's `table_info` (column positions
-    aside, since `ALTER TABLE ADD COLUMN` always appends) and `foreign_key_list`, every index's
-    `index_list` entry, `index_xinfo` and SQL in `sqlite_schema` (which carries a partial index's
-    `WHERE`), and the SQL of any view or trigger. A hand edit to a committed `.sql` file (an FK
-    action, a default, an index's columns or predicate) therefore fails. Table-level clauses are
-    **not** compared — `CHECK`, `COLLATE`, generated columns, `STRICT`, `WITHOUT ROWID` and
-    `DEFERRABLE` — so a hand edit to those passes and is the reviewer's to catch (issue #13);
+    database and compared by what SQLite reports: every table's `table_list` entry (its `STRICT`
+    and `WITHOUT ROWID` flags), `table_xinfo` (column positions aside, since
+    `ALTER TABLE ADD COLUMN` always appends; `hidden` marks a generated column) and
+    `foreign_key_list`, every index's `index_list` entry, `index_xinfo` and SQL in `sqlite_schema`
+    (which carries a partial index's `WHERE`), and the SQL of any view or trigger. SQLite's own
+    objects are compared too rather than filtered out: SQLite refuses a user object whose name
+    starts with `sqlite_` in any case, so a filter could only hide one (`sqlite_sequence` also
+    shows that some table uses `AUTOINCREMENT`). Both databases are opened with SQLite's
+    defensive flag, and the check fails if either leaves anything in its connection's `temp`
+    schema. The clauses no pragma reports are read from each table's SQL in `sqlite_schema` with
+    comments, quoting, case and spacing normalised: each column's `COLLATE`, `CHECK` and generated expression
+    (`[GENERATED ALWAYS] AS (…)`), the table's `CHECK` constraints, and each foreign key's
+    `[NOT] DEFERRABLE [INITIALLY …]`, keyed by its columns and parent table so that an inline
+    `REFERENCES` and a table-level `FOREIGN KEY` compare alike. A hand edit to a committed `.sql`
+    file (an FK action, a default, an index's columns or predicate, any of those clauses) therefore
+    fails. What none of these covers — constraint names, `ON CONFLICT` clauses, which table uses
+    `AUTOINCREMENT`, a primary key's `ASC`/`DESC`, a foreign key's `MATCH` clause (which SQLite
+    parses and ignores) — is the reviewer's to catch;
   - drizzle-kit, generating over a copy of the committed folder, writes or changes any file there
     (a `schema.ts` change without its migration and snapshot), or doesn't report "No schema
     changes".
@@ -309,16 +344,51 @@ The schema (`schema.ts`) also makes these choices, which the tables above leave 
 - **Node** applies them at startup (02 §7.3), tracked by hash in Drizzle's `__drizzle_migrations`
   table: every known migration whose hash isn't recorded runs, in journal order, all in one
   transaction; a recorded hash the build doesn't know (a newer build's, or a migration edited after
-  it ran) refuses the start. Foreign keys are off while they run (`PRAGMA foreign_keys` is a
+  it ran) refuses the start. They run on a connection of their own, opened after the
+  single-instance lock is taken and closed before the server's connection opens, so nothing a
+  migration could leave on its connection reaches the server (an in-memory database, which exists
+  only on its one connection, is migrated on that; it is for local development and tests only).
+  Foreign keys are off while they run (`PRAGMA foreign_keys` is a
   no-op inside a transaction, so this is set before it begins). When any migration is pending,
   `PRAGMA foreign_key_check` must come back empty both before the first one runs (a violation
   already in the database refuses the start with its own message) and before the commit, or
   nothing is applied; with nothing pending it isn't run.
+- **One reading.** A migration is applied two ways: whole on Cloudflare, as SQLite and
+  `wrangler d1 migrations apply` read it (where `--> statement-breakpoint` is a comment), and on
+  Node cut at every `--> statement-breakpoint` first, the way Drizzle's migrator cuts it, even
+  one inside a literal or a comment. Both must run the same statements, so `pnpm db:check`
+  refuses a migration that:
+  - doesn't contain only printable ASCII, tab and line endings (LF or CRLF; a CR alone is
+    refused): write the text in ASCII, and build a non-ASCII literal with `char(…)`;
+  - has anything after a `--> statement-breakpoint` on its line;
+  - leaves a block comment, string literal or quoted identifier unterminated (in the whole file
+    or in any piece between breakpoints);
+  - reads as a different list of statements whole and cut at its breakpoints.
+- **How the statement rules read a migration.** The rules below look at statements with comments
+  removed and whitespace collapsed, so neither hides a pattern, and a leading
+  `EXPLAIN [QUERY PLAN]` is ignored (some pragmas act while their statement is prepared). They are
+  checked in both readings above, and a review line counts only if it is a real `--` comment in
+  both. A review line's `\r\n` line ending is not part of it.
 - **No transaction control.** A migration never contains `BEGIN`, `COMMIT`, `END`, `ROLLBACK`,
   `SAVEPOINT` or `RELEASE` (a trigger's `BEGIN … END` body is not transaction control): it would
   break the one-transaction guarantee above. `pnpm db:check` refuses such a migration, with or
   without a review line, and Node refuses to apply one (SQLite's authorizer denies transaction and
   savepoint statements while a migration runs).
+- **No pragmas but `foreign_keys`, no `ATTACH`, `DETACH` or `VACUUM`.** `foreign_keys` is the
+  only pragma drizzle-kit writes (its table rebuild, below); nothing else a pragma does belongs in
+  a migration, and attaching a database or vacuuming reaches outside the schema. `pnpm db:check`
+  refuses such a migration, with or without a review line, and Node refuses to apply one (the
+  authorizer that denies transaction control also denies any pragma but `foreign_keys` and the
+  attach and detach actions; `VACUUM` already fails inside a transaction).
+- **No temporary objects.** A migration never creates anything in the connection's `temp`
+  schema (`CREATE TEMP …`, `CREATE TEMPORARY …`, or a `temp.` qualifier, as in
+  `CREATE TABLE temp.x` or `CREATE TRIGGER temp.t … ON main.x`): a temporary trigger or a table
+  shadowing a main one would live on in the connection that migrated, outside the schema
+  `pnpm db:check` compares. `pnpm db:check` refuses such a migration, with or without a review
+  line (the text rule matches `TEMP`, `TEMPORARY` and a `temp.` qualifier; the schema comparison
+  also fails on a non-empty `temp` schema), and Node refuses to apply one (the authorizer denies
+  the `CREATE_TEMP_*` actions and any insert into the `temp` schema), besides migrating on a
+  connection it then closes.
 - **No table rebuilds of parent tables.** D1 always enforces foreign keys, and neither
   `PRAGMA foreign_keys=OFF` nor `defer_foreign_keys` stops the `ON DELETE` actions a `DROP TABLE`
   fires, so drizzle-kit's rebuild (copy to `__new_x`, `DROP TABLE x`, rename) deletes or nulls
@@ -326,8 +396,14 @@ The schema (`schema.ts`) also makes these choices, which the tables above leave 
   (schema-qualified or quoted, as in `PRAGMA main."foreign_keys"`) is refused by `pnpm db:check`
   unless it carries a line `-- migration-reviewed: <how child rows are preserved on both drivers>`,
   added only after a reviewer has checked that claim (for example: the table has no children, or
-  the migration copies and restores them). The patterns are matched with comments removed and
-  whitespace collapsed, so neither hides them; the review line must be a real `--` comment.
+  the migration copies and restores them).
+- **Dropped columns.** `ALTER TABLE … DROP [COLUMN]` deletes the column's data on both drivers.
+  drizzle-kit writes it, beside an `ADD` of the new name, when its rename prompt ("created or
+  renamed from another column?") is answered *create* for a column that was in fact renamed, so a
+  rename silently becomes data loss. A migration containing `ALTER TABLE … DROP` is refused by
+  `pnpm db:check` unless it carries a line `-- migration-reviewed: <why the column's data may go>`,
+  added only after a reviewer has checked that claim (for example: the column was never written,
+  or its data was copied into another column first).
 - **Other statements cascade too.** `REPLACE INTO` (`INSERT OR REPLACE`, an upsert's conflict
   resolution by `REPLACE`) deletes the conflicting row before inserting, and `DELETE` on a parent
   table deletes it outright; either fires the children's `ON DELETE` actions on D1 just as
@@ -377,7 +453,10 @@ deleted first, so the account is unusable from the moment deletion starts.
    - `active` where they're `playing`: a real resign transition (module `onResign`; others notified),
      or the decline rule if they haven't acted yet (02 §4);
    - `lobby` they created: cancel (deleting its `invites`/`join_links` rows and clearing every
-     `invite_email` — third parties' addresses; realtime invalidation only, no push or email, 02 §4);
+     `invite_email` — third parties' addresses; realtime invalidation only, no push or email, 02 §4).
+     Until these game steps exist (M4), the deletion batch deletes the `join_links` rows of the
+     `lobby` games the user created, and a join link refuses any lobby whose creator row has no
+     user, with the same `404` as every other refusal (alpha A18);
    - other `lobby` games: a real `leave` (or decline, if `invited`) transition, so no orphaned
      `joined` seat can auto-start a game.
 3. Delete OTP challenges for the email, blocks and `past_opponents` rows in both directions. Mark the

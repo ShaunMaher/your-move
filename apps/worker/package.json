@@ -10,7 +10,7 @@
   },
   "scripts": {
     "assets": "tsx scripts/prepare-assets.ts",
-    "dev": "pnpm --filter @your-move/web build && PUBLIC_URL=http://localhost:8787 tsx scripts/prepare-assets.ts && wrangler dev --config wrangler.example.toml --env-file ../../config/local-dev.env --var PUBLIC_URL:http://localhost:8787 --port 8787",
+    "dev": "pnpm --filter @your-move/web --filter @your-move/dictionary build && PUBLIC_URL=http://localhost:8787 tsx scripts/prepare-assets.ts && wrangler dev --config wrangler.example.toml --env-file ../../config/local-dev.env --var PUBLIC_URL:http://localhost:8787 --port 8787",
     "build": "tsx scripts/prepare-assets.ts && wrangler deploy --dry-run --config wrangler.example.toml --outdir dist/worker --metafile dist/bundle-meta.json && tsx scripts/record-inputs.ts"
   },
   "dependencies": {
@@ -20,8 +20,10 @@
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
     "@types/node": "catalog:",
+    "@your-move/dictionary": "workspace:*",
     "@your-move/web": "workspace:*",
     "tsx": "catalog:",
+    "vitest": "catalog:",
     "wrangler": "catalog:"
   }
 }

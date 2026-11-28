@@ -1,0 +1,851 @@
+/**
+ * The game framework's endpoints (docs/spec/05-api.md §Games, §Catalog): catalog and rules,
+ * creating and listing games, one game's envelope and history, actions and previews, and the
+ * lifecycle transitions. Every state change goes through the `write_token` transition (03 §5.2);
+ * GET handlers never write game state, except the lazy expiry of an overdue lobby (03 §8).
+ *
+ * Membership decides access (04 §Membership): a game the viewer isn't a member of is `404`,
+ * never `403`. Join links (06 §6.8, alpha A18) are the one way in for someone who isn't a member:
+ * the lookup and the join answer every refusal with the same `404`.
+ */
+import type { OpenAPIHono } from "@hono/zod-openapi";
+import { isGameError, type ResourceMeta, type Text } from "@your-move/sdk";
+import {
+  acceptInvitationRoute,
+  addPlayerRoute,
+  cancelGameRoute,
+  catalogRoute,
+  createGameRoute,
+  declineGameRoute,
+  getGameRoute,
+  historyRoute,
+  listGamesRoute,
+  markSeenRoute,
+  previewRoute,
+  recentPlayersRoute,
+  rematchRoute,
+  removeSeatRoute,
+  resignGameRoute,
+  rulesRoute,
+  startGameRoute,
+  submitActionRoute,
+} from "@your-move/shared";
+import type { Context } from "hono";
+
+import { checkLimits, type LimitName } from "../auth/limits.js";
+import { requireSession } from "../auth/require-session.js";
+import type { Subkeys } from "../crypto/subkeys.js";
+import type { GamePlayerRecord, GameWriteSet, LoadedGame, UserRecord } from "../db/repositories.js";
+import { ApiError } from "../http/api-error.js";
+import { background, logBackgroundFailure } from "../http/background.js";
+import type { AppEnv, Platform } from "../platform.js";
+import { sendAddedPushes, sendNewInvitationPushes, sendTransitionPushes } from "../push/notify.js";
+import { createGame, type InvitationNotices } from "./create.js";
+import { expireIfOverdue, expireOverdueLobbies, loadCurrent } from "./expiry.js";
+import { sendInviteMail } from "./invite-mail.js";
+import { joinUrl } from "./join-links.js";
+import { registerJoinRoutes } from "./join-routes.js";
+import {
+  accept,
+  cancel,
+  decline,
+  endedUnplayed,
+  type GameContext,
+  lobbyExpiresAt,
+  isModuleOutcome,
+  isRefusal,
+  moduleTransition,
+  type ModuleOutcome,
+  type Refusal,
+  removeSeat,
+  resign,
+  SERVER_ATTEMPTS,
+  start,
+  startAtCreation,
+} from "./lifecycle.js";
+import {
+  addableUserIds,
+  engineOf,
+  envelope,
+  invitationOf,
+  memberRow,
+  plainText,
+  type PresentInput,
+  rematchOf,
+  shownUserIds,
+  summaryOf,
+  turnOf,
+  visiblePlayers,
+  viewOf,
+} from "./present.js";
+import type { RandomFactory } from "./random.js";
+import type { GameRegistry } from "./registry.js";
+import type { ResourceProvider } from "./resources.js";
+import { lastOptionsOf } from "./settings.js";
+
+const DAY = 86_400_000;
+const LIST_PAGE = 50;
+const HISTORY_PAGE = 100;
+/** `GET /api/v1/players/recent` lists at most this many past opponents (05). */
+const RECENT_PLAYERS = 50;
+/** `GET /api/v1/games` keeps finished games 90 days and other endings 7 days (05). */
+const FINISHED_LISTED_MS = 90 * DAY;
+const ENDED_LISTED_MS = 7 * DAY;
+/** Accepting an invitation in a rematch: one try and up to 3 retries on a lost race (03 §5.2). */
+const REMATCH_ACCEPT_ATTEMPTS = SERVER_ATTEMPTS;
+/** Creating a rematch whose guarded insert lost, with no live rematch to show, is tried twice. */
+const REMATCH_CREATE_ATTEMPTS = 2;
+
+export interface GameRouteOptions {
+  readonly platform: Platform;
+  readonly registry: GameRegistry;
+  readonly resources: ResourceProvider;
+  readonly keys: () => Promise<Subkeys>;
+  /** Each transition's source of randomness (WebCrypto in production, seeded in tests). */
+  readonly random: RandomFactory;
+}
+
+/** OpenAPI's `{id}` path parameters as Hono's `:id`, for middleware registration. */
+function honoPath(path: string): string {
+  return path.replace(/\{([a-zA-Z]+)\}/gu, ":$1");
+}
+
+/** The list cursor: the last listed game's `last_action_at` and id. */
+const LIST_CURSOR = /^([0-9]{1,16}):([0-9a-f-]{36})$/u;
+
+function parseListCursor(cursor: string | undefined) {
+  if (cursor === undefined) return undefined;
+  const match = LIST_CURSOR.exec(cursor);
+  if (match === null) throw ApiError.of("BAD_REQUEST");
+  return { lastActionAt: Number(match[1]), id: match[2] ?? "" };
+}
+
+function parseSeqCursor(cursor: string | undefined): number {
+  if (cursor === undefined) return 0;
+  if (!/^[0-9]{1,9}$/u.test(cursor)) throw ApiError.of("BAD_REQUEST");
+  return Number(cursor);
+}
+
+/** A refusal from the lifecycle as the API answers it. */
+function refusal(refused: Refusal): ApiError {
+  return ApiError.of(refused.refused, refused.detail);
+}
+
+export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteOptions): void {
+  const { platform, registry, resources } = options;
+  const { repos, config } = platform;
+  const now = (): number => platform.now().getTime();
+
+  const session = requireSession(platform);
+  for (const route of [
+    catalogRoute,
+    createGameRoute,
+    listGamesRoute,
+    getGameRoute,
+    historyRoute,
+    submitActionRoute,
+    previewRoute,
+    startGameRoute,
+    acceptInvitationRoute,
+    declineGameRoute,
+    resignGameRoute,
+    cancelGameRoute,
+    markSeenRoute,
+    recentPlayersRoute,
+    rematchRoute,
+    removeSeatRoute,
+    addPlayerRoute,
+  ]) {
+    // Registered for the method only, so the public rules route under /games/types is unaffected.
+    app.on(route.method.toUpperCase(), honoPath(route.path), session);
+  }
+
+  const userOf = (c: Context<AppEnv>): UserRecord => c.get("session").user;
+
+  /** Onboarding gate (05: the game list, creating and accepting). Re-prompts arrive in M4. */
+  const onboarded = (user: UserRecord): void => {
+    if (user.onboardedAt === null) throw ApiError.of("ONBOARDING_REQUIRED");
+  };
+
+  const limit = async (user: UserRecord, ...names: LimitName[]): Promise<void> => {
+    const results = await checkLimits(
+      repos,
+      config,
+      now(),
+      names.map((name) => ({ name, key: user.id, amount: 1 })),
+    );
+    if (results.some((result) => result.exceeded)) throw ApiError.of("RATE_LIMITED");
+  };
+
+  const describeResource = (kind: "dictionary", id: string): ResourceMeta | undefined =>
+    resources.describe(kind, id);
+
+  /** The game and the viewer's membership row, or `404` (04 §Membership). */
+  const loadMember = async (
+    gameId: string,
+    user: UserRecord,
+  ): Promise<{ loaded: LoadedGame; viewer: GamePlayerRecord }> => {
+    const loaded = await loadCurrent(repos, gameId, user.id, now());
+    const viewer = loaded === null ? undefined : memberRow(loaded.players, user.id);
+    if (loaded === null || viewer === undefined) throw ApiError.of("NOT_FOUND");
+    return { loaded, viewer };
+  };
+
+  /** Everything presenting one game needs: its resources and its players' users. */
+  const presentInput = async (
+    loaded: LoadedGame,
+    viewer: GamePlayerRecord,
+  ): Promise<PresentInput> => {
+    const { rematchGameId } = loaded.game;
+    const addable = addableUserIds(loaded.game, loaded.players, viewer);
+    const [gameResources, users, rematch, pastOpponents] = await Promise.all([
+      repos.games.resources(loaded.game.id),
+      repos.users.findByIds(shownUserIds(loaded.players, () => loaded.game.status === "lobby")),
+      // Only a finished game shows its rematch (05 `rematch`).
+      loaded.game.status === "finished" && rematchGameId !== null && viewer.userId !== null
+        ? repos.games.rematchRead(rematchGameId, viewer.userId)
+        : null,
+      // Only its creator's `canAddPlayers` needs to know who is a past opponent already.
+      addable.length > 0 && viewer.userId !== null
+        ? repos.users.pastOpponentsOf(viewer.userId, addable)
+        : [],
+    ]);
+    return {
+      ...(rematch === null ? {} : { rematch: rematchOf(rematch, now()) }),
+      pastOpponents: new Set(pastOpponents),
+      joinLink: loaded.joinLink,
+      now: now(),
+      game: loaded.game,
+      players: loaded.players,
+      resources: gameResources,
+      users: new Map(users.map((user) => [user.id, user])),
+      viewer,
+      type: registry.get(loaded.game.gameType),
+      describeResource,
+    };
+  };
+
+  /** `{ game, view }` for the viewer, freshly read; null once they're no longer a member. */
+  const gameWithViewIfMember = async (gameId: string, user: UserRecord) => {
+    const loaded = await loadCurrent(repos, gameId, user.id, now());
+    const viewer = loaded === null ? undefined : memberRow(loaded.players, user.id);
+    if (loaded === null || viewer === undefined) return null;
+    const input = await presentInput(loaded, viewer);
+    return { game: envelope(input), view: viewOf(input) };
+  };
+
+  /** `{ game, view }` for a member, freshly read, or `404` (04 §Membership). */
+  const gameWithView = async (gameId: string, user: UserRecord) => {
+    const shown = await gameWithViewIfMember(gameId, user);
+    if (shown === null) throw ApiError.of("NOT_FOUND");
+    return shown;
+  };
+
+  /** The module context of a loaded game, or `409 GAME_UNAVAILABLE` (02 §7.3). */
+  const contextOf = (loaded: LoadedGame): GameContext => {
+    const definition = engineOf({ game: loaded.game, type: registry.get(loaded.game.gameType) });
+    if (definition === undefined) throw ApiError.of("GAME_UNAVAILABLE");
+    const parsed = definition.optionsSchema.safeParse(JSON.parse(loaded.game.options));
+    if (!parsed.success) throw new Error("stored options don't match the module's schema");
+    return {
+      game: loaded.game,
+      players: loaded.players,
+      definition,
+      options: parsed.data,
+      state: loaded.game.state === null ? null : (JSON.parse(loaded.game.state) as unknown),
+      random: options.random(),
+      joinLink: loaded.joinLink,
+    };
+  };
+
+  /**
+   * Applies a write set from the version it was computed at, with the actor's own unread marker
+   * moved to the version it creates, in the same transition.
+   */
+  const applyAs = async (loaded: LoadedGame, writes: GameWriteSet, actor: GamePlayerRecord) => {
+    const seen = { lastSeenVersion: loaded.game.version + 1 };
+    const updates = writes.updatePlayers ?? [];
+    const own = updates.some((update) => update.id === actor.id);
+    return repos.games.applyTransition(loaded.game.id, loaded.game.version, {
+      ...writes,
+      updatePlayers: own
+        ? updates.map((update) =>
+            update.id === actor.id ? { id: update.id, set: { ...update.set, ...seen } } : update,
+          )
+        : [...updates, { id: actor.id, set: seen }],
+    });
+  };
+
+  /**
+   * Applies a write set from the version it was computed at; `409 STALE_GAME` if it lost. The
+   * actor has seen what they did: their own unread marker moves to the new version (A2 review
+   * P-6), in the same transition. A transition that won sends its pushes in the background
+   * (03 §7), after the response and never failing it.
+   */
+  const commit = async (
+    c: Context<AppEnv>,
+    loaded: LoadedGame,
+    writes: GameWriteSet,
+    actor: GamePlayerRecord,
+    describe: Text | null,
+  ): Promise<void> => {
+    const result = await applyAs(loaded, writes, actor);
+    if (result === "stale") throw ApiError.of("STALE_GAME");
+    if (platform.push.enabled) {
+      background(c, platform, () =>
+        sendTransitionPushes(platform, {
+          before: loaded,
+          writes,
+          actorUserId: userOf(c).id,
+          describe,
+        }),
+      );
+    }
+  };
+
+  /**
+   * Starts a game just created with every seat filled by past opponents added at once (05
+   * Created, 02 §4), as the creator's transition from version 0. Losing that race to a transition
+   * one of the added players made meanwhile (a decline) isn't an error: the game is what that
+   * transition left, and the creator is shown it. The start's own "your turn" push is not sent:
+   * the added players' "added you" push says it instead (03 §7).
+   */
+  const startIfFull = async (gameId: string, user: UserRecord): Promise<void> => {
+    const loaded = await repos.games.load(gameId);
+    const creator = loaded === null ? undefined : memberRow(loaded.players, user.id);
+    if (loaded === null || creator === undefined) return;
+    const writes = startAtCreation(contextOf(loaded), now());
+    if (writes !== null) await applyAs(loaded, writes, creator);
+  };
+
+  /** A lifecycle transition (05 §Lifecycle transitions) from `expectedVersion`. */
+  const lifecycle = async (
+    c: Context<AppEnv>,
+    gameId: string,
+    expectedVersion: number,
+    run: (
+      ctx: GameContext,
+      viewer: GamePlayerRecord,
+      at: number,
+    ) => GameWriteSet | ModuleOutcome | Refusal,
+    gate?: (user: UserRecord) => void,
+  ) => {
+    const user = userOf(c);
+    gate?.(user);
+    await limit(user, "WRITES_USER_MINUTE");
+    const { loaded, viewer } = await loadMember(gameId, user);
+    const ctx = contextOf(loaded);
+    if (loaded.game.version !== expectedVersion) throw ApiError.of("STALE_GAME");
+    const outcome = run(ctx, viewer, now());
+    if (isRefusal(outcome)) throw refusal(outcome);
+    await commit(
+      c,
+      loaded,
+      isModuleOutcome(outcome) ? outcome.writes : outcome,
+      viewer,
+      isModuleOutcome(outcome) ? outcome.describe : null,
+    );
+    return gameWithViewIfMember(gameId, user);
+  };
+
+  /** A lifecycle transition whose caller always stays a member. */
+  const memberLifecycle = async (...args: Parameters<typeof lifecycle>) => {
+    const after = await lifecycle(...args);
+    if (after === null) throw new Error("the viewer lost membership in a transition that keeps it");
+    return after;
+  };
+
+  /**
+   * The first checks `/actions` and `/preview` share (05): a member with a seat (`404`), `active`
+   * (`GAME_NOT_ACTIVE`) and not orphaned (`GAME_UNAVAILABLE`).
+   */
+  const seatedContext = async (gameId: string, user: UserRecord) => {
+    const { loaded, viewer } = await loadMember(gameId, user);
+    if (viewer.seat === null) throw ApiError.of("NOT_FOUND");
+    if (loaded.game.status !== "active") throw ApiError.of("GAME_NOT_ACTIVE");
+    return { loaded, viewer, seat: viewer.seat, ctx: contextOf(loaded) };
+  };
+
+  // Catalog and rules --------------------------------------------------------------------------
+
+  app.openapi(catalogRoute, (c) => {
+    const user = userOf(c);
+    const games = registry.enabled().flatMap((type) => {
+      const ctx = { config: type.config, resources: resources.listForUser("dictionary", user.id) };
+      const last = lastOptionsOf(user.settings, type.type);
+      const lastResolved = last === undefined ? undefined : type.latest.resolveOptions(last, ctx);
+      const useLast = lastResolved !== undefined && !isGameError(lastResolved);
+      const resolved = useLast ? lastResolved : type.latest.resolveOptions({}, ctx);
+      if (isGameError(resolved)) {
+        // checkConfig keeps the defaults usable; a type whose defaults don't resolve isn't offered.
+        platform.log.warn("game type's default options don't resolve", { gameType: type.type });
+        return [];
+      }
+      return [
+        {
+          type: type.type,
+          version: type.latest.version,
+          name: type.manifest.name,
+          description: type.manifest.description,
+          icon: type.manifest.icon,
+          players: { min: type.manifest.players.min, max: type.manifest.players.max },
+          defaultTurnTimeoutDays: type.latest.defaultTurnTimeoutDays(resolved),
+          defaults: useLast ? last : {},
+          catalog: type.latest.catalog(ctx),
+        },
+      ];
+    });
+    return c.json({ games }, 200);
+  });
+
+  app.openapi(rulesRoute, (c) => {
+    const { type: typeId } = c.req.valid("param");
+    const { version } = c.req.valid("query");
+    const type = registry.get(typeId);
+    const number = version === undefined ? type?.latest.version : Number(version);
+    const markdown = number === undefined ? undefined : type?.manifest.rules[number];
+    if (type === undefined || number === undefined || markdown === undefined) {
+      throw ApiError.of("NOT_FOUND");
+    }
+    return c.json({ type: type.type, version: number, markdown }, 200);
+  });
+
+  // Creating and listing ------------------------------------------------------------------------
+
+  /**
+   * A new game's invitation notices (06 §6.2, §6.3), in one background task whatever they carry
+   * (Q3): first the invite and invitation emails, then the generic invitation push. In that order
+   * (alpha A20 review S-2, P-1): the instance cap's alert and day stop, the sends and `sent_at` are
+   * written before the push spends any of a Worker invocation's statements, so the F-20 stop is
+   * never the statement that fails. A failure of either is logged by class and doesn't stop the
+   * other.
+   */
+  const sendInvitationNotices = async (gameId: string, notices: InvitationNotices) => {
+    try {
+      await sendInviteMail(platform, notices.mail);
+    } catch (error) {
+      logBackgroundFailure(platform, error);
+    }
+    try {
+      await sendNewInvitationPushes(platform, { gameId, invited: notices.invited });
+    } catch (error) {
+      logBackgroundFailure(platform, error);
+    }
+  };
+
+  /**
+   * What follows creating a game (05 Created): the invitation notices, the start at creation when
+   * every seat was filled by past opponents added at once, and their "added you" push. Returns the
+   * creator's envelope.
+   */
+  const afterCreate = async (
+    c: Context<AppEnv>,
+    user: UserRecord,
+    created: {
+      readonly gameId: string;
+      readonly added: readonly string[];
+      readonly invitations: InvitationNotices | null;
+    },
+    rematch: boolean,
+  ) => {
+    const { gameId, added, invitations } = created;
+    if (invitations !== null) {
+      // One task whenever an address was typed or a pick invited, whatever it sends (Q3).
+      background(c, platform, () => sendInvitationNotices(gameId, invitations));
+    }
+    if (added.length > 0) {
+      try {
+        await startIfFull(gameId, user);
+      } catch (error) {
+        // The game exists whatever happened to its start: the creator is shown it as stored (a
+        // lobby the creator can still start), never a 500 for a game that was created (A12-P-1).
+        platform.log.error("start at creation failed", {
+          errorClass: error instanceof Error ? error.name : typeof error,
+        });
+      }
+      if (platform.push.enabled) {
+        background(c, platform, () =>
+          sendAddedPushes(platform, { gameId, creator: user, added, rematch }),
+        );
+      }
+    }
+    return (await gameWithView(gameId, user)).game;
+  };
+
+  app.openapi(createGameRoute, async (c) => {
+    const user = userOf(c);
+    onboarded(user);
+    await limit(user, "WRITES_USER_MINUTE");
+    const body = c.req.valid("json");
+    const created = await createGame(
+      { platform, resources, keys: await options.keys() },
+      user,
+      registry.get(body.gameType),
+      body,
+    );
+    if (created === null) throw new Error("a game that isn't a rematch is always created");
+    const { joinToken } = created;
+    const game = await afterCreate(c, user, created, false);
+    // The link's URL is shown here and on a rotation only (06 §6.8).
+    return c.json(
+      {
+        game,
+        ...(joinToken === null ? {} : { joinLinkUrl: joinUrl(config.publicUrl, joinToken) }),
+      },
+      201,
+    );
+  });
+
+  /**
+   * Answers a player's rematch call once the finished game has its rematch (05): a member who has
+   * joined it gets it as it is; one holding an open invitation in it accepts that invitation, as
+   * `POST /accept` would (retried on `stale`, so the caller never has to, 03 §5.2); anyone else
+   * (declined, left, removed, dropped, an `inert` row, or no row) gets `404`.
+   */
+  const followRematch = async (c: Context<AppEnv>, rematchId: string, user: UserRecord) => {
+    for (let attempt = 1; ; attempt++) {
+      const { loaded, viewer } = await loadMember(rematchId, user);
+      if (viewer.state === "invited") {
+        // TODO(M3): a token accepting an invitation here needs the `join` scope as well as
+        // `games:create` (05 §Token scopes, 10 M3 acceptance); only sessions reach this today.
+        const outcome = accept(contextOf(loaded), viewer, now());
+        if (isRefusal(outcome)) throw refusal(outcome);
+        try {
+          await commit(c, loaded, outcome, viewer, null);
+        } catch (error) {
+          const lost = error instanceof ApiError && error.code === "STALE_GAME";
+          if (!lost || attempt >= REMATCH_ACCEPT_ATTEMPTS) throw error;
+          continue;
+        }
+      }
+      return (await gameWithView(rematchId, user)).game;
+    }
+  };
+
+  /**
+   * The finished game's current rematch, unless it has none or the one it names ended unplayed
+   * and may be replaced (04 `rematch_game_id`): then null.
+   */
+  const liveRematchOf = async (finishedId: string, user: UserRecord): Promise<string | null> => {
+    const rematchId = (await repos.games.get(finishedId))?.rematchGameId ?? null;
+    if (rematchId === null) return null;
+    let read = await repos.games.rematchRead(rematchId, user.id);
+    if (read?.game.status === "lobby" && now() >= lobbyExpiresAt(read.game)) {
+      // An overdue lobby has ended: expire it first, so the conditional link sees it (lazy expiry).
+      await expireIfOverdue(repos, rematchId, now());
+      read = await repos.games.rematchRead(rematchId, user.id);
+    }
+    return read === null || endedUnplayed(read.game) ? null : rematchId;
+  };
+
+  app.openapi(rematchRoute, async (c) => {
+    const user = userOf(c);
+    onboarded(user);
+    await limit(user, "WRITES_USER_MINUTE");
+    const { id } = c.req.valid("param");
+    // A finished game's members are exactly its players (04 §Membership): everyone else is `404`,
+    // as for any game they can't see.
+    const { loaded, viewer } = await loadMember(id, user);
+    if (loaded.game.status !== "finished") throw ApiError.of("WRONG_STATUS");
+    if (viewer.seat === null) throw ApiError.of("NOT_FOUND");
+    const existing = await liveRematchOf(id, user);
+    if (existing !== null) {
+      return c.json({ game: await followRematch(c, existing, user) }, 200);
+    }
+    const { game } = loaded;
+    // Every other player who acted and whose account still exists, in seat order, which is the
+    // order they are listed in and so join in (02 §4). A deleted account's row has no user; a seat
+    // that never acted never became anyone's past opponent (06 §6.11).
+    const others = loaded.players
+      .filter(
+        (row) =>
+          row.seat !== null && row.userId !== null && row.userId !== user.id && row.actedOnce === 1,
+      )
+      .sort((a, b) => (a.seat ?? 0) - (b.seat ?? 0))
+      .map((row) => ({ userId: row.userId ?? "" }));
+    const body = {
+      gameType: game.gameType,
+      options: JSON.parse(game.options) as unknown,
+      // One seat for each person carried over and the caller (05).
+      seats: others.length + 1,
+      turnTimeoutDays: game.turnTimeoutDays,
+      seatOrder: game.seatOrder,
+      aiAssistance: game.aiAssistance,
+      invitees: others,
+    };
+    for (let attempt = 1; ; attempt++) {
+      let created;
+      try {
+        created = await createGame(
+          { platform, resources, keys: await options.keys() },
+          user,
+          registry.get(game.gameType),
+          body,
+          game.id,
+        );
+      } catch (error) {
+        // Another player's call may have created the rematch meanwhile: then that is the answer,
+        // whatever refused this one (a limit, say).
+        const rematchId = await liveRematchOf(id, user);
+        if (rematchId === null) throw error;
+        return c.json({ game: await followRematch(c, rematchId, user) }, 200);
+      }
+      if (created !== null) {
+        return c.json({ game: await afterCreate(c, user, created, true) }, 201);
+      }
+      // The guarded insert wrote nothing: another call linked a rematch meanwhile, which is the
+      // answer. If that one has already ended unplayed too, try once more; a call that keeps
+      // losing is stale, never a server fault (A15-R2-2).
+      const rematchId = await liveRematchOf(id, user);
+      if (rematchId !== null) return c.json({ game: await followRematch(c, rematchId, user) }, 200);
+      if (attempt >= REMATCH_CREATE_ATTEMPTS) throw ApiError.of("STALE_GAME");
+    }
+  });
+
+  /**
+   * The creator's yes to "Add <name> to your players?" (05 `add-player`, 06 §6.9, alpha A19): the
+   * pair is written unless a block exists, and the answer is the same `204` either way, and on a
+   * repeat. Whom it may name doesn't depend on who is a past opponent already, so a repeat can't
+   * tell an added pair from a blocked one; everything else is the one `404`.
+   */
+  app.openapi(addPlayerRoute, async (c) => {
+    const user = userOf(c);
+    await limit(user, "WRITES_USER_MINUTE");
+    const { id } = c.req.valid("param");
+    const { userId } = c.req.valid("json");
+    const { loaded, viewer } = await loadMember(id, user);
+    const { endedAt } = loaded.game;
+    const named = addableUserIds(loaded.game, loaded.players, viewer).includes(userId);
+    if (!named || endedAt === null) throw ApiError.of("NOT_FOUND");
+    await repos.users.addPastOpponents(user.id, userId, endedAt);
+    return c.body(null, 204);
+  });
+
+  app.openapi(recentPlayersRoute, async (c) => {
+    const user = userOf(c);
+    onboarded(user);
+    const players = await repos.users.recentOpponents(user.id, RECENT_PLAYERS);
+    return c.json({ players }, 200);
+  });
+
+  app.openapi(listGamesRoute, async (c) => {
+    const user = userOf(c);
+    onboarded(user);
+    const query = c.req.valid("query");
+    const at = now();
+    const after = parseListCursor(query.cursor);
+    // No overdue lobby is listed as open (lazy expiry).
+    await expireOverdueLobbies(repos, user.id, at);
+    const rows = await repos.games.listForUser({
+      userId: user.id,
+      ...(query.status === undefined ? {} : { status: query.status }),
+      ...(query.gameType === undefined ? {} : { gameType: query.gameType }),
+      ...(query.invitations === undefined
+        ? {}
+        : { invitations: query.invitations === "true" ? "normal" : "hidden" }),
+      finishedSince: at - FINISHED_LISTED_MS,
+      endedSince: at - ENDED_LISTED_MS,
+      ...(after === undefined ? {} : { after }),
+      limit: LIST_PAGE + 1,
+    });
+    const page = rows.slice(0, LIST_PAGE);
+    const ids = page.map((row) => row.game.id);
+    const [players, lastActions] = await Promise.all([
+      repos.games.playersOf(ids),
+      repos.games.lastActions(ids),
+    ]);
+    const lobbies = new Set(
+      page.filter((row) => row.game.status === "lobby").map((row) => row.game.id),
+    );
+    const users = new Map(
+      (await repos.users.findByIds(shownUserIds(players, (gameId) => lobbies.has(gameId)))).map(
+        (u) => [u.id, u],
+      ),
+    );
+    const games = page.map(({ game, member }) => {
+      const rows = players.filter((row) => row.gameId === game.id);
+      const last = lastActions.find((action) => action.gameId === game.id);
+      const summary = summaryOf({
+        game,
+        players: rows,
+        viewer: member,
+        type: registry.get(game.gameType),
+      });
+      return {
+        id: game.id,
+        gameType: game.gameType,
+        status: game.status,
+        endReason: game.endReason,
+        aiAssistance: game.aiAssistance,
+        yourTurn: turnOf(rows, member).yourTurn,
+        yourInvitation: invitationOf(game, member),
+        players: visiblePlayers({ game, players: rows, users, viewer: member }),
+        summary: {
+          headline: plainText(summary.headline),
+          ...(summary.scores === undefined ? {} : { scores: [...summary.scores] }),
+        },
+        lastAction:
+          last === undefined
+            ? null
+            : {
+                describe: JSON.parse(last.describe) as (string | { seat: number })[],
+                byYou: member.seat !== null && last.seat === member.seat,
+              },
+        lastActionAt: game.lastActionAt,
+        // Only an open hidden invitation never badges; once accepted, the game is like any other.
+        unread:
+          !(member.state === "invited" && member.delivery === "hidden") &&
+          game.version > member.lastSeenVersion,
+        version: game.version,
+      };
+    });
+    const lastRow = page.at(-1);
+    const nextCursor =
+      rows.length > LIST_PAGE && lastRow !== undefined
+        ? `${String(lastRow.game.lastActionAt)}:${lastRow.game.id}`
+        : null;
+    return c.json({ games, nextCursor }, 200);
+  });
+
+  // One game -------------------------------------------------------------------------------------
+
+  app.openapi(getGameRoute, async (c) => {
+    return c.json(await gameWithView(c.req.valid("param").id, userOf(c)), 200);
+  });
+
+  app.openapi(historyRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const after = parseSeqCursor(c.req.valid("query").cursor);
+    await loadMember(id, userOf(c));
+    const rows = await repos.games.history(id, after, HISTORY_PAGE + 1);
+    const page = rows.slice(0, HISTORY_PAGE);
+    const items = page.map((row) => ({
+      seq: row.seq,
+      seat: row.seat,
+      kind: row.kind,
+      record: JSON.parse(row.record) as unknown,
+      describe: JSON.parse(row.describe) as (string | { seat: number })[],
+      via: row.via,
+      createdAt: row.createdAt,
+    }));
+    const last = page.at(-1);
+    const nextCursor = rows.length > HISTORY_PAGE && last !== undefined ? String(last.seq) : null;
+    return c.json({ items, nextCursor }, 200);
+  });
+
+  app.openapi(submitActionRoute, async (c) => {
+    const user = userOf(c);
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    await limit(user, "WRITES_USER_MINUTE", "MOVES_USER_MINUTE");
+    const { loaded, viewer, seat, ctx } = await seatedContext(id, user);
+    if (loaded.game.version !== body.expectedVersion) throw ApiError.of("STALE_GAME");
+    if (viewer.toAct !== 1) throw ApiError.of("NOT_YOUR_TURN");
+    const parsed = ctx.definition.actionSchema.safeParse(body.action);
+    if (!parsed.success) throw ApiError.of("INVALID_ACTION");
+    const action: unknown = parsed.data;
+    const loadedResources = await resources.load(await repos.games.resources(id));
+    const valid = ctx.definition.validate(ctx.state, seat, action, loadedResources);
+    if (isGameError(valid)) throw ApiError.module(valid.code, valid.detail);
+    const outcome = moduleTransition(ctx, {
+      seat,
+      kind: "action",
+      action,
+      run: (rng) => ctx.definition.apply(ctx.state, seat, action, rng),
+      now: now(),
+    });
+    await commit(c, loaded, outcome.writes, viewer, outcome.describe);
+    const after = await gameWithView(id, user);
+    return c.json(
+      {
+        ...after,
+        record: outcome.record,
+        describe: plainText(outcome.describe),
+      },
+      200,
+    );
+  });
+
+  app.openapi(previewRoute, async (c) => {
+    const user = userOf(c);
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    await limit(user, "PREVIEWS_USER_MINUTE");
+    const { viewer, seat, ctx } = await seatedContext(id, user);
+    const preview = ctx.definition.preview?.bind(ctx.definition);
+    if (preview === undefined) throw ApiError.of("NOT_FOUND");
+    if (viewer.toAct !== 1) throw ApiError.of("NOT_YOUR_TURN");
+    const parsed = ctx.definition.actionSchema.safeParse(body.action);
+    if (!parsed.success) throw ApiError.of("INVALID_ACTION");
+    const loadedResources = await resources.load(await repos.games.resources(id));
+    const result = preview(ctx.state, seat, parsed.data, loadedResources);
+    if (isGameError(result)) throw ApiError.module(result.code, result.detail);
+    return c.json({ preview: result }, 200);
+  });
+
+  // Lifecycle transitions ------------------------------------------------------------------------
+
+  app.openapi(startGameRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { expectedVersion } = c.req.valid("json");
+    return c.json(await memberLifecycle(c, id, expectedVersion, start), 200);
+  });
+
+  app.openapi(acceptInvitationRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { expectedVersion } = c.req.valid("json");
+    return c.json(await memberLifecycle(c, id, expectedVersion, accept, onboarded), 200);
+  });
+
+  app.openapi(declineGameRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { expectedVersion } = c.req.valid("json");
+    // A lobby decline ends the decliner's membership: nothing left to show them (04 §Membership).
+    const after = await lifecycle(c, id, expectedVersion, decline);
+    return after === null ? c.body(null, 204) : c.json(after, 200);
+  });
+
+  app.openapi(resignGameRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { expectedVersion } = c.req.valid("json");
+    return c.json(await memberLifecycle(c, id, expectedVersion, resign), 200);
+  });
+
+  app.openapi(cancelGameRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { expectedVersion } = c.req.valid("json");
+    return c.json(await memberLifecycle(c, id, expectedVersion, cancel), 200);
+  });
+
+  app.openapi(removeSeatRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const { expectedVersion, playerId } = c.req.valid("json");
+    return c.json(
+      await memberLifecycle(c, id, expectedVersion, (ctx, viewer, at) =>
+        removeSeat(ctx, viewer, playerId, at),
+      ),
+      200,
+    );
+  });
+
+  registerJoinRoutes(app, {
+    platform,
+    keys: options.keys,
+    userOf,
+    onboarded,
+    limit,
+    loadMember,
+    contextOf,
+    gameWithView,
+    describeResource,
+  });
+
+  app.openapi(markSeenRoute, async (c) => {
+    const user = userOf(c);
+    const { id } = c.req.valid("param");
+    await limit(user, "WRITES_USER_MINUTE");
+    await loadMember(id, user);
+    await repos.games.markSeen(id, user.id, c.req.valid("json").version);
+    return c.body(null, 204);
+  });
+}

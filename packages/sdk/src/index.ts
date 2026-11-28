@@ -60,3 +60,4 @@ export {
   type SubmitResult,
 } from "./api.js";
 export { GAME_TYPE_PATTERN, isGameType, type GameManifest } from "./manifest.js";
+export { formatText } from "./text.js";

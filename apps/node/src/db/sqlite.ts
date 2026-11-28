@@ -9,6 +9,9 @@
  * whole or not at all — the same guarantee D1's `batch()` gives (03 §5.2). Transaction control
  * belongs to {@link inTransaction} alone: a statement that would begin or end a transaction
  * through the driver is refused, so nothing can leave the shared connection mid-transaction.
+ *
+ * Test use only: this module is the package's `./db` export so the contract suite and the
+ * repository tests can open a real database; the server itself imports it by path (03 §4).
  */
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 
@@ -47,6 +50,9 @@ export function openSqlite(path: string): DatabaseSync {
   const sqlite = new DatabaseSync(path, {
     enableForeignKeyConstraints: true,
     timeout: BUSY_TIMEOUT_MS,
+    // SQLite's defensive flag (no writable_schema, no shadow-table writes), whatever Node's
+    // default is (B1-S-8).
+    defensive: true,
   });
   sqlite.exec("PRAGMA journal_mode = WAL");
   sqlite.exec("PRAGMA foreign_keys = ON");
@@ -58,8 +64,9 @@ export function openSqlite(path: string): DatabaseSync {
  * `get` the one row itself (`undefined` when there is none).
  *
  * Transaction control is refused by its text, and, as a backstop for whatever the text check
- * misses, a statement run in autocommit that leaves a transaction open is rolled back and refused
- * (M2a review S2-2).
+ * misses, by its effect: a statement run in autocommit that leaves a transaction open is rolled
+ * back and refused (M2a review S2-2), and one that closes the transaction it ran in is refused,
+ * so a batch stops there instead of running its other statements in autocommit (issue #13 S-3).
  */
 function execute(
   sqlite: DatabaseSync,
@@ -74,7 +81,12 @@ function execute(
 /** Whether a transaction is open (a call, so TypeScript doesn't narrow it between reads). */
 const isOpen = (sqlite: DatabaseSync): boolean => sqlite.isTransaction;
 
-/** Runs one statement; if it opened a transaction from autocommit, rolls that back and throws. */
+/**
+ * Runs one statement. If it opened a transaction from autocommit, that is rolled back and it
+ * throws; if it closed the transaction it ran in (`inTransaction`'s), it throws. A statement that
+ * failed and took its transaction with it (SQLite rolls back by itself after some errors) keeps
+ * its own error, which `inTransaction` rethrows.
+ */
 function runLeavingNoTransaction(
   sqlite: DatabaseSync,
   sql: string,
@@ -82,7 +94,7 @@ function runLeavingNoTransaction(
   method: Method,
 ): { rows: unknown[] } {
   const autocommit = !isOpen(sqlite);
-  const refuseOpenTransaction = (): void => {
+  const refuseOpenedTransaction = (): void => {
     if (autocommit && isOpen(sqlite)) {
       sqlite.exec("ROLLBACK");
       throw new TransactionControlError();
@@ -92,10 +104,11 @@ function runLeavingNoTransaction(
   try {
     result = run(sqlite.prepare(sql), params as SQLInputValue[], method);
   } catch (error) {
-    refuseOpenTransaction();
+    refuseOpenedTransaction();
     throw error;
   }
-  refuseOpenTransaction();
+  refuseOpenedTransaction();
+  if (!autocommit && !isOpen(sqlite)) throw new TransactionControlError();
   return result;
 }
 

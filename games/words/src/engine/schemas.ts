@@ -231,6 +231,8 @@ export const ERROR_CODES = {
   optionsNotObject: "OPTIONS_NOT_OBJECT",
   /** `resolveOptions`: a key that isn't an option. */
   unknownOption: "UNKNOWN_OPTION",
+  /** `resolveOptions`: a version key whose value isn't a non-negative integer. */
+  invalidOption: "INVALID_OPTION",
 } as const;
 
 /** The `detail` of an `INVALID_PLACEMENT` error, in check order (words §10.3). */

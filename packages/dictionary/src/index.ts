@@ -15,10 +15,18 @@ export {
   type WordListCheck,
   type WordListProblem,
 } from "./format.js";
-export { createWordList, hasWord, WordListFormatError, type WordList } from "./lookup.js";
+export {
+  createWordList,
+  followingLetters,
+  hasWord,
+  WordListFormatError,
+  type WordList,
+} from "./lookup.js";
 export {
   manifestSchema,
   parseIndex,
+  servedFileName,
+  servedPath,
   toResourceMeta,
   type DictionaryIndex,
   type DictionaryManifest,

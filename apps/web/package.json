@@ -11,14 +11,18 @@
   },
   "dependencies": {
     "@your-move/api-client": "workspace:*",
+    "@your-move/dictionary": "workspace:*",
+    "@your-move/sdk": "workspace:*",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@testing-library/dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@your-move/shared": "workspace:*",
     "@vitejs/plugin-react": "catalog:",
     "jsdom": "catalog:",
     "vite": "catalog:",

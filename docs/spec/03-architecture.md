@@ -31,7 +31,7 @@
 | Node SQLite driver | `node:sqlite` (Node's built-in `DatabaseSync`), WAL mode, through Drizzle's `sqlite-proxy` driver | Synchronous like better-sqlite3, but no native module: no install script, no downloaded binary, nothing added to the image (M2a) |
 | Node WebSockets | `ws` (via `@hono/node-ws` or direct) | Standard |
 | Frontend | React 18+, Vite, React Router | As requested; Vite has the best PWA tooling |
-| PWA | `vite-plugin-pwa` (Workbox) | Manifest + service worker generation |
+| PWA | A small hand-written service worker (`apps/web/sw/sw.js`) emitted by a Vite plugin; the manifest is served by the server at runtime | No `vite-plugin-pwa`/Workbox dependency (07 §4) |
 | Client state | TanStack Query for server state; small local store (Zustand or `useReducer`) for board drag state | Keep it simple |
 | Styling | CSS modules or plain CSS with custom properties | No heavy UI kit; we need full control of the board |
 | Tests | Vitest (unit + integration), fast-check (property tests), Playwright (e2e, mobile viewports) | Same test runner across packages; details in 11 §4 |
@@ -130,17 +130,24 @@ never touches a Drizzle database object. Instead:
   through an async Drizzle database with `batch()` that each adapter supplies: D1 → Drizzle's D1
   driver, whose `db.batch([...])` is D1's transactional batch; Node → Drizzle's `sqlite-proxy`
   driver over `node:sqlite`, whose batch callback runs the statements inside one synchronous
-  `BEGIN IMMEDIATE … COMMIT`. Only `src/db/` and the two adapters (`apps/node/src/db/`,
+  `BEGIN IMMEDIATE … COMMIT`. That transaction is the only one: a statement through the driver
+  that begins, ends or nests a transaction is refused by its text (after any leading comments),
+  and as a backstop a statement that opens a transaction from autocommit is rolled back and
+  refused, and one that closes the batch's transaction is refused before the batch's next
+  statement runs. Only `src/db/` and the two adapters (`apps/node/src/db/`,
   `apps/worker/src/d1.ts`) import Drizzle (a dependency-cruiser rule, 11 §5).
 - A shared repository contract test suite (`@your-move/server/testing`) runs against **both**
   adapters: Node in-process on a real file; D1 in workerd, migrated with
   `wrangler d1 migrations apply --local` and reached through Wrangler's `getPlatformProxy` (in
-  CI's arm64 `test:worker` job, 11 §9).
+  CI's arm64 `test:worker` job, 11 §9). `@your-move/server/testing` (the suite and test helpers
+  such as `createSession`) and `@your-move/node/db` (the Node adapter, for the contract tests) are
+  exports for tests only: production code reaches the adapter by path and never imports either.
 
 **Randomness.** Production randomness always comes from WebCrypto (`crypto.getRandomValues`,
 `crypto.randomUUID`). The engine receives it as an explicit `RandomSource` argument (02 §2); the
 server constructs the WebCrypto-backed source in exactly one place. Only tests construct seeded
-sources.
+sources: `createApp` takes an optional `random` source factory that runtimes never pass, and the
+framework's tests pass a seeded one and print its seed on failure.
 
 ## 5. Storage
 
@@ -174,7 +181,13 @@ Every `games` row has an integer `version` and a `write_token`. **Every** state 
 action, join, accept, remove, start, resign, decline, leave, cancel, expiry, timeout (02 §4) — is a
 *transition* applied like this. (Invite claims update only the claimed `game_players` row, guarded by
 its state, `delivery <> 'inert'`, the claimant holding no other row in the game, and the game
-`version` being unchanged since it was loaded — checked but deliberately not bumped, 02 §4.)
+`version` being unchanged since it was loaded — checked but deliberately not bumped, 02 §4. The
+email-nudge throttle `game_players.last_nudged_at` is not game state either: one conditional
+update of that row, re-checking everything that made the nudge due, with no version bump, §7. A
+finished game's rematch link `games.rematch_game_id` is not game state either: it is written in
+the batch that inserts the rematch, by one conditional update guarded on the game being `finished`
+and the link being NULL or naming a game that ended unplayed, with every insert of the batch
+guarded the same way and no version bump, 04, 05 `POST /api/v1/games/:id/rematch`.)
 
 1. Load game state + version.
 2. Compute the new state with the game module (pure), with recorded randomness and pre-loaded
@@ -211,7 +224,9 @@ database matches the winner's state exactly, on both drivers; same for move-vs-d
 remove-vs-join, an accept or join that triggers an automatic start, join-vs-join for the last open
 seat, and the invite-claim races (02 §4): claim-vs-start, claim-vs-remove, claim-vs-cancel, and
 **create-vs-onboarding** (a game created while the invitee completes onboarding is claimed by the
-sweep, 06 §6.4).
+sweep, 06 §6.4), and **rematch-vs-rematch** (several rematches of one finished game created
+together, and replacements of one that ended unplayed: exactly one is created, and the others
+leave no row, alpha A15).
 
 Clients send `expectedVersion` with every client-initiated transition, which doubles as
 double-submit protection. Transitions the server starts itself (join, sweep, account deletion)
@@ -222,12 +237,14 @@ indistinguishable `404`).
 ### 5.3 Docker storage
 
 Single SQLite file on a mounted volume (`/data/app.sqlite`), WAL mode, `busy_timeout` set,
-`foreign_keys=ON`. Backups: documented `sqlite3 .backup` / Litestream recipe in 09.
+`foreign_keys=ON`, and SQLite's defensive flag (no `writable_schema`) set explicitly, whatever
+Node's default. Backups: documented `sqlite3 .backup` / Litestream recipe in 09.
 The Node runtime is **single-instance** by design; running two containers against one file is
 unsupported and the app SHOULD refuse to start if it detects another live instance (lock file).
 M2a: the lock is SQLite's own exclusive lock on `<DATABASE_PATH>.lock`, held by an open
-transaction for the life of the process and taken before migrations; the operating system drops
-it however the process exits, so a crash leaves no stale lock (on a local filesystem; network
+transaction for the life of the process and taken before migrations, which run on a connection of
+their own that is closed before the server's connection opens (04 §Migrations); the operating
+system drops the lock however the process exits, so a crash leaves no stale lock (on a local filesystem; network
 filesystems are unsupported for the database anyway).
 
 ## 6. Realtime
@@ -258,38 +275,150 @@ filesystems are unsupported for the database anyway).
 - **Web Push** (VAPID) to subscribed devices when it becomes a user's turn, a past opponent adds
   them to a new game (auto-join), or a game that reached `active` ends. A new invitation (not
   `hidden` or `inert`) sends only the generic "You have a new game invitation" push, at most one per
-  recipient per day (06 §6.2). Every other lobby event (joins by others, accepts, declines,
-  leaves, removals) and lobby endings (`cancelled`, `expired`, `declined` from the lobby, including
-  cancels caused by account deletion) send realtime invalidations only — no push, no email (02 §4). iOS supports this only for home-screen web apps (16.4+) and only
-  after a user gesture grants permission — the UI asks after the first game is created, not at
-  sign-in.
+  recipient per day (06 §6.2). Every other lobby event (joins by others, accepts, declines, leaves,
+  removals) and lobby endings (`cancelled`, `expired`, `declined` from the lobby, including cancels
+  caused by account deletion) send realtime invalidations only — no push, no email (02 §4). iOS
+  supports this only for home-screen web apps (16.4+) and only after a user gesture grants
+  permission — the UI asks after the first game is created or the first invitation is accepted
+  (Q28), not at sign-in.
 - Push text is built only from public `describe` text (02 §5) and display names, never from state
   (e.g. "Alex played QUIZ for 64. Your turn."). The auto-join push is "<creator> added you to a
   game"; the invitation push names nobody (06 §6.2).
 - Implemented once in `packages/server` using WebCrypto (RFC 8291 aes128gcm + RFC 8292 VAPID) or a
   vetted Workers-compatible library; must work on both runtimes.
+- **Turn and game-end pushes (alpha A8).** Implemented with WebCrypto alone, no library. A
+  transition that won its race schedules its pushes in the background (§4) after the response, so a
+  push never delays or fails the action; nothing is sent without VAPID configured (09 §1). "Your
+  turn" goes to each seat whose clock the transition started (`to_act_since` set: it entered
+  `toAct`, the start included, 02 §2.3), and "game over" to every seated player when a game that
+  reached `active` ends (`finished`, or `declined` after the start); **never to the user whose
+  request made the transition**, who is looking at it (so a seat whose own action restarts its clock
+  gets nothing, and the creator who presses Start isn't told it's their turn). The message is `{
+  title, body, url, tag }`: `title` is `APP_NAME`; `body` is the transition's `describe` text with
+  names filled in ("You" for the recipient, "New player" and "Deleted player" as for the email
+  nudge) as a sentence followed by "Your turn." or "The game is over."; a start, which has no
+  `describe` text, says "Your game with <the other players> has started. Your turn.", and a
+  framework-only `declined` ending "<name> declined the game, so it's over."; the body is cut to 240
+  code points (so a cut never splits a surrogate pair); `url` is the game's path `/g/<id>` and `tag`
+  is `game-<id>`, so a newer notification for a game replaces an older one. Each request carries
+  `TTL: 86400` (the email nudge covers a longer wait) and `Urgency: normal`. A push service's `2xx`
+  sets `last_success_at`, `404`/`410` deletes the subscription, and anything else (a redirect,
+  another status, a network error or the 5 s timeout, 08 T12) is logged by status or error class
+  only, never the endpoint (a capability URL) or the text. Only subscriptions whose session is live
+  are sent to (the session check's own expiry rules, 06 §4: a session past its expiry is deleted
+  only at its next use, and until then gets nothing). At most 40 subscriptions are sent to per
+  transition (a Worker invocation's subrequest budget, 09 §3), taken in turn by recipient (each
+  one's first device, then each one's second, a recipient's devices most recently useful first), so
+  no recipient's devices crowd out another's; the delivery marks and deletions are one statement
+  each.
+- **The auto-join push (alpha A12).** When a past opponent picked from the list is added at once
+  (06 §6.2), the create request schedules, in the background like a transition's pushes, one push to
+  each added player and never to the creator: `body` is "<creator> added you to a game." (the
+  creator's display name, "New player" without one), or "<creator> wants a rematch." when the game
+  is a finished game's rematch (05 `POST /api/v1/games/:id/rematch`, alpha A15), followed by " Your
+  turn." when the game started at creation and the added player's seat is to act; `url`, `tag`, the
+  TTL, the 240-code-point cut, the per-request cap of 40 and the live-session rule are as above.
+  The start at creation sends no "your turn" push of its own: the auto-join push says it, so an
+  added player gets one notification, not two (they'd share a `tag` anyway). The push reads the game
+  when it is sent: nothing once the game has ended (a decline that won the race with the start ends
+  a two-seat lobby), and only to added players still `joined` or `playing`. A start at creation that
+  fails is logged by error class and leaves the created lobby, which the `201` shows; the push is
+  scheduled either way.
+- **The invitation push (alpha A20).** A create (or rematch) request that seats a `normal`
+  invitation with a user (06 §6.2) sends, from the one background task it schedules for its
+  invitations whatever they are (with the invite emails, 06 §6.3), "You have a new game
+  invitation." to each such invitee: `url` `/`, `tag` `invitation`, never naming the creator or
+  the game; it reads the game when it is sent and pushes only to rows still a `normal` invitation
+  in a `lobby`. A claim that makes a `normal` invitation (06 §6.4) sends the same push to the
+  claimant, after the onboarding response or from the sweep's claim step. At most one per
+  recipient in a fixed UTC day: the per-recipient counter `INVITATION_PUSHES_USER_DAY` (08 §4) is
+  taken in the background, after the subscriptions are read and only for a recipient who has a
+  live one, so it is never read or written by the request a creator sees. It is taken **before**
+  delivery, on purpose (review A20-S-5, P-7): one atomic count decides the day's push, so racing
+  invitations can't both send, and no outcome is written back; a send that fails, or a recipient
+  cut by the cap of 40, has still used up that day's push. The push runs after the same task's
+  emails, `sent_at` and the invite-email cap's alert and day stop (review A20-S-2, 09 §3). On Node
+  the task shares the server's event loop, so it can delay the next requests by the work of its
+  sends, as A17's invite emails can; nothing of it reaches a response (review A20-S-6, 06 §6.6).
+  TTL, urgency, the live-session rule, the cap of 40, the delivery marks and deletions are as
+  above.
 - Optional email nudge (default off, per-user setting): "It's your turn" after 24 h idle, max one
-  per game per day; and at most one email per normal invitation, sent when it's created or claimed
-  (06 §6.2), not by the sweep.
+  per game per day; and at most one email per normal invitation, sent when it's created (06 §6.2; alpha
+  A20), never by the sweep or a claim. Precisely (alpha A6): the sweep nudges a `playing` seat of an
+  `active` game whose `to_act_since` is at least 24 h old ("idle": in `toAct` that long without
+  acting) and whose `last_nudged_at` is unset or at least 24 h old, if its user is a human with
+  `settings.emailNudges` true, onboarded, not suspended or being deleted, whose `email_id` is set
+  and has no `bounced` or `complained` row in `email_suppressions`. An `unsubscribed` row doesn't
+  stop nudges: only the invites unsubscribe and the under-age exit write one, and nudges have their
+  own opt-out (the setting, and `email_id`, which a `nudges` unsubscribe clears). Only games of an
+  installed game type and rules version are looked at, in SQL, so orphaned games never take a place
+  in the queue. A run's page holds at most one seat per recipient (their least recently nudged, then
+  longest waiting), recipients nudged least recently in any game first, so neither one recipient's
+  many games nor a recipient held back by their own cap keeps anyone else waiting; a recipient's
+  other due games follow in later runs. Two daily caps apply (08 §4): instance-wide
+  `LIMIT_NUDGE_EMAILS_PER_DAY` and per recipient `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`. The run
+  reads the room left under each without counting; a nudge over either waits unclaimed for a later
+  run (at the instance-wide cap the run stops), only claimed nudges are counted, and the
+  instance-wide cap is alerted once per fixed window, through a counter of its own. Then
+  `last_nudged_at` is claimed with one conditional update that re-checks everything above — the
+  seat, the game being `active` and the user's eligibility — **before** the email is sent (so two
+  sweeps can't both send, an unsubscribe or a move in between stops it, and a failed send isn't
+  retried that day), and the claimed nudge is counted. The room is read once per run, so the run
+  also checks the instance-wide count each claimed nudge adds: one that goes over the cap (only
+  possible when two runs overlap) isn't sent, the run stops there as at the cap, and that seat is
+  due again once `NUDGE_INTERVAL_MS` (24 h) has passed since the claim, so no fixed UTC day sends
+  more than the cap (08 §4.2). It is a notification throttle, not game state: it is not a transition
+  (§5.2) and doesn't bump `version`. The email is a fixed template: the game type's name, the other
+  seated players' display names ("New player" for a name that isn't set, "Deleted player" for a
+  deleted account, 02 §5, 04), the last public `describe` text (names filled in, "You" for the
+  recipient), a link to the game, and the unsubscribe link and headers (05 §Email links) — never
+  state, options, totals or standings (a move's points only as its `describe` text gives them), nor
+  addresses (08 T18). A run sends at most a per-runtime number of nudges, bounded by what one
+  invocation may spend (100 on Node; 4 on Workers, 09 §3); the rest wait for the next run. Turning
+  nudges on deletes only the address's own `unsubscribed` row (its holder's opt-in, review
+  A20-P-3); a `bounced` or `complained` row stays and keeps stopping them (surfacing that in
+  Settings is M4's, with bounce handling).
 
 ## 8. Scheduled work
 
-(Turn timeouts are applied here and nowhere else; GET handlers never write game state.)
+(Turn timeouts are applied here and nowhere else. GET handlers never write game state, with one
+exception: **lazy lobby expiry**. A read or write of a game by a member first applies the expiry
+transition if it is a lobby past its 14 days (a stranger's `404` never writes), and listing or
+creating games first expires the caller's overdue lobbies (at most 20 per request, oldest first,
+the rest on the next request), so no overdue lobby is accepted or started (both refuse it whatever
+its status says), and its typed addresses are cleared (06 §6.5) as soon as anyone involved comes back. It's a
+transition like any other (§5.2), so it bumps the game's version: a member sees the game unread,
+and a request in flight with the earlier `expectedVersion` gets `STALE_GAME`. `start` and `accept`
+also refuse a lobby at or past its expiry. Past the 20-per-request bound a list may still show
+some overdue lobbies as open until a later request expires them. The alpha's sweep has the
+email-nudge step (A6), the invite-claim and lobby-expiry steps (A17), which expires the
+lobbies no one comes back to, so a typed address never outlives its lobby for long, and the join-link expiry (A18), which deletes links past
+`expires_at`.)
 
 One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * * *`) or a Node
-`setInterval`. Every step is idempotent and uses the same transition mechanism as actions:
+`setInterval` (every 15 minutes, first run 15 minutes after start; a run still going when the next
+is due skips that one). A failing step is logged (by class, never its message, 09 §5) and the
+other steps still run. Every step is idempotent and uses the same transition mechanism as actions,
+except notification throttles such as `last_nudged_at` (§7) and invite claims, which are guarded
+row updates that check the game's version without bumping it (02 §4, §5.2):
 
 - Expire OTPs, sessions, invites, join links and rate-limit buckets.
 - Delete accounts that haven't completed onboarding 7 days after creation — only rows with
   `onboarded_at IS NULL`, never users re-prompted after a `MIN_AGE` rise (06 §5).
 - Claim any `invited`, non-`inert` email seat in a `lobby` game whose `invite_email` matches an
   onboarded user who holds no other row in that game, with the same guard as an onboarding claim
-  (catches games created during onboarding and failed claims; 02 §4, 06 §6.4).
+  (catches games created during onboarding and failed claims; 02 §4, 06 §6.4). The user must be
+  an onboarded human, not suspended or being deleted, and the lobby not yet due to expire; at
+  most a per-runtime number of seats per run, oldest lobby first (alpha A17, 09 §3). This is also
+  the catch-up for the request that completes onboarding, which claims at most a per-runtime
+  number of seats (Node 50, the Worker 8, 06 §6.4).
 - Apply per-seat turn timeouts via module `onTimeout`: overdue seats one transition at a time, in
   seat order, reloading and re-checking `toAct` and the deadline before each (02 §4).
 - Send timeout reminders (50 % and 24 h before, 02 §4; tracked in `timeout_reminders_sent`, which
   every clock restart resets to 0).
-- Expire lobbies 14 days after creation.
+- Expire lobbies 14 days after creation (reads and writes also expire them lazily, above): the
+  same expiry transition, retried on `stale`, at most a per-runtime number per run, oldest first
+  (alpha A17, 09 §3).
 - Send due email nudges.
 - Purge blobs of deleted dictionaries no `lobby`/`active` game references (`game_resources`), and
   delete row-less upload blobs older than 1 h (words §9.5).
@@ -325,9 +454,10 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
 ## 10. Dictionary at runtime
 
 - Server: a `DictionaryProvider` loads dictionaries lazily by id and caches them per
-  isolate/process. Each compact sorted word list is either bundled into the Worker / Node build as a
-  text module or, on Cloudflare once the total exceeds the bundle budget, fetched once per isolate
-  from the static-assets binding (Node reads it from disk). Lookup is a binary search directly over
+  isolate/process. Each compact sorted word list is read from disk on Node and fetched once per
+  isolate from the static-assets binding on Cloudflare, so the Worker and the clients share one
+  copy of each list (the served layout below; bundling the lists into the Worker as text modules
+  was the plan until alpha A2). Lookup is a binary search directly over
   the text (no parse), or any index is built outside request handling, never inside a request.
   Memory < 25 MB per loaded dictionary. Measure Worker startup time and per-lookup CPU in M1 and
   record the numbers (M1, in `packages/dictionary/README.md`: under 1 µs CPU per ENABLE lookup,
@@ -336,6 +466,20 @@ One `sweep()` function in core, invoked by Cloudflare Cron Triggers (`*/15 * * *
   list as a text module; the real startup time is recorded at the first Workers deployment).
   Each built-in list is checked against its manifest's size and SHA-256 once per load, before
   first use.
+- **Served layout (alpha A2).** The dictionary build also writes `generated/served/`: the index
+  (`index.json`) and each word list, with its `.gz` and `.br` copies, under its versioned, hashed
+  name `<id>-v<version>.<first 16 hex digits of wordsSha256>.txt`. Clients download it at
+  `/assets/dictionaries/<that name>` (the `downloadUrl` the framework sets for public lists, words
+  §9.4), cached as immutable like every hashed asset. The index is unversioned, so it is never
+  published under `/assets/`: on Cloudflare the build copies the word lists (without the `.gz` and
+  `.br` copies, as Cloudflare compresses static assets itself) into the static assets and the index
+  to `/dictionaries/index.json`, which Cloudflare's default revalidates, and the Worker reads the
+  index (once per isolate, when the app is built) and each list (on first use) through the
+  `ASSETS` binding; on Node the build copies the layout to `dist/dictionaries`, which the server
+  reads from disk, serving only the word lists (with their precompressed copies). Around the
+  runtime's `loadText` the core adds a 10 s timeout, and it remembers any failure of the whole
+  load (a list whose size or hash doesn't match its manifest included) for 30 s before fetching
+  or hashing that list again (10 M3).
 - `serverOnly` dictionaries (operator and uploaded, words §9.5) are loaded from `BlobStore` on first
   use into an in-memory LRU cache **sized by bytes** (default 60 MB per isolate or process, below the
   Worker's 128 MB limit). Lookup is a binary search over the raw sorted text with no index build,

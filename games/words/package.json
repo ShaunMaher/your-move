@@ -24,20 +24,29 @@
     "dist",
     "!dist/**/*.test.*",
     "!dist/test-support.*",
-    "!dist/.tsbuildinfo"
+    "!dist/client/dom-setup.*",
+    "!dist/**/.tsbuildinfo"
   ],
   "scripts": {
     "build": "tsc --build"
   },
   "peerDependencies": {
     "@your-move/sdk": "workspace:^",
+    "react": "^19.0.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@testing-library/dom": "catalog:",
+    "@testing-library/react": "catalog:",
     "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
     "@your-move/dictionary": "workspace:*",
     "@your-move/sdk": "workspace:*",
     "@your-move/testkit": "workspace:*",
+    "jsdom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "vitest": "catalog:",
     "zod": "catalog:"
   }

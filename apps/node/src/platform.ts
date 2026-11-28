@@ -8,7 +8,9 @@ import { BlockList, isIP } from "node:net";
 import type { HttpBindings } from "@hono/node-server";
 import {
   type AppConfig,
+  type BuiltinDictionaries,
   coreEmailSender,
+  corePushSender,
   type EmailSender,
   type Logger,
   type Platform,
@@ -66,8 +68,11 @@ export interface NodePlatformOptions {
   readonly nodeConfig: Pick<NodeConfig, "trustProxy" | "trustProxyHops" | "trustProxyPeers">;
   readonly log: Logger;
   readonly now: () => Date;
+  readonly dictionaries: BuiltinDictionaries;
   /** The `smtp` sender, when that is the configured provider. */
   readonly smtp?: EmailSender;
+  /** Tests only: where Web Push requests go instead of the network. */
+  readonly pushFetch?: typeof fetch;
 }
 
 /** How many client addresses the misconfigured-proxy check looks at (08 §4.1). */
@@ -120,7 +125,9 @@ export function createNodePlatform(options: NodePlatformOptions): Platform {
     config: options.config,
     log: options.log,
     now: options.now,
+    dictionaries: options.dictionaries,
     email: coreEmailSender(options.config, options.log, options.now, options.smtp),
+    push: corePushSender(options.config, options.log, options.now, options.pushFetch),
     clientIp: (request, env) => {
       // An empty address never parses, so a request without a socket is refused.
       const socketAddress =

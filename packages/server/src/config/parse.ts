@@ -1,8 +1,14 @@
 import { isGameType } from "@your-move/sdk";
 import { z } from "zod";
 
-import { normaliseAddress, type NormalisedEmail } from "../accounts/email.js";
-import { RATE_LIMIT_NAMES } from "../auth/limits.js";
+import { isSendableAddress, normaliseAddress, type NormalisedEmail } from "../accounts/email.js";
+import {
+  EMAIL_DAY_CAPS,
+  emailDayCapLimits,
+  emailWorstCasePer24h,
+  RATE_LIMIT_NAMES,
+} from "../auth/limits.js";
+import { vapidKeyShapes } from "../push/vapid.js";
 import { DEFAULT_APP_NAME } from "./defaults.js";
 import { isEmailAddress, normaliseEmail, parseMailbox } from "./email.js";
 import { isLocalDevUrl, LOCAL_DEV_APP_SECRET } from "./local-dev.js";
@@ -32,6 +38,14 @@ const EMAIL_PROVIDERS = [
   "cloudflare",
   "console",
 ] as const;
+
+/**
+ * The most messages a provider accepts in any 24 hours when `EMAIL_DAILY_QUOTA` is unset (09 §2):
+ * known only for `gmail`, a paid Workspace user's limit.
+ */
+const DEFAULT_DAILY_QUOTA: Readonly<Partial<Record<(typeof EMAIL_PROVIDERS)[number], number>>> = {
+  gmail: 2000,
+};
 
 const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 
@@ -154,6 +168,10 @@ const envSchema = z.looseObject({
     error: `is required and must be one of ${EMAIL_PROVIDERS.join(", ")}`,
   }),
   EMAIL_FROM: required(),
+  EMAIL_DAILY_QUOTA: z
+    .string()
+    .regex(POSITIVE_INTEGER, { error: "must be a positive whole number" })
+    .optional(),
   EMAIL_API_KEY: z.string().optional(),
   SMTP_URL: z.string().optional(),
   GMAIL_CLIENT_ID: z.string().optional(),
@@ -215,6 +233,8 @@ function crossFieldIssues(raw: RawEnv, options: ParseConfigOptions): string[] {
   const from = parseMailbox(raw.EMAIL_FROM);
   if (!from) {
     issues.push('EMAIL_FROM: must be an address or "Name" <address>, on one line');
+  } else if (raw.EMAIL_PROVIDER !== "console" && !isSendableAddress(from.address)) {
+    issues.push("EMAIL_FROM: the address must be one mail can be sent to and from (04)");
   }
 
   switch (raw.EMAIL_PROVIDER) {
@@ -277,6 +297,16 @@ function crossFieldIssues(raw: RawEnv, options: ParseConfigOptions): string[] {
   if (raw.VAPID_SUBJECT !== undefined && !/^(mailto:|https:\/\/)\S+$/u.test(raw.VAPID_SUBJECT)) {
     issues.push("VAPID_SUBJECT: must be a mailto: or https:// URL");
   }
+  if (
+    raw.VAPID_PUBLIC_KEY !== undefined &&
+    raw.VAPID_PRIVATE_KEY !== undefined &&
+    !vapidKeyShapes(raw.VAPID_PUBLIC_KEY, raw.VAPID_PRIVATE_KEY)
+  ) {
+    issues.push(
+      "VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY: must be an unpadded base64url P-256 key pair as " +
+        "`pnpm gen:vapid` writes it (a 65-byte public point and a 32-byte private key)",
+    );
+  }
 
   if (raw.TURNSTILE_SITE_KEY !== undefined || raw.TURNSTILE_SECRET !== undefined) {
     // Until enforcement lands, keys would publish a site key and widen the CSP while nothing is
@@ -338,7 +368,40 @@ function crossFieldIssues(raw: RawEnv, options: ParseConfigOptions): string[] {
     }
   }
 
+  issues.push(...emailBudgetIssues(raw));
   return [...new Set(issues)];
+}
+
+/**
+ * The outbound email budget (08 §4.2): the instance-wide email caps must not be able to send more
+ * in some 24 hours than the provider's quota, when that is known.
+ */
+function emailBudgetIssues(raw: RawEnv): string[] {
+  if (raw.EMAIL_DAILY_QUOTA !== undefined && !POSITIVE_INTEGER.test(raw.EMAIL_DAILY_QUOTA)) {
+    return []; // reported by its own rule
+  }
+  const quota =
+    raw.EMAIL_DAILY_QUOTA === undefined
+      ? DEFAULT_DAILY_QUOTA[raw.EMAIL_PROVIDER]
+      : Number(raw.EMAIL_DAILY_QUOTA);
+  if (quota === undefined) return [];
+  const limits: Record<string, number> = {};
+  for (const name of EMAIL_DAY_CAPS) {
+    const value = raw[`LIMIT_${name}`];
+    // An invalid override is reported on its own; judge the budget only on valid ones.
+    if (typeof value === "string" && POSITIVE_INTEGER.test(value)) limits[name] = Number(value);
+  }
+  const worst = emailWorstCasePer24h({ limits });
+  if (worst <= quota) return [];
+  const caps = emailDayCapLimits({ limits });
+  const values = caps.map((cap) => `LIMIT_${cap.name}=${String(cap.limit)}`).join(", ");
+  const sum = caps.map((cap) => String(cap.limit)).join(" + ");
+  const source = raw.EMAIL_DAILY_QUOTA === undefined ? `${raw.EMAIL_PROVIDER} default` : "set";
+  return [
+    `${values}: they can send W = 2 × (${sum}) = ${String(worst)} in some 24 hours, more than ` +
+      `EMAIL_DAILY_QUOTA ${String(quota)} (${source}); lower them, or set EMAIL_DAILY_QUOTA to ` +
+      "the provider's real limit (docs/spec/08-security.md §4.2)",
+  ];
 }
 
 /** Placeholder for values the cross-variable rules have already proven present. */

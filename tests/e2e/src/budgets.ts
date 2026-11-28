@@ -30,3 +30,70 @@ export const LAUNCH_TIMEOUT_MS = 120_000;
  * and the first test then 3–4 s, where without it the first test failed at 35–38 s.
  */
 export const WARMUP_TIMEOUT_MS = 90_000;
+
+/**
+ * A test in which two people play a game (game.spec.ts): sign-ins, an invitation, several real
+ * moves each checked against the server, and a resignation, across two browser contexts. Not the
+ * 30 s of a single-page test (ADR 0004 records the exception). Measured locally in the pinned
+ * image, a warm browser and nothing else running: see the figures in the A4 review record; a
+ * loaded CI runner is several times slower, so 120 s is a guess of that margin, not a
+ * measurement. TO BE RE-MEASURED on the CI runner from the first pipeline that runs it (the
+ * owner feeds the number back); then this value and the one in the ADR are set from it.
+ */
+export const GAME_TEST_TIMEOUT_MS = 120_000;
+
+/** The part of `GAME_TEST_TIMEOUT_MS` the moves loop may use, so a stuck game fails an assertion first. */
+export const GAME_LOOP_BUDGET_MS = 60_000;
+
+/**
+ * The short game test: two sign-ins, an invitation, and a resignation straight after the start,
+ * with no moves. Between a single-page test and the full game; 60 s is twice the 30 s of the
+ * former, the same to-be-measured margin as the full game's.
+ */
+export const RESIGN_TEST_TIMEOUT_MS = 60_000;
+
+/**
+ * The rematch test (opponents.spec.ts, alpha A12): two sign-ins, an invitation, one pass each and
+ * a resignation, then a second game started by picking the other person from the list. The short
+ * game test plus two moves and a second game; 90 s sits between that test's 60 s and the full
+ * game's 120 s, the same to-be-measured margin as theirs. Measured locally in the pinned image
+ * with a warm browser: 5.0 s (Chromium) and 6.3 s (WebKit), 2026-11-26. Alpha A15 adds a third
+ * game from the finished game's Rematch button, opened by both players: in the pinned image,
+ * 6.1 s (Chromium) and 7.7 s (WebKit) in a full run, and 14.7 s and 11.9 s as the first test of a
+ * run (a cold browser), 2026-11-27; still well inside 90 s.
+ */
+export const REMATCH_TEST_TIMEOUT_MS = 90_000;
+
+/**
+ * The no-play hint test (no-play.spec.ts, alpha A14): two sign-ins, an invitation, and the first
+ * player's board with the word list downloaded and searched; no moves. The same steps as the short
+ * game test, so the same 60 s. Measured locally in the pinned image with a warm browser: 1.7 s
+ * (Chromium) and 2.4 s (WebKit), 2026-11-27.
+ */
+export const NO_PLAY_TEST_TIMEOUT_MS = 60_000;
+
+/**
+ * The email invite test (invites.spec.ts, alpha A17): one sign-in, a game for an address with no
+ * account, the invitation email read from the capture, the second person's sign-up from it, an
+ * accept and a pass each, then the email's unsubscribe page. The short game test's steps and two
+ * moves, so the same 60 s. Measured locally in the pinned image, 8 workers: 6.1 s (Chromium) and
+ * 8.8 s (WebKit) with the specs it touches, 5.9 s and 9.8 s in the full suite, 2026-11-27; to be
+ * re-measured on CI.
+ */
+export const INVITE_TEST_TIMEOUT_MS = 60_000;
+/**
+ * The join-link test (join-links.spec.ts, alpha A18): one sign-in, a words game with a link and no
+ * address, the second person's sign-up from the link (sign-in and onboarding on the way), the join,
+ * the creator's Start and both boards. Fewer steps than the email invite test, so the same 60 s.
+ * Measured locally in the pinned image: 2.3 s (Chromium) and 3.1 s (WebKit) alone, 4.4 s and 8.4 s
+ * in the full suite, 2026-11-28; to be re-measured on CI.
+ */
+export const JOIN_LINK_TEST_TIMEOUT_MS = 60_000;
+/**
+ * Adding a link joiner (add-player.spec.ts, alpha A19): two sign-ins, a words game with a link,
+ * the join and Start, a pass each and a resignation, the creator's Add, then a Rematch both open.
+ * The rematch test's steps with a join in place of an invitation and no second game from the list,
+ * so the same 90 s. Measured locally in the pinned image: 4.6 s (Chromium) and 5.9 s (WebKit)
+ * alone, 2026-11-28; to be re-measured on CI.
+ */
+export const ADD_PLAYER_TEST_TIMEOUT_MS = 90_000;

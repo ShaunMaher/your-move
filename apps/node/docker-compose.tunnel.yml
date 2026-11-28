@@ -1,0 +1,136 @@
+# The proof-of-concept deployment (docs/spec/09-operations.md §4, Q6): the app behind a
+# Cloudflare Tunnel, sending its email through the `gmail` provider. Step by step in
+# docs/deploy.md; the values it needs are in apps/node/tunnel.env.example.
+#
+#   docker compose -f apps/node/docker-compose.tunnel.yml --env-file <your env file> up -d
+#
+# - No host port is published and no inbound firewall rule is needed: `cloudflared` dials out to
+#   Cloudflare, and TLS ends there. The tunnel's public hostname must route only to the app's
+#   front-only alias, http://app-front:8080 (never http://app:8080: Docker resolves `app` to its
+#   `egress` address, a peer outside TRUST_PROXY_PEERS, and every request would be refused with
+#   400), with no catch-all rule.
+# - `front` is internal (no route out) and holds only the app and `cloudflared`. Only the services
+#   in this file are attached to it, but the Docker host itself has an address on it (its
+#   gateway), so the app does not rely on the network alone: TRUST_PROXY_PEERS is exactly
+#   cloudflared's pinned address and nothing else (the container's health check needs no client
+#   address, so loopback is not trusted), so a request from any other peer, the host's gateway
+#   included, is refused (08 §4.1). The subnet and both
+#   addresses are pinned; if you change one, change TRUST_PROXY_PEERS and the tunnel's route.
+# - `egress` is an ordinary bridge for outbound calls: the app's (Gmail, Web Push) and the tunnel's.
+# - Every secret is a Docker secret read through `<NAME>_FILE`, so none shows in `docker inspect`
+#   or the process environment.
+# - Pull the image by digest (docs/deploy.md), never by tag.
+
+services:
+  app:
+    image: ${APP_IMAGE:?set APP_IMAGE to the image reference, by digest}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL:?set PUBLIC_URL to https://<hostname>}
+      APP_NAME: ${APP_NAME:-}
+      OPERATOR_CONTACT: ${OPERATOR_CONTACT:?set OPERATOR_CONTACT to the address shown on the privacy page}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      EMAIL_PROVIDER: gmail
+      EMAIL_FROM: ${EMAIL_FROM:?set EMAIL_FROM to "Name" <address>}
+      GMAIL_SENDER: ${GMAIL_SENDER:?set GMAIL_SENDER to the sender user's address (EMAIL_FROM's address)}
+      # The outbound email budget (docs/deploy.md): empty keeps the defaults.
+      EMAIL_DAILY_QUOTA: ${EMAIL_DAILY_QUOTA:-}
+      LIMIT_OTP_EMAIL_GLOBAL_DAY: ${LIMIT_OTP_EMAIL_GLOBAL_DAY:-}
+      LIMIT_INVITE_EMAILS_GLOBAL_DAY: ${LIMIT_INVITE_EMAILS_GLOBAL_DAY:-}
+      LIMIT_NUDGE_EMAILS_PER_DAY: ${LIMIT_NUDGE_EMAILS_PER_DAY:-}
+      TRUST_PROXY: cloudflare
+      TRUST_PROXY_PEERS: 172.30.99.2/32
+      APP_SECRET_FILE: /run/secrets/app_secret
+      GMAIL_CLIENT_ID_FILE: /run/secrets/gmail_client_id
+      GMAIL_CLIENT_SECRET_FILE: /run/secrets/gmail_client_secret
+      GMAIL_REFRESH_TOKEN_FILE: /run/secrets/gmail_refresh_token
+      # Web Push "your turn" notifications (docs/deploy.md): keys from `pnpm gen:vapid`.
+      VAPID_SUBJECT: ${VAPID_SUBJECT:?set VAPID_SUBJECT to mailto:<an address that reaches you>}
+      VAPID_PUBLIC_KEY_FILE: /run/secrets/vapid_public_key
+      VAPID_PRIVATE_KEY_FILE: /run/secrets/vapid_private_key
+    secrets:
+      - app_secret
+      - gmail_client_id
+      - gmail_client_secret
+      - gmail_refresh_token
+      - vapid_public_key
+      - vapid_private_key
+    volumes:
+      - data:/data
+      - blobs:/data/blobs
+    networks:
+      front:
+        aliases:
+          - app-front
+        ipv4_address: 172.30.99.3
+      egress: {}
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    pids_limit: 256
+    mem_limit: 512m
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.11.2@sha256:55c7e3e8d89d5e8d20b75a82f3602cbf98e06db406e73e282073cfdc5a9a3af6
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command: tunnel --no-autoupdate --metrics 127.0.0.1:2000 run --token-file /run/secrets/tunnel_token
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    secrets:
+      - tunnel_token
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      front:
+        ipv4_address: 172.30.99.2
+      egress: {}
+    logging: *logging
+    pids_limit: 128
+    mem_limit: 256m
+
+networks:
+  front:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.99.0/28
+  egress: {}
+
+volumes:
+  data: {}
+  blobs: {}
+
+secrets:
+  app_secret:
+    file: ${SECRETS_DIR:?set SECRETS_DIR to the directory holding the secret files}/app_secret
+  gmail_client_id:
+    file: ${SECRETS_DIR}/gmail_client_id
+  gmail_client_secret:
+    file: ${SECRETS_DIR}/gmail_client_secret
+  gmail_refresh_token:
+    file: ${SECRETS_DIR}/gmail_refresh_token
+  vapid_public_key:
+    file: ${SECRETS_DIR}/vapid_public_key
+  vapid_private_key:
+    file: ${SECRETS_DIR}/vapid_private_key
+  tunnel_token:
+    file: ${SECRETS_DIR}/tunnel_token

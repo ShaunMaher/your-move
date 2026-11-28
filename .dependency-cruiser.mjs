@@ -29,6 +29,10 @@ export default {
           "[.]d[.]ts$",
           "(^|/)tsconfig[.]json$",
           "(^|/)(?:vite|vitest|playwright)[.]config[.]ts$",
+          // Named by vitest.config.ts setupFiles, never imported.
+          "^apps/web/vitest[.]setup[.]ts$",
+          // Read by the build's service-worker plugin (vite.config.ts), never imported.
+          "^apps/web/sw/sw[.]js$",
         ],
       },
       to: {},
@@ -118,6 +122,29 @@ export default {
       to: { path: "^(games/|apps/|generated/)|(^|/)node_modules/@[^/]+/game-" },
     },
     {
+      name: "production-not-to-testing-entry",
+      comment:
+        "Production code never imports the test-only entry @your-move/server/testing (A2-R3-7); only test files, tests/contract and the contract suites themselves do.",
+      severity: "error",
+      from: {
+        pathNot: [
+          "[.]test[.]tsx?$",
+          "^tests/",
+          "^packages/server/src/db/(testing|repository-contract)[.]ts$",
+          "^packages/server/src/games/race-contract[.]ts$",
+        ],
+      },
+      to: { path: "^packages/server/src/db/testing[.]ts$" },
+    },
+    {
+      name: "production-not-to-node-db-entry",
+      comment:
+        "@your-move/node/db (the SQLite adapter as a package entry) is for tests/contract; no other package or app imports it (A2-R3-7).",
+      severity: "error",
+      from: { pathNot: ["^apps/node/", "^tests/"] },
+      to: { path: "^apps/node/src/db/sqlite[.]ts$" },
+    },
+    {
       name: "generated-only-from-apps",
       comment: "Only apps/worker, apps/node and apps/web import generated/ (11 §5).",
       severity: "error",
@@ -150,8 +177,19 @@ export default {
       name: "web-only-through-api-client",
       comment: "The web app reaches the server only through @your-move/api-client (03 §1).",
       severity: "error",
-      from: { path: "^apps/web/" },
+      // The build (vite.config.ts, vite-plugin/) runs in Node and takes the server-path list from
+      // @your-move/shared/server-paths; nothing of it reaches the browser bundle.
+      from: { path: "^apps/web/", pathNot: "^apps/web/(vite-plugin/|vite(st)?[.]config[.]ts$)" },
       to: { path: "^packages/(server|shared)/" },
+    },
+    {
+      name: "web-src-not-to-build-code",
+      comment:
+        "The app's source and worker never import the build's code (vite-plugin/, the Vite configuration): " +
+        "it runs in Node and may use server packages; the build hands the app constants instead (07 §4).",
+      severity: "error",
+      from: { path: "^apps/web/(src|sw)/", pathNot: "[.]test[.]tsx?$" },
+      to: { path: "^apps/web/(vite-plugin/|vite(st)?[.]config)" },
     },
   ],
   options: {

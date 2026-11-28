@@ -1,24 +1,28 @@
 /**
  * The Cloudflare Worker entry (docs/spec/03-architecture.md §9, 09 §3). Workers Static Assets
  * serve the SPA with the generated `_headers`; this Worker runs first only for the server paths
- * (`run_worker_first` in wrangler.example.toml) and serves the core app.
+ * (`run_worker_first` in wrangler.example.toml) and serves the core app. Its Cron Trigger runs the
+ * core's sweep (03 §8).
  */
 import {
   ConfigError,
   coreEmailSender,
-  createApp,
+  corePushSender,
   createJsonLogger,
+  GameConfigError,
   installedSchema,
   parseConfig,
   registryMismatches,
   resolveClientIp,
+  ResourceConfigError,
 } from "@your-move/server";
 
 import installedJson from "../../../generated/installed.json" with { type: "json" };
 import { installedGames as games } from "../../../generated/server-registry.js";
 import { d1Repositories } from "./d1.js";
-
-type App = ReturnType<typeof createApp>;
+import { assetDictionaries } from "./dictionaries.js";
+import { type Built, workerRuntime } from "./runtime.js";
+import { runScheduled } from "./scheduled.js";
 
 /** A startup problem whose message carries no configuration value (safe to log in full). */
 class StartupError extends Error {
@@ -30,10 +34,14 @@ class StartupError extends Error {
  * request-scoped is captured here: background work goes through each request's own `ctx`
  * (`waitUntil`), which `fetch` below hands to the app.
  */
-function build(env: Readonly<Record<string, unknown>>): App {
+async function build(env: Readonly<Record<string, unknown>>): Promise<Built> {
   const db = env["DB"];
   if (db === undefined || db === null || typeof db !== "object") {
     throw new StartupError("The D1 binding DB is missing (09 §3).");
+  }
+  const assets = env["ASSETS"];
+  if (assets === undefined || assets === null || typeof assets !== "object") {
+    throw new StartupError("The static assets binding ASSETS is missing (09 §3).");
   }
   const strings = Object.fromEntries(
     Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
@@ -60,45 +68,69 @@ function build(env: Readonly<Record<string, unknown>>): App {
       console.log(line);
     },
   });
-  return createApp({
-    platform: {
-      repos: d1Repositories(db as D1Database),
-      config,
-      log,
-      now,
-      email: coreEmailSender(config, log, now),
-      // Workers always sit behind Cloudflare, which sets CF-Connecting-IP (08 §4.1).
-      clientIp: (request) =>
-        resolveClientIp(request.headers, {
-          mode: "cloudflare",
-          socketAddress: null,
-          hops: 1,
-          trustedPeers: [],
-        }),
-    },
-    games,
-  });
+  const dictionaries = await assetDictionaries(assets as Fetcher);
+  const platform = {
+    repos: d1Repositories(db as D1Database),
+    dictionaries,
+    config,
+    log,
+    now,
+    email: coreEmailSender(config, log, now),
+    push: corePushSender(config, log, now),
+    // Workers always sit behind Cloudflare, which sets CF-Connecting-IP (08 §4.1).
+    clientIp: (request: Request) =>
+      resolveClientIp(request.headers, {
+        mode: "cloudflare",
+        socketAddress: null,
+        hops: 1,
+        trustedPeers: [],
+      }),
+  };
+  return workerRuntime(platform, games);
 }
 
-let app: App | null = null;
+let built: Promise<Built> | null = null;
+
+/** The isolate's app and sweep, built on first use; null (logged) if the build failed. */
+async function ready(env: Readonly<Record<string, unknown>>): Promise<Built | null> {
+  try {
+    built ??= build(env);
+    return await built;
+  } catch (error) {
+    // A failed build is retried by the next request (the dictionary index may have been briefly
+    // unavailable).
+    built = null;
+    // Workers can't refuse to start: log what is wrong. ConfigError and the game and resource
+    // configuration errors name variables, never values, and StartupError messages carry no
+    // values; anything else is logged by class only, since its message might quote configuration.
+    const safe =
+      error instanceof ConfigError ||
+      error instanceof StartupError ||
+      error instanceof GameConfigError ||
+      error instanceof ResourceConfigError;
+    console.error(safe ? error.message : "startup failed", {
+      errorClass: error instanceof Error ? error.name : typeof error,
+    });
+    return null;
+  }
+}
 
 export default {
-  fetch(request, env, ctx) {
-    try {
-      app ??= build(env);
-    } catch (error) {
-      // Workers can't refuse to start: log what is wrong and answer 500. ConfigError messages are
-      // already redacted and StartupError messages carry no values; anything else is logged by
-      // class only, since its message might quote configuration.
-      const safe = error instanceof ConfigError || error instanceof StartupError;
-      console.error(safe ? error.message : "startup failed", {
-        errorClass: error instanceof Error ? error.name : typeof error,
-      });
+  async fetch(request, env, ctx) {
+    const worker = await ready(env);
+    if (worker === null) {
+      // Startup failed before the app existed: deliberately outside the request log and the
+      // per-request error contract (05 §Errors), which only the app's handlers uphold. The
+      // failure was logged by `ready`.
       return Response.json(
         { error: { code: "INTERNAL", message: "Something went wrong." } },
         { status: 500, headers: { "Cache-Control": "no-store" } },
       );
     }
-    return app.fetch(request, env, ctx);
+    return worker.app.fetch(request, env, ctx);
+  },
+  // The Cron Trigger (`*/15 * * * *`, wrangler.example.toml): one sweep run (03 §8).
+  async scheduled(controller, env) {
+    await runScheduled(controller, (await ready(env))?.sweep ?? null);
   },
 } satisfies ExportedHandler<Record<string, unknown>>;

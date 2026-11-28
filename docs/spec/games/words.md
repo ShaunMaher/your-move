@@ -341,14 +341,15 @@ dictionaries as a list from day one, so adding one is a data change plus a build
   deployed, and it applies to every game using that dictionary, including games in progress. The recorded version is informational only. Changes to
   additions/removals bump the version.
 - The server is authoritative. The client downloads the game's dictionary by versioned, hashed URL
-  (from the game envelope's `resources[].downloadUrl`, 05, so it works even after the dictionary is
-  disabled for new games; the new-game screen uses `GET /api/v1/catalog`), caches it in the service
-  worker, and uses it only for instant validity/score previews.
+  from the game envelope's `resources[].downloadUrl` (05), so it works even after the dictionary is
+  disabled for new games, caches it (07 §4), and uses it only for local, non-authoritative checks:
+  the no-play hint (§10.8) and instant validity previews (§10.5). The catalog (§10.1), which the new-game screen uses to choose a
+  dictionary, carries no download URL: nothing is previewed before a game exists.
 - Server lookup is a binary search directly over the sorted text. No index is built, so loading
   costs only I/O and no request pays a parse cost (Workers Free: 10 ms CPU/request). Dictionaries are
-  loaded lazily per id and cached per isolate/process. On Cloudflare they're bundled as text
-  modules while the total fits the bundle budget; past that they're fetched once per isolate from
-  the static-assets binding. See 03 §10.
+  loaded lazily per id and cached per isolate/process. On Cloudflare they're fetched once per
+  isolate from the static-assets binding, from the same versioned, hashed files clients download
+  (since alpha A2; bundling them as text modules was the first plan). See 03 §10.
 
 ### 9.5 Bring-your-own dictionaries
 
@@ -434,7 +435,7 @@ The page never links to unofficial copies.
 ### 10.1 Options, players, resources, catalog
 
 ```ts
-Input   = { rulesetId?: string; dictionaryId?: string }
+Input   = { rulesetId?: string; dictionaryId?: string; rulesetVersion?: number; dictionaryVersion?: number /* non-negative integers, accepted and ignored */ }
 Options = { rulesetId: string; rulesetVersion: number; dictionaryId: string; dictionaryVersion: number }
 ```
 
@@ -447,7 +448,10 @@ Options = { rulesetId: string; rulesetVersion: number; dictionaryId: string; dic
   a dictionary not in `ctx.resources` (unknown, disabled, deleted, or someone else's upload) →
   `UNKNOWN_DICTIONARY`; incompatible pair (language/alphabet from the resource metadata) →
   `INCOMPATIBLE_DICTIONARY` (§9.3). Resolves the latest ruleset version and the dictionary's
-  current version.
+  current version, whatever versions the input names: resolved options are a valid input and
+  resolve to themselves while nothing has changed (02 §2.1 rule 10, a rematch). A version key that
+  isn't a non-negative integer → `INVALID_OPTION` with `detail: { option }`; a valid one is never
+  honoured (no game can pin an old version).
 - `catalog(ctx)`: enabled rulesets (id, version, name, description, key numbers, premium preview),
   the dictionaries in `ctx.resources` with their compatibility per ruleset, and the defaults.
 - `players(options)` = `{ min: ruleset.minPlayers, max: ruleset.maxPlayers }` (2/2 in the MVP).
@@ -481,7 +485,7 @@ Action =
 `preview` for a seat that isn't in `toAct`, which the framework never asks), plus
 `UNKNOWN_RULESET`, `UNKNOWN_DICTIONARY`, `INCOMPATIBLE_DICTIONARY`, `NOT_ENOUGH_TILES`
 (`detail: { needed, tiles }`: `rackSize × seats` and the ruleset's tile count),
-`OPTIONS_NOT_OBJECT` and `UNKNOWN_OPTION` from option resolution, `checkConfig` (with `detail: {
+`OPTIONS_NOT_OBJECT`, `UNKNOWN_OPTION` and `INVALID_OPTION` from option resolution, `checkConfig` (with `detail: {
 key }` naming the config key, never its value) and start. `UNKNOWN_OPTION` has `detail: { option
 }` naming the unknown key only when the key matches `^[A-Za-z0-9_]{1,64}$`, and no `detail`
 otherwise, so arbitrary input is never echoed.
@@ -524,8 +528,12 @@ and the kit requires their different records to show up in a view (02 §6.3).
 
 `preview(state, seat, { type: "play", ... })` → `{ score, words: [{ word, score }], bingo }` or a
 `GameError`, with the same check order as `validate`. The client computes previews locally when the
-game's dictionary is `public` and loaded; otherwise it calls the server preview endpoint (05),
-debounced (§9.5).
+game's dictionary is `public` and loaded: the board runs the engine's own preview code on the
+viewer's view (`previewViewPlay`, the same `analysePlay` and the same word check as `validate`,
+`has()` backed by the handed-over list), so the result equals the server's for the same
+placements, error codes and order included. If there is no list, its id isn't the game's
+dictionary, or the local computation throws, it calls the server preview endpoint (05), debounced
+(§9.5). Submitting a play is always checked by the server.
 
 ### 10.6 Resign, timeout, result
 
@@ -566,3 +574,53 @@ debounced (§9.5).
 In addition to the framework test kit: rule tables for every rule in §3–§6, both `swapOrder`
 variants, each MVP ruleset's tile table and premium counts, and tile conservation
 (bag + racks + board = ruleset multiset) on every state produced by random play.
+
+### 10.8 No-play hint (client)
+
+On their turn, the board tells a player whose rack has no legal play (alpha A14), so they swap or
+pass instead of hunting for a word that isn't there.
+
+- **Client only, from what the viewer may see.** The search runs in the browser on the viewer's
+  view (the public board and `yourRack`) and the game's `public` word list, which the shell hands
+  the board as `resources.dictionary` (02 §3, 07 §4) and the board uses only when its id is the
+  view's dictionary id. Words are lower-case `a`–`z` only (§9.1), which is all `follows`
+  answers; the shell hands over only a list that passes the word-list check, and a board must
+  treat any other as no list. It never uses another seat's rack, the bag or a `serverOnly` list, sends
+  nothing, and needs no server, API or view change. Until the list is loaded, or when there is
+  none, the board says nothing.
+- **Sound, never a false "no".** The search (`moves.ts` in the engine, pure and deterministic)
+  is exhaustive: anchor squares (the start square on an empty board), cross-checks for the words
+  formed across the play line, a prefix walk of the sorted list, every letter for a blank, and
+  the ruleset's board, rack size and opening rules (§3.1). Two-tile plays are tried everywhere
+  first, then every length. A play it finds is confirmed with the engine's own placement rules
+  (`analysePlay`) and the list. Its work is counted in steps (search nodes and list questions),
+  never timed; past `HINT_MAX_STEPS` (150,000, measured in `moves.benchmark.test.ts` over the list
+  as the client holds it) it gives up and the board says nothing. Only a finished search that
+  found nothing shows the hint. The search keeps its place on an explicit stack, so a slice stops
+  within `MAX_STEPS_PER_ACTION` (3) steps of its budget wherever it is, never only between
+  anchors.
+- **When it runs.** Only on the player's turn in an active game, once per game version and rack
+  (the answer is kept for them), in slices of 5,000 steps that yield to the browser between them.
+  While a tile is pressed or dragged no slice runs; the search waits and goes on after it is
+  let go. A new
+  version or rack stops the search under way, and nothing it would have said is shown. Off turn
+  nothing runs.
+- **In every game, for every player** (A14-S-4). The hint is not an AI assist and is on whatever
+  the game's `aiAssistance` (02 §9.3): every player gets the same hint, and it is derived only
+  from public data (the board, the bag count, the public list) and the viewer's own rack, which
+  that player could search by hand. It never shows a play: the client keeps only whether a play
+  exists, never the play the search found. The rules text says so.
+- **What it says.** In the status line, in place of "Place tiles to make a word." while no tiles
+  are on the board: "No word can be played with your tiles. Try swapping some." when the bag holds
+  at least `swapMinBag` tiles (§3.2), else "No word can be played with your tiles. You can pass."
+  The status line's live region announces it when it appears. It is a hint only: Play, Swap and
+  Pass work as before, and nothing is done for the player.
+- **Tests.** Rule tables; a property test on a small board where a brute-force enumerator asks
+  `analysePlay` about every placement and must agree ("none" exactly when it finds nothing);
+  every play found in random games under each ruleset passes `validate` with the real list; a
+  benchmark on mid- and late-game boards with 0, 1 and 2 blanks that checks steps and records
+  time (as test annotations, never asserted); a test that no slice overshoots its budget by more
+  than one action; Board tests for each answer, a drag, a new version or rack mid-search and an
+  unmount mid-search; shell tests that the list is handed over only when public, intact, a word
+  list and loaded, as one object per list; and a Playwright check that a real game shows the hint (the
+  rack in the viewer's own copy of the view rewritten to one that forms no word).

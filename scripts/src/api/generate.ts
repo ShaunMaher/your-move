@@ -9,6 +9,8 @@ import {
   createJsonLogger,
   DEFAULT_APP_NAME,
   detachedRepositories,
+  DISABLED_PUSH_SENDER,
+  NO_DICTIONARIES,
   parseConfig,
 } from "@your-move/server";
 import openapiTS, { astToString } from "openapi-typescript";
@@ -35,9 +37,13 @@ export async function buildOpenApiDocument(): Promise<unknown> {
       now,
       log,
       email: createConsoleEmailSender(log, now),
+      push: DISABLED_PUSH_SENDER,
       clientIp: () => ({ ok: false, reason: "missing" }),
+      dictionaries: NO_DICTIONARIES,
     },
     games: [],
+    // No database behind this app (detached repositories): nothing is ever claimed.
+    onboardingClaims: 0,
   });
   const response = await app.request("/api/v1/openapi.json");
   if (!response.ok) throw new Error(`openapi.json answered ${String(response.status)}`);

@@ -12,6 +12,8 @@ import {
   accountDeletedEmail,
   deleteAccountCodeEmail,
   escapeHtml,
+  invitationEmail,
+  nudgeEmail,
   signInCodeEmail,
   suspendedNoticeEmail,
 } from "./templates.js";
@@ -78,6 +80,98 @@ describe("templates (06 §3.3, §7)", () => {
   });
 });
 
+describe("the email nudge (03 §7, 08 T18)", () => {
+  const nudge = {
+    appName: context.appName,
+    gameName: "Words",
+    opponents: ['Ann <img src=x onerror="y">', "Bo\r\nBcc: x@example.org", "Cy"],
+    lastMove: "Ann <b>played</b> QUIZ for 64",
+    gameUrl: "https://play.example.org/g/g1",
+    settingsUrl: "https://play.example.org/settings",
+    unsubscribeUrl: 'https://play.example.org/api/v1/email/unsubscribe?t=a"b',
+  };
+
+  it("names the game and the others, links the game, and carries the unsubscribe link", () => {
+    const message = nudgeEmail(to, nudge);
+    expect(message.subject).toBe(`It's your turn in Words on ${context.appName}`);
+    expect(message.listUnsubscribe).toBe(nudge.unsubscribeUrl);
+    expect(message.text).toContain(
+      `in your Words game with ${nudge.opponents[0] ?? ""}, ${nudge.opponents[1] ?? ""} and Cy.`,
+    );
+    expect(message.text).toContain(`Last move: ${nudge.lastMove}`);
+    expect(message.text).toContain(`Play now: ${nudge.gameUrl}`);
+    expect(message.text).toContain(`Or unsubscribe with one click: ${nudge.unsubscribeUrl}`);
+  });
+
+  it("escapes every value in the HTML, links included", () => {
+    const { html } = nudgeEmail(to, nudge);
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<b>");
+    expect(html).toContain("&lt;img src=x onerror=&quot;y&quot;&gt;");
+    expect(html).toContain('<a href="https://play.example.org/g/g1">');
+    expect(html).toContain('href="https://play.example.org/api/v1/email/unsubscribe?t=a&quot;b"');
+  });
+
+  it("leaves out what it doesn't have", () => {
+    const message = nudgeEmail(to, { ...nudge, opponents: [], lastMove: null });
+    expect(message.text).toContain("in your Words game. It has been");
+    expect(message.text).not.toContain("Last move");
+    expect(nudgeEmail(to, { ...nudge, opponents: ["Ann"] }).text).toContain("game with Ann.");
+  });
+});
+
+describe("the invite email (06 §6.3, alpha A17)", () => {
+  const invitation = {
+    appName: context.appName,
+    publicUrl: "https://play.example.org",
+    inviterName: 'Ann <img src=x onerror="y">',
+    inviterEmail: "ann@example.org",
+    gameName: "Words",
+    openDays: 14,
+    unsubscribeUrl: 'https://play.example.org/api/v1/email/unsubscribe?t=a"b',
+  };
+
+  it("names the inviter and the game, says how to join, and carries the unsubscribe link", () => {
+    const message = invitationEmail(to, invitation);
+    expect(message.to).toBe(to);
+    expect(message.subject).toBe(
+      `${invitation.inviterName} invited you to play Words on ${context.appName}`,
+    );
+    expect(message.listUnsubscribe).toBe(invitation.unsubscribeUrl);
+    expect(message.text).toContain(
+      `${invitation.inviterName} (ann@example.org) has invited you to play Words on ${context.appName}.`,
+    );
+    expect(message.text).toContain("The invitation stays open for 14 days.");
+    // No per-move limit until turn timeouts exist (06 §6.3).
+    expect(message.text).not.toContain("each move");
+    // One day is singular.
+    expect(invitationEmail(to, { ...invitation, openDays: 1 }).text).toContain("open for 1 day.");
+    expect(message.text).toContain(
+      "To join, sign in with this email address at https://play.example.org",
+    );
+    expect(message.text).toContain(`Don't send me invites again: ${invitation.unsubscribeUrl}`);
+  });
+
+  it("escapes every value in the HTML, links included", () => {
+    const { html } = invitationEmail(to, invitation);
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<b>");
+    expect(html).toContain("&lt;img src=x onerror=&quot;y&quot;&gt;");
+    expect(html).toContain('<a href="https://play.example.org">');
+    expect(html).toContain('href="https://play.example.org/api/v1/email/unsubscribe?t=a&quot;b"');
+  });
+
+  it("is refused by the header check when the inviter's name would break the subject (08 T14)", () => {
+    const message = invitationEmail(to, {
+      ...invitation,
+      inviterName: "Ann\r\nBcc: x@example.org",
+    });
+    expect(() => {
+      assertSafeHeaders(message);
+    }).toThrow(EmailHeaderError);
+  });
+});
+
 describe("header safety (08 T14)", () => {
   it.each([
     "Hello\r\nBcc: victim@example.org",
@@ -88,6 +182,18 @@ describe("header safety (08 T14)", () => {
   ])("refuses a subject with a control character: %j", (subject) => {
     expect(() => {
       assertSafeHeaders({ to, subject, text: "", html: "" });
+    }).toThrow(EmailHeaderError);
+  });
+
+  it("refuses an unsubscribe URL with a control character", () => {
+    expect(() => {
+      assertSafeHeaders({
+        to,
+        subject: "x",
+        text: "",
+        html: "",
+        listUnsubscribe: "https://a\r\nB: c",
+      });
     }).toThrow(EmailHeaderError);
   });
 

@@ -50,7 +50,9 @@ per supported rules version, typed by `@your-move/sdk`:
 ```ts
 // All of these types are exported by @your-move/sdk (§7.4). Schema<T> is a Zod schema: the SDK
 // declares zod (one pinned major) as a peer dependency and re-exports it as
-// "@your-move/sdk/schema", so engines build schemas without importing anything else.
+// "@your-move/sdk/schema", so engines build schemas without importing anything else. A game uses
+// that one Zod and no compiled parser: the browser runs it jitless under a CSP without
+// unsafe-eval (08 §3; §7 Dependencies).
 type Schema<T> = z.ZodType<T>;
 type Seat = number;                                        // 0..seats-1, fixed at start (§4)
 type GameError = { code: string; detail?: unknown };       // module codes, never a reserved code (§2.2)
@@ -187,6 +189,17 @@ Enforced by the generic test kit (§6) where possible:
    its first action (§4): the module removes the seat exactly as for a resignation, but its record
    and `describe` text say the player *declined* (e.g. [{seat:2}, " declined the game"]), never
    "resigned", and nothing in the record presents it as a loss.
+10. **Resolved options are an input** (alpha A15): `resolveOptions(options, ctx)` for options it
+    resolved itself returns them unchanged under the same `ctx`. A rematch (05
+    `POST /api/v1/games/:id/rematch`) resolves a finished game's stored options this way, so under a
+    later `ctx` or a newer module the same choices resolve at their current versions (or are
+    refused with the module's normal error, e.g. a ruleset the operator has since disabled), never
+    copied unchecked. Top-level option keys ending in `Version` are reserved for versions: a
+    module names each version key of its resolved options `<name>Version` (e.g.
+    `rulesetVersion`) and uses that suffix for nothing else; a module whose options carry them **accepts and ignores** them in its input
+    (validating only their shape, e.g. a non-negative integer) and **never honours** them: an input
+    can't pin an old version, so every game gets the current ones (words §10.1). The framework
+    leaves them out of remembered options (05 §Remembered options).
 
 ### 2.2 Reserved error codes
 
@@ -231,11 +244,24 @@ interface GameClientModule<Options, Action, View, PreviewResult> {
     game: GameEnvelope; view: View;   // view shape per game.gameVersion
     submit(action: Action): Promise<SubmitResult>;
     preview(action: Action): Promise<PreviewResult | GameError>;   // local when possible, else server
+    resources?: BoardResources;       // the game's public resources, once the shell has loaded them
   }>;
   RulesSheet: Component<{ options: Options; gameVersion: number }>;   // may render the manifest's rules markdown (§7.2)
   HistoryItem: Component<{ record: unknown; describe: Text; gameVersion: number; names: string[] }>; // describe: the stored fallback text
 }
 ```
+
+`BoardResources` is `{ dictionary?: PublicWordList }`, where `PublicWordList` is `{ id, version,
+has(word), follows(prefix) }` (`follows` gives the letters `a`–`z` that continue a prefix in some
+word, as a bit mask, bit 0 for `a`). Lists hold lower-case `a`–`z` words only: the shell hands over
+only a list that passes the word-list check (words §9.1), and a board given a list it can't use,
+such as one with any other letter, treats it as no list. The shell fills it only from a resource the envelope marks
+`distribution: "public"`, downloaded from that resource's own `downloadUrl` and checked against the
+hash in it (07 §4); a `serverOnly` list never reaches a client (08 T22). Every entry is optional:
+a board works without it and must not wait for it. The shell passes the same object for as long
+as the game's resources stay the same (and games with the same list share it), so a board may
+key work on its identity. The lookups
+are binary searches over the list's sorted text, as on the server (words §9.4); nothing is built.
 
 The client keeps rendering support for **every version ever released** (per-version view schemas,
 or a pure `upgradeView(version, view)` to the current shape), so finished games always display.
@@ -243,11 +269,38 @@ The shell's history drawer reads `GET /api/v1/games/:id/history` (05), which ret
 transition's public `record` and stored `describe` text; `HistoryItem` renders the record, falling
 back to the `describe` text for any record it can't render. Module views never carry history.
 
-The **game shell** (framework UI) supplies everything around the board: header with players,
-scores or ranks and whose turn it is, the menu (resign, rules, history, game info), lobby screens,
-error toasts, the stale-state refetch, and the realtime refresh. A game module never talks to the
+The **game shell** (framework UI) supplies everything around the board: the header, the menu
+(resign, rules, history, game info), lobby screens, the result card of a finished game (ranks
+and how it ended), error notices, the stale-state refetch, and the realtime refresh. Each piece
+of game state has **one owner on screen**: while a module's board is shown, the *board* draws the
+scores and whose turn it is, with its own live status, and the shell adds neither (no player chips,
+no turn line, no second live region); the shell's player list and turn line appear only in place
+of a board that can't be shown (loading, unsupported version). A finished game's Results card owns
+the ranks and how the game ended; the board's final summary is the module's own breakdown (every
+score, final adjustments, what was left), so the card lists scores only when no board is drawn. The board is kept above the fold on
+a 320 px phone. The history drawer hands each entry to the module's `HistoryItem` together with
+the stored `describe` text, and shows nothing else for it: the module chooses between its own
+drawing and the fallback. A game module never talks to the
 API directly; it only calls `submit` and `preview`. The client may import the module's pure engine
 to compute previews locally (e.g. word scores), but it is always non-authoritative.
+
+A client module ships **no stylesheet file** (its built output is JavaScript, §7.1.1) and the page's
+CSP allows no inline styles (08 §3): it installs its CSS as a constructable stylesheet
+(`document.adoptedStyleSheets`), which that policy doesn't restrict. There is no `<style>`
+fallback: the supported browsers all have constructable stylesheets (07 §4, browser baseline), and
+a module that finds them missing renders a visible `role="alert"` "Please update your browser to
+play" instead of an unstyled board. Positions and transforms set through the DOM's style object
+are likewise fine.
+
+A client module may keep small per-device conveniences in `localStorage`, **only under the
+reserved prefix** `ym.game.<gameType>.<userId>.<gameId>` (any suffix after the game id): per user
+and game, never shared between accounts on one device. The shell wipes every key starting
+`ym.game.` at sign-out and logout-all (06 §4), so a module need not clean up after itself, but it
+keeps nothing it wouldn't want a later user of the device to find: no letters, hands or other game
+information, only presentation choices such as the order of the rack (a permutation of positions,
+07 §2). It writes only after the player actually changes something, never on mount, and deletes
+its entry when the game is no longer active. Storage may be missing or full; everything works
+without it. Keys outside the prefix are not the module's to use.
 
 ## 4. Game lifecycle (all games)
 
@@ -266,8 +319,8 @@ to compute previews locally (e.g. word scores), but it is always non-authoritati
 **Creating.** The creator chooses the game type, options (resolved by `resolveOptions`), the seat
 count (within `players(options)`, else `400 INVALID_SEAT_COUNT`), the **turn timeout** (whole days,
 1–30, default `defaultTurnTimeoutDays(options)`; validated by the framework, never by the module)
-the **seat order** (`join`: the creator first, then others in the order they joined; or
-`random`) and **AI assistance** (`aiAssistance: "off" | "allowed"`, §9.3). The default is `off`
+the **seat order** (`join`: the creator first, then others in the order they joined, past
+opponents added at creation in the order the creator listed them; or `random`) and **AI assistance** (`aiAssistance: "off" | "allowed"`, §9.3). The default is `off`
 whenever the game has **any open seat** (a seat not filled by the creator or one of the creator's
 own AI accounts at creation: invitees, email seats and link seats are all open) or two or more
 human seats; otherwise (the creator alone with their own AI accounts) it is `allowed`. It is fixed
@@ -295,7 +348,7 @@ and in the lobby, and the AI setting also in the game header.
   they accept or decline. Anyone else (no account, or an account that hasn't finished onboarding)
   gets an **email-invite seat**, claimed when they complete onboarding with that address (06 §6.4),
   after which it is an invitation like any other. Typing a past opponent's email also gives an
-  invitation, never an auto-join.
+  invitation, never an auto-join. The address gets an invite email (06 §6.3; alpha A17).
 - **A join link.** The creator can create a shareable link for the open seats (06 §6.8). Anyone
   signed in and onboarded who opens it and taps Join takes an open seat. An **open seat** is one not
   held by an `invited` or `joined` row. A user who already holds an invitation in the game and joins
@@ -315,7 +368,9 @@ player, never the other players; 06 §6.9). A pair with a block in either direct
 recorded, at the finish or through that question (06 §6.10).
 
 The creator can **remove** any other seat while in the lobby (`removed`); a removed user can't rejoin
-through the link that was live when they were removed (06 §6.8).
+through any join link of the game, a rotated or new one included (06 §6.8); the creator can play
+with them in another game (cancel this one and create a new one), inviting them by address or as a
+past opponent.
 
 **Lobby notifications.** The only pushes a lobby causes go to the person being added: an auto-join
 push naming the creator ("<creator> added you to a game") and the generic invitation push that names
@@ -355,7 +410,7 @@ created, and so does a game of the creator against their own AI accounts.
 joined). The seat reopens. Only decline and leave check whether the lobby can still fill: it ends
 as `declined` when `joined + invited < min` (every `invited` row counts, whatever its delivery, 04)
 and no join link is live; otherwise it waits for a join, Start or expiry. A **remove** never ends
-the lobby — the creator chose it, and can still share a link, add players or cancel. Revoking a
+the lobby — the creator chose it, and can still share a link, or cancel and create a new game. Revoking a
 link or its expiry never ends a lobby by itself either. The creator leaving means cancelling.
 
 **Before a seat's first action (active game).** Any `playing` seat that hasn't acted yet
@@ -417,10 +472,11 @@ on a version conflict.
 **Invite claims are not game transitions.** Claiming an email-invite seat (06 §6.4) is a
 row-level update of that one `game_players` row, guarded by `state = 'invited' AND user_id IS NULL
 AND delivery <> 'inert'`, by **no other row in this game holding the claimant's user id**, by the
-game being in `lobby`, and by `games.version` still equalling the version loaded for the block and
-cap checks (checked, **not** bumped; on a mismatch the claim reloads and retries, up to 3 times). An
-`inert` row is never claimed and its `delivery` is never recomputed. The inbound-cap count (06 §6.7)
-is taken atomically in the same write. A claim doesn't bump the game `version`, sends no realtime
+game being in `lobby`, and by `games.version` still equalling the version loaded for the block
+check (checked, **not** bumped; on a mismatch the claim reloads and retries, up to 3 times). An
+`inert` row is never claimed and its `delivery` is never recomputed. No inbound-cap count is
+taken at a claim: the row keeps the `delivery` the cap gave it when the game was created, where it
+was counted for every typed address (06 §6.4, §6.7). A claim doesn't bump the game `version`, sends no realtime
 event to other members, and changes nothing the creator or other members can see (the row still
 shows the typed address or "Invited"); only the claimant's own game list updates. A concurrent
 start, remove, join, accept or cancel simply makes the guard fail.
@@ -466,7 +522,8 @@ optional `test.context()` gives what `resolveOptions`, `catalog` and `checkConfi
 plays exactly these hooks, so a game that needs a dictionary supplies one through them.
 
 1. **Schema conformance**: every option, view, record, preview and catalog matches its schema;
-   every error code is in `errorCodes` and none is reserved (§2.2). An exception from any module
+   every error code is in `errorCodes` and none is reserved (§2.2); the options resolved from each
+   option input resolve again to themselves (§2.1 rule 10). An exception from any module
    function, a transition's included, fails here (§2.1 rule 3).
 2. **Replay**: as in §5, with an empty resource provider (§2.1 rule 6).
 3. **Secrecy (perturbation)**: at sampled points of every game, for each seat `v` **and for the
@@ -585,7 +642,9 @@ package except through these three entry points.
   (publishing replaces them); `games:verify` resolves them only for this repository's workspace
   packages, whose own top-level `node_modules` (pnpm's links) it skips.
 - **Dependencies**: `@your-move/sdk`, `zod` and (for the client) `react` are **peerDependencies**
-  only (the instance supplies them); the SDK range is the package's statement of compatibility
+  only (the instance supplies them); a game takes Zod only as that peer dependency, because the web
+  app runs Zod `jitless` (08 §3) and a game that bundled its own copy, or used a compiled parser,
+  would need `unsafe-eval` in the browser; the SDK range is the package's statement of compatibility
   (§7.4). An engine may **bundle** pure third-party code into its built output (inlined, e.g. a
   small algorithm library; not as a bundled dependency); bundled code is held to the same rules as the engine's own code. The built
   engine and manifest output import nothing but `@your-move/sdk` and `@your-move/sdk/schema`,
@@ -807,7 +866,8 @@ The framework UI handles 2–8 players from day one:
 - Pushes go to seats whose clock started ("your turn"); to every seated player when a game that
   reached `active` ends; to a user auto-joined by a past opponent ("<creator> added you to a
   game"); and to a user with a new invitation, generically ("You have a new game invitation",
-  06 §6.2). Nothing else in the lobby pushes, and lobby endings send no push or email (§4).
+  06 §6.2). The user whose request made a transition gets none of its pushes (03 §7). Nothing
+  else in the lobby pushes, and lobby endings send no push or email (§4).
 
 ## 9. AI players and AI assistance
 

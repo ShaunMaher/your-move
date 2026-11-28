@@ -63,21 +63,27 @@ Toolchain: `mise install` (Node, pnpm and the scanners pinned in `mise.toml` and
 - `pnpm install` · `pnpm dev:node` · `pnpm dev:worker` · `pnpm build`
 - Quality: `pnpm format` · `pnpm format:check` · `pnpm lint` · `pnpm lint:arch` ·
   `pnpm lint:unused` · `pnpm lint:licences` · `pnpm lint:vulns` · `pnpm lint:pins` ·
-  `pnpm typecheck` · `pnpm test` · `pnpm test:timing` (the statistical sign-in timing suite, about
-  25 s, on a quiet machine; `pnpm test` skips it; coders run it before handing off sign-in
-  changes, ADR 0006) ·
-  `pnpm test:e2e` (after `pnpm build`) · `pnpm gates:prove`
+  `pnpm typecheck` · `pnpm test` · `pnpm test:timing` (the statistical timing suite for sign-in and for creating a game with
+  a typed address, about 70 s, on a quiet machine; `pnpm test` skips it; coders run it before
+  handing off sign-in or invite changes, ADR 0006) ·
+  `pnpm test:e2e` (after `pnpm build`) · `pnpm gates:prove` · the tunnel stack test (skipped by default; run it after
+  changing `docker-compose.tunnel.yml`, `TRUST_PROXY_PEERS` or the `app-front` alias, 11 §4):
+  `docker build -f apps/node/Dockerfile .` then
+  `TUNNEL_STACK_IMAGE=<image> pnpm exec vitest run --project apps/node src/tunnel-stack.test.ts`
 - Games: `pnpm games:generate` (also runs on `prepare`) · `pnpm games:verify` (`--fast` in builds; never in deploy jobs) ·
   `pnpm games:check-inputs` (after the builds; `--only web,node` in the Docker build) ·
   `pnpm games:check-db` (deploy; reads only `generated/installed.json`)
+- Email: `pnpm gmail:authorize --out <file>` (the one-time Gmail refresh token, docs/deploy.md)
+- Push: `pnpm gen:vapid --out <dir>` (the VAPID key pair as two new 0600 files outside the
+  repository, docs/deploy.md)
 - API: `pnpm api:generate` (OpenAPI document + `@your-move/api-client`) · `pnpm api:surface`
   (the SDK's API Extractor reports)
 - Releases: `pnpm changeset` · `pnpm renovate:sync` (game-package rule in `renovate.json`)
 - Ops: `docker build -f apps/node/Dockerfile .` · `pnpm sbom:app` (CycloneDX SBOMs of what each
   deployment ships)
 - Not built yet, with the milestone that adds them: `pnpm cf:migrate` and `pnpm cf:deploy` (both
-  D1/Workers-specific: the first Workers deployment, 10) · `pnpm gen:vapid` (M4) ·
-  `pnpm gmail:authorize` (M4) · `pnpm admin:*` (Admin API client, 09 §1.2; M3)
+  D1/Workers-specific: the first Workers deployment, 10) · `pnpm admin:*` (Admin API client,
+  09 §1.2; M3)
 
 Commits follow Conventional Commits (11 §7); published packages need a changeset.
 

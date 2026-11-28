@@ -31,5 +31,8 @@ database_name = "your-move"
 database_id = "local-placeholder"
 migrations_dir = "../../packages/server/migrations"
 
-# Added by later milestones: Durable Object USER_CHANNEL (M3), the cron trigger "*/15 * * * *"
-# (M3) and the R2 bucket BLOBS (M6).
+# The sweep (03 §8): scheduled work such as the email nudges (alpha A6).
+[triggers]
+crons = ["*/15 * * * *"]
+
+# Added by later milestones: Durable Object USER_CHANNEL (M3) and the R2 bucket BLOBS (M6).

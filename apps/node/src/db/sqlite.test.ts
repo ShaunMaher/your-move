@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { repositoryContract } from "@your-move/server/testing";
+import { gameRaceContract, repositoryContract } from "@your-move/server/testing";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { installedGames } from "../../../../generated/server-registry.js";
 import { migrate } from "./migrate.js";
 import {
   inTransaction,
@@ -45,6 +46,34 @@ repositoryContract("node:sqlite", () => {
   });
 });
 
+// The lifecycle races on a real file (03 §5.2): on Node the requests interleave at await points
+// on one connection; the suite's barrier makes every request load the game before any writes, so
+// the token guard decides them.
+gameRaceContract(
+  "node:sqlite",
+  () => {
+    const sqlite = openSqlite(join(dir, "races", "app.sqlite"));
+    migrate(sqlite, MIGRATIONS);
+    return Promise.resolve({
+      repos: nodeRepositories(sqlite),
+      sql: (statement: string, ...params: (string | number | null)[]) =>
+        Promise.resolve(sqlite.prepare(statement).all(...params) as Record<string, unknown>[]),
+      close: () => {
+        sqlite.close();
+        return Promise.resolve();
+      },
+    });
+  },
+  {
+    installed: installedGames,
+    type: "example",
+    // The reference game (02 §7.6): any card in the seat's own hand.
+    legalMove: (view, seat) => ({
+      card: (view as { seats: { hand: number[] | null }[] }).seats[seat]?.hand?.[0],
+    }),
+  },
+);
+
 describe("openSqlite", () => {
   it("creates the directory and turns on WAL and foreign keys", () => {
     const sqlite = openSqlite(join(dir, "nested", "deeper", "app.sqlite"));
@@ -55,6 +84,15 @@ describe("openSqlite", () => {
     } finally {
       sqlite.close();
     }
+  });
+
+  it("pins defensive mode, whatever Node's default: writable_schema can't rewrite the schema (B1-S-8)", () => {
+    const sqlite = openSqlite(":memory:");
+    sqlite.exec("CREATE TABLE t (x INTEGER); PRAGMA writable_schema = 1");
+    expect(() => {
+      sqlite.exec("UPDATE sqlite_schema SET sql = 'CREATE TABLE t (y)' WHERE name = 't'");
+    }).toThrow(/may not be modified/u);
+    sqlite.close();
   });
 
   it("opens an in-memory database without touching the file system", () => {
@@ -105,6 +143,46 @@ describe("the proxy driver (M2a review S-7)", () => {
       expect(sqlite.isTransaction).toBe(true);
     });
     expect(sqlite.prepare("SELECT count(*) AS n FROM t").get()).toEqual({ n: 1 });
+    sqlite.close();
+  });
+
+  it.each([
+    ["COMMIT", 1],
+    ["ROLLBACK", 0],
+  ])(
+    "refuses %s closing the adapter's own transaction, so the rest of the batch doesn't run (issue #13 S-3)",
+    (statement, kept) => {
+      // The backstop behind the text check: called here without it.
+      const sqlite = openSqlite(":memory:");
+      sqlite.exec("CREATE TABLE t (x INTEGER)");
+      const batch = ["INSERT INTO t VALUES (1)", statement, "INSERT INTO t VALUES (2)"];
+      expect(() => {
+        inTransaction(sqlite, () => {
+          for (const each of batch) testing.runLeavingNoTransaction(sqlite, each, [], "run");
+        });
+      }).toThrow(TransactionControlError);
+      expect(sqlite.isTransaction).toBe(false);
+      // What the closing statement committed stays; nothing after it ran.
+      expect(sqlite.prepare("SELECT count(*) AS n FROM t").get()).toEqual({ n: kept });
+      sqlite.close();
+    },
+  );
+
+  it("keeps the error of a statement that failed and rolled its transaction back", () => {
+    const sqlite = openSqlite(":memory:");
+    sqlite.exec("CREATE TABLE t (x INTEGER)");
+    sqlite.exec(
+      "CREATE TRIGGER t_refuse BEFORE INSERT ON t WHEN new.x = 2 BEGIN SELECT RAISE(ROLLBACK, 'refused'); END",
+    );
+    // SQLite's own error, not TransactionControlError.
+    expect(() => {
+      inTransaction(sqlite, () => {
+        testing.runLeavingNoTransaction(sqlite, "INSERT INTO t VALUES (1)", [], "run");
+        testing.runLeavingNoTransaction(sqlite, "INSERT INTO t VALUES (2)", [], "run");
+      });
+    }).toThrow("refused");
+    expect(sqlite.isTransaction).toBe(false);
+    expect(sqlite.prepare("SELECT count(*) AS n FROM t").get()).toEqual({ n: 0 });
     sqlite.close();
   });
 

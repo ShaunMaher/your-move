@@ -9,5 +9,9 @@
     "emitDeclarationOnly": true
   },
   "include": ["src"],
-  "references": [{ "path": "../sdk" }, { "path": "../shared" }]
+  "references": [
+    { "path": "../sdk" },
+    { "path": "../shared" },
+    { "path": "../dictionary/tsconfig.runtime.json" }
+  ]
 }

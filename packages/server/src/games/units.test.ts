@@ -1,0 +1,643 @@
+/** Unit tests of the framework's small parts: ranking, settings, randomness, resources, registry. */
+import type { DictionaryManifest } from "@your-move/dictionary";
+import { type AnyGameDefinition, OK } from "@your-move/sdk";
+import { describe, expect, it } from "vitest";
+import { z } from "zod";
+
+import type { GamePlayerRecord, GameRecord } from "../db/repositories.js";
+import { ApiError } from "../http/api-error.js";
+import { EngineFault, guardEngine } from "./engine-fault.js";
+import {
+  accept,
+  cancel,
+  decline,
+  endedUnplayed,
+  expire,
+  isModuleOutcome,
+  isRefusal,
+  LOBBY_LIFETIME_MS,
+  removeSeat,
+  rerank,
+  start,
+  startAtCreation,
+} from "./lifecycle.js";
+import { addableUserIds, rematchOf } from "./present.js";
+import { cryptoRandom, recorded } from "./random.js";
+import { createGameRegistry, GameConfigError } from "./registry.js";
+import {
+  createResourceProvider,
+  DictionaryUnavailableError,
+  ResourceConfigError,
+} from "./resources.js";
+import { lastOptionsOf, mergeOptions, rememberedInput, whoCanAddMeOf } from "./settings.js";
+
+describe("rerank (02 §4 Ranking)", () => {
+  it("drops declined seats and re-ranks the rest with standard competition ranking", () => {
+    const ranked = rerank(
+      [
+        { seat: 2, rank: 1, score: 9 },
+        { seat: 0, rank: 2, score: 5 },
+        { seat: 1, rank: 2, score: 5 },
+        { seat: 3, rank: 4 },
+      ],
+      new Set([2]),
+    );
+    expect([...ranked.entries()].sort()).toEqual([
+      [0, { rank: 1, score: 5 }],
+      [1, { rank: 1, score: 5 }],
+      [3, { rank: 3 }],
+    ]);
+  });
+});
+
+describe("remembered options (05 §Remembered options)", () => {
+  it("merges top-level keys, request keys winning; only objects merge", () => {
+    expect(mergeOptions({ a: 1 }, { a: 2, b: 3 })).toEqual({ a: 1, b: 3 });
+    expect(mergeOptions(undefined, { b: 3 })).toEqual({ b: 3 });
+    expect(mergeOptions("x", { b: 3 })).toBe("x");
+    expect(mergeOptions({ a: 1 }, ["no"])).toEqual({ a: 1 });
+  });
+
+  it("reads remembered options only from an object, and survives unreadable settings", () => {
+    const stored = JSON.stringify({ lastOptions: { words: { a: 1 } }, lastGameType: "words" });
+    expect(lastOptionsOf(stored, "words")).toEqual({ a: 1 });
+    expect(lastOptionsOf("not json", "words")).toBeUndefined();
+    expect(lastOptionsOf("[1]", "words")).toBeUndefined();
+  });
+
+  it("reads whoCanAddMe: only a stored 'nobody' is nobody (A12-P-3)", () => {
+    expect(whoCanAddMeOf(JSON.stringify({ whoCanAddMe: "nobody" }))).toBe("nobody");
+    for (const stored of ['{"whoCanAddMe":"pastOpponents"}', "{}", '{"whoCanAddMe":1}', "nope"]) {
+      expect(whoCanAddMeOf(stored)).toBe("pastOpponents");
+    }
+  });
+
+  it("doesn't remember an input too large to be worth keeping", () => {
+    expect(rememberedInput(undefined)).toBe("{}");
+    expect(rememberedInput({ a: 1 })).toBe('{"a":1}');
+    expect(rememberedInput({ big: "x".repeat(5000) })).toBeNull();
+  });
+});
+
+describe("the recorded WebCrypto source", () => {
+  it("records every draw as [max, value] and stays in range", () => {
+    const { rng, draws } = recorded(cryptoRandom());
+    for (const max of [1, 2, 7, 2 ** 32]) {
+      const value = rng.nextInt(max);
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThan(max);
+    }
+    expect(draws.map(([max]) => max)).toEqual([1, 2, 7, 2 ** 32]);
+    expect(() => rng.nextInt(0)).toThrow(RangeError);
+  });
+
+  it("is roughly uniform", () => {
+    const { rng } = recorded(cryptoRandom());
+    const counts = [0, 0, 0];
+    for (let i = 0; i < 3000; i++) {
+      const value = rng.nextInt(3);
+      counts[value] = (counts[value] ?? 0) + 1;
+    }
+    for (const count of counts) expect(count).toBeGreaterThan(800);
+  });
+});
+
+function manifest(id: string): DictionaryManifest {
+  return {
+    id,
+    version: 1,
+    name: id,
+    description: id,
+    language: "en",
+    licence: "CC0-1.0",
+    sourceUrl: "https://example.org/list.txt",
+    sha256: "0".repeat(64),
+    distribution: "public",
+    wordCount: 1,
+    alphabet: ["a"],
+    wordsSha256: "a".repeat(64),
+    bytes: 3,
+    skipped: { length: 0, characters: 0 },
+  };
+}
+
+describe("the resource provider", () => {
+  const index = { dictionaries: [manifest("one"), manifest("two")], globalRemovals: [] };
+
+  it("offers the enabled built-ins with their download URL, and describes any of them", () => {
+    const provider = createResourceProvider({
+      dictionaries: { index, loadText: () => Promise.resolve("aa\n") },
+      enabled: ["two"],
+      now: () => 0,
+    });
+    expect(provider.listForUser("dictionary", "u").map((meta) => meta.id)).toEqual(["two"]);
+    expect(provider.enabled().map((meta) => meta.id)).toEqual(["two"]);
+    expect(provider.authorizeForNewGame("dictionary", "two", "u")).toBe(true);
+    expect(provider.authorizeForNewGame("dictionary", "one", "u")).toBe(false);
+    expect(provider.describe("dictionary", "one")?.downloadUrl).toBe(
+      `/assets/dictionaries/one-v1.${"a".repeat(16)}.txt`,
+    );
+    expect(provider.unknownCode("dictionary")).toBe("UNKNOWN_DICTIONARY");
+  });
+
+  it("refuses DICTIONARIES_ENABLED naming an unknown dictionary", () => {
+    expect(() =>
+      createResourceProvider({
+        dictionaries: { index, loadText: () => Promise.resolve("") },
+        enabled: ["three"],
+        now: () => 0,
+      }),
+    ).toThrow(ResourceConfigError);
+  });
+
+  it("times a load out, and remembers a failure briefly before trying again", async () => {
+    let clock = 0;
+    let calls = 0;
+    const provider = createResourceProvider({
+      dictionaries: {
+        index,
+        loadText: () => {
+          calls += 1;
+          return calls === 1 ? new Promise<string>(() => undefined) : Promise.resolve("aa\n");
+        },
+      },
+      enabled: null,
+      now: () => clock,
+      timeoutMs: 5,
+      failureTtlMs: 1000,
+    });
+    const load = () => provider.load([{ kind: "dictionary", resourceId: "one" }]);
+    await expect(load()).rejects.toThrow(DictionaryUnavailableError);
+    await expect(load()).rejects.toThrow(/recently/u);
+    expect(calls).toBe(1);
+    clock = 1000;
+    // The list's size and hash don't match its manifest: still a failure, but a fresh attempt.
+    await expect(load()).rejects.toThrow();
+    expect(calls).toBe(2);
+    expect(await provider.load([{ kind: "other", resourceId: "x" }])).toEqual({});
+  });
+
+  it("remembers a list whose size or hash doesn't match: not fetched or hashed again at once (S-6)", async () => {
+    let clock = 0;
+    let calls = 0;
+    const provider = createResourceProvider({
+      dictionaries: {
+        index,
+        loadText: () => {
+          calls += 1;
+          return Promise.resolve("not the manifest's list\n");
+        },
+      },
+      enabled: null,
+      now: () => clock,
+      failureTtlMs: 1000,
+    });
+    const load = () => provider.load([{ kind: "dictionary", resourceId: "one" }]);
+    await expect(load()).rejects.toThrow(/one/u);
+    await expect(load()).rejects.toThrow(DictionaryUnavailableError);
+    await expect(load()).rejects.toThrow(DictionaryUnavailableError);
+    expect(calls).toBe(1);
+    clock = 1000;
+    await expect(load()).rejects.toThrow();
+    expect(calls).toBe(2);
+  });
+});
+
+/** A minimal definition: only what the registry reads. */
+function definition(version: number, overrides: Partial<AnyGameDefinition> = {}) {
+  return {
+    type: "toy",
+    version,
+    configSchema: z.object({ LEVEL: z.string().optional() }).strict(),
+    checkConfig: () => OK,
+    ...overrides,
+  } as unknown as AnyGameDefinition;
+}
+
+const toyManifest = {
+  type: "toy",
+  name: "Toy",
+  description: "",
+  icon: "",
+  licence: "MIT",
+  resources: [],
+  hiddenInformation: false,
+  players: { min: 2, max: 2 },
+  rules: {},
+};
+
+describe("the games registry (02 §7.3)", () => {
+  it("picks the latest rules version, keeps the others, and parses only the module's own keys", () => {
+    const registry = createGameRegistry(
+      [
+        {
+          manifest: toyManifest,
+          engines: { 1: definition(1), 2: definition(2) },
+          enabledByDefault: true,
+        },
+      ],
+      { gameConfig: { toy: { LEVEL: "3" } }, enabledGames: ["toy"], resources: [] },
+    );
+    const toy = registry.get("toy");
+    expect(toy?.latest.version).toBe(2);
+    expect(toy?.engine(1)?.version).toBe(1);
+    expect(toy?.engine(3)).toBeUndefined();
+    expect(toy?.config).toEqual({ LEVEL: "3" });
+    expect(registry.enabled().map((type) => type.type)).toEqual(["toy"]);
+    expect(registry.get("other")).toBeUndefined();
+  });
+
+  it("names every failing key and never a value", () => {
+    const failing = definition(1, {
+      checkConfig: () => ({ code: "BAD_LEVEL", detail: { key: "LEVEL" } }),
+    });
+    try {
+      createGameRegistry(
+        [{ manifest: toyManifest, engines: { 1: failing }, enabledByDefault: true }],
+        {
+          gameConfig: { toy: { LEVEL: "secret-value" } },
+          enabledGames: [],
+          resources: [],
+        },
+      );
+      throw new Error("accepted");
+    } catch (error) {
+      expect(error).toBeInstanceOf(GameConfigError);
+      expect((error as GameConfigError).issues).toEqual([
+        "GAMES_TOY_LEVEL: refused by the toy game (BAD_LEVEL)",
+      ]);
+    }
+    expect(() =>
+      createGameRegistry([{ manifest: toyManifest, engines: {}, enabledByDefault: true }], {
+        gameConfig: {},
+        enabledGames: [],
+        resources: [],
+      }),
+    ).toThrow(/exports no rules version/u);
+    const unknownKey = () =>
+      createGameRegistry(
+        [{ manifest: toyManifest, engines: { 1: definition(1) }, enabledByDefault: true }],
+        {
+          gameConfig: { toy: { COLOUR: "secret-value" } },
+          enabledGames: [],
+          resources: [],
+        },
+      );
+    expect(unknownKey).toThrow(GameConfigError);
+    expect(unknownKey).not.toThrow(/secret-value/u);
+  });
+
+  it("turns a throwing config refinement or checkConfig into a GameConfigError naming only variables (A2-R3-2/3)", () => {
+    const secret = "tile-rack-secret";
+    const build = (overrides: Partial<AnyGameDefinition>) => () =>
+      createGameRegistry(
+        [
+          {
+            manifest: toyManifest,
+            engines: { 1: definition(1, overrides) },
+            enabledByDefault: true,
+          },
+        ],
+        { gameConfig: { toy: {} }, enabledGames: [], resources: [] },
+      );
+    const refinement = build({
+      configSchema: z.object({}).refine(() => {
+        throw new Error(secret);
+      }),
+    });
+    const check = build({
+      checkConfig: () => {
+        throw new Error(secret);
+      },
+    });
+    for (const build of [refinement, check]) {
+      let caught: unknown;
+      try {
+        build();
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(GameConfigError);
+      expect((caught as GameConfigError).issues).toEqual([
+        "GAMES_TOY_*: the toy game failed while checking its configuration",
+      ]);
+      expect((caught as GameConfigError).message).not.toContain(secret);
+    }
+  });
+});
+
+describe("ApiError", () => {
+  it("answers framework codes with their status and module codes with 400, detail as-is", () => {
+    const framework = ApiError.of("NOT_YOUR_TURN");
+    expect([framework.status, framework.body()]).toEqual([
+      409,
+      { error: { code: "NOT_YOUR_TURN", message: "It isn't your turn." } },
+    ]);
+    const module = ApiError.module("NOT_IN_HAND", { card: 3 });
+    expect([module.status, module.body().error.code, module.body().error.detail]).toEqual([
+      400,
+      "NOT_IN_HAND",
+      { card: 3 },
+    ]);
+  });
+});
+
+describe("an automatic start validateStart refuses (02 §4 Start, step 2)", () => {
+  it("doesn't happen: the accept alone is written, and the game waits for the creator", () => {
+    const row = (
+      id: string,
+      state: GamePlayerRecord["state"],
+      joinedVia: GamePlayerRecord["joinedVia"],
+    ) =>
+      ({
+        id,
+        state,
+        joinedVia,
+        joinedAt: state === "joined" ? 1 : null,
+        seat: null,
+      }) as GamePlayerRecord;
+    const creator = row("a", "joined", "creator");
+    const invited = row("b", "invited", null);
+    const ctx = {
+      game: { status: "lobby", seats: 2, aiAssistance: "off", seatOrder: "join" } as GameRecord,
+      players: [creator, invited],
+      definition: {
+        validateStart: () => ({ code: "NOPE" }),
+        players: () => ({ min: 2, max: 2 }),
+      } as unknown as AnyGameDefinition,
+      options: {},
+      state: null,
+      random: cryptoRandom(),
+      joinLink: null,
+    };
+    expect(accept(ctx, invited, 5)).toEqual({
+      game: { updatedAt: 5 },
+      updatePlayers: [
+        {
+          id: "b",
+          set: { state: "joined", joinedVia: "invitation", joinedAt: 5, inviteEmail: null },
+        },
+      ],
+    });
+  });
+});
+
+describe("start and accept at the lobby's expiry (A2 review S2-5)", () => {
+  const row = (id: string, state: GamePlayerRecord["state"], joinedVia: "creator" | null) =>
+    ({
+      id,
+      state,
+      joinedVia,
+      joinedAt: state === "joined" ? 1 : null,
+      seat: null,
+    }) as GamePlayerRecord;
+  const creator = row("a", "joined", "creator");
+  const invited = row("b", "invited", null);
+  const ctx = {
+    game: {
+      status: "lobby",
+      createdAt: 1000,
+      seats: 2,
+      aiAssistance: "off",
+      seatOrder: "join",
+    } as GameRecord,
+    players: [creator, row("c", "joined", null), invited],
+    definition: {
+      players: () => ({ min: 2, max: 3 }),
+      validateStart: () => OK,
+      setup: () => ({}),
+      toAct: () => [0],
+    } as unknown as AnyGameDefinition,
+    options: {},
+    state: null,
+    random: cryptoRandom(),
+    joinLink: null,
+  };
+  const due = 1000 + LOBBY_LIFETIME_MS;
+
+  it("refuse a lobby at or past its expiry, even one still marked lobby", () => {
+    expect(start(ctx, creator, due)).toEqual({ refused: "WRONG_STATUS" });
+    expect(accept(ctx, invited, due)).toEqual({ refused: "WRONG_STATUS" });
+    expect(accept(ctx, invited, due + 5)).toEqual({ refused: "WRONG_STATUS" });
+  });
+
+  it("accept and start a lobby a moment before it", () => {
+    expect(accept(ctx, invited, due - 1)).not.toHaveProperty("refused");
+    expect(start(ctx, creator, due - 1)).not.toHaveProperty("refused");
+  });
+});
+
+describe("the engine-fault boundary (A2 review S2-6)", () => {
+  const secret = "the hand 7,8,9";
+  const definition = guardEngine({
+    type: "t",
+    version: 1,
+    actionSchema: z.unknown().transform(() => {
+      throw new Error(secret);
+    }),
+    optionsSchema: z.object({}),
+    view: () => {
+      throw new Error(secret);
+    },
+  } as unknown as AnyGameDefinition);
+
+  it("turns a throw from a schema's refinement into an EngineFault without the message", () => {
+    let caught: unknown;
+    try {
+      definition.actionSchema.safeParse(1);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(EngineFault);
+    expect((caught as EngineFault).message).not.toContain(secret);
+    expect((caught as EngineFault).member).toBe("actionSchema.safeParse");
+  });
+
+  it("still parses with a well-behaved schema", () => {
+    expect(definition.optionsSchema.safeParse({}).success).toBe(true);
+  });
+
+  it("keeps guarding a function member", () => {
+    expect(() => (definition.view as () => unknown)()).toThrow(EngineFault);
+  });
+});
+
+describe("typed addresses on open invitations (A12-S-3)", () => {
+  // Telling a picked invitation from a typed one (present.ts, `countLiveCreatedWithUser`) relies
+  // on this: no transition clears `invite_email` on a row that stays `invited` in a lobby that
+  // stays open. A row's address goes only with the row leaving `invited` or the lobby ending.
+  const row = (
+    id: string,
+    state: GamePlayerRecord["state"],
+    joinedVia: GamePlayerRecord["joinedVia"],
+    inviteEmail: string | null,
+  ) =>
+    ({
+      id,
+      userId: `u-${id}`,
+      state,
+      joinedVia,
+      inviteEmail,
+      joinedAt: state === "joined" ? 1 : null,
+      seat: null,
+    }) as GamePlayerRecord;
+  const creator = row("a", "joined", "creator", null);
+  const typedX = row("x", "invited", null, "x@example.org");
+  const typedY = row("y", "invited", null, "y@example.org");
+  const added = row("z", "joined", "added", null);
+  const pickedInvitation = row("p", "invited", null, null);
+  const ctx = {
+    game: {
+      status: "lobby",
+      createdAt: 1000,
+      seats: 5,
+      aiAssistance: "off",
+      seatOrder: "join",
+    } as GameRecord,
+    players: [creator, added, typedX, typedY, pickedInvitation],
+    definition: {
+      players: () => ({ min: 2, max: 5 }),
+      validateStart: () => OK,
+      setup: () => ({}),
+      toAct: () => [0],
+    } as unknown as AnyGameDefinition,
+    options: {},
+    state: null,
+    random: cryptoRandom(),
+    joinLink: null,
+  };
+
+  it("holds for every lobby transition", () => {
+    const at = 2000;
+    const outcomes = [
+      accept(ctx, typedX, at),
+      accept(ctx, pickedInvitation, at),
+      decline(ctx, typedX, at),
+      decline(ctx, added, at),
+      decline(ctx, pickedInvitation, at),
+      start(ctx, creator, at),
+      cancel(ctx, creator, at),
+      expire(ctx.game, ctx.players, 1000 + LOBBY_LIFETIME_MS),
+      startAtCreation({ ...ctx, game: { ...ctx.game, seats: 2 }, players: [creator, added] }, at),
+      removeSeat(ctx, creator, typedX.id, at),
+      removeSeat(ctx, creator, pickedInvitation.id, at),
+    ];
+    let checked = 0;
+    for (const outcome of outcomes) {
+      if (outcome === null || isRefusal(outcome)) continue;
+      const writes = isModuleOutcome(outcome) ? outcome.writes : outcome;
+      const lobbyOpen = (writes.game.status ?? "lobby") === "lobby";
+      for (const update of writes.updatePlayers ?? []) {
+        const before = ctx.players.find((candidate) => candidate.id === update.id);
+        const stillInvited = (update.set.state ?? before?.state) === "invited";
+        if (update.set.inviteEmail === null && before?.inviteEmail !== null) {
+          expect(lobbyOpen && stillInvited, update.id).toBe(false);
+          checked += 1;
+        }
+      }
+    }
+    // Not vacuous: accepts, declines and endings did clear addresses.
+    expect(checked).toBeGreaterThan(4);
+  });
+});
+
+describe("a finished game's rematch as one of its players sees it (05 `rematch`, alpha A15)", () => {
+  type Status = GameRecord["status"];
+  const game = (status: Status = "lobby", actionCount = 0, endReason: string | null = null) =>
+    ({ id: "r", status, createdAt: 1000, actionCount, endReason }) as const;
+  const at = (
+    viewerState: GamePlayerRecord["state"] | null,
+    status: Status = "lobby",
+    now = 2000,
+  ) => rematchOf({ game: game(status), viewerState }, now)?.you;
+
+  it("is joined for a joined or seated row, invited for an invitation, none otherwise", () => {
+    expect(
+      (["joined", "invited", "declined", "left", "removed", null] as const).map((state) =>
+        at(state),
+      ),
+    ).toEqual(["joined", "invited", "none", "none", "none", "none"]);
+    expect([at("playing", "active"), at("out", "finished"), at("dropped", "active")]).toEqual([
+      "joined",
+      "joined",
+      "none",
+    ]);
+    expect(rematchOf({ game: game(), viewerState: "joined" }, 2000)).toEqual({
+      gameId: "r",
+      you: "joined",
+    });
+  });
+
+  it("is null once its lobby is past its expiry: it has ended unplayed", () => {
+    expect(
+      rematchOf({ game: game(), viewerState: "invited" }, 1000 + LOBBY_LIFETIME_MS),
+    ).toBeNull();
+    expect(at("invited", "lobby", 999 + LOBBY_LIFETIME_MS)).toBe("invited");
+  });
+
+  it("is null once the rematch ended unplayed, so it may be replaced (A15-P-2, R2-1, S2-1)", () => {
+    for (const status of ["cancelled", "expired", "declined"] as const) {
+      expect(rematchOf({ game: game(status), viewerState: "invited" }, 2000)).toBeNull();
+    }
+    // Every declined ending is a seat refusing before it acted (02 §2.1 rule 9), even after
+    // others played.
+    expect(endedUnplayed(game("declined", 3, "declined"))).toBe(true);
+    // A cancel or expiry after moves was played, and an operator's cancel is never unplayed.
+    expect(rematchOf({ game: game("cancelled", 3), viewerState: "out" }, 2000)?.you).toBe("joined");
+    expect(endedUnplayed(game("expired", 1))).toBe(false);
+    expect(endedUnplayed(game("cancelled", 0, "operator_cancelled"))).toBe(false);
+    expect(endedUnplayed(game("cancelled", 0, "cancelled"))).toBe(true);
+    expect(endedUnplayed(game("finished"))).toBe(false);
+    expect(endedUnplayed(game("lobby"))).toBe(false);
+  });
+});
+
+describe("remembered options leave version keys out (05 §Remembered options, A15-P-10)", () => {
+  it("drops top-level *Version keys and keeps everything else", () => {
+    expect(
+      rememberedInput({ rulesetId: "casual", rulesetVersion: 1, dictionaryVersion: 2, x: 1 }),
+    ).toBe('{"rulesetId":"casual","x":1}');
+    expect(rememberedInput(undefined)).toBe("{}");
+    expect(rememberedInput("raw")).toBe('"raw"');
+  });
+});
+
+describe("whom a finished game's creator may add to their players (05 `canAddPlayers`, alpha A19)", () => {
+  const row = (overrides: Partial<GamePlayerRecord>): GamePlayerRecord =>
+    ({
+      id: overrides.userId ?? "row",
+      seat: 1,
+      userId: "u",
+      state: "out",
+      joinedVia: "join_link",
+      actedOnce: 1,
+      ...overrides,
+    }) as GamePlayerRecord;
+  const creator = row({ id: "c", userId: "c", seat: 0, joinedVia: "creator" });
+  const finished = { status: "finished" } as const;
+
+  it("lists seated link joiners who acted and still have an account, in seat order", () => {
+    const players = [
+      creator,
+      row({ userId: "late", seat: 3 }),
+      row({ userId: "early", seat: 1 }),
+      row({ userId: "silent", seat: 2, actedOnce: 0 }),
+      row({ userId: "invited", seat: 4, joinedVia: "invitation" }),
+      row({ userId: "added", seat: 5, joinedVia: "added" }),
+      row({ userId: null, seat: 6 }),
+      row({ userId: "unseated", seat: null, state: "declined" }),
+    ];
+    expect(addableUserIds(finished, players, creator)).toEqual(["early", "late"]);
+  });
+
+  it("lists no one for anyone but the creator who acted, or before the game finished", () => {
+    const joiner = row({ userId: "j" });
+    const players = [creator, joiner];
+    expect(addableUserIds(finished, players, joiner)).toEqual([]);
+    const idle = { ...creator, actedOnce: 0 };
+    expect(addableUserIds(finished, [idle, joiner], idle)).toEqual([]);
+    for (const status of ["lobby", "active", "declined", "cancelled", "expired"] as const) {
+      expect(addableUserIds({ status }, players, creator), status).toEqual([]);
+    }
+  });
+});

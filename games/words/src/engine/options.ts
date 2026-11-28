@@ -78,7 +78,15 @@ export function checkConfig(config: ModuleConfig, catalog: ResourceCatalog): Ok 
   return OK;
 }
 
+/** The input keys a creator chooses with. */
 const INPUT_KEYS: ReadonlySet<string> = new Set(["rulesetId", "dictionaryId"]);
+
+/**
+ * The versions resolved options carry: accepted so that resolved options resolve again to the
+ * same choices (a rematch, 02 §2.1 rule 10), checked to be non-negative integers, and otherwise
+ * ignored. Never honoured: no input can pin an old version.
+ */
+const VERSION_KEYS: ReadonlySet<string> = new Set(["rulesetVersion", "dictionaryVersion"]);
 
 /** The unknown keys `UNKNOWN_OPTION` may name in its detail (words §10.3). */
 const SAFE_KEY = /^[A-Za-z0-9_]{1,64}$/u;
@@ -87,7 +95,8 @@ const SAFE_KEY = /^[A-Za-z0-9_]{1,64}$/u;
  * Resolves a creator's input `{ rulesetId?, dictionaryId? }` (words §10.1): missing fields take
  * the instance defaults; an unknown or disabled ruleset, a dictionary the creator may not use, or
  * an incompatible pair is an error value. Resolves the ruleset's latest version and the
- * dictionary's current version. `undefined` and `null` mean "all defaults".
+ * dictionary's current version, whatever versions the input names (resolved options are a valid
+ * input). `undefined` and `null` mean "all defaults".
  */
 export function resolveOptions(input: unknown, ctx: OptionsContext): Options | GameError {
   const given: unknown = input ?? {};
@@ -95,7 +104,13 @@ export function resolveOptions(input: unknown, ctx: OptionsContext): Options | G
     return { code: ERROR_CODES.optionsNotObject };
   }
   const fields = new Map<string, unknown>(Object.entries(given as Record<string, unknown>));
-  for (const key of fields.keys()) {
+  for (const [key, value] of fields) {
+    if (VERSION_KEYS.has(key)) {
+      if (value !== undefined && !(Number.isSafeInteger(value) && (value as number) >= 0)) {
+        return { code: ERROR_CODES.invalidOption, detail: { option: key } };
+      }
+      continue;
+    }
     if (!INPUT_KEYS.has(key)) {
       // The key is echoed only if it looks like an option name, never arbitrary input.
       return SAFE_KEY.test(key)

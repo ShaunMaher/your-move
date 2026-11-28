@@ -7,16 +7,24 @@
  * 2. take the single-instance lock, apply migrations and run the orphan check against
  *    `installed.json` only (no game code is loaded yet).
  *
+ * Once the platform exists, {@link verifyEmail} checks the email provider's credentials (the
+ * `gmail` token's scope and account, 09 §2) and {@link verifyPush} that the VAPID keys are one
+ * key pair, before the server listens.
+ *
  * The caller then scrubs the secrets from the environment, imports the registry and serves; the
  * scrub always comes before the import (02 §7.5).
  */
 import {
   ConfigError,
+  type CoreEmailSender,
   type Env,
+  GmailTokenRefused,
   type Installed,
+  type PushSender,
   isLocalDev,
   parseConfig,
   type AppConfig,
+  VapidKeyError,
 } from "@your-move/server";
 
 import { InstanceLockedError } from "./db/instance-lock.js";
@@ -50,6 +58,26 @@ export function isRefusal(error: unknown): error is Error {
     error instanceof InstanceLockedError ||
     error instanceof MigrationError
   );
+}
+
+/** Refuses to start when the email provider's credentials are wrong; a Google outage doesn't. */
+export async function verifyEmail(email: CoreEmailSender): Promise<void> {
+  try {
+    await email.verifyCredentials?.();
+  } catch (error) {
+    if (error instanceof GmailTokenRefused) throw new StartupRefusal(`${error.message} (09 §2)`);
+    throw error;
+  }
+}
+
+/** Refuses to start when the VAPID private key doesn't belong to the public key (09 §1). */
+export async function verifyPush(push: PushSender): Promise<void> {
+  try {
+    await push.verifyKeys();
+  } catch (error) {
+    if (error instanceof VapidKeyError) throw new StartupRefusal(`${error.message} (09 §1)`);
+    throw error;
+  }
 }
 
 /** Steps 1 and 2 above; throws to refuse the start. */

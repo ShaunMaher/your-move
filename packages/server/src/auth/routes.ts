@@ -1,7 +1,7 @@
 /**
  * The sign-in and account endpoints (docs/spec/05-api.md §Auth & account, 06 §3–§5, §7): OTP
- * request and verify, logout and logout-all, `GET`/`PATCH /me`, and account deletion with a
- * step-up code.
+ * request and verify, logout and logout-all, `GET`/`PATCH /me` (with the `emailNudges` setting,
+ * 03 §7), and account deletion with a step-up code.
  */
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import {
@@ -17,12 +17,13 @@ import {
   patchMeRoute,
   UserSettingsSchema,
 } from "@your-move/shared";
-import type { Context, MiddlewareHandler } from "hono";
+import type { Context } from "hono";
+import { z } from "zod";
 
 import { validateDisplayName } from "../accounts/display-name.js";
 import { normaliseAddress } from "../accounts/email.js";
 import { isLocalDev } from "../config/local-dev.js";
-import { hmacHex, type Subkeys } from "../crypto/subkeys.js";
+import { emailId, type Subkeys } from "../crypto/subkeys.js";
 import type { UserRecord } from "../db/repositories.js";
 import type { EmailMessage } from "../email/sender.js";
 import {
@@ -33,8 +34,12 @@ import {
   suspendedNoticeEmail,
   type TemplateContext,
 } from "../email/templates.js";
+import { type Claimant, claimInvitations } from "../games/claim.js";
+import { background } from "../http/background.js";
+import { errorBody, type ErrorReason } from "../http/error-log.js";
 import type { AppEnv, Platform } from "../platform.js";
-import { ipBuckets } from "./client-ip.js";
+import { sendInvitationPushes } from "../push/notify.js";
+import { clientBucketsOf } from "./client-buckets.js";
 import { checkLimits } from "./limits.js";
 import {
   issueSignInCode,
@@ -43,8 +48,10 @@ import {
   type ClientBuckets,
   chargeNewAccount,
   newAccountAllowed,
+  takeOtpEmailRoom,
   verifyCode,
 } from "./otp.js";
+import { requireSession } from "./require-session.js";
 import {
   clearedSessionCookie,
   createSession,
@@ -67,12 +74,26 @@ const MESSAGES: Readonly<Record<Code, string>> = {
   RATE_LIMITED: "Too many requests. Please wait and try again.",
 };
 
-function fail<S extends ErrorStatus, C extends Code>(c: Context, status: S, code: C) {
-  return c.json({ error: { code, message: MESSAGES[code] } }, status);
+function fail<S extends ErrorStatus, C extends Code>(
+  c: Context<AppEnv>,
+  status: S,
+  code: C,
+  reason?: ErrorReason,
+) {
+  return c.json(errorBody(c, code, MESSAGES[code], reason === undefined ? {} : { reason }), status);
 }
 
-/** Stored settings: known keys only, anything unreadable treated as unset. */
-const storedSettings = UserSettingsSchema.partial().catch({});
+/**
+ * Stored settings: known keys only, each read on its own, so one unreadable value counts as unset
+ * without taking the others with it (A6-P-12).
+ */
+const storedSettings = z
+  .object({
+    whoCanAddMe: UserSettingsSchema.shape.whoCanAddMe.optional().catch(undefined),
+    emailNudges: UserSettingsSchema.shape.emailNudges.optional().catch(undefined),
+    theme: UserSettingsSchema.shape.theme.optional().catch(undefined),
+  })
+  .catch({});
 
 /** The `Me` view of a user (05 §Auth & account). */
 function toMe(user: UserRecord, adminEmails: readonly string[], minAge: number): Me {
@@ -88,7 +109,12 @@ function toMe(user: UserRecord, adminEmails: readonly string[], minAge: number):
     kind: user.kind,
     email: user.email,
     displayName: user.displayName,
-    settings: { whoCanAddMe: settings.whoCanAddMe ?? "pastOpponents" },
+    settings: {
+      whoCanAddMe: settings.whoCanAddMe ?? "pastOpponents",
+      // Off unless turned on (03 §7).
+      emailNudges: settings.emailNudges ?? false,
+      theme: settings.theme ?? "system",
+    },
     ageAttested: user.ageAttestedMinAge !== null && user.ageAttestedMinAge >= minAge,
     // M2b: onboarding is the display name; the age confirmation joins in M4 (10 M2).
     needsOnboarding: user.onboardedAt === null,
@@ -100,28 +126,8 @@ export interface AuthRouteOptions {
   readonly platform: Platform;
   /** HKDF subkeys of `APP_SECRET`, derived once per app. */
   readonly keys: () => Promise<Subkeys>;
-}
-
-/**
- * Runs `task` after the response (06 §3.2): through the request's `waitUntil` (per request on
- * Workers, tracked on Node), started on a later macrotask so it never delays the response. Errors
- * are logged by class only.
- */
-function background(c: Context, platform: Platform, task: () => Promise<unknown>): void {
-  const run = new Promise((resolve) => setTimeout(resolve, 0))
-    .then(task)
-    .catch((error: unknown) => {
-      platform.log.error("background task failed", {
-        errorClass: error instanceof Error ? error.name : typeof error,
-      });
-    });
-  let context: { waitUntil(promise: Promise<unknown>): void } | null = null;
-  try {
-    context = c.executionCtx;
-  } catch {
-    // No execution context (a bare `app.request` in a test): the task simply runs detached.
-  }
-  context?.waitUntil(run);
+  /** Email-invite seats completing onboarding claims at most; the sweep claims the rest. */
+  readonly onboardingClaims: number;
 }
 
 export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteOptions): void {
@@ -146,43 +152,33 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
   };
 
   /** The client's IP buckets, hashed (08 §4.1), or null when the address is missing. */
-  const clientBuckets = async (c: Context, keys: Subkeys): Promise<ClientBuckets | null> => {
-    const ip = platform.clientIp(c.req.raw, c.env);
-    if (!ip.ok) return null;
-    const buckets = await Promise.all(
-      ipBuckets(ip.ip).map(async (bucket) => ({
-        hash: await hmacHex(keys.ip, bucket.bucket),
-        multiplier: bucket.multiplier,
-      })),
-    );
-    return { ipBuckets: buckets };
+  const clientBuckets = (c: Context, keys: Subkeys): Promise<ClientBuckets | null> =>
+    clientBucketsOf(platform, c, keys);
+
+  /**
+   * Claims the new user's email-invite seats before onboarding answers, so their game list shows
+   * the invitations (06 §6.4), and when one is a `normal` invitation sends them the generic
+   * invitation push in the background (alpha A20). A failure never fails onboarding: it is logged
+   * by class (09 §5) and the sweep claims the seats later.
+   */
+  const claimAtOnboarding = async (c: Context, claimant: Claimant, at: number): Promise<void> => {
+    try {
+      const { normal } = await claimInvitations(repos, claimant, at, options.onboardingClaims);
+      if (normal > 0 && platform.push.enabled) {
+        background(c, platform, () => sendInvitationPushes(platform, [claimant.id]));
+      }
+    } catch (error) {
+      platform.log.error("invite claim at onboarding failed", {
+        errorClass: error instanceof Error ? error.constructor.name : typeof error,
+      });
+    }
   };
 
   const clearCookie = (c: Context): void => {
     c.header("Set-Cookie", clearedSessionCookie(localDev), { append: true });
   };
 
-  /** Session only (05 §Token scopes). Bearer tokens arrive in M3. */
-  const requireSession: MiddlewareHandler<AppEnv> = async (c, next) => {
-    const token = readSessionCookie(c.req.header("Cookie"), localDev);
-    if (c.req.header("Authorization") !== undefined) {
-      // A cookie and a bearer token together are refused (05 §Conventions); tokens alone can't
-      // authenticate until M3.
-      return token === null ? fail(c, 401, "UNAUTHENTICATED") : fail(c, 400, "BAD_REQUEST");
-    }
-    if (token === null) return fail(c, 401, "UNAUTHENTICATED");
-    const active = await loadSession(repos, token, now(), (task) => {
-      background(c, platform, task);
-    });
-    if (active === null) {
-      clearCookie(c);
-      return fail(c, 401, "UNAUTHENTICATED");
-    }
-    if (active.user.suspendedAt !== null) return fail(c, 403, "SUSPENDED");
-    c.set("session", active);
-    await next();
-    return undefined;
-  };
+  const session = requireSession(platform);
   // Registered before the handlers, so it runs first.
   for (const path of [
     logoutRoute.path,
@@ -190,15 +186,15 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     getMeRoute.path,
     deleteOtpRoute.path,
   ]) {
-    app.use(path, requireSession);
+    app.use(path, session);
   }
 
   app.openapi(otpRequestRoute, async (c) => {
     const email = normaliseAddress(c.req.valid("json").email);
-    if (email === null) return fail(c, 400, "BAD_REQUEST");
+    if (email === null) return fail(c, 400, "BAD_REQUEST", "invalid_email");
     const context = await deps();
     const buckets = await clientBuckets(c, context.keys);
-    if (buckets === null) return fail(c, 400, "BAD_REQUEST");
+    if (buckets === null) return fail(c, 400, "BAD_REQUEST", "no_client_ip");
     const outcome = await issueSignInCode(context, email, buckets);
     if (outcome.kind === "ip-limited") return fail(c, 429, "RATE_LIMITED");
     // Both messages are built on every path, sent or not, so the work before the response doesn't
@@ -219,10 +215,10 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
   app.openapi(otpVerifyRoute, async (c) => {
     const body = c.req.valid("json");
     const email = normaliseAddress(body.email);
-    if (email === null) return fail(c, 400, "BAD_REQUEST");
+    if (email === null) return fail(c, 400, "BAD_REQUEST", "invalid_email");
     const context = await deps();
     const buckets = await clientBuckets(c, context.keys);
-    if (buckets === null) return fail(c, 400, "BAD_REQUEST");
+    if (buckets === null) return fail(c, 400, "BAD_REQUEST", "no_client_ip");
     const existing = await repos.users.findByEmail(email);
     const outcome = await verifyCode(context, email, "signin", body.code, buckets);
     if (outcome === "limited") return fail(c, 429, "RATE_LIMITED");
@@ -315,13 +311,16 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
       if (!result.ok) return fail(c, 400, "BAD_REQUEST");
       const at = now();
       if (user.onboardedAt === null) {
-        // Completing onboarding (06 §5). Claiming email-invite seats joins with games (M3/M4).
+        // Completing onboarding (06 §5), which claims the address's email-invite seats (06 §6.4).
         await repos.users.update(user.id, {
           displayName: result.name,
           onboardedAt: at,
           updatedAt: at,
         });
         user = { ...user, displayName: result.name, onboardedAt: at, updatedAt: at };
+        if (user.email !== null) {
+          await claimAtOnboarding(c, { id: user.id, email: user.email }, at);
+        }
       } else if (result.name !== user.displayName) {
         const [limit] = await checkLimits(repos, config, at, [
           { name: "DISPLAY_NAME_CHANGES_30D", key: user.id, amount: 1 },
@@ -337,13 +336,34 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
         user = { ...user, displayName: result.name, updatedAt: at };
       }
     }
+    const nudges = body.settings?.emailNudges;
+    if (nudges !== undefined) {
+      if (nudges) {
+        // Nudges go to the account's address: an account without one can't have them.
+        if (user.email === null) return fail(c, 400, "BAD_REQUEST", "no_email");
+        // Records the address's emailId, which a nudges unsubscribe link finds the account by
+        // (04 `users.email_id`, 05 §Email links).
+        const id = await emailId(await options.keys(), user.email);
+        await repos.users.setEmailNudges(user.id, { enabled: true, emailId: id, updatedAt: now() });
+      } else {
+        await repos.users.setEmailNudges(user.id, { enabled: false, updatedAt: now() });
+      }
+      // The settings were changed in SQL, key by key: read back what is stored now.
+      user = (await repos.users.findById(user.id)) ?? user;
+    }
+    const theme = body.settings?.theme;
+    if (theme !== undefined) {
+      await repos.users.setTheme(user.id, theme, now());
+      user = (await repos.users.findById(user.id)) ?? user;
+    }
     return c.json(toMe(user, config.adminEmails, config.minAge), 200);
   });
 
   app.openapi(deleteOtpRoute, async (c) => {
     const active = c.get("session");
     const email = active.user.email;
-    if (email === null) return fail(c, 400, "BAD_REQUEST");
+    // The session user's own address is missing (an account without one), not a typed one.
+    if (email === null) return fail(c, 400, "BAD_REQUEST", "no_email");
     const issued = await issueStepUpCode(
       await deps(),
       { id: active.user.id, email },
@@ -358,10 +378,11 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
   app.openapi(deleteMeRoute, async (c) => {
     const active = c.get("session");
     const email = active.user.email;
-    if (email === null) return fail(c, 400, "BAD_REQUEST");
+    // The session user's own address is missing (an account without one), not a typed one.
+    if (email === null) return fail(c, 400, "BAD_REQUEST", "no_email");
     const context = await deps();
     const buckets = await clientBuckets(c, context.keys);
-    if (buckets === null) return fail(c, 400, "BAD_REQUEST");
+    if (buckets === null) return fail(c, 400, "BAD_REQUEST", "no_client_ip");
     const outcome = await verifyCode(
       context,
       email,
@@ -371,8 +392,9 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     );
     if (outcome === "limited") return fail(c, 429, "RATE_LIMITED");
     if (outcome === "invalid") return fail(c, 400, "INVALID_CODE");
-    // 04 §Account deletion. Game steps (resign, cancel, leave) join with games in M3; until then
-    // no account holds game rows.
+    // 04 §Account deletion. Its game steps (resign, cancel, leave) are M4's: until then a deleted
+    // user's game rows lose their user, and the lobbies they created lose their join links in the
+    // same batch (alpha A18), so no one joins a lobby whose creator has gone.
     await repos.users.deleteAccount(
       { id: active.user.id, email },
       {
@@ -382,7 +404,18 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
         createdAt: context.now,
       },
     );
-    send(c, accountDeletedEmail(email, templateContext()));
+    // The confirmation is informational: over the instance-wide OTP email caps it is skipped, and
+    // the account is deleted all the same (06 §7, 08 §4.2). So is a failure to count it: the
+    // deletion has happened, so it is logged by class only (09 §5) and the answer is still 204.
+    let confirm = false;
+    try {
+      confirm = await takeOtpEmailRoom(context);
+    } catch (error) {
+      platform.log.error("account-deleted email not counted", {
+        errorClass: error instanceof Error ? error.constructor.name : typeof error,
+      });
+    }
+    if (confirm) send(c, accountDeletedEmail(email, templateContext()));
     clearCookie(c);
     return c.body(null, 204);
   });

@@ -7,12 +7,13 @@ export {
   type App,
   type AppEnv,
   openApiDocument,
-  SERVER_PATHS,
   type AppOptions,
   type InstalledGame,
   type OpenApiDocument,
   type Platform,
 } from "./app.js";
+export type { RandomFactory } from "./games/random.js";
+export { createSweep, type Sweep, type SweepOptions, type SweepReport } from "./sweep/sweep.js";
 export { normaliseAddress, type NormalisedEmail } from "./accounts/email.js";
 export {
   resolveClientIp,
@@ -25,8 +26,28 @@ export {
   type CapturedEmail,
   type EmailMessage,
   type EmailSender,
+  markAlerted,
+  wasAlerted,
 } from "./email/sender.js";
-export { coreEmailSender } from "./email/providers.js";
+export { toBase64Url } from "./base64.js";
+export { coreEmailSender, type CoreEmailSender } from "./email/providers.js";
+export {
+  corePushSender,
+  DISABLED_PUSH_SENDER,
+  type PushMessage,
+  type PushOutcome,
+  type PushSender,
+  type PushTarget,
+} from "./push/sender.js";
+export { VapidKeyError } from "./push/vapid.js";
+export {
+  GMAIL_SEND_SCOPE,
+  GmailTokenRefused,
+  grantedScopes,
+  idTokenClaims,
+  isExpectedScopes,
+  REQUIRED_SCOPES,
+} from "./email/gmail.js";
 export { DEFAULT_APP_NAME } from "./config/defaults.js";
 export { isLocalDev, isLocalDevUrl } from "./config/local-dev.js";
 export {
@@ -79,6 +100,10 @@ export type {
 } from "./db/repositories.js";
 export type {
   GameActionRecord,
+  GameListQuery,
+  GameListRow,
+  GameStatus,
+  NewInvite,
   GamePlayerRecord,
   GamePlayerUpdate,
   GameRecord,
@@ -106,4 +131,11 @@ export {
   type LiveGame,
   type Orphan,
 } from "./games/installed.js";
+export { GameConfigError } from "./games/registry.js";
+export {
+  type BuiltinDictionaries,
+  NO_DICTIONARIES,
+  ResourceConfigError,
+} from "./games/resources.js";
+export { parseIndex, servedFileName, type DictionaryManifest } from "@your-move/dictionary";
 export { createJsonLogger, type LogFields, type Logger } from "./log.js";

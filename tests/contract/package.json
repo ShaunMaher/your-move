@@ -8,6 +8,8 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@your-move/api-client": "workspace:*",
+    "@your-move/game-example": "workspace:*",
+    "@your-move/node": "workspace:*",
     "@your-move/server": "workspace:*",
     "@your-move/shared": "workspace:*",
     "@your-move/worker": "workspace:*",

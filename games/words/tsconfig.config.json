@@ -1,0 +1,11 @@
+{
+  // The package's own config files: type-checked, never built into dist/.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "node_modules/.cache/tsc-config",
+    "tsBuildInfoFile": "node_modules/.cache/tsc-config/.tsbuildinfo",
+    "emitDeclarationOnly": true
+  },
+  "include": ["vitest.config.ts"]
+}

@@ -6,6 +6,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { normaliseAddress } from "@your-move/server";
+import { d1Repositories } from "@your-move/worker/d1";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestHarness, type TestHarness } from "wrangler";
 
@@ -88,6 +90,13 @@ async function send(
 }
 
 contractSuite("Worker", () => ({
+  // The Worker's own D1 binding, through the harness.
+  repos: async () => {
+    const env = (await harness.getWorker().getEnv()) as {
+      DB: Parameters<typeof d1Repositories>[0];
+    };
+    return d1Repositories(env.DB);
+  },
   fetch: async (request) => {
     const url = new URL(request.url);
     return send(url.pathname + url.search, {
@@ -99,6 +108,27 @@ contractSuite("Worker", () => ({
 }));
 
 describe("Worker static assets (generated _headers)", () => {
+  it("keeps the dictionaries' index out of the immutable assets, and no precompressed copies (A2 review S-8)", async () => {
+    const index = await send("/dictionaries/index.json");
+    expect(index.status).toBe(200);
+    expect(index.headers.get("Cache-Control") ?? "").not.toMatch(/immutable/u);
+    const manifest = (
+      JSON.parse(await index.text()) as {
+        dictionaries: { id: string; version: number; wordsSha256: string }[];
+      }
+    ).dictionaries[0];
+    const name = `${manifest?.id ?? ""}-v${String(manifest?.version)}.${manifest?.wordsSha256.slice(0, 16) ?? ""}.txt`;
+    expect((await send(`/assets/dictionaries/${name}`)).status).toBe(200);
+    // Neither is published under /assets/ (a missing path there gets the SPA's answer).
+    for (const path of [`/assets/dictionaries/${name}.gz`, "/assets/dictionaries/index.json"]) {
+      const response = await send(path, { headers: { "Sec-Fetch-Mode": "cors" } });
+      expect(response.headers.get("Content-Type"), path).toMatch(/^text\/html/u);
+    }
+    expect(readdirSync(new URL("dist/assets/assets/dictionaries/", WORKER_DIR)).sort()).toEqual([
+      name,
+    ]);
+  });
+
   const asset = readdirSync(new URL("dist/assets/assets/", WORKER_DIR)).find((file) =>
     file.endsWith(".js"),
   );
@@ -123,11 +153,18 @@ describe("Worker static assets (generated _headers)", () => {
   });
 
   it("never serves the shell for server paths", async () => {
-    for (const path of ["/api/nope", "/__dev/emails", "/manifest.webmanifest"]) {
+    for (const path of ["/api/nope", "/__dev/emails"]) {
       const response = await send(path);
       expect(response.status).toBe(404);
       expect(response.headers.get("Content-Type")).toMatch(/^application\/json/u);
     }
+  });
+
+  it("generates the manifest from config in the Worker, not from the static assets", async () => {
+    const response = await send("/manifest.webmanifest");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("application/manifest+json");
+    expectSecurityHeaders(response);
   });
 });
 
@@ -140,5 +177,76 @@ describe("Worker storage", () => {
       "SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table' AND name IN ('users', 'games', 'game_players')",
     ).first<{ n: number }>();
     expect(row?.n).toBe(3);
+  });
+});
+
+describe("Worker Cron Trigger (03 §8, alpha A6)", () => {
+  it("runs the sweep, which claims a due email nudge", async () => {
+    const env = (await harness.getWorker().getEnv()) as {
+      DB: Parameters<typeof d1Repositories>[0];
+    };
+    const repos = d1Repositories(env.DB);
+    const db = env.DB as unknown as { prepare(sql: string): { first<T>(): Promise<T | null> } };
+    const userId = crypto.randomUUID();
+    const email = normaliseAddress(`cron-${userId}@example.org`);
+    if (email === null) throw new Error("bad address");
+    const long = Date.now() - 2 * 24 * 60 * 60 * 1000;
+    await repos.users.create({
+      id: userId,
+      email,
+      displayName: "Cron",
+      onboardedAt: long,
+      createdAt: long,
+      updatedAt: long,
+    });
+    await repos.users.setEmailNudges(userId, {
+      enabled: true,
+      emailId: "c".repeat(64),
+      updatedAt: long,
+    });
+    const gameId = crypto.randomUUID();
+    const playerId = crypto.randomUUID();
+    await repos.games.create(
+      {
+        id: gameId,
+        gameType: "example",
+        gameVersion: 1,
+        options: "{}",
+        status: "active",
+        seats: 2,
+        turnTimeoutDays: 3,
+        seatOrder: "join",
+        aiAssistance: "off",
+        state: "{}",
+        lastActionAt: long,
+        createdAt: long,
+        updatedAt: long,
+        startedAt: long,
+      },
+      [
+        {
+          id: playerId,
+          userId,
+          seat: 0,
+          state: "playing",
+          joinedAt: long,
+          toAct: 1,
+          toActSince: long,
+        },
+        { id: crypto.randomUUID(), seat: 1, state: "playing", joinedAt: long },
+      ],
+    );
+    // An invocation is "ok" only when every sweep step ran and no nudge failed (apps/worker).
+    const result = await harness
+      .getWorker()
+      .scheduled({ scheduledTime: new Date(), cron: "*/15 * * * *" });
+    expect(result.outcome).toBe("ok");
+    // The nudge was counted against the daily cap, then claimed: the whole send path ran.
+    const counted = await db
+      .prepare("SELECT sum(count) AS n FROM rate_limits WHERE key = 'NUDGE_EMAILS_PER_DAY:all'")
+      .first<{ n: number }>();
+    expect(counted?.n).toBe(1);
+    const players = await repos.games.players(gameId);
+    expect(players.find((row) => row.id === playerId)?.lastNudgedAt).toEqual(expect.any(Number));
   });
 });

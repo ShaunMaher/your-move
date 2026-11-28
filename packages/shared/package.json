@@ -7,10 +7,12 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./server-paths": "./src/server-paths.ts"
   },
   "dependencies": {
     "@hono/zod-openapi": "catalog:",
+    "@your-move/sdk": "workspace:*",
     "hono": "catalog:",
     "zod": "catalog:"
   },

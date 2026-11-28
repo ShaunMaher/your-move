@@ -1,17 +1,59 @@
+/* Original look; every colour and size is a custom property so theming stays cheap (07 §5). */
 :root {
   color-scheme: light dark;
   --color-bg: #f7f7f5;
+  --color-surface: #ffffff;
   --color-fg: #1b1b1b;
+  --color-muted: #55585c;
+  --color-border: #c9ccd0;
+  --color-accent: #1f5f8b;
+  --color-accent-fg: #ffffff;
+  --color-danger: #a4262c;
+  --color-danger-fg: #ffffff;
+  --color-danger-bg: #fdecea;
   --space: 1rem;
+  --radius: 0.75rem;
+  --target: 2.75rem; /* 44 pt touch targets */
   font-family: system-ui, sans-serif;
   line-height: 1.5;
 }
 
+/*
+ * Dark tokens, under two selectors because CSS can't share a declaration list between a media
+ * query and an attribute: the device's setting unless the person chose light, and their choice of
+ * dark (07 §5). `color-scheme` follows, so form controls and scrollbars match.
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --color-bg: #151515;
+    --color-surface: #1f2124;
     --color-fg: #ececec;
+    --color-muted: #b4b8bd;
+    --color-border: #43474c;
+    --color-accent: #8cc2e8;
+    --color-accent-fg: #0b1b27;
+    --color-danger: #ff9b95;
+    --color-danger-fg: #1b0f0e;
+    --color-danger-bg: #3a1f1e;
   }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #151515;
+  --color-surface: #1f2124;
+  --color-fg: #ececec;
+  --color-muted: #b4b8bd;
+  --color-border: #43474c;
+  --color-accent: #8cc2e8;
+  --color-accent-fg: #0b1b27;
+  --color-danger: #ff9b95;
+  --color-danger-fg: #1b0f0e;
+  --color-danger-bg: #3a1f1e;
 }
 
 body {
@@ -20,10 +62,527 @@ body {
   color: var(--color-fg);
 }
 
+/* The app is a centred portrait column, with room for the notch and home bar (07 §4). */
 .shell {
   max-width: 32rem;
+  min-height: 100dvh;
   margin: 0 auto;
   padding: calc(var(--space) + env(safe-area-inset-top))
     calc(var(--space) + env(safe-area-inset-right)) calc(var(--space) + env(safe-area-inset-bottom))
     calc(var(--space) + env(safe-area-inset-left));
+  box-sizing: border-box;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+  min-height: var(--target);
+  margin-bottom: var(--space);
+}
+
+.brand {
+  margin: 0;
+  font-weight: 700;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: 1.25;
+}
+
+h1 {
+  font-size: 1.75rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+}
+
+h3 {
+  font-size: 1.05rem;
+}
+
+p {
+  margin: 0;
+}
+
+a,
+.link {
+  color: var(--color-accent);
+}
+
+/* Links standing alone (navigation) get a full-size target; links in a sentence stay inline. */
+.bar a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.aside {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+h1:focus {
+  outline: none;
+}
+
+fieldset.card {
+  min-width: 0;
+  margin: 0;
+}
+
+legend {
+  padding: 0;
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field label {
+  font-weight: 600;
+}
+
+.hint {
+  color: var(--color-muted);
+}
+
+/* 16 px or more keeps iOS from zooming the page when a field is focused. */
+input[type="text"],
+input[type="email"] {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--target);
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  font-size: 1rem;
+  color: inherit;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+.code-input {
+  font-size: 1.5rem;
+  letter-spacing: 0.2em;
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.button {
+  min-height: var(--target);
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--color-accent-fg);
+  background: var(--color-accent);
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.button.secondary {
+  color: var(--color-accent);
+  background: transparent;
+}
+
+.button.danger {
+  color: var(--color-danger-fg);
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.problem {
+  padding: 0.5rem 0.75rem;
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border-radius: var(--radius);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: var(--target);
+}
+
+.check input {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+/* A choice's name with a line of secondary text under it ("last played …"). */
+.check-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0;
+}
+
+.details dt {
+  color: var(--color-muted);
+}
+
+.details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast {
+  position: fixed;
+  right: var(--space);
+  bottom: calc(var(--space) + env(safe-area-inset-bottom));
+  left: var(--space);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: 0.75rem var(--space);
+  background: var(--color-surface);
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius);
+}
+
+.toast-room {
+  height: 6rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .button {
+    transition: opacity 0.15s;
+  }
+}
+
+/* Links that look like buttons (the game list's "New game", result screens' "Back to games"). */
+a.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  text-decoration: none;
+}
+
+select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--target);
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  font-size: 1rem;
+  color: inherit;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+ul.plain,
+ol.plain {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* One game in the list, or one game type in the picker: icon, text, badges. */
+.game-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--target);
+  padding: 0.5rem 0;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  text-decoration: none;
+  background: none;
+  border: 0;
+}
+
+button.game-row {
+  padding: var(--space);
+  cursor: pointer;
+}
+
+.game-row > .grow {
+  display: flex;
+  flex-direction: column;
+}
+
+.row-title {
+  font-weight: 600;
+}
+
+.game-icon {
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.5rem;
+  background: var(--color-bg);
+}
+
+.badges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+/* Text badges, not colour alone: the words are the signal. */
+.badge {
+  padding: 0.1rem 0.6rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--color-accent-fg);
+  white-space: nowrap;
+  background: var(--color-accent);
+  border-radius: 1rem;
+}
+
+.badge.quiet {
+  color: var(--color-fg);
+  background: transparent;
+  border: 1px solid var(--color-border);
+}
+
+.seat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+  min-height: var(--target);
+}
+
+summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--target);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* The game frame: a header, then the module's board (the player list and turn line only stand in for a board that is not there). */
+.frame-bar {
+  gap: 0.5rem;
+}
+
+.frame-bar .button {
+  min-height: var(--target);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 1rem;
+}
+
+.chip[aria-current="true"] {
+  border: 2px solid var(--color-accent);
+}
+
+.turn {
+  font-weight: 700;
+}
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.results li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.rank {
+  width: 1.5rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding-inline-start: 1.5rem;
+}
+
+/* Dialogs and drawers. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space);
+  background: rgb(0 0 0 / 0.5);
+}
+
+.scrim[data-variant="drawer"] {
+  align-items: flex-end;
+  padding: 0;
+}
+
+.sheet {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 28rem;
+  max-height: 85dvh;
+  padding: var(--space) var(--space) calc(var(--space) + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.scrim[data-variant="drawer"] .sheet {
+  max-width: 32rem;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+/* The install guide (07 §4): a banner in the page flow, and numbered steps with a drawn glyph. */
+.install-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+  max-width: 32rem;
+  margin: 0 auto;
+  padding: calc(var(--space) / 2) calc(var(--space) + env(safe-area-inset-right))
+    calc(var(--space) / 2) calc(var(--space) + env(safe-area-inset-left));
+  box-sizing: border-box;
+  background: var(--color-surface);
+  border-bottom: 2px solid var(--color-accent);
+}
+
+.install-banner p {
+  margin: 0;
+  flex: 1 1 14rem;
+}
+
+/* The banner sits above the shell, so the shell's full-height minimum would add a scroll. */
+.install-banner + .shell {
+  min-height: 0;
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.steps li {
+  padding-left: 0.25rem;
+}
+
+.steps li > .glyph {
+  float: left;
+  margin: 0 0.75rem 0.25rem 0;
+}
+
+.glyph {
+  display: inline-block;
+  width: 2rem;
+  height: 2rem;
+  color: var(--color-accent);
 }

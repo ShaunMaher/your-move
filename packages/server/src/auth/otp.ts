@@ -12,7 +12,7 @@ import type { AppConfig } from "../config/parse.js";
 import { emailId, hmacHex, type Subkeys, verifyHmacHex } from "../crypto/subkeys.js";
 import type { OtpPurpose, Repositories } from "../db/repositories.js";
 import type { Logger } from "../log.js";
-import { checkLimits, type LimitCheck, type LimitResult } from "./limits.js";
+import { alertOnCrossing, checkLimits, type LimitCheck } from "./limits.js";
 
 const CODE_TTL_MS = 10 * 60_000;
 const MAX_ATTEMPTS = 5;
@@ -72,18 +72,6 @@ export interface IssueOutcome {
  * the same counter row (06 §3.2). Never read.
  */
 const SILENT_COUNTER = "silent";
-
-/**
- * Logs an instance-wide limit as an alert (08 §4) once, on the request that first crosses it, so
- * a sustained flood doesn't also flood the logs.
- */
-function alertOnCrossing(log: Logger, results: readonly LimitResult[]): void {
-  for (const result of results) {
-    if (result.exceeded && result.estimate - 1 <= result.limit) {
-      log.error("instance-wide limit exceeded", { alert: result.name });
-    }
-  }
-}
 
 /** The per-bucket checks of one limit. */
 function bucketChecks(
@@ -170,6 +158,20 @@ export async function issueSignInCode(
 }
 
 /**
+ * Counts one email toward the instance-wide OTP email caps (08 §4, §4.2) and says whether it may
+ * be sent: for an email a signed-in user's own action sends (a step-up code, the account-deleted
+ * confirmation), where there is nothing to hide about whether it was sent. Alerts on the crossing.
+ */
+export async function takeOtpEmailRoom(deps: OtpDeps): Promise<boolean> {
+  const global = await checkLimits(deps.repos, deps.config, deps.now, [
+    { name: "OTP_EMAIL_GLOBAL_HOUR", key: "all", amount: 1 },
+    { name: "OTP_EMAIL_GLOBAL_DAY", key: "all", amount: 1 },
+  ]);
+  alertOnCrossing(deps.log, global);
+  return !global.some((result) => result.exceeded);
+}
+
+/**
  * Issues a purpose-bound step-up code for a signed-in user (06 §7). Rate-limited per user
  * (08 §4); the instance-wide OTP email cap applies as for sign-in.
  */
@@ -186,12 +188,7 @@ export async function issueStepUpCode(
     { name: "STEP_UP_USER_DAY", key: user.id, amount: 1 },
   ]);
   if (limits.some((result) => result.exceeded)) return { kind: "limited" };
-  const global = await checkLimits(repos, config, now, [
-    { name: "OTP_EMAIL_GLOBAL_HOUR", key: "all", amount: 1 },
-    { name: "OTP_EMAIL_GLOBAL_DAY", key: "all", amount: 1 },
-  ]);
-  alertOnCrossing(deps.log, global);
-  const sends = !global.some((result) => result.exceeded);
+  const sends = await takeOtpEmailRoom(deps);
   const challengeId = crypto.randomUUID();
   const code = generateCode();
   await repos.otp.issue(
