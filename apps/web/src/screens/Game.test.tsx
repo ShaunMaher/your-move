@@ -1147,6 +1147,229 @@ describe("the rematch button (07 §1, alpha A15)", () => {
   });
 });
 
+describe("adding link joiners to your players (07 §1, alpha A19)", () => {
+  const bob = { userId: "u2", displayName: "Bob" };
+  const di = { userId: "u3", displayName: "Di" };
+  type Listed = { userId: string; displayName: string }[] | undefined;
+  const finished = (canAddPlayers: Listed, over = {}) =>
+    withView(
+      envelope({
+        status: "finished",
+        endReason: "out",
+        yourTurn: false,
+        toAct: [],
+        players: [
+          player({ rank: 1 }),
+          alex({ rank: 2, displayName: "Bob" }),
+          alex({ seat: 2, userId: "u3", rank: 3, displayName: "Di" }),
+        ],
+        rematch: null,
+        ...(canAddPlayers === undefined ? {} : { canAddPlayers }),
+        ...over,
+      }),
+      null,
+    );
+  const results = () => screen.findByRole("region", { name: "Final result" });
+  const question = (name: string) =>
+    screen.queryByRole("group", { name: `Add ${name} to your players?` });
+  const noContent = () => new Response(null, { status: 204 });
+
+  it("asks the creator about each one, Add writes the pair and says so, and the list follows the server", async () => {
+    let listed = [bob, di];
+    const { calls } = open({
+      "GET /api/v1/games/g1": () => finished(listed),
+      "POST /api/v1/games/g1/add-player": () => {
+        listed = [di];
+        return noContent();
+      },
+    });
+    const card = await results();
+    expect(
+      within(card).getByText("To rematch, first add Bob and Di to your players."),
+    ).toBeDefined();
+    expect(
+      within(card).getByRole("button", { name: "Rematch" }).getAttribute("aria-describedby"),
+    ).toBe("rematch-needs rematch-problem");
+    const asked = question("Bob");
+    if (asked === null) throw new Error("no question about Bob");
+    fireEvent.click(within(asked).getByRole("button", { name: "Add Bob" }));
+    expect(await within(card).findByText("Added Bob to your players.")).toBeDefined();
+    expect(posts(calls, "add-player")).toEqual([
+      expect.objectContaining({ body: { userId: "u2" } }),
+    ]);
+    await waitFor(() => {
+      expect(question("Bob")).toBeNull();
+    });
+    expect(question("Di")).not.toBeNull();
+    expect(within(card).getByText("To rematch, first add Di to your players.")).toBeDefined();
+    // The version is unchanged, so the screen refetches to follow the server.
+    expect(
+      calls.filter((call) => call.method === "GET" && call.path === "/api/v1/games/g1"),
+    ).toHaveLength(2);
+  });
+
+  it("says the same after a 204 that wrote nothing (a block), and doesn't ask again", async () => {
+    // The server lists them still: whatever it did with the yes, the 204 is the same (06 §6.9).
+    open({
+      "GET /api/v1/games/g1": () => finished([bob]),
+      "POST /api/v1/games/g1/add-player": noContent,
+    });
+    const card = await results();
+    const asked = question("Bob");
+    if (asked === null) throw new Error("no question about Bob");
+    fireEvent.click(within(asked).getByRole("button", { name: "Add Bob" }));
+    expect(await within(card).findByText("Added Bob to your players.")).toBeDefined();
+    expect(question("Bob")).toBeNull();
+    expect(within(card).queryByText(/To rematch, first add/u)).toBeNull();
+  });
+
+  it("is busy while the call runs, and shows a refusal, keeping the question", async () => {
+    let answer: (response: Response) => void = () => undefined;
+    open({
+      "GET /api/v1/games/g1": () => finished([bob, di]),
+      "POST /api/v1/games/g1/add-player": () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+    });
+    await results();
+    const asked = question("Bob");
+    if (asked === null) throw new Error("no question about Bob");
+    fireEvent.click(within(asked).getByRole("button", { name: "Add Bob" }));
+    const busy = await within(asked).findByRole("button", { name: "Adding Bob…" });
+    expect(busy.hasAttribute("disabled")).toBe(true);
+    // One answer at a time: the other question waits too.
+    const other = question("Di");
+    expect(
+      within(other ?? document.body)
+        .getByRole("button", { name: "Add Di" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    answer(problem(404, "NOT_FOUND"));
+    expect((await screen.findByText("You can't add this player from this game.")).id).toBe(
+      "add-player-problem",
+    );
+    expect(question("Bob")).not.toBeNull();
+    expect(screen.queryByText(/^Added /u)).toBeNull();
+  });
+
+  it("hands a lost session back", async () => {
+    const { lost } = open({
+      "GET /api/v1/games/g1": finished([bob]),
+      "POST /api/v1/games/g1/add-player": problem(401, "UNAUTHENTICATED"),
+    });
+    await results();
+    fireEvent.click(
+      within(question("Bob") ?? document.body).getByRole("button", { name: "Add Bob" }),
+    );
+    await waitFor(() => {
+      expect(lost).toHaveBeenCalled();
+    });
+  });
+
+  it("Not now hides the question; a Rematch refused for want of them asks again", async () => {
+    open({
+      "GET /api/v1/games/g1": () => finished([bob]),
+      "POST /api/v1/games/g1/rematch": problem(400, "INVALID_INVITEES"),
+    });
+    const card = await results();
+    fireEvent.click(
+      within(question("Bob") ?? document.body).getByRole("button", { name: "Not now about Bob" }),
+    );
+    expect(question("Bob")).toBeNull();
+    // Not now silences the instruction under Rematch too (A19-P-1).
+    expect(within(card).queryByText(/To rematch, first add/u)).toBeNull();
+    expect(
+      within(card).getByRole("button", { name: "Rematch" }).getAttribute("aria-describedby"),
+    ).toBe("rematch-problem");
+    fireEvent.click(within(card).getByRole("button", { name: "Rematch" }));
+    await waitFor(() => {
+      expect(screen.getByText("Add them to your players first, then press Rematch again.").id).toBe(
+        "rematch-problem",
+      );
+    });
+    expect(question("Bob")).not.toBeNull();
+    expect(within(card).getByText("To rematch, first add Bob to your players.")).toBeDefined();
+  });
+
+  it("names the creator to another player refused with INVALID_INVITEES (A19-P-2)", async () => {
+    const asJoiner = (creatorName: string | null, creatorId: string | null = "u1") =>
+      finished(undefined, {
+        players: [
+          player({
+            rank: 1,
+            isYou: false,
+            isCreator: true,
+            displayName: creatorName,
+            userId: creatorId,
+          }),
+          alex({ rank: 2, isYou: true, displayName: "Bob" }),
+        ],
+      });
+    const unnamed =
+      "You can't start this rematch yet. Ask the game's creator to start it, or to add you to their players.";
+    for (const [creatorName, creatorId, text] of [
+      // A deleted creator: no user id, whatever name is shown (A19-P2-1).
+      ["Sam", null, unnamed],
+      ["Deleted player", "u1", unnamed],
+      [
+        "Sam",
+        "u1",
+        "You can't start this rematch yet. Ask Sam to start it, or to add you to their players.",
+      ],
+      [null, "u1", unnamed],
+    ] as const) {
+      open({
+        "GET /api/v1/games/g1": asJoiner(creatorName, creatorId),
+        "POST /api/v1/games/g1/rematch": problem(400, "INVALID_INVITEES"),
+      });
+      const card = await results();
+      expect(within(card).queryByRole("group")).toBeNull();
+      fireEvent.click(within(card).getByRole("button", { name: "Rematch" }));
+      expect((await screen.findByRole("alert")).textContent).toBe(text);
+      cleanup();
+    }
+  });
+
+  it("keeps the status region in the page from the start, so a confirmation is announced (A19-P-4)", async () => {
+    open({
+      "GET /api/v1/games/g1": () => finished([bob]),
+      "POST /api/v1/games/g1/add-player": noContent,
+    });
+    const card = await results();
+    const status = within(card).getByRole("status");
+    expect(status.textContent).toBe("");
+    fireEvent.click(
+      within(question("Bob") ?? document.body).getByRole("button", { name: "Add Bob" }),
+    );
+    await waitFor(() => {
+      expect(status.textContent).toBe("Added Bob to your players.");
+    });
+    expect(within(card).getByRole("status")).toBe(status);
+  });
+
+  it("asks nothing when there is no one to add, or for another player", async () => {
+    for (const listed of [[], undefined] as Listed[]) {
+      open({ "GET /api/v1/games/g1": finished(listed) });
+      const card = await results();
+      expect(within(card).queryByRole("group")).toBeNull();
+      expect(within(card).queryByText(/To rematch, first add/u)).toBeNull();
+      expect(
+        within(card).getByRole("button", { name: "Rematch" }).getAttribute("aria-describedby"),
+      ).toBe("rematch-problem");
+      cleanup();
+    }
+  });
+
+  it("drops the line under the button once the rematch exists", async () => {
+    open({ "GET /api/v1/games/g1": finished([bob], { rematch: { gameId: "g2", you: "joined" } }) });
+    const card = await results();
+    expect(within(card).getByRole("button", { name: "Go to rematch" })).toBeDefined();
+    expect(within(card).queryByText(/To rematch, first add/u)).toBeNull();
+    expect(question("Bob")).not.toBeNull();
+  });
+});
+
 describe("a game that can't be shown", () => {
   it("says it isn't available to you on 404", async () => {
     open({ "GET /api/v1/games/g1": problem(404, "NOT_FOUND") });

@@ -120,6 +120,17 @@ export interface UserRepo {
    */
   disableNudgesByEmailId(emailId: string, updatedAt: number): Promise<void>;
   /**
+   * Records `a` and `b` as past opponents both ways (04 `past_opponents`, 05 `add-player`, alpha
+   * A19) as of `lastFinishedAt`; a pair that already exists keeps the later of its time and this
+   * one. Writes nothing when a block exists between them in either direction (04 invariant 6),
+   * or either account is gone, suspended, being deleted or not a human: the caller can't tell,
+   * which is the point (06 §6.9). One atomic batch; repeating it changes nothing more.
+   *
+   * It checks none of who may be added: the caller must, through the one shared rule
+   * (`addableUserIds` in games/present.ts) that also builds `canAddPlayers`.
+   */
+  addPastOpponents(a: string, b: string, lastFinishedAt: number): Promise<void>;
+  /**
    * Whether the user has a past opponent (04 `past_opponents`: a finished game in which both
    * acted), which lifts the new-account invite-email rate (06 §6.6).
    */

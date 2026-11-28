@@ -14,6 +14,7 @@ import { loadCatalog } from "../catalog.js";
 import { rematchProblem } from "../create-problems.js";
 import {
   adapt,
+  addPlayer,
   createJoinLink,
   type GameEnvelope,
   type GameWithView,
@@ -33,7 +34,7 @@ import { PushOffer } from "../PushOffer.js";
 import { navigate, Link } from "../router.js";
 import { useRefresh, useVisible } from "../use-refresh.js";
 import { openWordList } from "../word-lists.js";
-import { Frame } from "./Frame.js";
+import { Frame, type RematchFailure } from "./Frame.js";
 import type { MadeLink } from "./JoinLinkPanel.js";
 import { Lobby, type LobbyAction } from "./Lobby.js";
 import { Page } from "./Page.js";
@@ -68,6 +69,11 @@ const REMOVE_PROBLEMS: Readonly<Record<string, string>> = {
 const LINK_PROBLEMS: Readonly<Record<string, string>> = {
   ...LOBBY_PROBLEMS,
   RATE_LIMITED: "You've made too many join links today. Try again tomorrow.",
+};
+
+const ADD_PROBLEMS: Readonly<Record<string, string>> = {
+  NOT_FOUND: "You can't add this player from this game.",
+  RATE_LIMITED: "Too many attempts. Wait a little and try again.",
 };
 
 const RESIGN_PROBLEMS: Readonly<Record<string, string>> = {
@@ -359,7 +365,7 @@ export function Game({
   }, [api, id, refetch, onSessionLost]);
 
   /** Opens the finished game's rematch, creating or accepting it first (05, 07 §1). */
-  const rematch = useCallback(async (): Promise<string | null> => {
+  const rematch = useCallback(async (): Promise<RematchFailure | null> => {
     const result = await rematchGame(api, id);
     if (result.ok) {
       navigate(`/g/${encodeURIComponent(result.data.game.id)}`);
@@ -369,8 +375,21 @@ export function Game({
     // The rematch isn't what the screen showed (gone, ended, or another player's meanwhile):
     // refetch, so the button says what the server now does (A15-P-8).
     if (result.status === 404 || result.status === 409) void refetch(true);
-    return rematchProblem(result.status, result.code);
+    return { code: result.code, message: rematchProblem(result.status, result.code) };
   }, [api, id, onSessionLost, refetch]);
+
+  /** The creator's yes to "Add <name> to your players?" (05 `add-player`, alpha A19). */
+  const addToPlayers = useCallback(
+    async (userId: string): Promise<string | null> => {
+      const result = await addPlayer(api, id, userId);
+      // The game's version doesn't change: refetch, so the list follows the server.
+      void refetch(true);
+      if (result.ok) return null;
+      if (result.status === 401) onSessionLost();
+      return failureText(result.status, result.code, ADD_PROBLEMS);
+    },
+    [api, id, onSessionLost, refetch],
+  );
 
   if (load.status === "loading") {
     return (
@@ -456,6 +475,7 @@ export function Game({
         resources={boardResources}
         onResign={() => act("resign")}
         onRematch={rematch}
+        onAddPlayer={addToPlayers}
         onSessionLost={onSessionLost}
         notice={notice}
       />

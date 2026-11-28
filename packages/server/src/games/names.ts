@@ -8,7 +8,7 @@ import { TextSchema } from "@your-move/shared";
 import type { GamePlayerRecord, UserRecord } from "../db/repositories.js";
 
 /** A seat whose account was deleted (02 §5, 04 §Account deletion). */
-const DELETED_PLAYER = "Deleted player";
+export const DELETED_PLAYER = "Deleted player";
 /** A display name that isn't set (04 `users.display_name`). */
 export const NEW_PLAYER_NAME = "New player";
 

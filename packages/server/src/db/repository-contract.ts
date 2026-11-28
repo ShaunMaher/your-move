@@ -430,6 +430,85 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
         expect(await repos.users.recentOpponents(await pickable(), 50)).toEqual([]);
       });
 
+      describe("adding a link joiner to a creator's players (05 `add-player`, alpha A19)", () => {
+        const pairsOf = (a: string, b: string) =>
+          target.sql(
+            "SELECT user_id, other_id, last_finished_at FROM past_opponents WHERE (user_id = ? AND other_id = ?) OR (user_id = ? AND other_id = ?) ORDER BY user_id = ? DESC",
+            a,
+            b,
+            b,
+            a,
+            a,
+          );
+
+        it("writes the pair both ways at the given time, and a repeat changes nothing", async () => {
+          const [a, b] = [await pickable("Ann"), await pickable("Bob")];
+          await repos.users.addPastOpponents(a, b, T0 + 7);
+          const written = [
+            { user_id: a, other_id: b, last_finished_at: T0 + 7 },
+            { user_id: b, other_id: a, last_finished_at: T0 + 7 },
+          ];
+          expect(await pairsOf(a, b)).toEqual(written);
+          await repos.users.addPastOpponents(a, b, T0 + 7);
+          expect(await pairsOf(a, b)).toEqual(written);
+          // It is a pair like any other: each can now pick the other.
+          expect(await repos.users.pickableOpponents(a, [b])).toEqual([b]);
+          expect(await repos.users.pickableOpponents(b, [a])).toEqual([a]);
+        });
+
+        it("keeps the later time of a pair that already exists", async () => {
+          const [a, b, c] = [await pickable("Ann"), await pickable("Bob"), await pickable("Cy")];
+          await pair(a, b, T0 + 9);
+          await repos.users.addPastOpponents(a, b, T0 + 5);
+          expect((await pairsOf(a, b)).map((row) => row["last_finished_at"])).toEqual([
+            T0 + 9,
+            T0 + 9,
+          ]);
+          await pair(a, c, T0 + 1);
+          await repos.users.addPastOpponents(c, a, T0 + 5);
+          expect((await pairsOf(a, c)).map((row) => row["last_finished_at"])).toEqual([
+            T0 + 5,
+            T0 + 5,
+          ]);
+        });
+
+        it("writes nothing across a block in either direction (04 invariant 6)", async () => {
+          const [a, b, c] = [await pickable("Ann"), await pickable("Bob"), await pickable("Cy")];
+          await block(a, b);
+          await block(c, a);
+          await repos.users.addPastOpponents(a, b, T0);
+          await repos.users.addPastOpponents(a, c, T0);
+          expect(await pairsOf(a, b)).toEqual([]);
+          expect(await pairsOf(a, c)).toEqual([]);
+        });
+
+        it("writes nothing for an account that is gone, suspended, being deleted or an agent", async () => {
+          const a = await pickable("Ann");
+          const leaving = await pickable("Leaving", { deletionRequestedAt: T0 });
+          const suspended = await pickable("Suspended", { suspendedAt: T0 });
+          const agent = crypto.randomUUID();
+          await repos.users.create({
+            id: agent,
+            kind: "agent",
+            ownerUserId: a,
+            displayName: "Helper",
+            createdAt: T0,
+            updatedAt: T0,
+          });
+          for (const other of [leaving, suspended, agent, crypto.randomUUID()]) {
+            await repos.users.addPastOpponents(a, other, T0);
+            await repos.users.addPastOpponents(other, a, T0);
+          }
+          expect(
+            await target.sql(
+              "SELECT user_id FROM past_opponents WHERE user_id = ? OR other_id = ?",
+              a,
+              a,
+            ),
+          ).toEqual([]);
+        });
+      });
+
       it("finds the blocks among a set of users, in either direction (A12)", async () => {
         const [a, b, c, d] = [await human(), await human(), await human(), await human()];
         await block(a, b);

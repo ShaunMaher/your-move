@@ -39,6 +39,7 @@ const METHODS = {
     findByIds: true,
     findByEmail: true,
     pastOpponentsOf: true,
+    addPastOpponents: true,
     pickableOpponents: true,
     recentOpponents: true,
     blocksAmong: true,

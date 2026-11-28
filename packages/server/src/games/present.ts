@@ -22,6 +22,7 @@ import {
   linkLive,
   lobbyExpiresAt,
 } from "./lifecycle.js";
+import { DELETED_PLAYER } from "./names.js";
 import type { GameType } from "./registry.js";
 
 type EnvelopePlayer = GameEnvelope["players"][number];
@@ -113,6 +114,11 @@ export interface PresentInput {
   readonly describeResource: (kind: "dictionary", id: string) => ResourceMeta | undefined;
   /** A finished game's rematch as the viewer sees it ({@link rematchOf}); null if it has none. */
   readonly rematch?: GameEnvelope["rematch"];
+  /**
+   * Which of the game's {@link addableUserIds} are already the viewer's past opponents (04
+   * `past_opponents`), for `canAddPlayers`; read only for the creator of a finished game.
+   */
+  readonly pastOpponents?: ReadonlySet<string>;
   /** The game's join link, live or expired, if it has one. */
   readonly joinLink: JoinLinkTimes | null;
   /** The time the envelope is for (whether the link is still live). */
@@ -228,6 +234,50 @@ export function rematchOf(rematch: RematchRead, now: number): GameEnvelope["rema
   return { gameId: game.id, you };
 }
 
+/**
+ * The one rule for whom the creator of a finished game may add to their players (05
+ * `canAddPlayers` and `add-player`, 06 §6.9, alpha A19), whether or not they already are: the users
+ * of seated rows that joined through a link and acted, whose account still exists, in seat order;
+ * none unless the viewer is the creator and acted too, since a pair needs both to have acted. Both
+ * the route and the envelope use it, so what is listed and what may be named never drift apart.
+ * Blocks, suspensions and pending deletions never change it: the write then silently does nothing,
+ * so the question reveals none of them (06 §6.9, §6.11).
+ */
+export function addableUserIds(
+  game: Pick<GameRecord, "status">,
+  players: readonly GamePlayerRecord[],
+  viewer: GamePlayerRecord,
+): string[] {
+  if (game.status !== "finished" || viewer.joinedVia !== "creator" || viewer.actedOnce !== 1) {
+    return [];
+  }
+  return players
+    .filter(
+      (row) =>
+        row.seat !== null &&
+        row.joinedVia === "join_link" &&
+        row.actedOnce === 1 &&
+        row.userId !== null,
+    )
+    .sort((a, b) => (a.seat ?? 0) - (b.seat ?? 0))
+    .map((row) => row.userId ?? "");
+}
+
+/**
+ * The envelope's `canAddPlayers`: the {@link addableUserIds} who aren't yet past opponents, with
+ * their names (an account deleted since the rows were read is named as deleted, never dropped).
+ */
+function canAddPlayersOf(input: PresentInput): NonNullable<GameEnvelope["canAddPlayers"]> {
+  const known = input.pastOpponents ?? new Set<string>();
+  return addableUserIds(input.game, input.players, input.viewer)
+    .filter((userId) => !known.has(userId))
+    .map((userId) => ({
+      userId,
+      // Deleted between the two reads: listed as "Deleted player", and Add is then the silent 204.
+      displayName: input.users.get(userId)?.displayName ?? DELETED_PLAYER,
+    }));
+}
+
 /** The seats in `toAct`, and whether the viewer's is one of them. */
 export function turnOf(
   players: readonly GamePlayerRecord[],
@@ -275,6 +325,10 @@ export function envelope(input: PresentInput): GameEnvelope {
     // The creator's own lobby only: whether its link works, never the link itself (05).
     ...(viewer.joinedVia === "creator" && game.status === "lobby"
       ? { joinLink: joinLinkOf(input.joinLink, input.now) }
+      : {}),
+    // The creator of a finished game only (05, alpha A19).
+    ...(viewer.joinedVia === "creator" && game.status === "finished"
+      ? { canAddPlayers: canAddPlayersOf(input) }
       : {}),
     // Finished games only, and only ever to their players: nobody else reads a finished game.
     ...(game.status === "finished" ? { rematch: input.rematch ?? null } : {}),

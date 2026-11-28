@@ -283,6 +283,39 @@ export const rematchRoute = createRoute({
   },
 });
 
+// Adding a link joiner to your players -----------------------------------------------------------
+
+export const AddPlayerBodySchema = z
+  .object({
+    userId: z.string().min(1).max(64).openapi({
+      description: "The player to add: a `userId` from the finished game's `canAddPlayers`.",
+    }),
+  })
+  .strict()
+  .openapi("AddPlayerRequest");
+
+export const addPlayerRoute = createRoute({
+  operationId: "addPlayer",
+  "x-scope": "games:create",
+  security: SESSION,
+  method: "post",
+  path: `${API_V1}/games/{id}/add-player`,
+  tags: ["Games"],
+  summary: "Add a link joiner to your players",
+  description:
+    "The creator of a `finished` game answers yes to \"Add <name> to your players?\" for someone in its `canAddPlayers`: you and that player become past opponents (both ways, never the other players), so either of you can pick the other for a game or a rematch. Not a transition: the game's `version` is unchanged. `204` also when repeated, and when the pair isn't written (a block between you either way, or an account suspended or being deleted), which writes nothing and answers the same, so the answer never says whether, or why (06 §6.9, §6.11).",
+  request: { params: GameId, body: jsonBody(AddPlayerBodySchema) },
+  responses: {
+    204: { description: "Answered: added, already added, or a silent no-op." },
+    ...errors({
+      ...COMMON_ERRORS,
+      403: "`BAD_ORIGIN` or `SUSPENDED`.",
+      404: "No such game, you're not its creator, it isn't `finished`, or that player didn't join it through a link and act in it (`NOT_FOUND`, the same in every case).",
+      429: "Too many game writes (`RATE_LIMITED`).",
+    }),
+  },
+});
+
 // Listing games -------------------------------------------------------------------------------
 
 const GamePlayer = gameEnvelopeSchema.shape.players.element;

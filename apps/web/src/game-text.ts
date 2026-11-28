@@ -6,7 +6,7 @@ import type { GameSummary, Player } from "./game-api.js";
 type Text = Parameters<typeof formatText>[0];
 
 /** A seat whose account was deleted (02 §5, 04 §Account deletion). */
-const DELETED_PLAYER = "Deleted player";
+export const DELETED_PLAYER = "Deleted player";
 /** A display name that isn't set (04 `users.display_name`). */
 const NEW_PLAYER = "New player";
 

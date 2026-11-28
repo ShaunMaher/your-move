@@ -12,6 +12,7 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { isGameError, type ResourceMeta, type Text } from "@your-move/sdk";
 import {
   acceptInvitationRoute,
+  addPlayerRoute,
   cancelGameRoute,
   catalogRoute,
   createGameRoute,
@@ -63,6 +64,7 @@ import {
   startAtCreation,
 } from "./lifecycle.js";
 import {
+  addableUserIds,
   engineOf,
   envelope,
   invitationOf,
@@ -152,6 +154,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     recentPlayersRoute,
     rematchRoute,
     removeSeatRoute,
+    addPlayerRoute,
   ]) {
     // Registered for the method only, so the public rules route under /games/types is unaffected.
     app.on(route.method.toUpperCase(), honoPath(route.path), session);
@@ -194,16 +197,22 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     viewer: GamePlayerRecord,
   ): Promise<PresentInput> => {
     const { rematchGameId } = loaded.game;
-    const [gameResources, users, rematch] = await Promise.all([
+    const addable = addableUserIds(loaded.game, loaded.players, viewer);
+    const [gameResources, users, rematch, pastOpponents] = await Promise.all([
       repos.games.resources(loaded.game.id),
       repos.users.findByIds(shownUserIds(loaded.players, () => loaded.game.status === "lobby")),
       // Only a finished game shows its rematch (05 `rematch`).
       loaded.game.status === "finished" && rematchGameId !== null && viewer.userId !== null
         ? repos.games.rematchRead(rematchGameId, viewer.userId)
         : null,
+      // Only its creator's `canAddPlayers` needs to know who is a past opponent already.
+      addable.length > 0 && viewer.userId !== null
+        ? repos.users.pastOpponentsOf(viewer.userId, addable)
+        : [],
     ]);
     return {
       ...(rematch === null ? {} : { rematch: rematchOf(rematch, now()) }),
+      pastOpponents: new Set(pastOpponents),
       joinLink: loaded.joinLink,
       now: now(),
       game: loaded.game,
@@ -565,6 +574,25 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
       if (rematchId !== null) return c.json({ game: await followRematch(c, rematchId, user) }, 200);
       if (attempt >= REMATCH_CREATE_ATTEMPTS) throw ApiError.of("STALE_GAME");
     }
+  });
+
+  /**
+   * The creator's yes to "Add <name> to your players?" (05 `add-player`, 06 §6.9, alpha A19): the
+   * pair is written unless a block exists, and the answer is the same `204` either way, and on a
+   * repeat. Whom it may name doesn't depend on who is a past opponent already, so a repeat can't
+   * tell an added pair from a blocked one; everything else is the one `404`.
+   */
+  app.openapi(addPlayerRoute, async (c) => {
+    const user = userOf(c);
+    await limit(user, "WRITES_USER_MINUTE");
+    const { id } = c.req.valid("param");
+    const { userId } = c.req.valid("json");
+    const { loaded, viewer } = await loadMember(id, user);
+    const { endedAt } = loaded.game;
+    const named = addableUserIds(loaded.game, loaded.players, viewer).includes(userId);
+    if (!named || endedAt === null) throw ApiError.of("NOT_FOUND");
+    await repos.users.addPastOpponents(user.id, userId, endedAt);
+    return c.body(null, 204);
   });
 
   app.openapi(recentPlayersRoute, async (c) => {
