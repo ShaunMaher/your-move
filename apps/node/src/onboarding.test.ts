@@ -266,8 +266,21 @@ describe("the re-prompt after a MIN_AGE rise (06 §5)", () => {
     expect(lobby.status, JSON.stringify(lobby.body)).toBe(201);
     const lobbyToken = /#([A-Za-z0-9_-]{22})$/u.exec(lobby.body.joinLinkUrl ?? "")?.[1] ?? "";
     const lobbyVersion = (await getGame(h, ann, lobby.body.game.id)).game.version;
+    // A lobby of Ann's own, with a link she may still turn off but not make anew.
+    const own = await call<{ game: GameEnvelope }>(h, ann, "POST", "/api/v1/games", {
+      gameType: "example",
+      seats: 3,
+      invitees: [{ email: cy.email }],
+      joinLink: true,
+    });
+    expect(own.status, JSON.stringify(own.body)).toBe(201);
 
     forgetAge(ann);
+    const counts = () => ({
+      games: h.query("SELECT count(*) AS n FROM games")[0]?.["n"],
+      links: h.query("SELECT count(*) AS n FROM join_links")[0]?.["n"],
+    });
+    const before = counts();
     const gated: [string, string, unknown][] = [
       ["GET", "/api/v1/games", undefined],
       [
@@ -281,6 +294,8 @@ describe("the re-prompt after a MIN_AGE rise (06 §5)", () => {
       ["GET", "/api/v1/players/recent", undefined],
       ["POST", `/api/v1/games/${finished}/add-player`, { userId: bob.id }],
       ["POST", `/api/v1/games/${finished}/rematch`, {}],
+      // Making or rotating a join link brings new people in (A21-S-5).
+      ["POST", `/api/v1/games/${own.body.game.id}/join-link`, {}],
     ];
     for (const [method, path, body] of gated) {
       const answer = await call<ErrorBody>(h, ann, method, path, body);
@@ -291,7 +306,8 @@ describe("the re-prompt after a MIN_AGE rise (06 §5)", () => {
         "ONBOARDING_REQUIRED",
       ]);
     }
-    // Nothing was written by any of them.
+    // Nothing was written by any of them: no game, no link, no pair (A21-P-13).
+    expect(counts()).toEqual(before);
     expect(
       h.query("SELECT 1 FROM past_opponents WHERE user_id = ? AND other_id = ?", ann.id, bob.id),
     ).toEqual([]);
@@ -301,6 +317,10 @@ describe("the re-prompt after a MIN_AGE rise (06 §5)", () => {
     expect((await me(ann)).status).toBe(200);
     expect((await getGame(h, ann, finished)).game.status).toBe("finished");
     expect((await getGame(h, cy, lobby.body.game.id)).game.status).toBe("lobby");
+    // What keeps existing games going stays open: turning her own link off, for one.
+    expect(
+      (await call(h, ann, "DELETE", `/api/v1/games/${own.body.game.id}/join-link`)).status,
+    ).toBe(204);
 
     // Confirming again opens every gate.
     await patchMe(ann, { ageAttested: true });
@@ -454,5 +474,142 @@ describe("POST /api/v1/me/under-age (06 §5)", () => {
       cookie: kid.cookie,
     });
     expect(answer.status).toBe(204);
+  });
+});
+
+describe("round 1 review fixes (alpha A21)", () => {
+  it("S-1: email nudges can't be turned on before onboarding, so a new account can't lift the exit's suppression", async () => {
+    h = gameHarness();
+    const kid = await signUp(h, null);
+    expect((await underAge(kid)).status).toBe(204);
+    const hash = await emailIdOfAddress(kid.email);
+    // Signed in again: a new account with the same address, not onboarded.
+    const again: Player = { ...kid, cookie: await h.signIn(kid.email) };
+    const refused = await patchMe(again, { settings: { emailNudges: true } });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error.code).toBe("ONBOARDING_REQUIRED");
+    // With a name but no age it's still refused, and nothing of the request is written.
+    const halfway = await patchMe(again, { displayName: "Kim", settings: { emailNudges: true } });
+    expect(halfway.status).toBe(403);
+    expect(h.query("SELECT display_name FROM users WHERE email = ?", kid.email)).toEqual([
+      { display_name: null },
+    ]);
+    expect(h.query("SELECT reason FROM email_suppressions WHERE email_hash = ?", hash)).toEqual([
+      { reason: "unsubscribed" },
+    ]);
+    // Turning them off is never refused.
+    expect((await patchMe(again, { settings: { emailNudges: false } })).status).toBe(200);
+    // The request that completes onboarding may turn them on: the holder's own opt-in (A20 P-3).
+    const done = await patchMe(again, {
+      displayName: "Kim",
+      ageAttested: true,
+      settings: { emailNudges: true },
+    });
+    expect(done.status).toBe(200);
+    expect(done.body.needsOnboarding).toBe(false);
+  });
+
+  it("S-1: a re-prompted account can't turn email nudges on until it confirms again", async () => {
+    h = gameHarness();
+    const sam = await signUp(h, "Sam");
+    forgetAge(sam);
+    expect((await patchMe(sam, { settings: { emailNudges: true } })).status).toBe(403);
+    expect(
+      (await patchMe(sam, { ageAttested: true, settings: { emailNudges: true } })).status,
+    ).toBe(200);
+  });
+
+  it("S-2 (A): a name and an age sent in parallel still complete onboarding, and claim once", async () => {
+    h = gameHarness();
+    const ada = await seasoned("Ada");
+    const bo = await signUp(h, null);
+    const game = await invite(ada, bo.email);
+    const [named, aged] = await Promise.all([
+      patchMe(bo, { displayName: "Bo" }),
+      patchMe(bo, { ageAttested: true }),
+    ]);
+    expect([named.status, aged.status]).toEqual([200, 200]);
+    expect(userRow(bo.id)).toMatchObject({ display_name: "Bo", age_attested_min_age: 13 });
+    expect(userRow(bo.id)?.["onboarded_at"]).not.toBeNull();
+    expect((await me(bo)).body.needsOnboarding).toBe(false);
+    expect(seatOf(game.id, "user_id")).toBe(bo.id);
+  });
+
+  it("S-2 (B): a completing PATCH that loses to the under-age exit answers 401, claims nothing", async () => {
+    let racer: Player | null = null;
+    h = gameHarness(
+      {},
+      {
+        wrapRepos: (repos) => ({
+          ...repos,
+          users: {
+            ...repos.users,
+            // The exit commits just before this request's answers are written.
+            saveOnboarding: async (id, set, complete) => {
+              if (racer !== null) {
+                await h.request("POST", "/api/v1/me/under-age", {}, { cookie: racer.cookie });
+              }
+              return repos.users.saveOnboarding(id, set, complete);
+            },
+          },
+        }),
+      },
+    );
+    const ada = await seasoned("Ada");
+    const kid = await signUp(h, null);
+    const game = await invite(ada, kid.email);
+    racer = await otherDevice(kid);
+    const answer = await patchMe(kid, { displayName: "Kid", ageAttested: true });
+    expect(answer.status).toBe(401);
+    expect(answer.body.error.code).toBe("UNAUTHENTICATED");
+    expect(h.query("SELECT 1 FROM users WHERE id = ?", kid.id)).toEqual([]);
+    expect(seatOf(game.id, "user_id")).toBeNull();
+    expect(seatOf(game.id, "delivery")).toBe("inert");
+  });
+
+  it("S-3: PATCH /me and the under-age exit count toward the per-user write limit", async () => {
+    h = gameHarness({ LIMIT_WRITES_USER_MINUTE: "2" });
+    const sam = await signUp(h, null);
+    expect((await patchMe(sam, { displayName: "Sam" })).status).toBe(200);
+    expect((await patchMe(sam, { settings: { theme: "dark" } })).status).toBe(200);
+    const limited = await patchMe(sam, { ageAttested: true });
+    expect(limited.status).toBe(429);
+    expect(limited.body.error.code).toBe("RATE_LIMITED");
+    const exit = await underAge(sam);
+    expect(exit.status).toBe(429);
+    expect(h.query("SELECT 1 FROM users WHERE id = ?", sam.id)).toHaveLength(1);
+    h.advance(2 * MINUTE + 1);
+    expect((await patchMe(sam, { ageAttested: true })).status).toBe(200);
+  });
+
+  it("P-4: an exit that loses to onboarding answers 409, keeps the session and logs nothing", async () => {
+    h = gameHarness(
+      {},
+      {
+        wrapRepos: (repos) => ({
+          ...repos,
+          users: {
+            ...repos.users,
+            // Onboarding commits just before the exit's batch.
+            underAgeDelete: async (account, at) => {
+              h.exec(
+                "UPDATE users SET display_name = 'Kid', onboarded_at = ?, age_attested_at = ?, age_attested_min_age = 13 WHERE id = ?",
+                at.createdAt,
+                at.createdAt,
+                account.id,
+              );
+              return repos.users.underAgeDelete(account, at);
+            },
+          },
+        }),
+      },
+    );
+    const kid = await signUp(h, null);
+    const answer = await call<ErrorBody>(h, kid, "POST", "/api/v1/me/under-age", {});
+    expect(answer.status).toBe(409);
+    expect(answer.body.error.code).toBe("WRONG_STATUS");
+    expect((await me(kid)).body).toMatchObject({ displayName: "Kid", needsOnboarding: false });
+    expect(h.query("SELECT 1 FROM auth_events WHERE type = 'under_age_exit'")).toEqual([]);
+    expect(h.query("SELECT 1 FROM email_suppressions")).toEqual([]);
   });
 });

@@ -565,7 +565,13 @@ describe("the invitation email to a user with email nudges on (06 §6.2)", () =>
     harness();
     const ada = await seasoned("Ada");
     const ray = await signUp(h, null);
-    await nudgesOn(ray);
+    // Nudges on before onboarding: the API refuses that since alpha A21 (review S-1), so the row
+    // is set directly, to keep the claim's own guard tested.
+    await h.platform.repos.users.setEmailNudges(ray.id, {
+      enabled: true,
+      emailId: await emailIdOfAddress(ray.email),
+      updatedAt: now(),
+    });
     await invite(ada, ray.email);
     expect(await inviteEmailsTo(ray.email)).toHaveLength(1);
     h.exec("UPDATE users SET onboarded_at = ?, display_name = 'Ray' WHERE id = ?", now(), ray.id);

@@ -743,7 +743,7 @@ export const createJoinLinkRoute = createRoute({
     200: { description: "The new link.", content: json(JoinLinkSchema) },
     ...errors({
       ...MEMBER_ERRORS,
-      403: "`NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`.",
+      403: "`NOT_ALLOWED` (not the creator), `ONBOARDING_REQUIRED` (onboarding incomplete, or a re-prompt after a `MIN_AGE` rise, 06 §5), `BAD_ORIGIN` or `SUSPENDED`.",
       409: "`WRONG_STATUS` (the lobby has ended).",
       429: "Too many join links today (`RATE_LIMITED`).",
     }),

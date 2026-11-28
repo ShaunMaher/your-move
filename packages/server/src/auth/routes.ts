@@ -66,7 +66,13 @@ import {
 type ErrorStatus = 400 | 401 | 403 | 409 | 429;
 type Code = Extract<
   ErrorCode,
-  "BAD_REQUEST" | "INVALID_CODE" | "UNAUTHENTICATED" | "SUSPENDED" | "WRONG_STATUS" | "RATE_LIMITED"
+  | "BAD_REQUEST"
+  | "INVALID_CODE"
+  | "UNAUTHENTICATED"
+  | "SUSPENDED"
+  | "ONBOARDING_REQUIRED"
+  | "WRONG_STATUS"
+  | "RATE_LIMITED"
 >;
 
 const MESSAGES: Readonly<Record<Code, string>> = {
@@ -74,6 +80,7 @@ const MESSAGES: Readonly<Record<Code, string>> = {
   INVALID_CODE: "That code is wrong or has expired.",
   UNAUTHENTICATED: "Please sign in.",
   SUSPENDED: "This account is suspended.",
+  ONBOARDING_REQUIRED: "Finish setting up your account first.",
   WRONG_STATUS: "Your account is already set up.",
   RATE_LIMITED: "Too many requests. Please wait and try again.",
 };
@@ -176,6 +183,14 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
         errorClass: error instanceof Error ? error.constructor.name : typeof error,
       });
     }
+  };
+
+  /** The per-user write limit every game write shares (08 §4), on the account writes too (A21-S-3). */
+  const writesLimited = async (userId: string, at: number): Promise<boolean> => {
+    const [limit] = await checkLimits(repos, config, at, [
+      { name: "WRITES_USER_MINUTE", key: userId, amount: 1 },
+    ]);
+    return limit?.exceeded === true;
   };
 
   const clearCookie = (c: Context): void => {
@@ -312,7 +327,8 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     const body = c.req.valid("json");
     let user = active.user;
     const at = now();
-    // Checked before anything is written, so a refused name changes nothing else either.
+    if (await writesLimited(user.id, at)) return fail(c, 429, "RATE_LIMITED");
+    // Everything is checked before anything is written, so a refused request changes nothing.
     const named =
       body.displayName === undefined
         ? undefined
@@ -322,26 +338,43 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     // A rename (06 §5) is budgeted and logged; a name set before onboarding completes isn't one.
     const renamed = named !== undefined && named.name !== user.displayName;
     const rename = renamed && user.onboardedAt !== null;
-    if (rename) {
-      const [limit] = await checkLimits(repos, config, at, [
-        { name: "DISPLAY_NAME_CHANGES_30D", key: user.id, amount: 1 },
-      ]);
-      if (limit?.exceeded === true) return fail(c, 429, "RATE_LIMITED");
-    }
     if (renamed) set.displayName = named.name;
     if (body.ageAttested === true && !ageConfirmed(user, config.minAge)) {
       // The confirmation's time and the MIN_AGE in force (06 §5): a later rise re-prompts.
       set.ageAttestedAt = at;
       set.ageAttestedMinAge = config.minAge;
     }
+    // Email nudges only once onboarding is done, as this request leaves it: turning them on lifts
+    // the address's own `unsubscribed` suppression, which the under-age exit wrote (A21-S-1).
     const after = { ...user, ...set };
-    // The request that leaves both the name and the age confirmation done completes onboarding.
-    const completes =
-      user.onboardedAt === null && after.displayName !== null && ageConfirmed(after, config.minAge);
-    if (completes) set.onboardedAt = at;
-    if (Object.keys(set).length > 0) {
-      await repos.users.update(user.id, { ...set, updatedAt: at });
-      user = { ...user, ...set, updatedAt: at };
+    const done = after.displayName !== null && ageConfirmed(after, config.minAge);
+    if (body.settings?.emailNudges === true && !done) {
+      return fail(c, 403, "ONBOARDING_REQUIRED");
+    }
+    if (rename) {
+      const [limit] = await checkLimits(repos, config, at, [
+        { name: "DISPLAY_NAME_CHANGES_30D", key: user.id, amount: 1 },
+      ]);
+      if (limit?.exceeded === true) return fail(c, 429, "RATE_LIMITED");
+    }
+    if (Object.keys(set).length > 0 || user.onboardedAt === null) {
+      // The completion is judged on the stored row in the same batch (A21-S-2), so a parallel
+      // request bringing the other answer can't leave onboarding undone.
+      const saved = await repos.users.saveOnboarding(
+        user.id,
+        { ...set, updatedAt: at },
+        { at, minAge: config.minAge },
+      );
+      // The account went meanwhile (the under-age exit): this session went with it.
+      if (saved.user === null) {
+        clearCookie(c);
+        return fail(c, 401, "UNAUTHENTICATED");
+      }
+      user = saved.user;
+      // Completing onboarding claims the address's email-invite seats (06 §6.4).
+      if (saved.completed && user.email !== null) {
+        await claimAtOnboarding(c, { id: user.id, email: user.email }, at);
+      }
     }
     if (rename) {
       await repos.authEvents.record({
@@ -350,10 +383,6 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
         ipHash: null,
         createdAt: at,
       });
-    }
-    // Completing onboarding claims the address's email-invite seats (06 §6.4).
-    if (completes && user.email !== null) {
-      await claimAtOnboarding(c, { id: user.id, email: user.email }, at);
     }
     const nudges = body.settings?.emailNudges;
     if (nudges !== undefined) {
@@ -388,6 +417,7 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, options: AuthRouteO
     const { user } = active;
     if (!needsOnboarding(user, config.minAge)) return fail(c, 409, "WRONG_STATUS");
     const at = now();
+    if (await writesLimited(user.id, at)) return fail(c, 429, "RATE_LIMITED");
     const keys = await options.keys();
     // The event is pseudonymous: the hashed IP bucket, never the address (06 §5, 09 §5).
     const ipHash = (await clientBuckets(c, keys))?.ipBuckets[0]?.hash ?? null;

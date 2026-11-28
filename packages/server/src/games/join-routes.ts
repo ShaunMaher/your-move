@@ -77,6 +77,9 @@ export function registerJoinRoutes(app: OpenAPIHono<AppEnv>, deps: JoinRouteDeps
 
   app.openapi(createJoinLinkRoute, async (c) => {
     const user = userOf(c);
+    // Making or rotating a link brings new people into the lobby: gated (06 §5, A21-S-5).
+    // Revoking it stays open to a re-prompted creator.
+    onboarded(user);
     await limit(user, "WRITES_USER_MINUTE");
     const { id } = c.req.valid("param");
     const { loaded } = await loadAsCreator(id, user);

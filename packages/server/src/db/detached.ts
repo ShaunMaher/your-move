@@ -44,6 +44,7 @@ const METHODS = {
     recentOpponents: true,
     blocksAmong: true,
     update: true,
+    saveOnboarding: true,
     rememberGameOptions: true,
     setEmailNudges: true,
     setTheme: true,

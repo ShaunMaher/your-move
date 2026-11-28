@@ -244,12 +244,12 @@ export const PatchMeBodySchema = z
   .object({
     displayName: z.string().max(256).optional().openapi({
       description:
-        "1–24 characters; no links, addresses, long digit runs or reserved words (06 §5.1). Setting it completes onboarding.",
+        "1–24 characters; no links, addresses, long digit runs or reserved words (06 §5.1). Onboarding completes once both this and `ageAttested` are given, in one request or two (06 §5); after that, a change is a rename.",
     }),
     settings: UserSettingsPatchSchema.optional(),
     ageAttested: z.literal(true).optional().openapi({
       description:
-        "The user confirms they are at least `minAge` (`GET /api/v1/config`): records the time and the `MIN_AGE` in force (06 §5). With a display name it completes onboarding; alone it answers a re-prompt after a `MIN_AGE` rise.",
+        "The user confirms they are at least `minAge` (`GET /api/v1/config`): records the time and the `MIN_AGE` in force, or changes nothing while the current `MIN_AGE` is already confirmed (06 §5). Onboarding completes once both this and a display name are given, in one request or two; a user re-prompted after a `MIN_AGE` rise sends it alone.",
     }),
   })
   .strict()
@@ -274,7 +274,8 @@ export const patchMeRoute = createRoute({
     ...errors({
       ...SESSION_ERRORS,
       400: "A display name breaking the rules, or an invalid request (`BAD_REQUEST`).",
-      429: "Too many display-name changes (`RATE_LIMITED`).",
+      403: "`BAD_ORIGIN`, `SUSPENDED`, or `ONBOARDING_REQUIRED` for `emailNudges: true` while onboarding isn't done (as this request leaves it, 06 §5).",
+      429: "Too many writes or display-name changes (`RATE_LIMITED`).",
     }),
   },
 });
@@ -295,6 +296,7 @@ export const underAgeRoute = createRoute({
     ...errors({
       ...SESSION_ERRORS,
       409: "Onboarding is complete for the current `MIN_AGE` (`WRONG_STATUS`).",
+      429: "Too many writes (`RATE_LIMITED`).",
     }),
   },
 });

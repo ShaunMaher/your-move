@@ -713,11 +713,11 @@ export interface components {
       revokeTokens?: boolean;
     };
     PatchMe: {
-      /** @description 1–24 characters; no links, addresses, long digit runs or reserved words (06 §5.1). Setting it completes onboarding. */
+      /** @description 1–24 characters; no links, addresses, long digit runs or reserved words (06 §5.1). Onboarding completes once both this and `ageAttested` are given, in one request or two (06 §5); after that, a change is a rename. */
       displayName?: string;
       settings?: components["schemas"]["UserSettingsPatch"];
       /**
-       * @description The user confirms they are at least `minAge` (`GET /api/v1/config`): records the time and the `MIN_AGE` in force (06 §5). With a display name it completes onboarding; alone it answers a re-prompt after a `MIN_AGE` rise.
+       * @description The user confirms they are at least `minAge` (`GET /api/v1/config`): records the time and the `MIN_AGE` in force, or changes nothing while the current `MIN_AGE` is already confirmed (06 §5). Onboarding completes once both this and a display name are given, in one request or two; a user re-prompted after a `MIN_AGE` rise sends it alone.
        * @enum {boolean}
        */
       ageAttested?: true;
@@ -1826,7 +1826,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description `BAD_ORIGIN` (cookie request without this instance's `Origin`), or `SUSPENDED`. */
+      /** @description `BAD_ORIGIN`, `SUSPENDED`, or `ONBOARDING_REQUIRED` for `emailNudges: true` while onboarding isn't done (as this request leaves it, 06 §5). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -1853,7 +1853,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description Too many display-name changes (`RATE_LIMITED`). */
+      /** @description Too many writes or display-name changes (`RATE_LIMITED`). */
       429: {
         headers: {
           [name: string]: unknown;
@@ -1940,6 +1940,15 @@ export interface operations {
       };
       /** @description A body that isn't `application/json` (`UNSUPPORTED_MEDIA_TYPE`). */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Too many writes (`RATE_LIMITED`). */
+      429: {
         headers: {
           [name: string]: unknown;
         };
@@ -3893,7 +3902,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
-      /** @description `NOT_ALLOWED` (not the creator), `BAD_ORIGIN` or `SUSPENDED`. */
+      /** @description `NOT_ALLOWED` (not the creator), `ONBOARDING_REQUIRED` (onboarding incomplete, or a re-prompt after a `MIN_AGE` rise, 06 §5), `BAD_ORIGIN` or `SUSPENDED`. */
       403: {
         headers: {
           [name: string]: unknown;

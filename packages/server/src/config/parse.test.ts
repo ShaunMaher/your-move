@@ -143,6 +143,17 @@ describe("parseConfig: valid configurations", () => {
     ).toMatchObject({ appName: DEFAULT_APP_NAME, minAge: 13, privacyRetention: null });
   });
 
+  it("counts PRIVACY_RETENTION in code points, not UTF-16 units (A21-P-14)", () => {
+    // 1000 emoji are 2000 UTF-16 units: still within the limit; one more is over it.
+    const emoji = "🙂".repeat(1000);
+    expect(parseConfig({ ...PROD_ENV, PRIVACY_RETENTION: emoji }, NODE).privacyRetention).toBe(
+      emoji,
+    );
+    expect(() => parseConfig({ ...PROD_ENV, PRIVACY_RETENTION: `${emoji}🙂` }, NODE)).toThrow(
+      /PRIVACY_RETENTION: must be at most 1000 characters/u,
+    );
+  });
+
   it("keeps PRIVACY_RETENTION as written, up to 1000 characters", () => {
     const text = "Logs are kept 14 days. ".repeat(43).slice(0, 1000);
     expect(parseConfig({ ...PROD_ENV, PRIVACY_RETENTION: text }, NODE).privacyRetention).toBe(text);

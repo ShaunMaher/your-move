@@ -522,6 +522,11 @@ describe("errors and logging", () => {
         const platform = testPlatform(PROD_ENV);
         const repos = {
           ...platform.repos,
+          // Account writes count toward the per-user write limit (A21-S-3): always under it here.
+          rateLimits: {
+            hit: (hits: readonly unknown[]) =>
+              Promise.resolve(hits.map(() => ({ current: 1, previous: 0 }))),
+          },
           sessions: {
             ...platform.repos.sessions,
             findByTokenHash: () =>
@@ -571,7 +576,14 @@ describe("errors and logging", () => {
       });
 
       it("gives turning nudges on for an account without an address the reason no_email", async () => {
-        const { app, platform } = signedInAs({ email: null, onboardedAt: 1 });
+        // Onboarded for the current MIN_AGE: nudges are refused before onboarding (A21-S-1).
+        const { app, platform } = signedInAs({
+          email: null,
+          displayName: "Sam",
+          onboardedAt: 1,
+          ageAttestedAt: 1,
+          ageAttestedMinAge: 13,
+        });
         const res = await app.request(ME, {
           method: "PATCH",
           headers: {

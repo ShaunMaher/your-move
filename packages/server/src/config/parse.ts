@@ -189,7 +189,8 @@ const envSchema = z.looseObject({
   // Empty counts as unset, like every variable (`parseConfig`).
   PRIVACY_RETENTION: z
     .string()
-    .max(PRIVACY_RETENTION_MAX, {
+    // Characters as people count them: code points, not UTF-16 units (A21-P-14).
+    .refine((value) => Array.from(value).length <= PRIVACY_RETENTION_MAX, {
       error: `must be at most ${String(PRIVACY_RETENTION_MAX)} characters`,
     })
     .pipe(text)

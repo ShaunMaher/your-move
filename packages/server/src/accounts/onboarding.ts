@@ -19,5 +19,8 @@ export function ageConfirmed(user: Pick<UserRecord, "ageAttestedMinAge">, minAge
  * is missing or below the current `MIN_AGE` (a re-prompt).
  */
 export function needsOnboarding(user: OnboardingFields, minAge: number): boolean {
+  // Humans only so far. An AI account (M3 tokens) has no confirmation of its own: its
+  // `age_attested_min_age` stays NULL and its onboarding state is its owner's (04 invariant 7,
+  // 06 §8), so token requests must judge the owner's row, never pass an agent's here.
   return user.onboardedAt === null || !ageConfirmed(user, minAge);
 }

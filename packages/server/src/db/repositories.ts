@@ -106,6 +106,18 @@ export interface UserRepo {
   blocksAmong(userIds: readonly string[]): Promise<BlockPair[]>;
   update(id: string, set: UserUpdate): Promise<void>;
   /**
+   * Onboarding's answers (06 §5, 05 `PATCH /api/v1/me`): writes `set`'s columns, then sets
+   * `onboarded_at` to `complete.at` if it is still NULL and the stored row now has a display name
+   * and an age confirmation of at least `complete.minAge`. One atomic batch, judged on the stored
+   * row, so two requests that each bring one answer still complete onboarding. Answers whether
+   * this call completed it, and the row as stored afterwards (null when the account is gone).
+   */
+  saveOnboarding(
+    id: string,
+    set: UserUpdate,
+    complete: { readonly at: number; readonly minAge: number },
+  ): Promise<{ completed: boolean; user: UserRecord | null }>;
+  /**
    * Sets `settings.lastGameType` and, unless `input` is null, `settings.lastOptions[gameType]` to
    * the JSON `input`, leaving every other key as it is now in the database (05 §Remembered
    * options). `gameType` matches the manifest's type pattern.
