@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { forgetCatalog } from "../catalog.js";
@@ -170,11 +170,14 @@ describe("the game list", () => {
     expect(fetched()).toBe(1);
     // An ordinary pageshow is not a restore.
     window.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: false }));
+    await Promise.resolve();
     expect(fetched()).toBe(1);
+    // The list is still the one on screen: nothing was cleared.
+    expect(document.querySelector('a[href="/g/frozen"]')).not.toBeNull();
     games = [summary({ id: "fresh", yourTurn: false, players: [player(), alex] })];
-    act(() => {
-      window.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true }));
-    });
+    // No act(): the old list is gone the moment the event has been handled.
+    window.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true }));
+    expect(document.querySelector('a[href="/g/frozen"]')).toBeNull();
     await waitFor(() => {
       expect(fetched()).toBe(2);
     });
@@ -183,6 +186,27 @@ describe("the game list", () => {
     });
     expect(document.querySelector('a[href="/g/frozen"]')).toBeNull();
     expect(document.querySelector('a[href="/g/fresh"]')).not.toBeNull();
+  });
+
+  it("drops the list as the page enters the cache, and a page of it asked for before", async () => {
+    let release: (answer: Response) => void = () => undefined;
+    const { api } = fakeApi({
+      "GET /api/v1/games": (call: { search: string }) =>
+        call.search.includes("cursor")
+          ? new Promise<Response>((resolve) => {
+              release = resolve;
+            })
+          : json({ games: [summary({ id: "frozen" })], nextCursor: "next" }),
+      "GET /api/v1/catalog": json(CATALOG),
+    });
+    render(<GameList api={api} onSessionLost={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Show more games" }));
+    window.dispatchEvent(Object.assign(new Event("pagehide"), { persisted: true }));
+    expect(document.querySelector('a[href="/g/frozen"]')).toBeNull();
+    release(json({ games: [summary({ id: "old-page" })], nextCursor: null }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(document.querySelector('a[href="/g/old-page"]')).toBeNull();
   });
 
   it("does not poll while the tab is hidden, and refetches when it is shown again", async () => {

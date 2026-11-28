@@ -230,7 +230,7 @@ in order:
    split into parallel shards by option set and seat count (`pnpm games:verify --shard
    "$CI_NODE_INDEX/$CI_NODE_TOTAL"`, 02 §6), so no one job carries every game's kit. The shards
    share one timeout, provisional until it is measured on the runner (ADR 0004); the shard count
-   is sized so that no shard runs much past 20 minutes on the shared runner, and is re-measured
+   is sized so that the slowest shard takes about 20 minutes on the shared runner (docs/deploy.md "CI runners"), and is re-measured
    when a game is installed. The publish jobs need every shard.
 3. **build** — `pnpm games:verify --fast`, web app, Node server build (`apps/node/dist`), Worker
    bundle, then `pnpm games:check-inputs` (the bundler-input closure check, 02 §7.3; the whole

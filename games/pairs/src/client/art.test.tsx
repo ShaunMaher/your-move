@@ -37,7 +37,7 @@ describe("the faces", () => {
     });
   });
 
-  it("keep the apple whole and the faces free of any bird", () => {
+  it("have no bird among the faces, and the apple is drawn as body, stem and leaf only (that no bite is taken, and each shape, were reviewed by eye)", () => {
     expect(FACES.map((face) => face.name)).not.toContain("bird");
     const apple = render(<Face id={1} />).container;
     // One body and one stem and one leaf: three paths, none a second, bitten outline.

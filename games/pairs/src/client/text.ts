@@ -69,7 +69,7 @@ function possessive(who: Who, seat: Seat): string {
  * A card's accessible name, rows and columns from 1 (pairs §9): "Row 2, column 3, face down";
  * "Row 2, column 3, star, your first card"; "Row 2, column 3, star, Sam's first card"; "Row 1,
  * column 2, moon, Sam's last turn, turns face down at the next first card"; "Row 4, column 4,
- * apple, matched by Ann". A stopped game drops the in-play hints ("... Sam's first card when the
+ * apple, matched by Ann (player 1)". A stopped game drops the in-play hints ("... Sam's first card when the
  * game stopped"); a finished one names the faces left down "not found".
  */
 export function cardName(row: number, column: number, card: Card, who: Who, mode: Mode): string {
@@ -90,7 +90,7 @@ export function cardName(row: number, column: number, card: Card, who: Who, mode
     case "matched":
       return `${place}, ${faceName(card.face)}, matched by ${
         card.by === who.you ? "you" : (who.names[card.by] ?? "someone")
-      }`;
+      } (player ${String(card.by + 1)})`;
   }
 }
 

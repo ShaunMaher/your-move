@@ -462,7 +462,7 @@ that remembers for you spoil the game for everyone else, who can't tell.
   the button's visible label is its name (WCAG 2.5.3).
 - **Accessible names** (rows and columns from 1): "Row 2, column 3, face down"; "Row 2, column 3,
   star, your first card"; "Row 2, column 3, star, Sam's first card"; "Row 1, column 2, moon, Sam's
-  last turn, turns face down at the next first card"; "Row 4, column 4, apple, matched by Ann" ("matched by you" for the viewer's own pairs, "your"
+  last turn, turns face down at the next first card"; "Row 4, column 4, apple, matched by Ann (player 1)" ("matched by you (player 1)" for the viewer's own pairs, "your"
   for the viewer's own cards in the names above). In a finished game a card left down shows its
   face, named "Row 2, column 3, star, not found".
 - **Grid semantics**: the board is a `role="grid"` labelled "Cards", with a `role="row"` per row

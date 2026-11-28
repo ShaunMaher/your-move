@@ -86,6 +86,8 @@ export function GameList({ api, onSessionLost }: GameListProps) {
   const hiddenRequest = useRef(0);
   /** The newest list request: an answer asked for before a restore (or a newer request) is dropped. */
   const listRequest = useRef(0);
+  /** Bumped when the page is frozen: a "Show more" asked for before then is a page of the old list. */
+  const epoch = useRef(0);
   const [types, setTypes] = useState<ReadonlyMap<string, CatalogGame>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const loading = useRef(false);
@@ -147,19 +149,27 @@ export function GameList({ api, onSessionLost }: GameListProps) {
 
   // A page restored from the back-forward cache shows the list as it was frozen: drop it and
   // fetch again (07 §4).
-  useRestored(() => {
+  const freeze = () => {
+    epoch.current += 1;
+    listRequest.current += 1;
+    hiddenRequest.current += 1;
     loading.current = false;
     expanded.current = false;
     setGames(null);
     setMore(null);
     setHidden({ games: [], full: false });
+  };
+  useRestored(() => {
+    freeze();
     refresh();
-  });
+  }, freeze);
 
   function showMore() {
     if (more === null) return;
+    const asked = epoch.current;
     void listGames(api, more).then((result) => {
-      if (!mounted.current) return;
+      // The page was frozen and restored meanwhile: this is a page of the old list.
+      if (!mounted.current || asked !== epoch.current) return;
       if (!result.ok) {
         setError("Couldn't load more games.");
         return;

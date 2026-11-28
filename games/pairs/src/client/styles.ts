@@ -110,6 +110,7 @@ export const PAIRS: readonly Pair[] = [
   { what: "confirmation text", fg: "ok", bg: "paper", kind: "text" },
   { what: "the acting player's chip", fg: "paper", bg: "ink", kind: "text" },
   { what: "a player number's badge", fg: "paper", bg: "ink", kind: "text" },
+  { what: "a matched card's badge", fg: "paper", bg: "done-ink", kind: "text" },
   { what: "your-turn line", fg: "turn-ink", bg: "turn-bg", kind: "text" },
   { what: "your-turn line against the page", fg: "turn-bg", bg: "paper", kind: "non-text" },
   { what: "card borders against the page", fg: "muted", bg: "paper", kind: "non-text" },

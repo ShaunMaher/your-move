@@ -331,9 +331,12 @@ contradict, and Play still goes through `submit`, where the server remains autho
     browser's back-forward cache, which runs no new page load), the shell refetches the open game
     or list before showing it, for every game, so an old view never comes back on screen (02 §3;
     games/pairs.md §9, where a view's faces must not outlive it). Added with the pairs client
-    slice (alpha A26): the screen drops the frozen view for its loading state, shows the new one
-    when the fetch answers (or says the server isn't answering, never the frozen view), and drops
-    any answer asked for before the restore, however late it arrives.
+    slice (alpha A26): on `pagehide` with `persisted` the screen already drops its view for the
+    loading state, so the document entering the cache holds no game; on `pageshow` it fetches
+    (or says the server isn't answering, never the frozen view); both run inside `flushSync`, since neither is a
+    discrete event for React and the browser must not paint the old view first. A move's answer or a page of the
+    list asked for before the freeze is still heard by the board that asked, but never put on the
+    cleared screen.
   - **Never touch server-handled paths**: the worker ignores non-GET requests, other origins and
     every path in `SERVER_PATHS` (`@your-move/shared`, the one list also behind the server's 404s
     and, by hand, Cloudflare's `run_worker_first`; 03 §9): `/api/*`, `/__dev/*` and

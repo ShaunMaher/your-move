@@ -239,8 +239,12 @@ describe("accessible names (pairs §9)", () => {
         ],
       }),
     );
-    expect(card(0, 2).getAttribute("aria-label")).toBe("Row 1, column 3, apple, matched by you");
-    expect(card(1, 1).getAttribute("aria-label")).toBe("Row 2, column 2, bell, matched by Sam");
+    expect(card(0, 2).getAttribute("aria-label")).toBe(
+      "Row 1, column 3, apple, matched by you (player 1)",
+    );
+    expect(card(1, 1).getAttribute("aria-label")).toBe(
+      "Row 2, column 2, bell, matched by Sam (player 2)",
+    );
   });
 
   it("name the cards of a stopped game without the in-play hints", () => {
@@ -632,7 +636,9 @@ describe("a finished game (pairs §9)", () => {
     expect(card(1, 0).getAttribute("data-state")).toBe("unfound");
     expect(card(1, 0).querySelector(".ym-pr-face")).not.toBeNull();
     expect(card(1, 0).querySelector(".ym-pr-badge")).toBeNull();
-    expect(card(0, 0).getAttribute("aria-label")).toBe("Row 1, column 1, acorn, matched by you");
+    expect(card(0, 0).getAttribute("aria-label")).toBe(
+      "Row 1, column 1, acorn, matched by you (player 1)",
+    );
   });
 
   const ENDINGS: [NonNullable<State["endReason"]>, Partial<State>, string][] = [

@@ -779,6 +779,67 @@ describe("the game frame", () => {
       expect(screen.queryByText(/Board v3/u)).toBeNull();
     });
 
+    it("clears the board in the same task, before the browser can paint it (no act)", async () => {
+      open();
+      await screen.findByText(/Board v3/u);
+      // Not wrapped in act(): React must have committed by the time dispatchEvent returns.
+      window.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true }));
+      expect(screen.queryByRole("region", { name: "Fake board" })).toBeNull();
+      expect(screen.queryByText(/Board v3/u)).toBeNull();
+    });
+
+    it("holds no game view in a page entering the cache, and ignores a pagehide that stays", async () => {
+      const { calls } = open();
+      await screen.findByText(/Board v3/u);
+      window.dispatchEvent(Object.assign(new Event("pagehide"), { persisted: false }));
+      expect(screen.getByText(/Board v3/u)).toBeDefined();
+      window.dispatchEvent(Object.assign(new Event("pagehide"), { persisted: true }));
+      expect(screen.queryByRole("region", { name: "Fake board" })).toBeNull();
+      expect(document.body.textContent).not.toContain("Board v3");
+      // Nothing is fetched while frozen; the restore does that.
+      expect(calls.filter((c) => c.method === "GET" && c.path === "/api/v1/games/g1")).toHaveLength(
+        1,
+      );
+    });
+
+    it("hears a move's answer on the board but never puts it on a restored screen", async () => {
+      let gets = 0;
+      const posts: ((answer: Response) => void)[] = [];
+      const gets2: ((answer: Response) => void)[] = [];
+      open({
+        "GET /api/v1/games/g1": () => {
+          gets += 1;
+          if (gets === 1) return withView();
+          return new Promise<Response>((resolve) => gets2.push(resolve));
+        },
+        "POST /api/v1/games/g1/actions": () =>
+          new Promise<Response>((resolve) => posts.push(resolve)),
+      });
+      await screen.findByText(/Board v3/u);
+      click("Play");
+      await waitFor(() => {
+        expect(posts).toHaveLength(1);
+      });
+      window.dispatchEvent(Object.assign(new Event("pagehide"), { persisted: true }));
+      window.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true }));
+      await waitFor(() => {
+        expect(gets2).toHaveLength(1);
+      });
+      posts[0]?.(
+        json({
+          game: envelope({ version: 4, yourTurn: false, toAct: [1] }),
+          view: { board: "moved" },
+          describe: [],
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      // The move's own answer must not have put its view on the cleared screen.
+      expect(screen.queryByText(/Board v4/u)).toBeNull();
+      gets2[0]?.(withView(envelope({ version: 5, yourTurn: false, toAct: [1] })));
+      await screen.findByText(/Board v5/u);
+    });
+
     it("ignores a pageshow that is not a restore, such as the first load", async () => {
       const { calls } = open();
       await screen.findByText(/Board v3/u);

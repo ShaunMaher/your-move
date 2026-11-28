@@ -114,7 +114,7 @@ export const PATHS_TEST_TIMEOUT_MS = 150_000;
  * join link used twice, Start, a perfect-memory double playing a 4 × 5 game on three pages until
  * one player has resigned mid-turn and the others have found every pair (dozens of card turns,
  * each answered by the server and each followed by a refresh of the three pages), then the end.
- * PROVISIONAL: see the figures in the A26 review record; to be re-measured on the CI runner from
+ * PROVISIONAL: 14-20 s locally (ADR 0004 has the figures); to be re-measured on the CI runner from
  * the first pipeline that runs it, and then set from that.
  */
 export const PAIRS_TEST_TIMEOUT_MS = 180_000;

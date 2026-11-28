@@ -291,14 +291,17 @@ test:games:
   needs: [validate]
   # Sized from measurements (docs/deploy.md "CI runners", 2026-11-29). The first run of four shards
   # on the runner (pipeline 82926, without pairs) took 891, 880, 688 and 649 s against about 136,
-  # 134, 92 and 80 s locally: a factor of about 6.5 for kit work run beside test, e2e and the
-  # builds, not the 2.3 an earlier estimate used. With pairs installed four shards take 276-292 s
-  # locally (about 36 minutes here), so eight shards: the slowest takes 208 s locally, about 22
-  # minutes here. The runner runs the shards concurrently, so more shards cut wall time; each adds
-  # a workspace install.
+  # 134, 92-96 and 80-82 s locally. That fits runner = 303 s + 4.3 x local: a fixed cost per shard
+  # (workspace install and builds) plus kit work at 4.3 x, not the 2.3 x of an earlier estimate. With
+  # pairs, four shards take 276-292 s locally (about 26 minutes here on that fit). Eight shards,
+  # chosen because the combinations fall unevenly (slowest 208 s, mean 143 s locally), put the
+  # slowest at about 20 minutes. Only four shards were seen running together: that the runner runs
+  # eight at once is unproven and depends on the operator's `concurrent` setting (4 or more for
+  # this 4-core VM; with fewer slots the shards queue and wall time grows to about 8 / slots x 20
+  # minutes). More shards each add the fixed cost.
   parallel: 8
-  # ADR 0004: 35 minutes, about 1.6x the 22-minute estimate above, which is not a CI measurement
-  # of this configuration yet; set it from the first pipeline that runs these shards.
+  # ADR 0004: 35 minutes, 1.75 x the 20-minute estimate above, which is not a CI measurement of
+  # this configuration yet; set it from the first pipeline that runs these shards.
   timeout: 35 minutes
   script:
     # The workspace game builds' scratch files on tmpfs, as in `test`.

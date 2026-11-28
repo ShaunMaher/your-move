@@ -228,16 +228,19 @@ export function Game({
    * A page restored from the back-forward cache shows what it showed when it was frozen: drop it
    * and fetch the game again, so an old view never comes back on screen (07 §4, 02 §3).
    */
-  const restore = useCallback(() => {
+  const freeze = useCallback(() => {
     generation.current += 1;
     fetching.current = false;
     again.current = false;
     newest.current = -1;
     setNotice(null);
     setLoad({ status: "loading" });
+  }, []);
+  const restore = useCallback(() => {
+    freeze();
     void refetch();
-  }, [refetch]);
-  useRestored(restore);
+  }, [freeze, refetch]);
+  useRestored(restore, freeze);
 
   const game = load.status === "ready" ? load.game : null;
   const gameType = game?.gameType ?? null;
@@ -293,14 +296,18 @@ export function Game({
   const submit = useCallback(
     async (action: unknown): Promise<SubmitResult> => {
       if (game === null) throw new Error("no game");
+      const asked = generation.current;
       const result = await submitAction(api, id, game.version, action);
+      // The page was frozen and restored while the request was out: its answer is the board's to
+      // hear, but it must not put a view on a screen the restore has cleared.
+      const current = asked === generation.current;
       if (result.ok) {
-        apply({ game: result.data.game, view: result.data.view });
+        if (current) apply({ game: result.data.game, view: result.data.view });
         return { ok: true, game: adapt(result.data).game, view: result.data.view };
       }
       if (result.status === 0) throw new Error("offline");
       if (result.status === 401) onSessionLost();
-      if (MOVED_ON.has(result.code)) void refetch(true);
+      if (current && MOVED_ON.has(result.code)) void refetch(true);
       return {
         ok: false,
         error: {

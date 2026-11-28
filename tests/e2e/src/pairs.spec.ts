@@ -133,7 +133,6 @@ test("three people play a pairs game from a join link: a miss, a match, a resign
   const memory = new Memory();
   const moved = new Set<number>();
   let sawMatch = false;
-  let sawMiss = false;
   let resigned = -1;
   let shotMid = false;
   let missedBefore: number[] = [];
@@ -169,9 +168,10 @@ test("three people play a pairs game from a join link: a miss, a match, a resign
     const page = pages[index];
     if (page === undefined) throw new Error("no page");
 
-    // Once a match, a miss and a turn each have been seen, someone other than Ann who has already
-    // moved turns a first card and resigns: the card turns back face down on every page.
-    if (resigned < 0 && sawMatch && sawMiss && index !== 0 && moved.has(index)) {
+    // The first time someone other than Ann, who has already played a turn, is to play while a
+    // missed pair is showing, they turn a first card and resign: the card turns back face down on
+    // every page.
+    if (resigned < 0 && missedBefore.length > 0 && index !== 0 && moved.has(index)) {
       const first = await turnFirst(page, memory);
       if (missedBefore.length > 0) await expectMissedGone(first);
       await page.getByRole("button", { name: "Menu" }).click();
@@ -229,7 +229,6 @@ test("three people play a pairs game from a join link: a miss, a match, a resign
         await expect(page.getByRole("region", { name: "Final result" })).toBeVisible(FAR);
       }
     } else {
-      sawMiss = true;
       missedBefore = await missedCards(page);
       missedBy = index;
       expect(missedBefore).toHaveLength(2);
@@ -248,7 +247,13 @@ test("three people play a pairs game from a join link: a miss, a match, a resign
     expect((await readCards(page)).every((cell) => cell.face !== null)).toBe(true);
     await expect(page.locator(".ym-pr-turn")).toHaveCount(0);
   }
-  expect(resigned).toBeGreaterThan(0);
+  expect(
+    resigned,
+    "the mid-turn resignation never happened: the game ended before a player other than Ann was to play, having already played, with a missed pair showing",
+  ).toBeGreaterThan(0);
+  expect(sawMatch, "no pair was found, so the extra turn after a match was never checked").toBe(
+    true,
+  );
   await expectAccessible(ann);
   await ann.emulateMedia({ colorScheme: "dark" });
   await expectAccessible(ann);
