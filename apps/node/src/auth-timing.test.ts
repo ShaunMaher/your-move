@@ -57,6 +57,11 @@
  * check plants two (ADR 0006 addendum). Alpha A20 added a known account with email nudges on (its
  * invitation is mailed after the response, like the unknown arm's invite email): one run on
  * 2026-11-28, +0.26% against unknown (known +0.08%, two planted SELECTs +3.35% in the same run).
+ * Its review S-1 moved the inbound cap to one read of live `invites` rows and added an address
+ * whose earlier invitations' lobby was cancelled (rows read, none counting): one run on
+ * 2026-11-28, load about 3, +0.97% against unknown; in the same run hidden −0.30% (the inbound
+ * cap no longer writes, so its insert-against-update residual is gone), known with nudges on
+ * +0.39%, two planted SELECTs +3.39%.
  *
  * A join-link lookup refused for a block with a member vs one refused because the game is full
  * (alpha A18, 06 §6.8): the same design, one joiner looking up a fresh lobby of the same shape each
