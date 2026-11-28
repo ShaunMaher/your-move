@@ -29,3 +29,5 @@ gated (S-5), the Turnstile sentence waits for enforcement (P-6), and S-6 is acce
 | A21-P2-2 to A21-P2-5 | Fixed. | 05, 08 §4, 09 §1, 10 |
 
 After sign-off, the MR pipeline found one load-dependent test: the re-prompt's arrival focus asserted synchronously after `findByRole`, which 11 §4 forbids. The owner fixed it with `waitFor` (`apps/web/src/App.test.tsx`, commit `130abb4`).
+
+A second post-review fix waits for the address bar and the remembered return path in eight more of the slice's web tests, which read them straight after `findBy*` (commit `e8a65f8`).
