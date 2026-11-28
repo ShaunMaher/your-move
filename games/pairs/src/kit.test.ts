@@ -37,7 +37,7 @@ type Samples = Map<GridId, Map<string, number>>;
 function traced(): { engines: GameEngines; games: Played[]; samples: Samples } {
   const def = engines[1];
   const games: Played[] = [];
-  const samples: Samples = new Map(GRIDS.map((grid) => [grid.id, new Map()]));
+  const samples: Samples = new Map(GRIDS.map((grid) => [grid.id, new Map<string, number>()]));
   /** Each state seen, by its JSON: the game it belongs to, and whether a seat left on the way. */
   const lines = new Map<string, { game: Played; anyoneLeft: boolean }>();
   /** Follows a transition from `state` to `next`, if `state` is on a known line of play. */

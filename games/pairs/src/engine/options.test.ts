@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { catalog, resolveOptions } from "./options.js";
 import { FACES } from "./faces.js";
+import { catalog, resolveOptions } from "./options.js";
 import { catalogSchema, GRIDS, optionsSchema } from "./schemas.js";
 
 describe("resolveOptions (pairs §7)", () => {
