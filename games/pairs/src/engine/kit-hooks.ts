@@ -76,9 +76,10 @@ export function hiddenCards(state: State): number[] {
 
 /**
  * Shuffles the faces of the hidden cards among them (pairs §8.7), the same for every viewer, since
- * every viewer gets the same view and the hidden set is the same for all. If the shuffle reproduces the layout while
- * two hidden faces differ, the first hidden card's face is swapped with the first later one that
- * differs, so the state changes whenever it can. A finished game is returned unchanged.
+ * every viewer gets the same view and so the same hidden set. If the shuffle reproduces the
+ * layout while two hidden faces differ, the first hidden card's face is swapped with the first
+ * later one that differs, so the state changes whenever it can. A finished game is returned
+ * unchanged.
  */
 function perturbHidden(state: State, _viewer: Seat | null, rng: RandomSource): State {
   const hidden = hiddenCards(state);
