@@ -355,8 +355,8 @@ version, and the resource kinds.
 
 The CPU budget (5 ms per call at the 99th percentile) is the one check whose result depends on the
 host: it is measured on the machine running the kit, so a game within budget on your machine can
-fail on a slower one. Each timed sample is the fastest of three back-to-back runs, so a run your
-machine happened to preempt doesn't fail the game, but code that is slow every time still does.
+fail on a slower one. Each timed sample is the median of three back-to-back runs, so a single run
+your machine happened to preempt doesn't fail the game, but code slow on most calls still does.
 `games:verify --cpu-budget-ms <n>`, the `cpuBudgetMs` option of `runKit`, or the
 `KIT_CPU_BUDGET_MS` environment variable (a whole number of milliseconds from 1 to 50, read by
 every kit run not given a budget, so set it once for a slow CI runner) sets the budget, raising it

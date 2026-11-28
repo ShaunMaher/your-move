@@ -13,23 +13,27 @@ const WARM_UP_RUNS = 10;
 /** Timed samples per `worstCase` input. */
 const SAMPLES = { fast: 100, full: 300 } as const;
 /**
- * Back-to-back runs per sample; the sample is the fastest of them. A run the host preempted or
- * paused for garbage collection is slow on its own, while code that really is slow is slow in
- * every one (a full `pnpm test`, 16 threads busy, showed single 9 ms runs of a 0.5 ms p99 input).
+ * Back-to-back runs per sample; the sample is their median. A run the host preempted or paused for
+ * garbage collection is slow on its own (a full `pnpm test`, 16 threads busy, showed single 9 ms
+ * runs of a 0.5 ms p99 input), while code slow on most calls is slow in most runs. The median,
+ * not the fastest: a module slow on two calls in three must fail (CH8-S-1).
  */
 const REPETITIONS = 3;
+/** Runs on one side of the budget that decide a sample: a majority of its runs. */
+const MAJORITY = Math.floor(REPETITIONS / 2) + 1;
 
 /**
  * The CPU budget (02 §6.6, 08 T25): `validate` + `preview` + `apply` on each `worstCase` input,
- * timed on the host running the kit, after warm-up runs. Each timed sample is the fastest of
- * `REPETITIONS` back-to-back runs on fresh copies of the state, and the 99th percentile of the
- * samples must stay within the budget (`cpuBudgetMs`, default 5 ms). The slowest 1 % of samples are
- * dropped, and timing stops as soon as more samples than that are over budget, so a slow module
- * fails quickly.
+ * timed on the host running the kit, after warm-up runs. Each timed sample is the median of
+ * `REPETITIONS` back-to-back runs on fresh copies of the state and the action, and the 99th
+ * percentile of the samples must stay within the budget (`cpuBudgetMs`, default 5 ms). The slowest
+ * 1 % of samples are dropped, and timing stops as soon as more samples than that are over budget,
+ * so a slow module fails quickly.
  *
- * A sample's remaining runs are skipped once one is within budget: the fastest run is then within
- * budget whatever the others take, so the verdict and the slowest over-budget sample are exactly
- * those of always running all of them, and a fast module costs about one run per sample.
+ * A sample stops as soon as a majority of its runs are on one side of the budget, which decides its
+ * median. For a module whose cost doesn't depend on earlier calls, that doesn't change the result,
+ * and a fast module costs about two runs per sample. An over-budget sample is reported by the
+ * fastest of its over-budget runs: its median if all its runs were taken, a lower bound otherwise.
  *
  * A worst case must be a real move of its combination: a game with that many seats, its seat in
  * `toAct` and its action valid; and a playable seat count must have at least one, or the check
@@ -86,33 +90,40 @@ export function checkCpu(
         report.fail("cpu", `${at}: the action doesn't validate (${verdict.code})`, where);
         continue;
       }
-      /** One run of the three calls on a fresh copy of the state, in milliseconds. */
-      const time = (seed: number): number => {
+      /**
+       * One run of the three calls on fresh copies of the state and the action (a module can't
+       * carry anything from one run to the next on them), in milliseconds.
+       */
+      const time = (rngSeed: number): number => {
         const copy = jsonClone(state);
+        const move = jsonClone(action);
         const start = performance.now();
-        def.validate(copy, seat, action, resources);
-        def.preview?.(copy, seat, action, resources);
-        def.apply(copy, seat, action, seededRandom(seed));
+        def.validate(copy, seat, move, resources);
+        def.preview?.(copy, seat, move, resources);
+        def.apply(copy, seat, move, seededRandom(rngSeed));
         return performance.now() - start;
       };
       for (let run = 0; run < WARM_UP_RUNS; run += 1) time(run);
       let over = 0;
       let slowest = 0;
       for (let sample = 0; sample < samples && over <= allowed; sample += 1) {
-        // Every run of a sample does the same work: the same state, action and random seed.
-        let fastest = time(sample);
-        for (let run = 1; run < REPETITIONS && fastest > budget; run += 1) {
-          fastest = Math.min(fastest, time(sample));
+        // Every run of a sample does the same work, with a random seed no warm-up run used.
+        let within = 0;
+        const overRuns: number[] = [];
+        while (within < MAJORITY && overRuns.length < MAJORITY) {
+          const ms = time(WARM_UP_RUNS + sample);
+          if (ms > budget) overRuns.push(ms);
+          else within += 1;
         }
-        if (fastest > budget) {
+        if (overRuns.length >= MAJORITY) {
           over += 1;
-          slowest = Math.max(slowest, fastest);
+          slowest = Math.max(slowest, Math.min(...overRuns));
         }
       }
       if (over > allowed) {
         report.fail(
           "cpu",
-          `${at} is over the ${String(budget)} ms budget at the 99th percentile (${String(over)} samples over, the slowest ${slowest.toFixed(2)} ms; a sample is the fastest of ${String(REPETITIONS)} runs)`,
+          `${at} is over the ${String(budget)} ms budget at the 99th percentile (${String(over)} samples over, the slowest at least ${slowest.toFixed(2)} ms; a sample is the median of ${String(REPETITIONS)} runs)`,
           where,
         );
       }
