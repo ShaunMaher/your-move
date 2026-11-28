@@ -105,7 +105,7 @@ const TIMEOUT_MS = 600_000;
 
 describe("the generic test kit (02 §6) and its coverage (pairs §10)", () => {
   const { engines: wrapped, games, samples } = traced();
-  let report: KitReport = { failures: [], games: 0 };
+  let report: KitReport = { failures: [], games: 0, combos: 0 };
   beforeAll(() => {
     // The grids played come from the engine's own `test.optionInputs` hook, and every seat count
     // `players` allows. The CPU budget is timed in this thread's CPU time (02 §6.6). It is timed

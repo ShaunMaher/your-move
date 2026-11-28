@@ -32,9 +32,9 @@ import {
   type Combo,
   type Where,
 } from "./report.js";
-import type { KitOptions, KitReport } from "./types.js";
+import type { KitOptions, KitReport, KitShard } from "./types.js";
 
-export type { KitFailure, KitMode, KitOptions, KitProperty, KitReport } from "./types.js";
+export type { KitFailure, KitMode, KitOptions, KitProperty, KitReport, KitShard } from "./types.js";
 
 /** Games per rules version in fast mode, spread over its option sets and seat counts. */
 const FAST_GAMES = 300;
@@ -60,6 +60,15 @@ const ANY_ACTIONS = 2;
 const CHOICE_ACTIONS = 8;
 /** The largest `maxActions` the kit accepts: beyond it, random play can't show termination. */
 const MAX_ACTIONS_CAP = 1_000_000;
+/**
+ * Seeds per combination. The `k`-th combination a run plays (counting every rules version's, in
+ * order) takes its seeds from `seed + k * SEED_STRIDE` on: its games first, then its isolation
+ * pairs, then its CPU check. A combination's seeds depend only on its number, so a shard
+ * (`KitOptions.shard`) plays each of its combinations exactly as the whole run does.
+ */
+const SEED_STRIDE = 2 ** 20;
+/** Isolation pairs per combination (02 §6.7). */
+const ISOLATION_PAIRS = { fast: 3, full: 20 } as const;
 
 interface LogEntry {
   readonly kind: "action" | "resign" | "decline" | "timeout";
@@ -73,6 +82,8 @@ interface Sample {
   readonly state: unknown;
   readonly toAct: readonly Seat[];
   readonly acted: readonly Seat[];
+  /** Each viewer's view of `state` as JSON (each seat, then the public), as served at that step. */
+  readonly views: readonly string[];
 }
 
 /** How one game is played. */
@@ -89,9 +100,11 @@ type Observation = string;
 /** Plays games through one engine and checks them (02 §6.2–§6.5, §6.7). */
 class Kit extends Reporter {
   games = 0;
+  /** Combinations played (in this shard). */
+  combos = 0;
   /**
-   * Secrecy samples taken while a game was in progress; how many changed some other viewer's
-   * view; how many changed the state at all (02 §6.3 non-vacuity).
+   * Secrecy samples taken while a game of the current combination was in progress; how many
+   * changed some other viewer's view; how many changed the state at all (02 §6.3 non-vacuity).
    */
   private samples = 0;
   private viewPerturbed = 0;
@@ -99,10 +112,12 @@ class Kit extends Reporter {
   /** The resources of the combo being played (`test.resources`). */
   private resources: Resources = {};
   /**
-   * The rules version's `test.hiddenFromEveryone`, read once when `runKit` starts on that version
-   * (see {@link Kit.claimsSameView}), so a hook that changed its answer can't dodge the check.
+   * The rules version's `test.hiddenFromEveryone` and `test.hiddenInformation`, read once when
+   * `runKit` starts on that version (see {@link Kit.claims}), so a hook that changed its answer
+   * can't dodge the checks.
    */
   private sameView = false;
+  private hidden = false;
 
   readonly options: KitOptions;
 
@@ -179,16 +194,22 @@ class Kit extends Reporter {
         );
         throw new GameAborted();
       }
-      const sample = { state: jsonClone(state), toAct, acted: [...acted] };
+      // A copy of this point, made only when it is checked: the module may change `state` later.
+      const sample = (): Sample => ({
+        state: jsonClone(state),
+        toAct,
+        acted: [...acted],
+        views: seen.map((viewer) => viewer.view),
+      });
       if (plan.everyStep) {
-        this.secrecy(combo, sample, sampler, where);
+        this.secrecy(combo, sample(), sampler, where);
       } else if (reservoir.length < size) {
         // Reservoir sampling: every in-progress step is equally likely to be checked, early or
         // late (02 §6.3).
-        reservoir.push(sample);
+        reservoir.push(sample());
       } else {
         const slot = sampler.nextInt(step + 1);
-        if (slot < size) reservoir[slot] = sample;
+        if (slot < size) reservoir[slot] = sample();
       }
 
       for (const seat of toAct) this.legalAction(def, state, seat, rng, where);
@@ -505,7 +526,9 @@ class Kit extends Reporter {
 
   /**
    * Checks every viewer's view and summary against their schemas; returns their JSON, by viewer
-   * (each seat, then the public).
+   * (each seat, then the public). Each distinct JSON is checked once per step: viewers who get
+   * identical JSON are served the same thing, and a check of the same JSON gives the same answer
+   * (e.g. every viewer of a `hiddenFromEveryone` game).
    */
   private observeViews(
     def: AnyGameDefinition,
@@ -514,30 +537,48 @@ class Kit extends Reporter {
     where: Where,
     observe?: (o: Observation) => void,
   ): { view: string; summary: string }[] {
+    const views = new Set<string>();
+    const summaries = new Set<string>();
     return viewers(seats).map((viewer) => {
       const view = this.call("schema", "view", where, () => def.view(state, viewer));
-      this.check(
-        def.viewSchema.safeParse(view).success,
-        "schema",
-        `view for ${String(viewer)} doesn't match viewSchema`,
-        where,
-      );
+      const viewJson = canonical(view);
+      if (!views.has(viewJson)) {
+        this.check(
+          def.viewSchema.safeParse(view).success,
+          "schema",
+          `view for ${String(viewer)} doesn't match viewSchema`,
+          where,
+        );
+        views.add(viewJson);
+      }
       const summary = this.call("schema", "summary", where, () => def.summary(state, viewer));
-      this.check(
-        listSummarySchema.safeParse(summary).success,
-        "schema",
-        `summary for ${String(viewer)} isn't a ListSummary`,
-        where,
-      );
-      const seen = { view: canonical(view), summary: canonical(summary) };
-      observe?.(`view ${String(viewer)} ${seen.view} ${seen.summary}`);
-      return seen;
+      const summaryJson = canonical(summary);
+      if (!summaries.has(summaryJson)) {
+        this.check(
+          listSummarySchema.safeParse(summary).success,
+          "schema",
+          `summary for ${String(viewer)} isn't a ListSummary`,
+          where,
+        );
+        summaries.add(summaryJson);
+      }
+      observe?.(`view ${String(viewer)} ${viewJson} ${summaryJson}`);
+      return { view: viewJson, summary: summaryJson };
     });
   }
 
-  /** Reads a rules version's `hiddenFromEveryone` once, before any game of it is played. */
-  claimsSameView(def: AnyGameDefinition): void {
+  /**
+   * Reads a rules version's `hiddenFromEveryone` and `hiddenInformation` once, before any game of
+   * it is played; the first requires the second (02 §6.3).
+   */
+  claims(def: AnyGameDefinition): void {
     this.sameView = def.test.hiddenFromEveryone === true;
+    this.hidden = def.test.hiddenInformation;
+    if (this.sameView && !this.hidden) {
+      this.fail("secrecy", "hiddenFromEveryone is set but hiddenInformation isn't", {
+        version: def.version,
+      });
+    }
   }
 
   /**
@@ -593,20 +634,22 @@ class Kit extends Reporter {
         "perturbHidden changed the state it was given",
         where,
       );
-      this.tally(def, state, perturbed, viewer, seats, before, where);
+      this.tally(def, sample, perturbed, viewer, seats, before, where);
       const who = viewer === null ? "the public" : `seat ${String(viewer)}`;
+      const hidden = (what: string): string =>
+        `${what} for ${who} depends on information hidden from ${who}`;
       const same = (what: string, fn: (s: unknown) => unknown): void => {
         // An exception is a bug whatever the state (02 §2.1 rule 3), so it counts as schema.
         const a = this.call("schema", what, where, () => fn(state));
         const b = this.call("schema", `${what} (perturbed)`, where, () => fn(perturbed));
-        this.check(
-          sameJson(a, b),
-          "secrecy",
-          `${what} for ${who} depends on information hidden from ${who}`,
-          where,
-        );
+        this.check(sameJson(a, b), "secrecy", hidden(what), where);
       };
-      same("view", (s) => def.view(s, viewer));
+      // The view of `state` is the JSON this viewer was served at that step.
+      const view = this.call("schema", "view (perturbed)", where, () =>
+        def.view(perturbed, viewer),
+      );
+      const served = sample.views[viewer ?? seats];
+      this.check(canonical(view) === served, "secrecy", hidden("view"), where);
       same("summary", (s) => def.summary(s, viewer));
       same("toAct", (s) => def.toAct(s));
       same("seatStatus", (s) => def.seatStatus(s));
@@ -642,7 +685,7 @@ class Kit extends Reporter {
    */
   private tally(
     def: AnyGameDefinition,
-    state: unknown,
+    sample: Sample,
     perturbed: unknown,
     viewer: Seat | null,
     seats: number,
@@ -651,11 +694,13 @@ class Kit extends Reporter {
   ): void {
     this.samples += 1;
     if (canonical(perturbed) !== before) this.statePerturbed += 1;
-    const others = viewers(seats).filter((other) => other !== viewer);
-    const changed = others.some((other) => {
-      const a = this.call("schema", "view", where, () => def.view(state, other));
+    // A module that sets hiddenFromEveryone is counted by the state alone (see `vacuity`).
+    if (this.sameView) return;
+    // Each other viewer's view of the sample is the JSON they were served at that step.
+    const changed = viewers(seats).some((other, index) => {
+      if (other === viewer) return false;
       const b = this.call("schema", "view (perturbed)", where, () => def.view(perturbed, other));
-      return !sameJson(a, b);
+      return canonical(b) !== sample.views[index];
     });
     if (changed) this.viewPerturbed += 1;
   }
@@ -780,18 +825,16 @@ class Kit extends Reporter {
     }
   }
 
-  /** Whether the perturbation samples were vacuous (02 §6.3). */
-  vacuity(def: AnyGameDefinition): void {
+  /**
+   * Whether the perturbation samples since the last call were vacuous (02 §6.3): those of one
+   * combination's games in full mode, of the whole rules version's in fast mode (see `runKit`).
+   */
+  vacuity(def: AnyGameDefinition, combo?: Combo): void {
     const { samples, viewPerturbed, statePerturbed } = this;
     this.samples = 0;
     this.viewPerturbed = 0;
     this.statePerturbed = 0;
-    if (this.sameView && !def.test.hiddenInformation) {
-      this.fail("secrecy", "hiddenFromEveryone is set but hiddenInformation isn't", {
-        version: def.version,
-      });
-    }
-    if (!def.test.hiddenInformation || samples === 0) return;
+    if (!this.hidden || samples === 0) return;
     // A perturbation counts when it changes what another viewer sees. Only a module that declares
     // its hidden information is seen by no seat at all (e.g. deck order alone) is counted by
     // whether the state changed: otherwise reordering a deck while hands leak would pass.
@@ -801,8 +844,10 @@ class Kit extends Reporter {
     if (counted * 2 < samples) {
       this.fail(
         "secrecy",
-        `perturbHidden changed ${what} in only ${String(counted)} of ${String(samples)} samples taken in progress; it must change at least half`,
-        { version: def.version },
+        `perturbHidden changed ${what} in only ${String(counted)} of ${String(samples)} samples taken in progress${combo === undefined ? "" : ` under options ${canonical(combo.options)}`}; it must change at least half`,
+        combo === undefined
+          ? { version: def.version }
+          : { version: def.version, seats: combo.seats },
       );
     }
   }
@@ -892,7 +937,9 @@ class Kit extends Reporter {
     };
     const alone = [...run([seedA]), ...run([seedB])];
     const together = run([seedA, seedB]);
-    if (!sameJson(alone, together)) {
+    const same = (a: readonly Observation[], b: readonly Observation[] | undefined): boolean =>
+      a.length === b?.length && a.every((observation, i) => observation === b[i]);
+    if (alone.length !== together.length || !alone.every((seen, i) => same(seen, together[i]))) {
       this.fail(
         "isolation",
         `games ${String(seedA)} and ${String(seedB)} see different results when played interleaved through the same engine than when played alone`,
@@ -908,6 +955,11 @@ class Kit extends Reporter {
  * per option set and seat count, a tenth of them with secrecy checked at every step. Half the
  * games have no seat leaving, so long games run to their end (02 §6.4).
  *
+ * Non-vacuity (02 §6.3) is judged per option set and seat count in full mode, and per rules
+ * version in fast mode, where a combination may have only three games. So a full-mode run can be
+ * sharded (`shard`): each combination is played, with the seeds of its number, and judged exactly
+ * as in the whole run.
+ *
  * The CPU budget is the `cpuBudgetMs` option, else the host's `KIT_CPU_BUDGET_MS` (set in CI to
  * its calibrated value), else the reference 5 ms (./budget.ts).
  *
@@ -920,6 +972,22 @@ export function runKit(engines: GameEngines, given: KitOptions): KitReport {
     fromEnvironment?.ok === true && fromEnvironment.ms !== undefined
       ? { ...given, cpuBudgetMs: fromEnvironment.ms }
       : given;
+  const shard = options.shard ?? { index: 1, count: 1 };
+  if (!isShard(shard)) {
+    throw new RangeError(
+      `shard must be index/count with 1 <= index <= count; it is ${String(shard.index)}/${String(shard.count)}`,
+    );
+  }
+  // Fast mode judges non-vacuity over a whole rules version, which a shard doesn't play.
+  if (options.mode === "fast" && shard.count > 1) {
+    throw new RangeError("only a full-mode run can be sharded");
+  }
+  const pairs = ISOLATION_PAIRS[options.mode];
+  // A combination's games, isolation pairs and CPU check each take seeds from its stride.
+  const maxGames = SEED_STRIDE - 2 * pairs - 1;
+  if (options.games !== undefined && options.games > maxGames) {
+    throw new RangeError(`games must be at most ${String(maxGames)}`);
+  }
   const kit = new Kit(options);
   if (fromEnvironment?.ok === false) kit.fail("cpu", fromEnvironment.problem);
   if (options.manifest !== undefined) {
@@ -927,36 +995,52 @@ export function runKit(engines: GameEngines, given: KitOptions): KitReport {
       kit.fail("manifest", message);
     }
   }
-  let seed = options.seed ?? 1;
+  const base = options.seed ?? 1;
   const stop = (): boolean => options.stopAtFirstFailure === true && kit.failures.length > 0;
+  // Every combination of every rules version is numbered in order, whichever shard plays it.
+  let comboNumber = -1;
   for (const def of Object.values(engines)) {
-    kit.claimsSameView(def);
+    kit.claims(def);
     const combos = resolveCombos(kit, def, options);
+    // Fast mode spreads its games over all of the version's combinations, played or not.
     const perCombo =
       options.games ??
       (options.mode === "full"
         ? FULL_GAMES
         : Math.max(3, Math.ceil(FAST_GAMES / Math.max(1, combos.length))));
     for (const combo of combos) {
+      comboNumber += 1;
+      if (comboNumber % shard.count !== shard.index - 1 || stop()) continue;
+      const first = base + comboNumber * SEED_STRIDE;
+      kit.combos += 1;
       for (let game = 0; game < perCombo && !stop(); game += 1) {
-        seed += 1;
         kit.games += 1;
-        kit.play(combo, seed, {
+        kit.play(combo, first + game, {
           // Half the games run without exits, so long games reach their end (02 §6.4).
           exits: game % 2 === 1,
           everyStep: options.mode === "full" && EVERY_STEP_SLOTS.has(game % EVERY_STEP_PERIOD),
         });
       }
-      if (stop()) break;
-      checkCpu(kit, combo, seed, options);
-      const pairs = options.mode === "full" ? 20 : 3;
+      if (options.mode === "full") kit.vacuity(def, combo);
+      if (stop()) continue;
+      checkCpu(kit, combo, first + perCombo + 2 * pairs, options);
       for (let pair = 0; pair < pairs && !stop(); pair += 1) {
-        seed += 2;
-        kit.isolation(combo, seed - 1, seed);
+        const seed = first + perCombo + 2 * pair;
+        kit.isolation(combo, seed, seed + 1);
       }
     }
-    kit.vacuity(def);
+    if (options.mode === "fast") kit.vacuity(def);
     if (stop()) break;
   }
-  return { failures: kit.failures, games: kit.games };
+  return { failures: kit.failures, games: kit.games, combos: kit.combos };
+}
+
+/** Whether `shard` names one of `count` shards, numbered from 1. */
+function isShard(shard: KitShard): boolean {
+  return (
+    Number.isSafeInteger(shard.index) &&
+    Number.isSafeInteger(shard.count) &&
+    shard.index >= 1 &&
+    shard.index <= shard.count
+  );
 }
