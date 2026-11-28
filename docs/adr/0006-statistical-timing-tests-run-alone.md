@@ -23,7 +23,7 @@ loaded runner passes would leave a test that detects nothing.
 
 - **Statistical timing tests are measurements.** They run in a job of their own, `test:timing`,
   and never alongside another suite. `pnpm test` skips them, so the `test` job does too. `test:timing` runs on the arm64
-  runner, after this pipeline's other arm64 jobs (`test:worker` and `build:image:arm64`) have
+  runner, after this pipeline's other arm64 job (`build:image:arm64`) has
   finished. It is a required job.
 - **The suite is designed to pass on a quiet machine**, with the evidence recorded in the file's
   header:
@@ -56,7 +56,7 @@ typed addresses too; the file now takes about 70 s on a developer laptop.
 
 ## Consequences
 
-- One more job per pipeline, on the arm64 runner, starting only after its other arm64 work. The
+- One more job per pipeline, on the arm64 runner, starting only after its other arm64 work (the arm64 image build). The
   pipeline takes longer by the suite's runtime there.
 - A change that slows one sign-in path relative to another still fails a merge request: the
   deterministic checks fail in `test`, or the measured shift fails in `test:timing`.

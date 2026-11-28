@@ -213,19 +213,19 @@ build job can read it (08 §6). Rotation is noted in the operator's private note
 Pipelines run for merge requests and for `main`/tags (no duplicate branch pipelines). The pnpm
 store and mise's tools are cached inside the project directory, keyed by `pnpm-lock.yaml` and
 `mise.lock` and per architecture (mise's tools and native packages differ); only one job per
-architecture writes them (validate on amd64), and every job checks pnpm uses the cached store.
+architecture writes them (validate on amd64, `test:timing` on arm64), and every job checks pnpm
+uses the cached store.
 Jobs run unprivileged (no Docker-in-Docker); untagged jobs run on the amd64 shared runner, whose
-CPU must offer x86-64-v2 (SSE4.2): workerd's linux-64 build fails to start without it. Until it
-does, the workerd tests (the Worker half of the contract suite, the D1 repository contract suite
-and the gmail redirect test) run in their own job on the arm64 runner, which also
-writes the arm64 caches (M0 review CI-1). Stages, in order:
+CPU must offer x86-64-v2 (SSE4.2): workerd's linux-64 build fails to start without it (M0 review
+CI-1; the runner's VM now does, so the workerd tests run in `test` with everything else). Stages,
+in order:
 
 1. **validate** — `pnpm games:generate` first (§3), then `prettier --check`, ESLint, `tsc -b`,
    `pnpm lint:arch`, knip, commitlint (MR),
    changeset check (§7), committed generated-code drift (§3), OpenAPI breaking-change check against
    the target branch (`oasdiff breaking`, 05 §Versioning), API Extractor report check.
 2. **test** — Vitest with coverage (unit, integration, property, component, the **full** game
-   kit, API contract on both runtimes, the Worker half on arm64 for now, above); JUnit and
+   kit, API contract on both runtimes, workerd included); JUnit and
    Cobertura reports to the MR.
 3. **build** — `pnpm games:verify --fast`, web app, Node server build (`apps/node/dist`), Worker
    bundle, then `pnpm games:check-inputs` (the bundler-input closure check, 02 §7.3; the whole

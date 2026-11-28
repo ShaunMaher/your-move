@@ -379,10 +379,11 @@ anything or running game code while the deploy token is present.
 
 The amd64 runner's CPU must offer **x86-64-v2 (SSE4.2)**: workerd's linux-64 build, which the
 workerd tests run, fails at startup without it (an empty `jsg.Error` at isolate bootstrap). A VM
-on the generic `qemu64` CPU model doesn't qualify; use the `host` CPU type, or at least an
-x86-64-v2 model. Until the shared amd64 runner offers it, the workerd tests (the Worker contract
-suite, the D1 repository contract suite and the gmail redirect test) run in the `test:worker` job
-on the arm64 runner (`arch-arm64`); when it does, delete that job and the `--exclude`s in `test`. Caches are kept per architecture (`CACHE_ARCH`).
+on the generic `qemu64` CPU model doesn't qualify; use the `host` CPU type (`host-passthrough`),
+or at least an x86-64-v2 model. The shared runner's VM now does (2026-11-28), so the workerd tests
+(the Worker contract suite, the D1 repository contract suite and the gmail redirect test) run in
+the ordinary `test` job; the separate arm64 `test:worker` job they needed while it didn't is gone.
+Caches are kept per architecture (`CACHE_ARCH`); `test:timing` writes the arm64 ones.
 
 `test:timing` (the statistical sign-in timing suite, ADR 0006) measures on the arm64 runner, after
 this pipeline's other arm64 jobs. Jobs of other pipelines can still share that runner while it
@@ -404,7 +405,7 @@ developer laptop (2026-11-24), the words engine's worst cases take 0.02 ms media
 at the 99th percentile; budget failures on the runner are pauses (garbage collection, a busy
 host), not engine cost. Revisit the value when the runner changes.
 
-The test jobs (`test`, `test:worker`) keep their scratch files (temporary SQLite databases,
+The `test` job keeps their scratch files (temporary SQLite databases,
 bundles) on tmpfs: `TMPDIR` points into `/dev/shm`. On the shared amd64 runner the disk is shared
 with other jobs' image builds, and an fsync there can stall for hundreds of ms: tests that open a
 real database file (each committing a dozen or more times while migrating) took 4–19 s instead of

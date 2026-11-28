@@ -5,7 +5,7 @@
  * fetch double in packages/server; it can't be probed here, because Wrangler's test harness sends
  * a Worker's outbound requests through a proxy that follows redirects itself.
  *
- * workerd needs SSE4.2 on x86-64, so CI runs this file in the arm64 `test:worker` job.
+ * workerd needs SSE4.2 on x86-64, which CI's amd64 runner offers; this file runs in the `test` job.
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";

@@ -3,8 +3,8 @@
  * `wrangler d1 migrations apply` from the shared migrations exactly as a deployment would be, then
  * reached from this test process through Wrangler's platform proxy.
  *
- * workerd needs SSE4.2 on x86-64, so CI runs this file in the arm64 `test:worker` job (see
- * .gitlab-ci.yml), like the Worker half of the API contract suite.
+ * workerd needs SSE4.2 on x86-64, which CI's amd64 runner offers (docs/deploy.md "CI runners");
+ * this file runs in the `test` job with the Worker half of the API contract suite.
  */
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";

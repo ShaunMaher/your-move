@@ -82,11 +82,8 @@ export default defineConfig({
         // Process entry points: exercised by the e2e suite and the Docker smoke run, not unit tests.
         "apps/node/src/main.ts",
         "apps/worker/src/index.ts",
-        // The D1 adapter: exercised by the D1 repository contract suite (tests/contract), which
-        // runs workerd and so runs in CI's arm64 test:worker job, outside the coverage run.
-        "apps/worker/src/d1.ts",
         // The Worker's dictionary loader: it reads the static-assets binding, so it runs only in
-        // workerd, under the Worker contract suite (tests/contract, CI's test:worker job).
+        // workerd, under the Worker contract suite (tests/contract), where V8 coverage can't see it.
         "apps/worker/src/dictionaries.ts",
         // The shared repository contract suite and its entry point: test code that ships in src/
         // so both adapters' tests can import it (@your-move/server/testing).
