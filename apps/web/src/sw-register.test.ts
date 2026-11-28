@@ -38,7 +38,9 @@ function fakes(options: { controlled: boolean; waiting?: boolean }) {
       registration.installing = installing;
       for (const listener of registrationListeners) listener();
     },
-    takeOver() {
+    /** A controller change; pass the current controller to fire the event with none. */
+    takeOver(next: object = {}) {
+      container.controller = next;
       for (const listener of containerListeners) listener();
     },
   };
@@ -82,6 +84,15 @@ describe("watchForUpdates", () => {
     const f = fakes({ controlled: false });
     const { reload } = watch(f);
     f.takeOver();
+    expect(reload).not.toHaveBeenCalled();
+    f.takeOver();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("does not reload for a controllerchange that leaves the controller as it was", () => {
+    const f = fakes({ controlled: true });
+    const { reload } = watch(f);
+    f.takeOver(f.container.controller ?? {});
     expect(reload).not.toHaveBeenCalled();
     f.takeOver();
     expect(reload).toHaveBeenCalledOnce();

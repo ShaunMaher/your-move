@@ -27,6 +27,9 @@ export function watchForUpdates(
   // asked for the update. The first worker claiming an uncontrolled page also fires
   // `controllerchange`, and that must not reload a page that has just loaded.
   let controlled = container.controller !== null;
+  // WebKit under load can fire `controllerchange` for a claim the page already saw when it
+  // started watching; with the controller unchanged there is nothing to reload for.
+  let seen = container.controller;
   const offer = (worker: ServiceWorker) => {
     onUpdate({
       apply: () => {
@@ -37,10 +40,14 @@ export function watchForUpdates(
   // An update is a worker that is not the one in control. Under load WebKit has been seen to show
   // the page its controller (the first worker, claiming it) before the page has seen that same
   // worker leave `installed`, so "something controls the page" alone offered the very first
-  // install as an update; the controller must be a different worker.
+  // install as an update; the controller must be a different worker. The comparison relies on the
+  // browser keeping one `ServiceWorker` object per worker per client (the Service Worker spec);
+  // a browser that broke that would fail toward an extra offer, never toward hiding an update.
   const replacesController = (worker: ServiceWorker) =>
     container.controller !== null && container.controller !== worker;
-  // A worker already waiting from an earlier visit.
+  // A worker already waiting from an earlier visit. The guard cannot be false here (a waiting
+  // worker is never the controller); it is kept for symmetry, the race being the `statechange`
+  // path's alone.
   if (registration.waiting !== null && replacesController(registration.waiting)) {
     offer(registration.waiting);
   }
@@ -52,6 +59,8 @@ export function watchForUpdates(
     });
   });
   container.addEventListener("controllerchange", () => {
+    if (container.controller === seen) return;
+    seen = container.controller;
     const wasControlled = controlled;
     controlled = true;
     if (wasControlled) reload();

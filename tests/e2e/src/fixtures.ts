@@ -3,7 +3,7 @@
  * every test fails on a Content-Security-Policy violation (07 §4). `friend` is a second person's
  * page, for tests where two people play.
  */
-import { test as base, expect, type Page } from "@playwright/test";
+import { test as base, expect, type Page, type TestInfo } from "@playwright/test";
 
 import { WARMUP_TIMEOUT_MS } from "./budgets.js";
 
@@ -45,6 +45,19 @@ async function trackCspViolations(page: Page): Promise<() => Promise<Violation[]
   };
 }
 
+/**
+ * On a failed test, Playwright's failure screenshot inserts an inline `<style>` (to freeze
+ * animations) before these fixtures collect, and the page's CSP rightly blocks and reports it.
+ * That is Playwright's, not the page's, and only buries the real failure, so it is dropped, and
+ * only once the test has already failed: a passing test never has a violation excused.
+ */
+function withoutScreenshotNoise(violations: Violation[], testInfo: TestInfo): Violation[] {
+  if (testInfo.status === testInfo.expectedStatus) return violations;
+  return violations.filter(
+    (violation) => !(violation.directive.startsWith("style-src") && violation.blocked === "inline"),
+  );
+}
+
 export const test = base.extend<
   { cspViolations: Violation[]; friend: Page },
   { browserWarmup: undefined }
@@ -72,12 +85,15 @@ export const test = base.extend<
     { scope: "worker", auto: true, timeout: WARMUP_TIMEOUT_MS, title: "warm up the browser" },
   ],
   cspViolations: [
-    async ({ page }, use) => {
+    async ({ page }, use, testInfo) => {
       const collect = await trackCspViolations(page);
       const violations: Violation[] = [];
       await use(violations);
       violations.push(...(await collect()));
-      expect(violations, "Content-Security-Policy violations").toEqual([]);
+      expect(
+        withoutScreenshotNoise(violations, testInfo),
+        "Content-Security-Policy violations",
+      ).toEqual([]);
     },
     { auto: true },
   ],
@@ -100,7 +116,7 @@ export const test = base.extend<
     const page = await context.newPage();
     const collect = await trackCspViolations(page);
     await use(page);
-    const violations = await collect();
+    const violations = withoutScreenshotNoise(await collect(), testInfo);
     await context.close();
     expect(violations, "Content-Security-Policy violations (second player)").toEqual([]);
   },
