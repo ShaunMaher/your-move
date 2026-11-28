@@ -62,8 +62,12 @@ dragon motif or look.
 1. Turn order = seat order (the framework's `seatOrder`, 02 §4).
 2. The deck (all 35 tiles) is shuffled with the `rng`.
 3. **Marker phase**: in turn order, each player places their marker on any unoccupied edge notch
-   (action `place-marker`). The tile phase starts after every player has placed.
-4. Each player is dealt `handSize` tiles, in turn order, when the tile phase starts.
+   (action `place-marker`). The tile phase starts after every player has placed. The player to act
+   is always the first player in turn order who is not out and hasn't placed, so a player who
+   resigns or declines in this phase is simply passed over.
+4. Each player is dealt `handSize` tiles, in turn order (a full hand each, from the top of the
+   deck, so no new random draw), when the tile phase starts. The first player in turn order who is
+   not out takes the first tile turn.
 
 ## 3. A turn (tile phase)
 
@@ -84,6 +88,7 @@ dragon motif or look.
    avoids it. If every option eliminates them, they must still play one. With the variant
    `"allowed"`, any choice may be made.
 5. **Draw**: if the mover survived, they draw one tile (§4). An eliminated mover doesn't draw.
+   Eliminated players are marked out (and the draw-order token passed on, §4) before this draw.
 6. Eliminated players' hand tiles are shuffled back into the deck and dealt out (§4).
 7. **Next player**: the next surviving player in turn order who holds at least one tile. Surviving
    players with empty hands are skipped and listed in the record (`skipped`); they are never put in
@@ -100,13 +105,19 @@ flags eliminations before the player confirms.
 - When tiles return to the deck (from eliminated, resigned or timed-out players' hands), they're
   shuffled in and dealt out at once: one at a time in turn order, starting with the token holder (or,
   if nobody holds it, with the next surviving player after the mover), to each surviving player with
-  fewer than `handSize` tiles, until every hand is full or the deck is empty.
+  fewer than `handSize` tiles, until every hand is full or the deck is empty. "One at a time" goes
+  round: each short player gets one tile per pass. For a resignation or timeout the leaving player
+  counts as the mover; "after" always wraps around in turn order. The shuffle happens whenever
+  tiles return, even if nobody is short or the game has just ended.
   - If the deck runs out while someone is still short, the token goes to the next short player in
     turn order after the last player dealt to.
   - Otherwise the token is cleared.
 - If the token holder is eliminated, resigns or times out, the token passes to the next surviving
   player in turn order after them who has fewer than `handSize` tiles; if there is none, it's
-  cleared.
+  cleared. This happens before the returned tiles are dealt, so the deal starts with the new
+  holder.
+- So the token is only ever held while the deck is empty, and only by a surviving player who is
+  short.
 
 ## 5. End of game
 
@@ -120,11 +131,13 @@ flags eliminations before the player confirms.
   6 × 6 board with 35 tiles leaves one square empty), every remaining player shares rank 1.
 - **Resign / timeout**: the player's marker is removed (`out`, reason `resigned` / `timed_out`),
   their hand returns to the deck (§4), and play continues if two or more remain. With one left,
-  they win. A player who declines or times out before their first action (placing their marker)
+  they win. If it was their turn, play passes to the next player as after a move (§3 step 7);
+  otherwise the player to act keeps the turn. A player who declines or times out before their first action (placing their marker)
   goes through `onResign(…, "decline")` (02 §2.1 rule 9): the marker and hand are handled the same
   way, but the record has type `decline` and says they declined, never that they resigned; the
   framework records them as `declined` and leaves them out of the ranking (02 §4).
-- There are no points; `result()` returns ranks only.
+- There are no points; `result()` returns ranks only. Its `endReason` is `last-standing`,
+  `wipe-out` or `board-full`.
 
 ## 6. Options (variants)
 
@@ -136,6 +149,15 @@ Options = {
 }
 ```
 
+- Every field is optional in the input and takes the default shown (`boardSize` 6, `handSize` 3,
+  `selfElimination` `"avoidIfPossible"`); `undefined` or `null` means all defaults. Errors from
+  `resolveOptions`, as in words (words §10.3): `OPTIONS_NOT_OBJECT`; `UNKNOWN_OPTION` (`detail: {
+  option }` only when the key matches `^[A-Za-z0-9_]{1,64}$`, so arbitrary input is never echoed);
+  `INVALID_OPTION` (`detail: { option }`) for a value outside the ones above. Options carry no
+  versions.
+- `catalog()`: `{ boardSize: { values: [6], default: 6 }, handSize: { min: 1, max: 3, default: 3
+  }, selfElimination: { values: ["avoidIfPossible", "allowed"], default: "avoidIfPossible" },
+  tiles: 35 }`.
 - `players(options)` = `{ min: 2, max: 8 }`. No resources. `validateStart` always succeeds.
 - `defaultTurnTimeoutDays` = 3 (groups of kids need a quicker pace). The timeout itself is a
   framework setting (02 §4); seat order is the framework's `seatOrder`.
@@ -145,34 +167,53 @@ Options = {
 
 ## 7. Module contract implementation
 
-- **State** (secret): `{ deck (ordered), hands[seat], board[r][c]: { tileId, rotation } | null,
-  markers[seat]: { pos: { r, c, n } | null /* null = edge exit or not placed */, out?: { atAction } },
-  phase: "markers" | "tiles", turn, tokenHolder }`. Hidden information for `perturbHidden`: the deck
-  order and other players' hands.
+- **State** (secret): `{ options, deck (ordered, drawn from the front), hands[seat] (ascending
+  tile ids), board[r][c]: { tileId, rotation } | null, markers[seat]: { pos: { r, c, n } | null /*
+  null = edge exit, removed, or not placed */, out: { atAction, reason } | null }, phase: "markers" |
+  "tiles", turn: Seat | null /* the seat to act; null once over */, moves /* module transitions so
+  far */, tokenHolder: Seat | null, endReason: null | "last-standing" | "wipe-out" | "board-full"
+  }`. `out.atAction` is the value of `moves` before the transition that put the seat out, so seats
+  out in the same transition share it (the elimination order, §5); `out.reason` is `eliminated`,
+  `resigned`, `timed_out` or `declined`. Hidden information for `perturbHidden`: the deck order
+  and other players' hands.
 - **seatStatus**: `out` once a marker is eliminated, resigned or timed out.
 - **Actions**:
-  `{ type: "place-marker", edgeNotch: number /* 0..8·boardSize−1, §1 */ }`,
-  `{ type: "place-tile", tileId: number, rotation: 0 | 1 | 2 | 3 }`.
-- **Errors** (`errorCodes`), checked in this order (first failure wins): `WRONG_PHASE` (action type
+  `{ type: "place-marker", edgeNotch: number /* any integer; 0..8·boardSize−1 is legal, §1 */ }`,
+  `{ type: "place-tile", tileId: number /* 0..34 */, rotation: 0 | 1 | 2 | 3 }`.
+- **Errors** (`errorCodes`), checked in this order (first failure wins): `NOT_TO_ACT` (`validate`
+  for a seat that isn't in `toAct`, which the framework never asks) → `WRONG_PHASE` (action type
   doesn't match the phase) → `OUT_OF_RANGE` (`edgeNotch` outside `0..8·boardSize−1`; every index in
   range is an edge notch, §1) → `NOTCH_OCCUPIED` (place-marker) / `NOT_IN_HAND` (place-tile) →
   `SELF_ELIMINATION_AVOIDABLE`. `SELF_ELIMINATION_AVOIDABLE` is computed only from the board,
-  markers and the mover's own hand.
-- **View**: board, all markers (positions, out status and reasons), phase, `toAct`, `deckCount`,
-  `handCounts`, `yourHand` (null for the public view), `tokenHolder`. History comes from the
-  framework's history endpoint (02 §3), not the view. After the game ends: everyone's remaining hand.
-- **Record** (`PathsRecord`): `{ seat, type: "place-marker" | "place-tile" | "resign" | "decline" | "timeout",
-  tileId?, rotation?, square?, moves: [{ seat, path: { r, c, n }[] }], eliminated: Seat[],
-  collided: Seat[][], skipped: Seat[] }`. The full movement trace is public, so every client can
-  animate it. Records never mention drawn or returned tiles.
+  markers and the mover's own hand. None has a `detail`. The option errors are in §6.
+- **View**: `{ boardSize, phase, board, markers[seat]: { pos, out }, toAct, deckCount, handCounts,
+  yourHand (null for the public view), hands (null while the game is in progress; afterwards
+  everyone's remaining hand), tokenHolder, endReason }`, with `board`, `pos` and `out` as in the
+  state. History comes from the framework's history endpoint (02 §3), not the view.
+- **Record** (`PathsRecord`), one shape per `type`, every one with `{ seat, moves: [{ seat, path: {
+  r, c, n }[] }], eliminated: Seat[], collided: Seat[][], skipped: Seat[] }`: `place-marker` adds
+  `edgeNotch`; `place-tile` adds `tileId`, `rotation` and `square: { r, c }`; `resign`, `decline`
+  and `timeout` add nothing. `moves` lists, in seat order, every marker the tile moved; its `path`
+  starts with the marker's position before the move and then gives, for each tile it crossed in
+  order, the notch it left that tile by, as `{ r, c, n }` of that tile's square. A marker that
+  survives faces the square across the last notch (its new position); one whose last notch is an
+  edge notch is out. `eliminated` lists in seat order the markers the move put out; `collided` the
+  pairs among them that collided (§3), each pair ascending, pairs in order of their first seat.
+  The full movement trace is public, so every client can animate it. Records never mention drawn
+  or returned tiles.
 - **Preview**: not needed on the server; the client engine computes it locally (§3).
-- `describe`: `[{seat:0}, " placed a tile — ", {seat:2}, " and ", {seat:3}, " crashed!"]`; for
-  `decline`: `[{seat:1}, " declined the game"]`;
-  `summary`: headline "4 left of 6 · your turn".
+- `describe`: `[{seat:0}, " placed a tile — ", {seat:2}, " and ", {seat:3}, " crashed!"]` (a
+  collision; a marker that just ran off the board "ran off the board"); `[{seat:0}, " placed
+  their marker"]`; `[{seat:1}, " resigned"]`, `[{seat:1}, " ran out of time"]`; for `decline`:
+  `[{seat:1}, " declined the game"]`. `summary`: headline "4 left of 6 · your turn" (or "· ",
+  `{seat}`, " to play" for anyone else); once over, `{seat}` " won" for last standing and "Shared
+  win" for the other endings.
 - **Termination bound** (`maxActions`): `players` (markers) + 35 (tiles) + `players`
   (resigns/timeouts). Skips are not actions.
 - **worstCase**: late-game boards where a placement moves every surviving marker along the longest
-  available chains.
+  available chains. Such boards can't be written down by hand for every seat count, so the hook
+  plays seeded random games and keeps the legal placements whose traces are longest, together with
+  placements that eliminate the mover (which make `validate` try every other option in hand).
 
 ## 8. UI notes (games/paths client)
 
