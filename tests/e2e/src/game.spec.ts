@@ -9,7 +9,7 @@ import type { Page } from "@playwright/test";
 
 import { GAME_LOOP_BUDGET_MS, GAME_TEST_TIMEOUT_MS, RESIGN_TEST_TIMEOUT_MS } from "./budgets.js";
 import { expect, test } from "./fixtures.js";
-import { createAndAccept, FAR, isMyTurn, refocus } from "./game-steps.js";
+import { createAndAccept, FAR, isMyTurn, refocus, shot } from "./game-steps.js";
 import {
   expectAccessible,
   expectOnlyShellAndWordLists,
@@ -18,21 +18,6 @@ import {
   watchWorkerResponses,
 } from "./helpers.js";
 import { loadWordList, takeTurn } from "./words-player.js";
-
-async function shot(page: Page, name: string): Promise<void> {
-  const dir = process.env["SHOTS_DIR"];
-  if (dir === undefined) return;
-  // Playwright inserts an inline <style> to take a screenshot, which the page's CSP rightly
-  // refuses and reports; those reports are not the page's, so they aren't counted.
-  const ignore = (on: boolean) =>
-    page.evaluate((value) => {
-      (window as unknown as { __ignoreCsp?: boolean }).__ignoreCsp = value;
-      return new Promise((done) => setTimeout(done, 0));
-    }, on);
-  await ignore(true);
-  await page.screenshot({ path: `${dir}/${name}.png`, fullPage: true });
-  await ignore(false);
-}
 
 /** The viewer's and the opponent's scores, as the board's score bar shows them. */
 async function scoresOf(page: Page): Promise<number[]> {

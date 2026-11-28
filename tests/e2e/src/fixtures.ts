@@ -3,7 +3,7 @@
  * every test fails on a Content-Security-Policy violation (07 §4). `friend` is a second person's
  * page, for tests where two people play.
  */
-import { test as base, expect, type Page, type TestInfo } from "@playwright/test";
+import { test as base, expect, type Browser, type Page, type TestInfo } from "@playwright/test";
 
 import { WARMUP_TIMEOUT_MS } from "./budgets.js";
 
@@ -58,8 +58,36 @@ function withoutScreenshotNoise(violations: Violation[], testInfo: TestInfo): Vi
   );
 }
 
+/** A page in a context of its own, with the project's device settings, and its CSP check. */
+async function openPlayer(
+  browser: Browser,
+  testInfo: TestInfo,
+  who: string,
+): Promise<{ page: Page; close: () => Promise<void> }> {
+  const { baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch } =
+    testInfo.project.use;
+  const context = await browser.newContext({
+    ...(baseURL === undefined ? {} : { baseURL }),
+    ...(viewport === undefined ? {} : { viewport }),
+    ...(userAgent === undefined ? {} : { userAgent }),
+    ...(deviceScaleFactor === undefined ? {} : { deviceScaleFactor }),
+    ...(isMobile === undefined ? {} : { isMobile }),
+    ...(hasTouch === undefined ? {} : { hasTouch }),
+  });
+  const page = await context.newPage();
+  const collect = await trackCspViolations(page);
+  return {
+    page,
+    close: async () => {
+      const violations = withoutScreenshotNoise(await collect(), testInfo);
+      await context.close();
+      expect(violations, `Content-Security-Policy violations (${who})`).toEqual([]);
+    },
+  };
+}
+
 export const test = base.extend<
-  { cspViolations: Violation[]; friend: Page },
+  { cspViolations: Violation[]; friend: Page; crowd: Page[] },
   { browserWarmup: undefined }
 >({
   /**
@@ -103,22 +131,21 @@ export const test = base.extend<
    * Content-Security-Policy violation like the first.
    */
   friend: async ({ browser }, use, testInfo) => {
-    const { baseURL, viewport, userAgent, deviceScaleFactor, isMobile, hasTouch } =
-      testInfo.project.use;
-    const context = await browser.newContext({
-      ...(baseURL === undefined ? {} : { baseURL }),
-      ...(viewport === undefined ? {} : { viewport }),
-      ...(userAgent === undefined ? {} : { userAgent }),
-      ...(deviceScaleFactor === undefined ? {} : { deviceScaleFactor }),
-      ...(isMobile === undefined ? {} : { isMobile }),
-      ...(hasTouch === undefined ? {} : { hasTouch }),
-    });
-    const page = await context.newPage();
-    const collect = await trackCspViolations(page);
-    await use(page);
-    const violations = withoutScreenshotNoise(await collect(), testInfo);
-    await context.close();
-    expect(violations, "Content-Security-Policy violations (second player)").toEqual([]);
+    const player = await openPlayer(browser, testInfo, "second player");
+    await use(player.page);
+    await player.close();
+  },
+  /**
+   * Two more people, for games of four (the paths game's e2e, alpha A24): each a page in a context
+   * of its own, like `friend`, and held to the same Content-Security-Policy check.
+   */
+  crowd: async ({ browser }, use, testInfo) => {
+    const players = [
+      await openPlayer(browser, testInfo, "third player"),
+      await openPlayer(browser, testInfo, "fourth player"),
+    ];
+    await use(players.map((player) => player.page));
+    for (const player of players) await player.close();
   },
 });
 
