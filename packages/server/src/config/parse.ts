@@ -325,7 +325,7 @@ function crossFieldIssues(raw: RawEnv, options: ParseConfigOptions): string[] {
     // Until enforcement lands, keys would publish a site key and widen the CSP while nothing is
     // verified (M2b review S-3); refuse rather than give a false sense of protection.
     issues.push(
-      "TURNSTILE_SITE_KEY, TURNSTILE_SECRET: Turnstile enforcement is not built yet (docs/spec/10-roadmap.md M2); unset both",
+      "TURNSTILE_SITE_KEY, TURNSTILE_SECRET: Turnstile enforcement is not built yet (docs/spec/10-roadmap.md M4); unset both",
     );
   }
   if ((raw.TURNSTILE_SITE_KEY === undefined) !== (raw.TURNSTILE_SECRET === undefined)) {

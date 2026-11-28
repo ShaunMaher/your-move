@@ -189,7 +189,9 @@ Verify on a real device during M2.
   Don't use your full name." After onboarding it can be changed at most **3 times per 30 days**;
   each change is logged (`display_name_changed`), so a name can't be used as a rolling message
   channel. The same budget covers the user's AI accounts: renaming one, or creating one, uses one
-  of the owner's 3 changes per 30 days (§8).
+  of the owner's 3 changes per 30 days (§8). A request that sets only the name while another
+  request completes onboarding is judged as a name set before onboarding and isn't counted as a
+  rename: an accepted residual, at most once per account (alpha A21 review S2-1).
 - **Until onboarding is complete** (`users.onboarded_at` NULL) the account is invisible to other
   players: it is treated exactly like an unknown address when someone adds that email (§6.1),
   claims no invitations, and gets `403 ONBOARDING_REQUIRED` from the game list, game creation

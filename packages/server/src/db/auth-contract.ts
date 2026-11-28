@@ -104,6 +104,120 @@ export function authRepositoryContract(target: () => AuthTarget): void {
       });
     });
 
+    describe("saveOnboarding (06 §5, alpha A21 review S-2)", () => {
+      const COMPLETE = { at: T0 + 5, minAge: 13 };
+      const stored = async (id: string) =>
+        (
+          await sql(
+            "SELECT display_name, onboarded_at, age_attested_min_age FROM users WHERE id = ?",
+            id,
+          )
+        )[0];
+
+      it("writes the answers and completes only when the stored row has a name and a confirmation for MIN_AGE", async () => {
+        const user = await newUser(repos());
+        const nameOnly = await repos().users.saveOnboarding(
+          user.id,
+          { displayName: "Sam", updatedAt: T0 + 1 },
+          COMPLETE,
+        );
+        expect(nameOnly.completed).toBe(false);
+        expect(nameOnly.user).toMatchObject({ displayName: "Sam", onboardedAt: null });
+        const both = await repos().users.saveOnboarding(
+          user.id,
+          { ageAttestedAt: T0 + 2, ageAttestedMinAge: 13, updatedAt: T0 + 2 },
+          COMPLETE,
+        );
+        expect(both.completed).toBe(true);
+        expect(both.user).toMatchObject({
+          displayName: "Sam",
+          ageAttestedMinAge: 13,
+          onboardedAt: COMPLETE.at,
+        });
+      });
+
+      it("an age alone, with no name stored, doesn't complete", async () => {
+        const user = await newUser(repos());
+        const saved = await repos().users.saveOnboarding(
+          user.id,
+          { ageAttestedAt: T0 + 1, ageAttestedMinAge: 13, updatedAt: T0 + 1 },
+          COMPLETE,
+        );
+        expect(saved.completed).toBe(false);
+        expect(await stored(user.id)).toEqual({
+          display_name: null,
+          onboarded_at: null,
+          age_attested_min_age: 13,
+        });
+      });
+
+      it("a confirmation for a lower MIN_AGE than now in force doesn't complete", async () => {
+        const user = await newUser(repos());
+        const saved = await repos().users.saveOnboarding(
+          user.id,
+          { displayName: "Sam", ageAttestedAt: T0 + 1, ageAttestedMinAge: 13, updatedAt: T0 + 1 },
+          { at: T0 + 5, minAge: 16 },
+        );
+        expect(saved.completed).toBe(false);
+        expect((await stored(user.id))?.["onboarded_at"]).toBeNull();
+      });
+
+      it("two calls each bringing one answer complete it, and only one reports it", async () => {
+        const user = await newUser(repos());
+        const results = await Promise.all([
+          repos().users.saveOnboarding(
+            user.id,
+            { displayName: "Sam", updatedAt: T0 + 1 },
+            { at: T0 + 1, minAge: 13 },
+          ),
+          repos().users.saveOnboarding(
+            user.id,
+            { ageAttestedAt: T0 + 2, ageAttestedMinAge: 13, updatedAt: T0 + 2 },
+            { at: T0 + 2, minAge: 13 },
+          ),
+        ]);
+        expect(results.filter((result) => result.completed)).toHaveLength(1);
+        const row = await stored(user.id);
+        expect(row).toMatchObject({ display_name: "Sam", age_attested_min_age: 13 });
+        expect([T0 + 1, T0 + 2]).toContain(row?.["onboarded_at"]);
+      });
+
+      it("never overwrites an onboarded_at already set", async () => {
+        const user = await newUser(repos());
+        await repos().users.update(user.id, {
+          displayName: "Sam",
+          ageAttestedAt: T0,
+          ageAttestedMinAge: 13,
+          onboardedAt: T0,
+          updatedAt: T0,
+        });
+        // A rename, then a fresh confirmation after a MIN_AGE rise: the onboarding time stays.
+        for (const set of [
+          { displayName: "Sam A", updatedAt: T0 + 1 },
+          { ageAttestedAt: T0 + 2, ageAttestedMinAge: 16, updatedAt: T0 + 2 },
+        ]) {
+          const saved = await repos().users.saveOnboarding(user.id, set, {
+            at: T0 + 9,
+            minAge: 16,
+          });
+          expect(saved.completed).toBe(false);
+        }
+        expect(await stored(user.id)).toEqual({
+          display_name: "Sam A",
+          onboarded_at: T0,
+          age_attested_min_age: 16,
+        });
+      });
+
+      it("a missing account gives { completed: false, user: null }, writing nothing", async () => {
+        const id = crypto.randomUUID();
+        expect(
+          await repos().users.saveOnboarding(id, { displayName: "Ghost", updatedAt: T0 }, COMPLETE),
+        ).toEqual({ completed: false, user: null });
+        expect(await sql("SELECT 1 FROM users WHERE id = ?", id)).toEqual([]);
+      });
+    });
+
     it("deleteAccount removes the user, sessions and challenges, and is safe to repeat", async () => {
       const user = await newUser(repos());
       const tokenHash = crypto.randomUUID();

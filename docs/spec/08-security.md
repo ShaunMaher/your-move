@@ -106,7 +106,7 @@ generated `_headers` file for static assets (03 §9). One shared definition gene
 | Join-link lookups and joins per user (the joiner's limits only, never the creator's) | 30 / h | `429` |
 | Join-link lookups and joins per IP (bucketed) | 60 / h | `429` |
 | Join-link creations per user | 20 / day | `429` |
-| Any authenticated write per user (every game write, the push subscription routes, `PATCH /api/v1/me` and `POST /api/v1/me/under-age`) | 300 / min | `429` |
+| Authenticated writes per user: every game write, the push subscription routes, `PATCH /api/v1/me` and `POST /api/v1/me/under-age` | 300 / min | `429` |
 | **"It's your turn" email nudges instance-wide** (alpha A6, `LIMIT_NUDGE_EMAILS_PER_DAY`) | 150 / day: at most the cap per UTC day, up to twice the cap in any 24 hours (a sliding window over fixed UTC days; sized in §4.2) | silent: the sweep stops and claims nothing more, the rest wait for a later run; only claimed nudges count, and a claimed nudge whose count goes over the cap (only when two runs overlap) isn't sent; alert once per UTC day (03 §7) |
 | "It's your turn" email nudges per recipient (alpha A6, `LIMIT_NUDGE_EMAILS_PER_USER_PER_DAY`) | 10 / day: about the cap per UTC day, up to about twice the cap in any 24 hours | silent: that recipient's other due nudges wait unclaimed; only claimed nudges count (03 §7) |
 | Requests per API token | 120 / min, 10,000 / day (the account's limits apply too) | `429` |

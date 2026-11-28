@@ -106,11 +106,14 @@ export interface UserRepo {
   blocksAmong(userIds: readonly string[]): Promise<BlockPair[]>;
   update(id: string, set: UserUpdate): Promise<void>;
   /**
-   * Onboarding's answers (06 §5, 05 `PATCH /api/v1/me`): writes `set`'s columns, then sets
-   * `onboarded_at` to `complete.at` if it is still NULL and the stored row now has a display name
-   * and an age confirmation of at least `complete.minAge`. One atomic batch, judged on the stored
-   * row, so two requests that each bring one answer still complete onboarding. Answers whether
-   * this call completed it, and the row as stored afterwards (null when the account is gone).
+   * Every column change of a `PATCH /api/v1/me` (05): the display name and the age confirmation,
+   * before or after onboarding, with `updated_at`. In the same atomic batch it then tries to
+   * complete onboarding, which only ever applies while `onboarded_at` is NULL: it sets it to
+   * `complete.at` when the stored row now has a display name and an age confirmation of at least
+   * `complete.minAge` (06 §5). Judged on the stored row, so two requests that each bring one
+   * answer still complete onboarding, and only one of them reports it; an `onboarded_at` already
+   * set is never overwritten. Answers whether this call completed onboarding, and the row as stored
+   * afterwards (null when the account is gone).
    */
   saveOnboarding(
     id: string,
