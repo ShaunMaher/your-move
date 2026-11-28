@@ -27,10 +27,10 @@ settles it.
 
   | `grid` | Columns | Rows | Cards | Pairs | Move limit (§6) |
   |---|---|---|---|---|---|
-  | `4x4` | 4 | 4 | 16 | 8 | 128 |
-  | `4x5` (default) | 4 | 5 | 20 | 10 | 160 |
-  | `5x6` | 5 | 6 | 30 | 15 | 240 |
-  | `6x6` | 6 | 6 | 36 | 18 | 288 |
+  | `4x4` | 4 | 4 | 16 | 8 | 256 |
+  | `4x5` (default) | 4 | 5 | 20 | 10 | 400 |
+  | `5x6` | 5 | 6 | 30 | 15 | 900 |
+  | `6x6` | 6 | 6 | 36 | 18 | 1,296 |
 
   Grids are written columns × rows. No grid is wider than 6 columns, because 6 is the most that
   fit a 320 px screen with 44 CSS px cards (§9).
@@ -152,9 +152,14 @@ friends (F-27); the rules text says so (§8.7).
 - **Last standing** (`last-standing`): the one seat still playing ranks 1; the others rank by when
   they left, the most recent highest. Cards still down stay down.
 - **Move limit** (`move-limit`): after every second card, and after every leave by the seat to act,
-  the game ends if `moves ≥ 16 × pairs` (`moves` counts every card turned and every leave; the
-  limit is eight turns per pair, far more than any real game needs). It ranks exactly as
-  `all-found`. The limit is what makes the game's length follow from its rules (02 §6.4), and it
+  the game ends if `moves ≥ 4 × pairs²` (`moves` counts every card turned and every leave). The
+  limit grows with the square of the pairs, as play without memory does: players turning cards at
+  random find all the pairs within it in at least 98 % of games on every grid (98.4 % at `4x4`,
+  99.9 % at `6x6`, simulating 4,000 games each), so a real game, where players remember something,
+  almost never meets it; a linear limit (16 × pairs) would cut off a fifth to two-fifths of weak-memory games on `5x6`
+  and `6x6`. It ranks exactly as `all-found`. As game design: the limit is shown as it nears ("N moves left", §9), so it never
+  ends a game by surprise, and a player who is ahead can't run it down alone: a turn that finds no
+  pair uses two moves and passes the turn, and the others go on finding pairs on theirs. The limit is what makes the game's length follow from its rules (02 §6.4), and it
   bounds a game that colluding or careless players would otherwise keep going for ever, together
   with its action log (08 T25, storage).
 - When more than one ending applies to a transition, `all-found` comes first, then
@@ -179,9 +184,9 @@ Options = {
   arbitrary input is never echoed); `INVALID_OPTION` (`detail: { option }`) for any other value.
   Options carry no versions, and resolved options resolve to themselves (02 §2.1 rule 10).
 - `catalog()`: `{ grid: { values: ["4x4", "4x5", "5x6", "6x6"], default: "4x5" }, grids: [{ id:
-  "4x4", columns: 4, rows: 4, pairs: 8, moveLimit: 128 }, { id: "4x5", columns: 4, rows: 5, pairs:
-  10, moveLimit: 160 }, { id: "5x6", columns: 5, rows: 6, pairs: 15, moveLimit: 240 }, { id: "6x6",
-  columns: 6, rows: 6, pairs: 18, moveLimit: 288 }], faces: 18 }`.
+  "4x4", columns: 4, rows: 4, pairs: 8, moveLimit: 256 }, { id: "4x5", columns: 4, rows: 5, pairs:
+  10, moveLimit: 400 }, { id: "5x6", columns: 5, rows: 6, pairs: 15, moveLimit: 900 }, { id: "6x6",
+  columns: 6, rows: 6, pairs: 18, moveLimit: 1296 }], faces: 18 }`.
 - `players(options)` = `{ min: 2, max: 6 }` for every grid: with more seats a `missed` pair reaches
   too few of them, and an 8-pair grid shared by more than 6 gives most players a pair or none.
   No resources. `validateStart` always succeeds.
@@ -210,7 +215,7 @@ State = {
 ```
 
 - `out.atMove` is the value of `moves` before the transition that put the seat out (the leaving
-  order, §6). `columns`, `rows`, `pairs` and the move limit `16 × pairs` come from
+  order, §6). `columns`, `rows`, `pairs` and the move limit `4 × pairs²` come from
   `options.grid`.
 - **Invariants**: `turned !== null ⇒ lastMiss === null` (the first card clears the missed pair, and
   a miss sets it only as it clears `turned`); `turned` and `lastMiss` cards are never matched;
@@ -231,9 +236,9 @@ State = {
   2. **Second card, match** (`faces[c] === faces[turned]`): `matchedBy[turned] = matchedBy[c] =
      seat`, `turned = null`; then
      - **last pair** (no card has `matchedBy` null): the game ends `all-found`;
-     - **otherwise**, if `moves ≥ 16 × pairs`, the game ends `move-limit`; else `turn` stays.
+     - **otherwise**, if `moves ≥ 4 × pairs²`, the game ends `move-limit`; else `turn` stays.
   3. **Second card, miss**: `lastMiss = { seat, cards: [turned, c] }`, `turned = null`; then if
-     `moves ≥ 16 × pairs` the game ends `move-limit`, else `turn` = the next playing seat after
+     `moves ≥ 4 × pairs²` the game ends `move-limit`, else `turn` = the next playing seat after
      `seat` in turn order, wrapping.
 - `onResign(state, seat, rng, reason)` and `onTimeout(state, seat, rng)`: `moves` goes up by one;
   `out[seat] = { atMove, reason }` with `atMove` the value before, and the reason mapped from the
@@ -241,7 +246,7 @@ State = {
   `onTimeout` → `"timed_out"`. Then:
   1. if `seat` is `turn`, `turned = null` (`lastMiss` is left as it is);
   2. if one seat is still playing, the game ends `last-standing`;
-  3. else if `seat` was `turn` and `moves ≥ 16 × pairs`, the game ends `move-limit`;
+  3. else if `seat` was `turn` and `moves ≥ 4 × pairs²`, the game ends `move-limit`;
   4. else if `seat` was `turn`, `turn` = the next playing seat after `seat`, wrapping; otherwise
      `turn` is unchanged.
 - **A game ending** sets `endReason`, `turn = null`, `turned = null` and `lastMiss = null` (§6).
@@ -279,7 +284,7 @@ View = {
   turn: Seat | null,
   pairs: number[],                    // pairs found, by seat
   out: (null | "resigned" | "timed_out" | "declined")[],  // by seat
-  moves: number, moveLimit: number,   // moveLimit = 16 × pairs
+  moves: number, moveLimit: number,   // moveLimit = 4 × pairs²
   endReason: null | "all-found" | "last-standing" | "move-limit",
 }
 Card =
@@ -327,8 +332,9 @@ Every object is strict (no other keys); every number is an integer.
 - `viewSchema`: `grid` one of the four ids; `columns` and `rows` 4–6; `faces` 8–18 distinct ids
   0–17, ascending; `cards` 4–6 rows of 4–6 cards; a card's `face` 0–17 (or null for `down`), its
   `by` 0–5 (or null for `down`); `turn` 0–5 or null; `pairs` and `out` 2–6 entries, each pair count
-  0–18; `moves` 0–`moveLimit + 7` (the `maxActions` bound at 6 seats, §8.7); `moveLimit` one of 128,
-  160, 240, 288. Shape-level checks only: that `cards` matches `columns × rows` and `faces` holds
+  0–18; `moves` 0–1,303 (a constant: the largest `maxActions`, `6x6` at 6 seats, §8.7; that a
+  game's `moves` stays within its own `maxActions` is a refinement the engine's tests check, not
+  Zod); `moveLimit` one of 256, 400, 900, 1,296. Shape-level checks only: that `cards` matches `columns × rows` and `faces` holds
   `pairs` ids is the engine's (and the tests') business, not Zod's.
 - `recordSchema`: `seat` 0–5, `step` 1 or 2; no arrays.
 - `catalogSchema`: as §7, with exactly the four grids.
@@ -363,19 +369,27 @@ Every object is strict (no other keys); every number is an integer.
 - `randomAnyAction(state, seat, rng)`: schema-valid and often illegal: mostly a uniformly random
   card in the grid (matched, up, missed or down), sometimes a row or column one outside the grid,
   now and then a large integer.
-- `maxActions(options, seats)` = `16·pairs + seats + 1` (131 at `4x4` with 2 seats, 295 at `6x6`
-  with 6), from the move limit (§6). Proof: every module transition adds one to `moves`, so the
-  first `16·pairs` transitions bring it to the limit. From then on the game ends at the next second
-  card or the next leave by the seat to act (§8.2). Before that, at most one first card can be
-  turned (a first card is followed by its own second card or its seat's leave), and seats not to
-  act can leave, but a game has at most `seats − 1` leaves (the last but one ends it). So at most
-  `1 + 1 + (seats − 1)` transitions follow the limit.
+- `maxActions(options, seats)` = `4·pairs² + seats + 1` (259 at `4x4` with 2 seats, 1,303 at
+  `6x6` with 6), from the move limit (§6). Proof, with `L = 4·pairs²`: every module transition
+  adds one to `moves`, so transition number `L` is the one that brings `moves` to the limit. If it
+  was a second card or a leave by the seat to act, the game ends there. Otherwise it was a first
+  card or a leave by another seat, and the game ends at the next second card or the next leave by
+  the seat to act (§8.2). Until then the only other transitions are at most one first card (only
+  if the limit was reached between turns, by another seat's leave) and leaves by seats not to act.
+  A game has at most `seats − 1` leaves in all (the last but one ends it), and when the limit was
+  reached by a leave, that leave is one of them. So at most `seats` transitions follow transition
+  `L` in either case (a first card, the ending second card and `seats − 2` further leaves; or the
+  ending transition and `seats − 1` leaves at most, the last of which would end the game), and
+  `L + seats + 1` leaves a margin of one.
 - `worstCase(options, seats, rng)`: built by seeded play from `setup` at the given options and seat
-  count, so every input is a reachable state. Its own driver (not `randomAction`; it may read the
-  layout to reach the end) turns the partner of the `up` card half the time. It keeps a first card
-  while a `missed` pair is shown (apply clears it), a second card that misses (the next-seat
-  search), the second card that finds the last pair (the end and the ranking), and a second card
-  that ends the game at the move limit. `validate` is a few lookups and `apply` copies at most 36
+  count, so every input is a reachable state. Its own drivers (not `randomAction`; they may read
+  the layout) play two kinds of game. One turns the partner of the `up` card half the time, so it
+  reaches the end, and gives a first card while a `missed` pair is shown (apply clears it), a
+  second card that misses (the next-seat search) and the second card that finds the last pair
+  (the end and the ranking). The other always **misses on purpose** (it picks a second card whose
+  face differs from the `up` card's, which is possible while two or more faces are unmatched, so
+  from the start), until the second card that reaches the move limit, which ends the game
+  `move-limit`. `validate` is a few lookups and `apply` copies at most 36
   cards and 6 seats, so the costliest inputs are the largest grid's; the engine's tests report the
   measured p99, expected to be microseconds against the 5 ms budget (08 T25). Its honesty rests on
   that reading of the code, which the review checks.
@@ -406,8 +420,9 @@ that remembers for you spoil the game for everyone else, who can't tell.
   the turn (02 §3).
   - **The players area is compact**: at widths under 480 px, two columns of one line each
     ("1 Ann · 3", "2 Sam · out"), so 2–4 players take two lines and 5–6 three; on wider screens one
-    wrapped line. Near the limit (fewer than `2 × seats` moves left) the turn line adds "N moves
-    left".
+    wrapped line. Near the limit the turn line adds "N moves left", where `N = moveLimit − moves`
+    (from the view): from when `N < 2 × p`, with `p` the seats still playing (about one turn each
+    left), and it stays visible until the game ends.
   - **Above the fold**: at 320 × 568 the whole board, not just its top (02 §3), is on the first
     screen for 2–4 players on every grid, and the e2e asserts it. With 5–6 players the players area
     takes a third line, and on `4x5` the board's last row may need a short scroll; that trade-off
@@ -457,9 +472,18 @@ that remembers for you spoil the game for everyone else, who can't tell.
   theme's contrast tested: face drawings at least 3:1 against their card (WCAG 1.4.11), dimmed
   matched cards included; badge and status text at least 4.5:1; the card back against the page.
 - **Finished or stopped game**: the board never offers a tap and shows no turn line; the shell's
-  result card owns the ranks and how it ended. After `all-found`, `last-standing` or `move-limit`
-  the board shows every card's face and each player's pairs; after a framework-only ending or a
-  cancel it shows the frozen view as it is (§8.4), face-down cards still blank.
+  result card owns the ranks, and the board's final summary says how the game ended in its own
+  words, since the shell's ending text knows only the framework's reasons (02 §3):
+  - `all-found`: "All the pairs were found.";
+  - `last-standing`: "Only Ann was left playing." (the one seat still playing);
+  - `move-limit`: "The move limit (N moves) was reached with K pairs still face down." (`N` =
+    `moveLimit`, `K` the pairs not found);
+
+  then every card's face and each player's pairs. After a framework-only ending or a cancel
+  (`endReason` null in the frozen view, §8.4) it adds no ending line and draws the frozen view as it
+  is, face-down cards still blank; an `up` or `missed` card keeps its face and gets a stopped-game
+  name without the in-play hints: "Row 2, column 3, star, Sam's first card when the game stopped";
+  "Row 1, column 2, moon, Sam's last turn".
 - Options form: the grid as radios ("4 × 4: 8 pairs, quickest" … "6 × 6: 18 pairs, longest").
   The rules sheet states the game's options, then the manifest's rules for its version.
   `HistoryItem` renders the record's `describe` text with names (and the shared-name number); it
@@ -497,6 +521,11 @@ Rule tables in addition to the kit, with a seeded `RandomSource`:
   §8.1 invariants hold at every state; and a separate model written from §3–§6 alone, fed the
   **actions** applied (not the records) and the layout, predicts at every step which cards show a
   face and in which state; the view's `cards` must equal it exactly.
+- **Kit coverage** (a test over the kit's own fast-mode games, with its seeds): on every grid at
+  least 90 % of the games played with no seat leaving end `all-found` (about 98 % or more is
+  expected under the uniform `randomAction`, §6), so the endgame is played and not cut off by the
+  limit; and the secrecy samples include in-progress states with at most 4 hidden cards on every
+  grid, so the last pairs' faces are perturbed too.
 - **Hooks**: `perturbHidden` changes only hidden cards' faces, keeps the multiset, the faces in
   play and the key order, changes the state whenever two hidden faces differ, and leaves a finished
   game alone; `randomAction` always validates and reads no face (it gives the same flip on a state

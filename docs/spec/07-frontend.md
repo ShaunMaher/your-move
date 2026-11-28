@@ -327,6 +327,11 @@ contradict, and Play still goes through `submit`, where the server remains autho
     (a lobby, or another player's turn); the game list polls every 15 s whether or not anything
     is waiting, so a new invitation appears by itself. A hidden tab polls nothing and marks
     nothing seen.
+  - **Back-forward cache**: on `pageshow` with `event.persisted` (a page restored from the
+    browser's back-forward cache, which runs no new page load), the shell refetches the open game
+    or list before showing it, for every game, so an old view never comes back on screen (02 §3;
+    games/pairs.md §9, where a view's faces must not outlive it). Proposed with the pairs client
+    slice (10 §Pairs game).
   - **Never touch server-handled paths**: the worker ignores non-GET requests, other origins and
     every path in `SERVER_PATHS` (`@your-move/shared`, the one list also behind the server's 404s
     and, by hand, Cloudflare's `run_worker_first`; 03 §9): `/api/*`, `/__dev/*` and

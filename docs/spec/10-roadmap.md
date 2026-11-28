@@ -388,8 +388,12 @@ with its own review, as paths was built (A22, A24):
   face, and `maxActions` derived from the move limit. In the testkit and SDK (02 §6.3): the kit
   checks, for a module that sets `hiddenFromEveryone`, that every seat and the public get identical
   view JSON at every step in progress, with a broken fixture (a hand game that sets the flag) it
-  must fail; the SDK's TSDoc for the flag and the writing-a-game guide say the same (review
-  PS-S-2, PS-P-3). **Accept:** passes the generic test kit at 2–6 players on every grid (CPU budget
+  must fail, and a second fixture where every seat sees the same view but the public's differs,
+  with the flag set; the existing kit test that "counts a deck-only perturbation" (in
+  `packages/testkit/src/kit.test.ts`) rewritten so its fixture's view is no longer per-viewer; the
+  SDK's TSDoc for the flag and the writing-a-game guide say the same (review PS-S-2, PS-P-3,
+  PS-P2-2); and a testkit changeset with a migration note, since a stricter kit check is a
+  breaking change for a module that set the flag loosely (02 §7.4). **Accept:** passes the generic test kit at 2–6 players on every grid (CPU budget
   included, T25); the rule tables, invariants and oracle test of pairs §10.
 - **Client slice**: the board of pairs §9 (cards sized for 320 px with 44 CSS px targets, the
   compact players area, the reveal of the missed pair when a turn opens, the `role="grid"` board
@@ -517,7 +521,9 @@ phase is a good test of multi-seat `toAct`.
 
 #### Pairs: keeping the memory in an async game (idea, 2026-11-28)
 Now specified in games/pairs.md and proposed in §Pairs game; this note is the design it started
-from.
+from. The spec settled two points otherwise: records name **no** card, not even its position
+(Q31), because positions let the history solve a late game; and a move limit of `4 · pairs²` moves
+ends every game, so its length follows from the rules (02 §6.4).
 
 Played asynchronously, the memory game loses its point if the history shows every card turned:
 anyone could scroll back. A design that keeps it:

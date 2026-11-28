@@ -272,7 +272,9 @@ back to the `describe` text for any record it can't render. Module views never c
 
 The **game shell** (framework UI) supplies everything around the board: the header, the menu
 (resign, rules, history, game info), lobby screens, the result card of a finished game (ranks
-and how it ended), error notices, the stale-state refetch, and the realtime refresh. Each piece
+and how it ended), error notices, the stale-state refetch, the realtime refresh, and a refetch
+when a page comes back from the back-forward cache (`pageshow` with `persisted`, 07 §4), so a
+board never shows a view the server has since replaced. Each piece
 of game state has **one owner on screen**: while a module's board is shown, the *board* draws the
 scores and whose turn it is, with its own live status, and the shell adds neither (no player chips,
 no turn line, no second live region); the shell's player list and turn line appear only in place
@@ -551,9 +553,13 @@ plays exactly these hooks, so a game that needs a dictionary supplies one throug
      this: **while the game is in progress, every seat and the public get the same view**
      (identical JSON; summaries may differ), so nothing is hidden from one viewer that another
      sees, e.g. a game whose only hidden information is the deck order, or a memory game's
-     face-down cards (games/pairs.md §8.6). The kit checks it at every step of every game of a
-     module that sets it, and fails the module on any two viewers whose views differ (built with
-     the pairs engine slice, 10 §Pairs game);
+     face-down cards (games/pairs.md §8.7). A module that sets it keeps per-viewer conveniences
+     ("your turn", which seat is yours) out of the view: they belong in `summary` or come from the
+     envelope (05), which already says who the viewer is and who is to act. The kit checks the
+     flag at every step of every game of a module that sets it, and fails the module on any two
+     viewers, seats or the public, whose views differ (built with the pairs engine slice, 10
+     §Pairs game). A weaker reading, the same perturbation for every viewer, wouldn't do: a hand
+     game that set the flag with a deck-only `perturbHidden` would pass it;
    - `validate` and `preview` results, including `detail`, are identical for `s` and `s'`, for
      legal actions from `randomAction` **and** for possibly-illegal ones from `randomAnyAction`;
    - the `record` from `apply`/`onResign`/`onTimeout` by any seat is identical for `s` and `s'`
