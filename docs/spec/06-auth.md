@@ -426,7 +426,8 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    anyone's past opponent without the creator's say-so. A pair with a block in either direction is
    never recorded — not at the finish, not through that question (`canAddPlayers` still lists a
    blocked link joiner, so the prompt reveals nothing, but `add-player` is then a silent `204`
-   no-op that writes no pair) — and blocking someone deletes the relationship both
+   no-op that writes no pair; what follows it can still show the block, an item open for M4 in
+   08 T20) — and blocking someone deletes the relationship both
    ways. A test asserts that no `past_opponents` row ever exists for a blocked pair (04 invariant 6).
 10. **Blocks** apply between every pair of users in a game: they're checked when seats are added
     (§6.1), on accept, on join, and again at start (02 §4). Blocking someone you share a lobby with
