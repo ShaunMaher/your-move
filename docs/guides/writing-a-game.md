@@ -4,7 +4,11 @@ This guide is for authors of game packages: a game you write in your own reposit
 registry, and that an operator installs into their instance of the platform. It walks through the
 reference game, `@your-move/game-example` (in this repository under `games/example/`), which is
 deliberately small and exercises every part of the contract: 2–4 players, a hidden hand, one
-simultaneous secret phase per round, and elimination.
+simultaneous secret phase per round, and elimination. Where the example is too small to show
+something, the guide points at the second reference game, `@your-move/game-paths` (`games/paths/`):
+2–8 players on a shared public board, a hidden deck and hands, a rule the engine and the client
+share, and a board drawn as SVG. It is a good model of a full game and of what the kit and the
+reviews caught while it was built.
 
 The contract itself is specified in [`docs/spec/02-game-framework.md`](../spec/02-game-framework.md)
 (cited below as "02 §n"); engineering rules are in
@@ -131,6 +135,13 @@ export const actionSchema = z.object({ card }).strict();
 export type Action = z.infer<typeof actionSchema>;
 ```
 
+**Bound the view and record schemas by construction.** They describe what is sent to every client and
+stored in every history, so give every array in `viewSchema` and `recordSchema` a `.max(…)` that
+the rules guarantee (the most seats, the largest board, the longest path), every integer a range, and
+every object `.strict()`. Derive each bound from the same constants the engine uses (paths takes them
+from its seat range, board sizes and hand sizes), so a bound can't drift from a rule. A schema with no bounds lets one
+bad value grow without limit.
+
 ### Options
 
 `resolveOptions(input, ctx)` turns the creator's partial, untrusted input into complete options,
@@ -187,7 +198,13 @@ Transitions get an `rng` too and may draw from it: when the example's deck can't
 seat a card, the face-down cards of seats that left are shuffled back in with `shuffle(…, rng)`.
 The platform records every value drawn and replays a game from its log, so the same state, action
 and draws must always give the same result. Keep no module-level mutable state: one loaded engine
-serves many games at once, and the kit plays games interleaved to catch leaks between them.
+serves many games at once, and the kit plays games interleaved to catch leaks between them. The
+engine lint rules don't forbid a module-level `let` or a cache in a `Map`, so nothing stops you
+writing one; it breaks isolation and determinism all the same, so don't. For the same reason the
+engine's globals allow-list leaves out every blocking or concurrent primitive (`Atomics`,
+`SharedArrayBuffer`, `Worker`, `WebAssembly`). They must stay off: the CPU budget (below) counts
+only CPU time of the calling thread, so an engine that waited or handed work elsewhere would pass
+the check and still stall the server (02 §6.6, 08 T25).
 
 ### Turns: `toAct`
 
@@ -260,7 +277,12 @@ that transition, or what anyone drew. The kit also plays two different legal act
 seat on the same state: if every other seat's view and the public view come out identical, the two
 records and their `describe` text must be identical too, so a record can't repeat a secret choice.
 (If a public move leaves no trace in any view, show it in the view, for example as a last-move
-field.) Views are compared as the JSON clients receive, key order included: build them with a fixed
+field.) **Name in a record only what every seat may know.** An outcome that depends on hidden state
+reaches players through `view`, as the example's round result does. `paths` shows the line: its
+records carry the tile placed (it is on the public board), the public movement it caused and who
+went out or was skipped, and never a drawn tile, the deck or a hand; where a public outcome does
+disclose something about a hand (a player put out under the default rule had no safe tile), the
+rules text says so (paths §3). Views are compared as the JSON clients receive, key order included: build them with a fixed
 key order, never one that depends on hidden state. The example's records are only:
 
 ```ts
@@ -307,13 +329,29 @@ The `test` object drives the generic kit (02 §6):
   counts a perturbation only if it changes what some _other_ viewer sees (another seat's hand,
   say), and at least half of them must. If no seat ever sees your hidden information (only the deck
   order is hidden), set `hiddenFromEveryone: true`, and the kit counts perturbations that change
-  the state instead.
+  the state instead. **The kit can't tell if your perturbation stops covering a hidden part**: a
+  hook that leaves the deck alone passes as long as hands change, and the secrecy check then never
+  tests the deck. Write a test that it changes every hidden part, in every phase (paths'
+  `kit-hooks.test.ts` checks that the deck order itself changes, for the public viewer, a viewer
+  whose is the only hand and a finished game), and that it keeps the multiset of cards.
 - `hiddenInformation`: whether anything is ever hidden (must match the manifest).
 - `maxActions(options, seats)`: an upper bound on transitions in a game, for the termination
   check: a whole number from 1 to 1 000 000, as tight as you can prove it.
 - `worstCase(options, seats, rng)`: the most expensive `{ state, seat, action }` inputs, for the
   CPU budget check. Each must be a real move (its seat in `toAct`, its action valid), and every
-  playable seat count needs at least one.
+  playable seat count needs at least one. **Make it honest**, because the budget check is only as
+  good as the inputs you hand it, and the kit can't find a worse one for you:
+  - Cost a candidate by what `validate` and `apply` actually do for it, including any search they
+    make over the hand (paths counts the tiles `validate` traces, plus every tile and rotation in
+    hand when a move that puts the mover out makes `validate` look for a safe one).
+  - Search for it: play seeded games to their end, cost every move on the way, and keep the
+    costliest few. Use enough games. With 6, paths' inputs at 3 and 8 players were four to five
+    times cheaper than positions random play reaches; it plays 150 per seat count, which adds
+    about a second to a fast kit run.
+  - Keep distinct states (not four moves from one position), and keep the costliest move of each
+    kind that matters (paths also keeps the costliest that eliminates the mover).
+  - It is a heuristic, not a proof. Say so in your spec or comments, and measure how far under
+    the budget your engine runs.
 - `optionInputs(ctx)` (required): the option inputs the kit plays, each with every seat count your
   options allow. List the defaults (`{}`) and enough others to reach every rule an option changes:
   each ruleset or variant and the corners of each range. The kit can't tell whether you covered
@@ -357,13 +395,21 @@ The CPU budget (5 ms per call at the 99th percentile) is the one check whose res
 host: it is measured on the machine running the kit, so a game within budget on your machine can
 fail on a slower one. Pass `cpuClock: threadCpuClock().now` (from `@your-move/testkit/cpu-clock`)
 to `runKit` in your kit test, as `games:verify` does: the kit then times your engine in this
-thread's CPU time, so a busy machine doesn't fail it (without a clock it uses the wall clock).
+thread's CPU time, so a busy machine doesn't fail it (without a clock it uses the wall clock;
+`paths` failed at 7–10 ms for moves that cost 0.2–0.5 ms before it did this).
 Each timed sample is the median of five back-to-back runs, so a run or two that a garbage
 collection slowed don't fail the game, but code slow on most calls still does.
 `games:verify --cpu-budget-ms <n>`, the `cpuBudgetMs` option of `runKit`, or the
 `KIT_CPU_BUDGET_MS` environment variable (a whole number of milliseconds from 1 to 50, read by
 every kit run not given a budget, so set it once for a slow CI runner) sets the budget, raising it
-for a slow host or lowering it to keep headroom; don't raise it to hide a slow engine.
+for a slow host or lowering it to keep headroom; don't raise it to hide a slow engine. If a test of
+yours asserts on the budget, name the one you mean (`cpuBudgetMs: 5`) rather than relying on the
+default, because a CI that sets `KIT_CPU_BUDGET_MS` changes what an unnamed run uses.
+
+A fast kit run plays hundreds of games, so give the Vitest test a **measured timeout**, not the 5 s
+default, and don't add retries (ADR 0004). Time it alone on your machine, and set the timeout for a
+CI runner that may be 100 times slower on CPU-bound work; `games/paths/src/kit.test.ts` shows the
+reasoning in a comment (about 10 s alone, 300 s allowed).
 
 ### The built-output rules
 
@@ -409,7 +455,8 @@ The kit checks the contract, not your rules. Write table-driven tests per rule, 
 `RandomSource` (the testkit exports `seededRandom(seed)`). The example's tests cover dealing,
 secret plays, round resolution, elimination, every way of leaving, the end conditions, the ranking
 with ties, views and secrecy, errors and options; engine code is held to 95 % line and branch
-coverage, client code to 80 % lines.
+coverage, client code to 80 % lines. Tests of the hooks themselves belong here too (`worstCase`
+returns real moves for every seat count; `perturbHidden` changes every hidden part).
 
 ## 5. Writing the client
 
@@ -448,6 +495,54 @@ No
 `dangerouslySetInnerHTML`, no inline scripts, no resources fetched from anywhere: your client is
 bundled into the app at build time. Keep rendering support for every rules version you have ever
 released, so finished games still display. Test components with Testing Library and jsdom.
+
+### Lessons from a larger board
+
+`paths` has a board of squares, a drawn tile for every move and up to eight players, which is where
+the small example stops being a guide. What its reviews turned up:
+
+- **Share rules between engine and client; don't copy them.** If the client needs a rule to preview
+  a move or to say why a tile is unsafe, export the pure function from the engine (paths exports
+  `selfElimination` and `movement`) and call it from the client, so the two can't disagree. Give
+  the function only what the client has: the viewer's `view`, never the full state. Then test the
+  client's use against the server's rule with a property test: play seeded games, and at each turn
+  compare what the client computes from the viewer's view with `validate` and the engine's legal
+  moves on the real state (`games/paths/src/client/rule.test.ts`). Your client may import your own engine (section 1).
+- **CSS goes in a constructable stylesheet.** The page's content security policy allows no inline
+  styles, so a `<style>` element or a `style` attribute is blocked. Build one `CSSStyleSheet`,
+  fill it with `replaceSync`, add it to `document.adoptedStyleSheets` once per page, and say so to
+  the player if the browser can't (`games/paths/src/client/styles.ts`). Follow the shell's light and
+  dark theme, and never let colour be the only signal (paths gives markers a shape each).
+- **Draw SVG as React elements**, with `viewBox` and class names, never as a string put into the
+  page; decorative drawings get `aria-hidden="true"` and `focusable="false"`.
+- **Give every control and every part of the board an accessible name** that says its state in
+  words ("Row 2, column 5, empty, your marker faces this square"; "Tile 3 of 3, rotated 90 degrees;
+  your marker would survive"), keep the board a region, and announce changes in a polite live
+  region. Use real `<button>`s and fieldsets, as the example does.
+- **Touch targets are at least 44 × 44 CSS px**, including buttons that are only part of a
+  drawing. Paths sizes its squares in `pt` and its marker-phase buttons separately in CSS px; measure
+  the targets in CSS px, in your tests and in the e2e.
+- **Respect `prefers-reduced-motion`**: skip the animation and show the end state. **Cap the
+  animation**: a replay of everyone's movement can be long, so give the whole replay a frame budget
+  and share it between the moves (paths: 90 frames of 40 ms, property-tested over long replays).
+- **Tell apart players who share a display name.** The platform lets two people use the same name,
+  so a board or history that says only "Ann" can mean either. Add the thing that tells them apart
+  (paths adds the marker's look: "Ann (orange square)") in every text, the history included.
+
+### End-to-end tests
+
+The unit tests can't show a game works for several people on phones. If you test against a platform
+checkout, `tests/e2e/` plays real games, and `tests/e2e/src/paths.spec.ts` is the model for a
+multi-player game:
+
+- the `crowd` fixture opens extra signed-in players on top of `page` and `friend`, all with the
+  project's device settings, collects every one's content-security-policy violations, and closes
+  them all, so a game with four players uses `page`, `friend` and `crowd`;
+- turn touch on (`test.use({ hasTouch: true, isMobile: true })`) and use screens from the smallest
+  phone up, so a target under 44 CSS px or a board that doesn't fit fails the test;
+- read state from the page, not from a copy kept in the test: who is to act, which players are out,
+  how many tiles are on the board. A test that tracks the game itself breaks when the rules do,
+  and can pass while the page is wrong.
 
 ## 6. Versions
 
@@ -507,15 +602,25 @@ games.
 - [ ] Rules text exists for every exported rules version, as Markdown without HTML.
 - [ ] The engine is pure: no I/O, clock, `Math.random`, `crypto`, timers or DOM; randomness only
       from `rng`; no module-level mutable state; state is plain JSON.
+- [ ] View and record schemas are bounded: every array has a `.max`, every number a range, every
+      object `.strict()`.
 - [ ] Errors are values with codes listed in `errorCodes`, none reserved; `validate` never throws
       for a schema-valid action.
 - [ ] Records and `describe` text carry nothing hidden and nothing drawn; a decline says
       "declined", never "resigned".
 - [ ] `test.optionInputs` lists the defaults and every option set that changes a rule, and
-      `runKit(engines, { mode: "full", manifest })` reports no failures.
+      `runKit(engines, { mode: "full", manifest, cpuClock: threadCpuClock().now })` reports no
+      failures.
+- [ ] `worstCase` costs what `validate` and `apply` do, searches enough games and keeps distinct
+      states; a test shows `perturbHidden` changes every hidden part; the kit test has a measured
+      timeout and names any CPU budget it asserts on.
 - [ ] Built relative imports name their files (`./rules.js`, not `./rules`), and the published
       files hold no `.ts`, `.tsx` or `.jsx` sources.
 - [ ] dependency-cruiser and the engine ESLint config pass on the built output.
 - [ ] Your rules tables pass, with coverage at 95 % for the engine and 80 % for the client.
+- [ ] The client shares engine rules instead of copying them (with a property test against
+      `validate`), styles itself through a constructable stylesheet, names every control, has 44 px
+      touch targets, honours `prefers-reduced-motion`, caps its animation and tells apart players
+      who share a name.
 - [ ] A changed rule or state shape is a new rules version, and the old one is still exported.
 - [ ] Install instructions name your registry explicitly.
