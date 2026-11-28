@@ -111,8 +111,8 @@ the module's `RulesSheet`.
 
 ## 2. Word game board layout (portrait phone) — `games/words/client`
 
-(The `paths` board is described in games/paths.md §8. Header, menu and history drawer are provided
-by the shell for every game.)
+(The `paths` board is described in games/paths.md §8, and the proposed `pairs` board in
+games/pairs.md §9. Header, menu and history drawer are provided by the shell for every game.)
 
 ```
 ┌─────────────────────────────┐  safe-area top
@@ -327,6 +327,11 @@ contradict, and Play still goes through `submit`, where the server remains autho
     (a lobby, or another player's turn); the game list polls every 15 s whether or not anything
     is waiting, so a new invitation appears by itself. A hidden tab polls nothing and marks
     nothing seen.
+  - **Back-forward cache**: on `pageshow` with `event.persisted` (a page restored from the
+    browser's back-forward cache, which runs no new page load), the shell refetches the open game
+    or list before showing it, for every game, so an old view never comes back on screen (02 §3;
+    games/pairs.md §9, where a view's faces must not outlive it). Proposed with the pairs client
+    slice (10 §Pairs game).
   - **Never touch server-handled paths**: the worker ignores non-GET requests, other origins and
     every path in `SERVER_PATHS` (`@your-move/shared`, the one list also behind the server's 404s
     and, by hand, Cloudflare's `run_worker_first`; 03 §9): `/api/*`, `/__dev/*` and
@@ -395,6 +400,9 @@ contradict, and Play still goes through `submit`, where the server remains autho
   letter Q, 10 points").
 - Path game: squares, edge notches, hand tiles and rotations have accessible names (games/paths.md
   §8).
+- Pairs (proposed): the board is a `role="grid"` of cards whose accessible names give the
+  position, the face while it is shown and its state; no face stays in the page once the view drops
+  it (games/pairs.md §9).
 - Full keyboard play on desktop (word game: arrow keys to move cursor, type letters from rack, Enter
   to submit, Backspace to recall; path game: arrow keys to choose a hand tile, R to rotate, Enter to
   place).
