@@ -86,13 +86,16 @@ dragon motif or look.
 4. **Self-elimination rule** (`selfElimination: "avoidIfPossible"`, the default): a player may not
    choose a tile and rotation that eliminates their own marker if any tile and rotation in their hand
    avoids it. If every option eliminates them, they must still play one. With the variant
-   `"allowed"`, any choice may be made.
+   `"allowed"`, any choice may be made. So under the default, a player who puts themselves out
+   shows everyone that every tile and rotation in their hand would have done the same. That is by
+   design, and the rules text says so.
 5. **Draw**: if the mover survived, they draw one tile (§4). An eliminated mover doesn't draw.
    Eliminated players are marked out (and the draw-order token passed on, §4) before this draw.
 6. Eliminated players' hand tiles are shuffled back into the deck and dealt out (§4).
 7. **Next player**: the next surviving player in turn order who holds at least one tile. Surviving
    players with empty hands are skipped and listed in the record (`skipped`); they are never put in
-   `toAct`. If no surviving player holds a tile, the game ends (§5).
+   `toAct`. If no surviving player holds a tile, the game ends (§5); a move that ends the game
+   lists nobody as skipped.
 
 The movement result depends only on public information (board, markers) plus the mover's own tile.
 So the client computes an exact preview locally: it draws the path the marker(s) would take and
@@ -114,8 +117,9 @@ flags eliminations before the player confirms.
   - Otherwise the token is cleared.
 - If the token holder is eliminated, resigns or times out, the token passes to the next surviving
   player in turn order after them who has fewer than `handSize` tiles; if there is none, it's
-  cleared. This happens before the returned tiles are dealt, so the deal starts with the new
-  holder.
+  cleared. A mover who survives has just placed a tile, so it counts as short and can take the
+  token this way. This happens before the returned tiles are dealt, so the deal starts with the
+  new holder.
 - So the token is only ever held while the deck is empty, and only by a surviving player who is
   short.
 
@@ -129,13 +133,14 @@ flags eliminations before the player confirms.
   share rank 1.
 - **Board full**: if no surviving player holds a tile (all tiles are placed or held by nobody — a
   6 × 6 board with 35 tiles leaves one square empty), every remaining player shares rank 1.
-- **Resign / timeout**: the player's marker is removed (`out`, reason `resigned` / `timed_out`),
-  their hand returns to the deck (§4), and play continues if two or more remain. With one left,
-  they win. If it was their turn, play passes to the next player as after a move (§3 step 7);
-  otherwise the player to act keeps the turn. A player who declines or times out before their first action (placing their marker)
-  goes through `onResign(…, "decline")` (02 §2.1 rule 9): the marker and hand are handled the same
-  way, but the record has type `decline` and says they declined, never that they resigned; the
-  framework records them as `declined` and leaves them out of the ranking (02 §4).
+- **Resign / timeout / decline**: the player's marker is removed (`out`, reason `resigned`,
+  `timed_out` or `declined`), their hand returns to the deck (§4), and play continues if two or
+  more remain. With one left, they win. If it was their turn, play passes to the next player as
+  after a move (§3 step 7); otherwise the player to act keeps the turn. A player who declines or
+  times out before their first action (placing their marker) goes through `onResign(…,
+  "decline")` (02 §2.1 rule 9): the marker and hand are handled the same way, but the record has
+  type `decline` and says they declined, never that they resigned; the framework records them as
+  `declined` and leaves them out of the ranking (02 §4).
 - There are no points; `result()` returns ranks only. Its `endReason` is `last-standing`,
   `wipe-out` or `board-full`.
 
@@ -176,7 +181,8 @@ Options = {
   out in the same transition share it (the elimination order, §5); `out.reason` is `eliminated`,
   `resigned`, `timed_out` or `declined`. Hidden information for `perturbHidden`: the deck order
   and other players' hands.
-- **seatStatus**: `out` once a marker is eliminated, resigned or timed out.
+- **seatStatus**: `out` once a marker is eliminated, or its player resigned, timed out or
+  declined.
 - **Actions**:
   `{ type: "place-marker", edgeNotch: number /* any integer; 0..8·boardSize−1 is legal, §1 */ }`,
   `{ type: "place-tile", tileId: number /* 0..34 */, rotation: 0 | 1 | 2 | 3 }`.
@@ -211,9 +217,12 @@ Options = {
 - **Termination bound** (`maxActions`): `players` (markers) + 35 (tiles) + `players`
   (resigns/timeouts). Skips are not actions.
 - **worstCase**: late-game boards where a placement moves every surviving marker along the longest
-  available chains. Such boards can't be written down by hand for every seat count, so the hook
-  plays seeded random games and keeps the legal placements whose traces are longest, together with
-  placements that eliminate the mover (which make `validate` try every other option in hand).
+  available chains. Such boards can't be written down by hand for every seat count, so the hook is
+  a heuristic search, not a proof: it plays seeded random games and costs each tile turn's legal
+  placements by the tile paths `validate` and `apply` actually trace (the placement once in each,
+  plus, under `avoidIfPossible` when it puts the mover out, every tile and rotation in hand). It
+  keeps the costliest placement of each of the 4 costliest positions, plus the costliest one that
+  puts the mover out if none of those does.
 
 ## 8. UI notes (games/paths client)
 
