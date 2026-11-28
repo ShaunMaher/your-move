@@ -1,0 +1,43 @@
+{
+  "name": "@your-move/game-pairs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Memory game for 2 to 6 players: turn over two cards at a time and find the pairs",
+  "license": "BSD-2-Clause",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./engine": {
+      "types": "./dist/engine/index.d.ts",
+      "import": "./dist/engine/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "import": "./dist/manifest.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/test-support.*",
+    "!dist/**/.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "peerDependencies": {
+    "@your-move/sdk": "workspace:^",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@your-move/sdk": "workspace:*",
+    "@your-move/testkit": "workspace:*",
+    "vitest": "catalog:",
+    "zod": "catalog:"
+  }
+}

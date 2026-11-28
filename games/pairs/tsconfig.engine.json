@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    // Node types for the tests. No DOM library, so `window`, `document` and the other DOM globals
+    // are type errors in the engine. The Node types do declare `crypto`, `fetch` and `process`, so
+    // those are NOT caught here: the engine lint's allow-list and the architecture rules (11 §5)
+    // are what keep them out of `src/engine`.
+    "types": ["node"],
+    "lib": ["ES2023"]
+  },
+  "include": ["src"],
+  "exclude": ["src/client"],
+  "references": [{ "path": "../../packages/sdk" }, { "path": "../../packages/testkit" }]
+}
