@@ -262,11 +262,28 @@ describe("leaving the game (pairs §5)", () => {
     expect(timeout.state.out[0]).toEqual({ atMove: 5, reason: "timed_out" });
   });
 
-  it("keeps a shown missed pair when the seat to act leaves before its first card", () => {
-    const before = game({ seats: 3, turn: 1, lastMiss: { seat: 0, cards: [0, 2] } });
-    const state = def.onResign(before, 1, noRandom, "decline").state;
-    expect(state).toMatchObject({ turn: 2, lastMiss: { seat: 0, cards: [0, 2] }, turned: null });
-  });
+  it.each([
+    ["resigns", (s: State) => def.onResign(s, 1, noRandom, "resign"), "resigned"],
+    ["times out", (s: State) => def.onTimeout(s, 1, noRandom), "timed_out"],
+    ["declines", (s: State) => def.onResign(s, 1, noRandom, "decline"), "declined"],
+  ] as const)(
+    "keeps a shown missed pair when the seat to act %s before its first card",
+    (_name, leave, reason) => {
+      const before = game({ seats: 3, turn: 1, lastMiss: { seat: 0, cards: [0, 2] }, moves: 9 });
+      const { state } = leave(before);
+      expect(state).toMatchObject({
+        turn: 2,
+        lastMiss: { seat: 0, cards: [0, 2] },
+        turned: null,
+        endReason: null,
+        moves: 10,
+      });
+      expect(state.out[1]).toEqual({ atMove: 9, reason });
+      // The seat now to act still sees the pair.
+      const cards = def.view(state, null).cards.flat();
+      expect([cards[0]?.state, cards[2]?.state]).toEqual(["missed", "missed"]);
+    },
+  );
 
   it("turns the first card back face down when the seat to act leaves mid-turn", () => {
     const before = game({ seats: 3, turn: 1, turned: 6 });

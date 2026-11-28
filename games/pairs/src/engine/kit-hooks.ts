@@ -115,8 +115,9 @@ function optionInputs(): readonly unknown[] {
   return [{}, { grid: "4x4" }, { grid: "5x6" }, { grid: "6x6" }];
 }
 
-/** The four kinds of input `worstCase` returns (pairs §8.7, §10). */
-export type WorstKind = "clears-miss" | "misses" | "last-pair" | "move-limit";
+/** The four kinds of input `worstCase` returns, in this order (pairs §8.7, §10). */
+export const WORST_KINDS = ["clears-miss", "misses", "last-pair", "move-limit"] as const;
+export type WorstKind = (typeof WORST_KINDS)[number];
 
 /** A first card that is legal now, chosen uniformly. */
 const firstCard = (state: State, rng: RandomSource): number => pick(legalCards(state), rng);
@@ -207,13 +208,20 @@ export function worstCases(
   rng: RandomSource,
 ): Map<WorstKind, WorstCase<State, Action>> {
   const found = new Map<WorstKind, WorstCase<State, Action>>();
-  for (let drive = 0; drive < DRIVES && found.size < 3; drive += 1) {
+  for (let drive = 0; drive < DRIVES && found.size < WORST_KINDS.length - 1; drive += 1) {
     for (const [kind, input] of playToEnd(options, seats, rng)) {
       if (!found.has(kind)) found.set(kind, input);
     }
   }
   found.set("move-limit", missToLimit(options, seats, rng));
-  return found;
+  // Every kind, in order; a missing one is a bug in the drivers, so it throws (02 §2.1 rule 3).
+  return new Map(
+    WORST_KINDS.map((kind) => {
+      const input = found.get(kind);
+      if (input === undefined) throw new Error(`worstCase found no ${kind} input`);
+      return [kind, input] as const;
+    }),
+  );
 }
 
 function worstCase(

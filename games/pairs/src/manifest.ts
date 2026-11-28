@@ -43,7 +43,7 @@ The history says who turned over a card and whether it was their first or second
 
 ## Leaving the game
 
-If you resign or run out of time, you're out, but the pairs you found stay yours. If you leave in the middle of your turn, your first card turns back face down. Leaving before you turn over your first card counts as declining the game, not losing it.
+If you resign or run out of time, you're out, but the pairs you found stay yours. If you leave in the middle of your turn, your first card turns back face down. Leaving before you have turned over any card in this game counts as declining the game, not losing it.
 
 ## The end
 

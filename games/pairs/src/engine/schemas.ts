@@ -34,19 +34,21 @@ export interface Grid {
   readonly moveLimit: number;
 }
 
-/** A grid of `columns × rows` cards. */
+/** A grid of `columns × rows` cards, frozen: rules data no caller may change. */
 function grid(id: GridId, columns: number, rows: number): Grid {
   const pairs = (columns * rows) / 2;
-  return { id, columns, rows, pairs, moveLimit: 4 * pairs * pairs };
+  return Object.freeze({ id, columns, rows, pairs, moveLimit: 4 * pairs * pairs });
 }
 
-/** The four grids, in the order of `GRID_IDS` (pairs §1). */
-export const GRIDS: readonly Grid[] = [
+const GRID_LIST: readonly [Grid, Grid, Grid, Grid] = [
   grid("4x4", 4, 4),
   grid("4x5", 4, 5),
   grid("5x6", 5, 6),
   grid("6x6", 6, 6),
 ];
+
+/** The four grids, in the order of `GRID_IDS` (pairs §1); frozen, entries included. */
+export const GRIDS = Object.freeze(GRID_LIST);
 
 /** The grid an id names. */
 export function gridOf(id: GridId): Grid {
@@ -151,23 +153,38 @@ export const recordSchema = z.discriminatedUnion("type", [
 export type PublicRecord = z.infer<typeof recordSchema>;
 
 /** This module's part of `GET /api/v1/catalog` (pairs §7): exactly the four grids. */
+/** One grid of the catalog, every value pinned. */
+const catalogGrid = (g: Grid) =>
+  z
+    .object({
+      id: z.literal(g.id),
+      columns: z.literal(g.columns),
+      rows: z.literal(g.rows),
+      pairs: z.literal(g.pairs),
+      moveLimit: z.literal(g.moveLimit),
+    })
+    .strict();
+
 export const catalogSchema = z
   .object({
-    grid: z.object({ values: z.array(gridId), default: gridId }).strict(),
-    grids: z
-      .array(
-        z
-          .object({
-            id: gridId,
-            columns: side,
-            rows: side,
-            pairs: z.number().int().min(MIN_PAIRS).max(MAX_PAIRS),
-            moveLimit: z.number().int(),
-          })
-          .strict(),
-      )
-      .length(GRIDS.length),
-    faces: z.number().int(),
+    grid: z
+      .object({
+        values: z.tuple([
+          z.literal(GRIDS[0].id),
+          z.literal(GRIDS[1].id),
+          z.literal(GRIDS[2].id),
+          z.literal(GRIDS[3].id),
+        ]),
+        default: gridId,
+      })
+      .strict(),
+    grids: z.tuple([
+      catalogGrid(GRIDS[0]),
+      catalogGrid(GRIDS[1]),
+      catalogGrid(GRIDS[2]),
+      catalogGrid(GRIDS[3]),
+    ]),
+    faces: z.literal(FACE_COUNT),
   })
   .strict();
 export type Catalog = z.infer<typeof catalogSchema>;

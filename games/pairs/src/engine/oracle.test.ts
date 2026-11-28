@@ -134,7 +134,8 @@ function play(
   const rng: RandomSource = seededRandom(seed);
   let state = def.setup({ options: { grid }, seats, rng });
   const faces = [...state.faces];
-  const limit = GRIDS.find((g) => g.id === grid)?.moveLimit ?? 0;
+  // The grid's size and limit come from the rules table, never from the view under test.
+  const { columns, moveLimit: limit } = GRIDS.find((g) => g.id === grid) ?? GRIDS[0];
   const oracle = new Oracle(faces, seats, limit);
   let steps = 0;
   for (;;) {
@@ -159,7 +160,7 @@ function play(
       const action = def.test.randomAction(state, seat, rng, {});
       expect(def.validate(state, seat, action, {})).toEqual({ ok: true });
       state = def.apply(state, seat, action, rng).state;
-      oracle.turnOver(action.row * view.columns + action.column);
+      oracle.turnOver(action.row * columns + action.column);
     }
     steps += 1;
   }
@@ -168,7 +169,7 @@ function play(
 
 // A measured budget (ADR 0004), not Vitest's 5 s default: each grid's games take up to 1.8 s alone
 // and about 7 s within a full `pnpm test` on a 16-thread developer machine (2026-11-29). The shared
-// qemu64 CI runner has run comparable CPU-bound suites far slower (see kit.test.ts), so 300 s.
+// qemu64 CI runner ran the paths kit test about 2.3× slower than this machine, so 300 s is ample.
 describe("invariants and the oracle of shown faces (pairs §8.1, §10)", { timeout: 300_000 }, () => {
   it.each(GRIDS.map((grid) => grid.id))(
     "hold at every step of random games with exits on %s",

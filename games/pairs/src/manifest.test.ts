@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { isGameType } from "@your-move/sdk";
 import { checkIcon } from "@your-move/testkit";
 import { describe, expect, it } from "vitest";
@@ -25,6 +27,16 @@ describe("pairs manifest (02 §7.2, pairs §8.8)", () => {
     }
   });
 
+  it("names no trademarked game in the package's description either", () => {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+      description: string;
+      license: string;
+    };
+    expect(pkg.description).toMatch(/^Card-matching game for 2 to 6 players/u);
+    expect(pkg.description).not.toMatch(/memory|concentration/iu);
+    expect(pkg.license).toBe(manifest.licence);
+  });
+
   it("has rules in Markdown without HTML or trademarked names, stating what pairs §8.8 asks", () => {
     for (const rules of Object.values(manifest.rules)) {
       expect(rules).not.toMatch(/[<>]/u);
@@ -33,6 +45,9 @@ describe("pairs manifest (02 §7.2, pairs §8.8)", () => {
       expect(rules).toMatch(/until the next player turns over their first card/u);
       expect(rules).toMatch(/never which card/u);
       expect(rules).toMatch(/screenshots/u);
+      expect(rules).toMatch(
+        /before you have turned over any card in this game counts as declining/u,
+      );
     }
   });
 

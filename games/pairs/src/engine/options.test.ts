@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { catalog, resolveOptions } from "./options.js";
-import { catalogSchema, optionsSchema } from "./schemas.js";
+import { FACES } from "./faces.js";
+import { catalogSchema, GRIDS, optionsSchema } from "./schemas.js";
 
 describe("resolveOptions (pairs §7)", () => {
   it.each([
@@ -61,8 +62,29 @@ describe("catalog (pairs §7)", () => {
     });
   });
 
-  it("accepts exactly four grids", () => {
+  it("accepts exactly the catalog of pairs §7, every value pinned", () => {
     const value = catalog();
-    expect(catalogSchema.safeParse({ ...value, grids: value.grids.slice(1) }).success).toBe(false);
+    const [g44, g45, g56, g66] = value.grids;
+    for (const changed of [
+      { ...value, grids: value.grids.slice(1) },
+      { ...value, grids: [g44, g45, g56, g66, g66] },
+      { ...value, grids: [g44, g45, g56, { ...g66, moveLimit: 1295 }] },
+      { ...value, grids: [g45, g44, g56, g66] },
+      { ...value, grid: { ...value.grid, values: ["4x4", "4x4", "5x6", "6x6"] } },
+      { ...value, grid: { ...value.grid, values: ["4x4", "4x5", "5x6"] } },
+      { ...value, grid: { ...value.grid, default: "5x4" } },
+      { ...value, faces: 17 },
+    ]) {
+      expect(catalogSchema.safeParse(changed).success).toBe(false);
+    }
+  });
+
+  it("hands out copies: the grids it is built from are frozen", () => {
+    const value = catalog();
+    expect(value.grids[0]).not.toBe(GRIDS[0]);
+    expect(Object.isFrozen(GRIDS)).toBe(true);
+    for (const grid of GRIDS) expect(Object.isFrozen(grid)).toBe(true);
+    expect(Object.isFrozen(FACES)).toBe(true);
+    for (const face of FACES) expect(Object.isFrozen(face)).toBe(true);
   });
 });

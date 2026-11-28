@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { flipAt, game, noRandom } from "../test-support.js";
 import { pairsV1 as def } from "./definition.js";
-import { hiddenCards, testHooks, worstCases } from "./kit-hooks.js";
+import { hiddenCards, testHooks, WORST_KINDS, worstCases } from "./kit-hooks.js";
 import { resolveOptions } from "./options.js";
 import { validate } from "./rules.js";
 import { actionSchema, GRIDS, optionsSchema, type Action } from "./schemas.js";
@@ -230,12 +230,8 @@ describe("worstCase (pairs §8.7)", { timeout: 120_000 }, () => {
   it.each(GRIDS)("returns real moves of every kind on $id at 2–6 seats", (grid) => {
     for (let seats = 2; seats <= 6; seats += 1) {
       const cases = worstCases({ grid: grid.id }, seats, seededRandom(seats));
-      expect([...cases.keys()].sort()).toEqual([
-        "clears-miss",
-        "last-pair",
-        "misses",
-        "move-limit",
-      ]);
+      expect([...cases.keys()]).toEqual([...WORST_KINDS]);
+      expect(WORST_KINDS).toEqual(["clears-miss", "misses", "last-pair", "move-limit"]);
       for (const [kind, { state, seat, action }] of cases) {
         expect(def.seatStatus(state)).toHaveLength(seats);
         expect(def.toAct(state)).toEqual([seat]);

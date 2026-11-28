@@ -49,7 +49,7 @@ export function resolveOptions(input: unknown): Options | GameError {
 export function catalog(): Catalog {
   return {
     grid: { values: [...GRID_IDS], default: DEFAULT_GRID },
-    grids: GRIDS.map((grid) => ({ ...grid })),
+    grids: [{ ...GRIDS[0] }, { ...GRIDS[1] }, { ...GRIDS[2] }, { ...GRIDS[3] }],
     faces: FACE_COUNT,
   };
 }
