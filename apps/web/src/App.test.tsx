@@ -282,14 +282,32 @@ describe("onboarding", () => {
     expect(screen.getByRole("button", { name: "I'm under 16" })).toBeDefined();
   });
 
-  it("won't continue until the age is confirmed", async () => {
+  it("won't continue until the age is confirmed, and marks and focuses only the checkbox", async () => {
     const calls = await toWelcome(json(ME));
     typeInto("Display name", "Sam");
     click("Continue");
     await waitFor(() => {
       expect(alertText()).toContain("Confirm you're 13 or older to continue.");
     });
+    const box = screen.getByLabelText("I'm 13 or older");
+    expect(box.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(box);
+    expect(screen.getByLabelText("Display name").getAttribute("aria-invalid")).toBeNull();
     expect(calls.some((call) => call.method === "PATCH")).toBe(false);
+  });
+
+  it("marks and focuses only the name when the name is at fault", async () => {
+    await toWelcome(json(ME));
+    confirmAge();
+    typeInto("Display name", "   ");
+    click("Continue");
+    await waitFor(() => {
+      expect(alertText()).toContain("Enter a display name");
+    });
+    const field = screen.getByLabelText("Display name");
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(field);
+    expect(screen.getByLabelText("I'm 13 or older").getAttribute("aria-invalid")).toBeNull();
   });
 
   it("explains a refused name", async () => {
@@ -391,9 +409,11 @@ describe("onboarding", () => {
       });
       render(<App api={api} />);
       await screen.findByRole("heading", { name: "Confirm your age" });
+      expect(screen.getByText("Family Games is for people aged 13 or older.")).toBeDefined();
       expect(
         screen.getByText("Please confirm you, the account holder, are 13 or older."),
       ).toBeDefined();
+      expect(document.activeElement).toBe(screen.getByLabelText("I'm 13 or older"));
       expect(screen.queryByLabelText("Display name")).toBeNull();
       confirmAge();
       click("Continue");
@@ -415,6 +435,17 @@ describe("onboarding", () => {
 });
 
 describe("the privacy page (07 §1, 08 §5)", () => {
+  it("is linked from sign-in's email step only, where nothing typed is lost (A21-P-8)", async () => {
+    const { api } = fakeApi({ ...signedOut, "POST /api/v1/auth/otp/request": json({}, 202) });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    expect(screen.getByRole("link", { name: "Privacy" })).toBeDefined();
+    typeInto("Email address", "sam@example.org");
+    click("Email me a code");
+    await screen.findByLabelText("Sign-in code");
+    expect(screen.queryByRole("link", { name: "Privacy" })).toBeNull();
+  });
+
   it("is readable signed out, linked from sign-in, and doesn't become the return path", async () => {
     // A signed-out visit to Settings is remembered on the way to sign-in.
     window.history.replaceState(null, "", "/settings");
@@ -851,6 +882,68 @@ describe("a join link through sign-in and onboarding (06 §6.8, 07 §1)", () => 
     expect(calls.filter((call) => call.path === "/api/v1/join")).toHaveLength(0);
     expect(keptJoinToken()).toBe(TOKEN);
     expect(seen.join(" ")).not.toContain(TOKEN);
+  });
+
+  it("keeps the link when a signed-out visitor looks at the privacy page on the way (A21-P-1)", async () => {
+    const { api } = fakeApi({
+      ...signedOut,
+      "POST /api/v1/auth/otp/request": json({}, 202),
+      "POST /api/v1/auth/otp/verify": json({ user: ME, needsOnboarding: false }),
+      "POST /api/v1/join/lookup": json({ game: PREVIEW }),
+      "GET /api/v1/catalog": json({ games: [] }),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    await waitFor(() => {
+      expect(peekReturnPath()).toBe("/join");
+    });
+    fireEvent.click(screen.getByRole("link", { name: "Privacy" }));
+    await screen.findByRole("heading", { name: "Privacy" });
+    fireEvent.click(screen.getByRole("link", { name: "Back" }));
+    await screen.findByRole("heading", { name: "Sign in" });
+    expect(window.location.pathname).toBe("/signin");
+    expect(peekReturnPath()).toBe("/join");
+    typeInto("Email address", "sam@example.org");
+    click("Email me a code");
+    await screen.findByLabelText("Sign-in code");
+    typeInto("Sign-in code", "12345678");
+    click("Sign in");
+    expect(await screen.findByRole("button", { name: "Join" })).toBeDefined();
+    expect(keptJoinToken()).toBe(TOKEN);
+  });
+
+  it("keeps the link, and the typed name, when someone onboarding looks at the privacy page (A21-P-1, P-8)", async () => {
+    const { api } = fakeApi({
+      ...signedOut,
+      "POST /api/v1/auth/otp/request": json({}, 202),
+      "POST /api/v1/auth/otp/verify": json({
+        user: { ...ME, displayName: null, ageAttested: false, needsOnboarding: true },
+        needsOnboarding: true,
+      }),
+      "PATCH /api/v1/me": json(ME),
+      "POST /api/v1/join/lookup": json({ game: PREVIEW }),
+      "GET /api/v1/catalog": json({ games: [] }),
+    });
+    render(<App api={api} />);
+    await screen.findByRole("heading", { name: "Sign in" });
+    typeInto("Email address", "sam@example.org");
+    click("Email me a code");
+    await screen.findByLabelText("Sign-in code");
+    typeInto("Sign-in code", "12345678");
+    click("Sign in");
+    await screen.findByRole("heading", { name: "Welcome to Family Games" });
+    typeInto("Display name", "Sam");
+    fireEvent.click(screen.getByRole("link", { name: "Privacy" }));
+    await screen.findByRole("heading", { name: "Privacy" });
+    fireEvent.click(screen.getByRole("link", { name: "Back" }));
+    await screen.findByRole("heading", { name: "Welcome to Family Games" });
+    expect(window.location.pathname).toBe("/welcome");
+    expect(peekReturnPath()).toBe("/join");
+    expect(screen.getByLabelText<HTMLInputElement>("Display name").value).toBe("Sam");
+    fireEvent.click(screen.getByLabelText("I'm 13 or older"));
+    click("Continue");
+    expect(await screen.findByRole("button", { name: "Join" })).toBeDefined();
+    expect(keptJoinToken()).toBe(TOKEN);
   });
 
   it("keeps the link through onboarding", async () => {

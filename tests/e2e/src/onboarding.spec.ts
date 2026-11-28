@@ -16,7 +16,9 @@ test("someone under the minimum age leaves at onboarding: the new account goes, 
   // Continue without confirming the age is refused on the page.
   await page.getByLabel("Display name").fill("Kim");
   await page.getByRole("button", { name: "Continue" }).click();
-  await expect(page.getByRole("alert").first()).toContainText("Confirm you're 13 or older");
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Confirm you're 13 or older to continue." }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "I'm under 13" }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("You're signed out");

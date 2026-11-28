@@ -2,7 +2,8 @@
  * The privacy page (07 §1, 08 §5): what the instance keeps and who sees it, its minimum age and
  * that children play through a parent's or carer's account, the email provider's copies and the
  * operator's own retention statement (`PRIVACY_RETENTION`, 09 §1), and how to reach the operator.
- * Anyone may read it, signed in or not. Every statement here must stay true of what is built.
+ * Anyone may read it, signed in or not. Every statement here must stay true of what is built:
+ * Turnstile, for one, isn't mentioned until its widget ships (startup refuses its keys today).
  */
 import type { ClientConfig } from "../auth-api.js";
 import { Link } from "../router.js";
@@ -10,13 +11,15 @@ import { Page } from "./Page.js";
 
 interface PrivacyProps {
   readonly config: ClientConfig;
+  /** Where Back goes: the screen the person came from in the sign-in flow, or home. */
+  readonly back: string;
 }
 
-export function Privacy({ config }: PrivacyProps) {
+export function Privacy({ config, back }: PrivacyProps) {
   const { appName, operatorContact } = config;
   const age = String(config.minAge);
   return (
-    <Page appName={appName} nav={<Link to="/">Back</Link>}>
+    <Page appName={appName} nav={<Link to={back}>Back</Link>}>
       <h1 tabIndex={-1}>Privacy</h1>
 
       <section className="stack" aria-labelledby="privacy-age">
@@ -37,7 +40,7 @@ export function Privacy({ config }: PrivacyProps) {
       <section className="stack" aria-labelledby="privacy-keep">
         <h2 id="privacy-keep">What we keep</h2>
         <ul>
-          <li>Your email address, to send you sign-in codes and the emails you ask for.</li>
+          <li>Your email address, to send you codes and the emails you ask for.</li>
           <li>Your display name, and your settings.</li>
           <li>When you confirmed your age, and the minimum age at that time.</li>
           <li>Your games: who played, the moves and the results.</li>
@@ -59,6 +62,11 @@ export function Privacy({ config }: PrivacyProps) {
             invitation ends, and a scrambled form of it used to limit how many invitations an
             address gets.
           </li>
+          <li>
+            A scrambled form of an address that asked us to stop sending it invitations, or whose
+            new account was deleted for being under the minimum age, kept so we don&apos;t email it
+            invitations again.
+          </li>
         </ul>
       </section>
 
@@ -66,16 +74,13 @@ export function Privacy({ config }: PrivacyProps) {
         <h2 id="privacy-see">Who sees what</h2>
         <p>
           Other players see your display name and the games you play with them. They never see your
-          email address, with two exceptions: if you invite someone by email, the email we send them
-          may show your address; and someone who invited you by typing your address sees it until
-          you accept.
+          email address, with two exceptions: if you invite someone who doesn&apos;t have an account
+          yet by email, the invitation email we send them shows your address; and someone who
+          invited you by typing your address sees it until you accept.
         </p>
         <p>
           The app loads nothing from other companies: no adverts, analytics, tracking, or outside
           fonts or scripts.
-          {config.turnstileSiteKey === undefined
-            ? null
-            : " The one exception: to stop automated abuse, the sign-in screen may show a check from Cloudflare Turnstile, which then receives your network address and information about your browser."}
         </p>
         <p>
           The operator&apos;s hosting and network providers handle your connection, including your
@@ -86,7 +91,8 @@ export function Privacy({ config }: PrivacyProps) {
       <section className="stack" aria-labelledby="privacy-email">
         <h2 id="privacy-email">Emails and how long things are kept</h2>
         <p>
-          We email sign-in codes, invitations, and, if you turn them on, emails when you&apos;re
+          We email one-time codes (to sign in, or to delete your account), invitations, a
+          confirmation when an account is deleted, and, if you turn them on, emails when you&apos;re
           invited or it&apos;s your turn. The email service that sends them keeps copies of the
           messages it sends.
         </p>
@@ -101,7 +107,9 @@ export function Privacy({ config }: PrivacyProps) {
         <p>
           To ask about your data, or to have your account deleted, contact the operator of this
           instance at {operatorContact}. When an account is deleted, the games it played stay for
-          the other players, without its name or email address.
+          the other players, without its name or email address. If it had been invited by email to a
+          game that hadn&apos;t started, the person who typed the address still sees it there until
+          that game starts or ends.
         </p>
       </section>
     </Page>

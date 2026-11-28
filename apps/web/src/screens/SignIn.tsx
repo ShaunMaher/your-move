@@ -199,9 +199,12 @@ export function SignIn({ api, appName, onSignedIn }: SignInProps) {
           </div>
         </form>
       )}
-      <p className="aside">
-        <Link to="/privacy">Privacy</Link>
-      </p>
+      {step === "email" && (
+        // On the email step only: leaving the code step would lose the typed address (A21-P-8).
+        <p className="aside">
+          <Link to="/privacy">Privacy</Link>
+        </p>
+      )}
     </Page>
   );
 }

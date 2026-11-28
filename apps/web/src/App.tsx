@@ -82,6 +82,8 @@ function gameIdOf(path: string): string | null {
 export function App({ api }: AppProps) {
   const [boot, setBoot] = useState<Boot>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
+  // The name typed on the welcome screen, kept here so a look at the privacy page doesn't lose it.
+  const [welcomeName, setWelcomeName] = useState("");
   const path = usePath();
 
   useEffect(() => {
@@ -157,6 +159,7 @@ export function App({ api }: AppProps) {
   // person and show the sign-in screen (08 §2).
   const endSession = useCallback((announce: boolean, underAge = false) => {
     clearClientState();
+    setWelcomeName("");
     if (announce) announceSignedOut();
     navigate("/signin", { replace: true });
     setBoot((current) =>
@@ -223,6 +226,7 @@ export function App({ api }: AppProps) {
   // in the handler, so it survives a reload during Welcome. A late reply for someone who is no
   // longer signed in (another account took over meanwhile) is dropped.
   const setMe = (next: Me) => {
+    setWelcomeName("");
     const returnTo = peekReturnPath();
     setBoot((current) =>
       current.status === "ready" && current.me?.id === next.id
@@ -263,7 +267,10 @@ export function App({ api }: AppProps) {
   else if (boot.status === "unreachable") {
     screen = <Unreachable offline={boot.offline} onRetry={retry} />;
   } else if (place === PRIVACY_PATH) {
-    screen = <Privacy config={boot.config} />;
+    // Back returns to the sign-in flow's own screen, never through `/`, which would replace the
+    // remembered return path (07 §1, A21-P-1).
+    const back = me === null ? "/signin" : me.needsOnboarding ? "/welcome" : "/";
+    screen = <Privacy config={boot.config} back={back} />;
   } else if (me === null) {
     screen =
       boot.underAge === true ? (
@@ -278,6 +285,8 @@ export function App({ api }: AppProps) {
         appName={boot.config.appName}
         minAge={boot.config.minAge}
         me={me}
+        name={welcomeName}
+        onNameChange={setWelcomeName}
         onDone={setMe}
         onSignedOut={signedOut}
         onUnderAge={leftUnderAge}
