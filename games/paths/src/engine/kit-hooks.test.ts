@@ -11,7 +11,11 @@ import { placeTile, seatStatus, setup } from "./state.js";
 
 const SAFE = placedFor(STRAIGHT);
 
-describe("the kit hooks (02 §6)", () => {
+// A measured budget (ADR 0004), not Vitest's 5 s default: each `worstCase` test runs the hook's
+// 150-game search several times, up to 0.8 s alone and about 4× that within a full `pnpm test` on
+// a 16-thread developer machine (2026-11-28). The shared qemu64 CI runner has run comparable
+// CPU-bound suites far slower than this machine (see kit.test.ts), so 60 s.
+describe("the kit hooks (02 §6)", { timeout: 60_000 }, () => {
   const markers = game({ phase: "markers", markers: [facing(0, 0, 0), unplaced], turn: 1 });
   const tiles = game({
     markers: [facing(0, 2, 0), facing(5, 5, 4)],
