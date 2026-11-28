@@ -302,6 +302,20 @@ The log shows `listening` and, with the gmail provider, no `email_*` alert. Then
 to the new digest and run `up -d` again; the app applies new migrations at start (and refuses to
 start on a database a newer image has migrated, so keep a backup before an update).
 
+**Measuring usage.** To see how many requests a game costs (the input to the Workers cost model,
+roadmap "Workers cost model"), feed the app's request log to the usage report. It reads only the
+JSON request lines (route, method, status, time; no personal data) and prints requests per route
+and estimates per move, per game and per player per day, with its assumptions, and a comparison
+with the Workers Free plan's daily request limit. It fetches nothing and logs nothing:
+
+```sh
+docker compose -f apps/node/docker-compose.tunnel.yml --env-file /path/to/tunnel.env logs --no-log-prefix app \
+  | pnpm ops:usage --players 2        # or: pnpm ops:usage app.log; add --json for machine output
+```
+
+`--players` is the number of active players, which the log cannot tell. Retention is whatever
+Docker keeps, so a short log gives rough rates.
+
 **Check it** (the acceptance checks for this deployment; the settings they rely on are also tests in CI,
 `apps/node/src/tunnel-compose.test.ts`):
 
