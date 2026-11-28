@@ -230,7 +230,7 @@ that work on both runtimes, plus SMTP for Node only.
   - `POST /api/v1/games` with `n` typed addresses: 25 statements plus 17 per address (the caps,
     the lookups, the per-pair counts, the inbound cap's one read of live invitations, alpha A20
     review S-1, the two tiers of invite-email caps, and the seat and `invites` row in the insert).
-    One address (every two-seat game, so every words game) is 43–45 in the request, inside the
+    One address (every two-seat game, so every words game) is 42–45 in the request, inside the
     Free plan's 50; two or more addresses are over it (59 for two, up to 144 for seven), and so is
     any create that lazily expires the creator's overdue lobbies (up to 20 of them, 03 §8). Its
     background task runs in the same invocation, in this order (review A20-S-2, P-1): 2 for the
@@ -238,10 +238,11 @@ that work on both runtimes, plus SMTP for Node only.
     record `sent_at`, and only then the invitation push (alpha A20, when a `normal` invitation with
     a user was seated and push is configured): the read of the game (2), the subscriptions (1),
     and for invitees with a device the daily counter (2 each), the delivery marks (1) and the
-    deletions (1). One known invitee with a device is therefore about 53 statements, or 55 when
-    the instance cap stopped an email: **over the Free plan's 50**; because the push comes
-    last, the statement over the limit is one of the push's, after the F-20 stop and `sent_at`
-    are written. A
+    deletions (1). One known invitee with a device is therefore 42 + 1 (`sent_at`) + 7 (the push)
+    = 50 statements, or 52 with the alert's 2 when the instance cap stopped an email: **at or over
+    the Free plan's 50**. Because the push comes last, the F-20 stop and `sent_at` have landed by
+    about statement 48, inside the limit, and a statement over it is one of the push's
+    (review A20-P2-1). A
     pick seated as an invitation adds the two shared invite-email counters (4), and a request with
     such a pick but no typed address the suppression and past-opponent reads and the instance
     cap's stop marker (4). Those **need the Paid plan, or the invitation push in an invocation of

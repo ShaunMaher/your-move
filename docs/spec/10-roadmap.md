@@ -277,6 +277,13 @@ tests are green in CI.
   claim at onboarding and in the sweep, the sweep's lobby expiry and the unsubscribe route): the
   under-age exit's suppression and `inert` email seats, the Admin API's suppression routes, and the
   sweep's tidy-up of expired `invites` rows; Q3's identical responses for every email case kept.
+  With the under-age exit and account deletion, decide what happens to an address's
+  `unsubscribed` row once turning nudges on has lifted it (alpha A20 review P-3): deleting the
+  account doesn't restore it, so either re-write it on deletion or have the invitation email
+  ignore `unsubscribed` while nudges are on and leave the row alone (review A20-S2-2).
+- Serialise the inbound invitation cap's check (06 §6.7) inside the create batch, so creations
+  racing for one target can't all read the same count of live invitations (alpha A20 review
+  P2-2, S2-1).
 - Join links beyond alpha A18 (which built the fragment tokens, create/rotate/revoke, the landing page with
   explicit Join and `sessionStorage` return path, the rate limits, block checks against every member, no
   re-entry after decline/remove, and remove seat; link joiners' "Add <name> to your players?" is
@@ -453,8 +460,8 @@ several typed addresses and the onboarding claim (8 seats per request on the Wor
 puts over the Free plan's per-invocation D1 query limit for more than one typed address: the
 Paid plan, or fewer statements per address (alpha A17 review S-5). On the Free plan the
 invitation push (alpha A20) needs an invocation of its own, since a create with one known invitee
-who has a device is about 53 statements with it (55 when the invite-email cap stopped a send, 09
-§3): move it to the sweep or a queue (review A20-P-1, S-2).
+who has a device is 50 statements with it (52 when the invite-email cap stopped a send, 09 §3),
+at or over the limit: move it to the sweep or a queue (review A20-P-1, S-2, P2-1).
 
 **Workers cost model (before the first Workers deployment).** Before choosing a plan, estimate
 what the Workers Free plan carries, as games per month, from measurements rather than guesses:

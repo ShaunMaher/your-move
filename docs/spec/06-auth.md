@@ -361,7 +361,8 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    so an address with more seats than the cap gets the rest within a sweep or a few. A claim
    that fails there is logged by error class and never fails onboarding; the sweep claims it
    later. A lobby at or past its expiry is never claimed into (it is about to expire, 02 §4). A
-   claim that makes a `normal` invitation sends the claimant the generic invitation push (§6.2; alpha A20), in the background after the
+   claim that makes a `normal` invitation sends the claimant the generic invitation push (§6.2;
+   alpha A20), in the background after the
    onboarding response or from the sweep, and never the invitation email. At onboarding the
    claimant has usually just signed in and has no push subscription yet, so that push is normally
    a no-op (review A20-P-6); the sweep's claim is the one that usually reaches a device.
@@ -430,11 +431,14 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
    invite a re-invitation, and so does a game that started. Each `invites` row has its seat's
    `game_players.id` as its id (04), which is how a removal is seen. It is one read per typed
    address, the same statement whatever the address resolves to (a placeholder user when there is
-   none), and writes nothing (Q3). Two creations racing for a target's last place can both get
-   it, at most one more `normal` invitation each; the per-creator and pair limits bound that.
-   The creator sees "Invited" either way. Active game caps (05) count
-   only games a user *created*, so other people's games can never lock a user out of creating their
-   own.
+   none), and writes nothing (Q3). The read isn't serialised with the insert, so creations racing
+   for one target all read the same count: one stranger racing their own creations can get up
+   to the pair limit (`GAMES_CREATED_PAIR_DAY`, 5 a day) of `normal` invitations to that target,
+   and any number of strangers can race at once. The notices stay bounded (one invitation push a
+   day, 3 emails to an address in 30 days); only the target's list grows. Serialising the check
+   inside the create batch is M4's (10; review A20-P2-2, S2-1). The creator sees "Invited" either
+   way. Active game caps (05) count only games a user *created*, so other people's games can never
+   lock a user out of creating their own.
 8. **Join links** (for groups, and for players who'd rather share a link in a group chat than type
    emails):
    - Created by the creator for a `lobby` game's open seats (seats not held by an `invited` or
