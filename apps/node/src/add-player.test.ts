@@ -289,6 +289,85 @@ describe("POST /api/v1/games/:id/add-player (05)", () => {
     expect(await canAdd(a, other)).toEqual([{ userId: e.id, displayName: "Eve" }]);
   });
 
+  it("answers a suspended or pending-deletion joiner the same 204, writes nothing, and keeps them listed (06 §6.11)", async () => {
+    const [a, b, c, d] = [
+      await signUp(h, "Ann"),
+      await signUp(h, "Bob"),
+      await signUp(h, "Cy"),
+      await signUp(h, "Di"),
+    ];
+    const gameId = await finishedLinkGame(a, [b, c, d]);
+    h.exec("UPDATE users SET suspended_at = ? WHERE id = ?", now(), b.id);
+    h.exec("UPDATE users SET deletion_requested_at = ? WHERE id = ?", now(), c.id);
+    const listed = [
+      { userId: b.id, displayName: "Bob" },
+      { userId: c.id, displayName: "Cy" },
+      { userId: d.id, displayName: "Di" },
+    ];
+    expect(await canAdd(a, gameId)).toEqual(listed);
+    const answers = [];
+    for (const player of [b, c, d]) answers.push(await addPlayer(a, gameId, player.id));
+    for (const answer of answers) expect(answer).toEqual({ status: 204, body: null });
+    expect(pairsOf(a, b, c, d)).toEqual(both(a, d));
+    expect(await canAdd(a, gameId)).toEqual(listed.slice(0, 2));
+  });
+
+  it("answers a joiner already a past opponent 204, keeping the later of the two times", async () => {
+    const [a, b, c] = [await signUp(h, "Ann"), await signUp(h, "Bob"), await signUp(h, "Cy")];
+    const gameId = await finishedLinkGame(a, [b, c]);
+    const endedAt = Number(
+      h.query("SELECT ended_at FROM games WHERE id = ?", gameId)[0]?.["ended_at"],
+    );
+    // b: a pair from an earlier game; c: one from a game that ended later (seeded by hand).
+    const seed = (other: Player, at: number) => {
+      h.exec(
+        "INSERT INTO past_opponents (user_id, other_id, last_finished_at) VALUES (?, ?, ?), (?, ?, ?)",
+        a.id,
+        other.id,
+        at,
+        other.id,
+        a.id,
+        at,
+      );
+    };
+    seed(b, endedAt - DAY);
+    seed(c, endedAt + DAY);
+    // Already past opponents: nothing to ask, and naming them is still the same 204.
+    expect(await canAdd(a, gameId)).toEqual([]);
+    for (const player of [b, c]) {
+      expect(await addPlayer(a, gameId, player.id)).toEqual({ status: 204, body: null });
+    }
+    const timeOf = (other: Player) =>
+      h
+        .query(
+          "SELECT last_finished_at FROM past_opponents WHERE (user_id = ? AND other_id = ?) OR (user_id = ? AND other_id = ?)",
+          a.id,
+          other.id,
+          other.id,
+          a.id,
+        )
+        .map((row) => row["last_finished_at"]);
+    expect(timeOf(b)).toEqual([endedAt, endedAt]);
+    expect(timeOf(c)).toEqual([endedAt + DAY, endedAt + DAY]);
+  });
+
+  it("refuses a joiner whose account was deleted, and an active game, with the same 404", async () => {
+    const [a, b, c] = [await signUp(h, "Ann"), await signUp(h, "Bob"), await signUp(h, "Cy")];
+    const gameId = await finishedLinkGame(a, [b, c]);
+    // Account deletion nulls the row's user (04 §Account deletion step 5); the row stays.
+    h.exec(
+      "UPDATE game_players SET user_id = NULL WHERE game_id = ? AND user_id = ?",
+      gameId,
+      b.id,
+    );
+    expect(await canAdd(a, gameId)).toEqual([{ userId: c.id, displayName: "Cy" }]);
+    expect(await addPlayer(a, gameId, b.id)).toEqual(NOT_FOUND);
+    h.advance(DAY);
+    const active = await startedLinkGame(a, [c]);
+    expect(await addPlayer(a, active, c.id)).toEqual(NOT_FOUND);
+    expect(pairsOf(a, b, c)).toEqual([]);
+  });
+
   it("refuses a malformed body as 400", async () => {
     const [a, b] = [await signUp(h, "Ann"), await signUp(h, "Bob")];
     const gameId = await finishedLinkGame(a, [b]);
@@ -339,13 +418,23 @@ describe("a rematch with a link joiner (06 §6.11, alpha A15)", () => {
     expect(asked.body.game.status).toBe("active");
   });
 
-  it("stays INVALID_INVITEES for another player: adding pairs the joiner with the creator only", async () => {
+  it("stays INVALID_INVITEES for every other player: only the creator can start it (06 §6.11)", async () => {
     const [a, b, c] = [await signUp(h, "Ann"), await signUp(h, "Bob"), await signUp(h, "Cy")];
     const gameId = await finishedLinkGame(a, [b], [c]);
     expect((await addPlayer(a, gameId, b.id)).status).toBe(204);
-    const refused = await rematch(c, gameId);
-    expect([refused.status, refused.body.error.code]).toEqual([400, "INVALID_INVITEES"]);
+    // Adding pairs the joiner with the creator alone, by design: c and b never become a pair.
+    for (const player of [c, b]) {
+      const refused = await rematch(player, gameId);
+      expect([refused.status, refused.body.error.code]).toEqual([400, "INVALID_INVITEES"]);
+    }
     expect(pairsOf(b, c)).toEqual(both(a, b).concat(both(a, c)).sort());
+    // The creator's rematch takes everyone.
+    const asked = await rematch(a, gameId);
+    expect(asked.status, JSON.stringify(asked.body)).toBe(201);
+    expect(asked.body.game.status).toBe("active");
+    expect(asked.body.game.players.map((row) => row.userId).sort()).toEqual(
+      [a.id, b.id, c.id].sort(),
+    );
   });
 
   it("stays INVALID_INVITEES after a yes across a block: the add wrote nothing", async () => {

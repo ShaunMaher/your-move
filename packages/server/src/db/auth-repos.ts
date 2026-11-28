@@ -183,11 +183,12 @@ export function userRepo(db: Database): UserRepo {
         .where(eq(users.emailId, emailId));
     },
     async addPastOpponents(a, b, lastFinishedAt) {
-      // Both accounts still exist and neither is being deleted (04 §Account deletion removes its
-      // pairs and must not see one come back), and no block either way (04 invariant 6), checked
-      // in the statements that write, so a block written meanwhile is never crossed.
+      // Both accounts are humans that still exist, neither suspended nor being deleted (04
+      // §Account deletion removes its pairs and must not see one come back; agents never have
+      // pairs, 04 invariant 7), and no block either way (04 invariant 6), checked in the
+      // statements that write, so a block or suspension written meanwhile is never crossed.
       const live = (id: string) =>
-        sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${id} AND ${users.deletionRequestedAt} IS NULL)`;
+        sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.id} = ${id} AND ${users.kind} = 'human' AND ${users.suspendedAt} IS NULL AND ${users.deletionRequestedAt} IS NULL)`;
       const guard = sql`${live(a)} AND ${live(b)} AND ${unblocked(a, b)}`;
       const pair = (userId: string, otherId: string) =>
         guardedInsert(

@@ -21,7 +21,7 @@ import {
   start,
   startAtCreation,
 } from "./lifecycle.js";
-import { addableRows, rematchOf } from "./present.js";
+import { addableUserIds, rematchOf } from "./present.js";
 import { cryptoRandom, recorded } from "./random.js";
 import { createGameRegistry, GameConfigError } from "./registry.js";
 import {
@@ -615,7 +615,6 @@ describe("whom a finished game's creator may add to their players (05 `canAddPla
     }) as GamePlayerRecord;
   const creator = row({ id: "c", userId: "c", seat: 0, joinedVia: "creator" });
   const finished = { status: "finished" } as const;
-  const ids = (rows: GamePlayerRecord[]) => rows.map((r) => r.userId);
 
   it("lists seated link joiners who acted and still have an account, in seat order", () => {
     const players = [
@@ -628,17 +627,17 @@ describe("whom a finished game's creator may add to their players (05 `canAddPla
       row({ userId: null, seat: 6 }),
       row({ userId: "unseated", seat: null, state: "declined" }),
     ];
-    expect(ids(addableRows(finished, players, creator))).toEqual(["early", "late"]);
+    expect(addableUserIds(finished, players, creator)).toEqual(["early", "late"]);
   });
 
   it("lists no one for anyone but the creator who acted, or before the game finished", () => {
     const joiner = row({ userId: "j" });
     const players = [creator, joiner];
-    expect(addableRows(finished, players, joiner)).toEqual([]);
+    expect(addableUserIds(finished, players, joiner)).toEqual([]);
     const idle = { ...creator, actedOnce: 0 };
-    expect(addableRows(finished, [idle, joiner], idle)).toEqual([]);
+    expect(addableUserIds(finished, [idle, joiner], idle)).toEqual([]);
     for (const status of ["lobby", "active", "declined", "cancelled", "expired"] as const) {
-      expect(addableRows({ status }, players, creator), status).toEqual([]);
+      expect(addableUserIds({ status }, players, creator), status).toEqual([]);
     }
   });
 });

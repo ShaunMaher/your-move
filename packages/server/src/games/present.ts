@@ -22,6 +22,7 @@ import {
   linkLive,
   lobbyExpiresAt,
 } from "./lifecycle.js";
+import { DELETED_PLAYER } from "./names.js";
 import type { GameType } from "./registry.js";
 
 type EnvelopePlayer = GameEnvelope["players"][number];
@@ -114,7 +115,7 @@ export interface PresentInput {
   /** A finished game's rematch as the viewer sees it ({@link rematchOf}); null if it has none. */
   readonly rematch?: GameEnvelope["rematch"];
   /**
-   * Which of the game's {@link addableRows} are already the viewer's past opponents (04
+   * Which of the game's {@link addableUserIds} are already the viewer's past opponents (04
    * `past_opponents`), for `canAddPlayers`; read only for the creator of a finished game.
    */
   readonly pastOpponents?: ReadonlySet<string>;
@@ -234,17 +235,19 @@ export function rematchOf(rematch: RematchRead, now: number): GameEnvelope["rema
 }
 
 /**
- * The players the creator of a finished game may add to their players (05 `canAddPlayers` and
- * `add-player`, 06 §6.9, alpha A19), whether or not they already are: seated rows that joined
- * through a link and acted, whose account still exists, in seat order; none unless the viewer is
- * the creator and acted too, since a pair needs both to have acted. Blocks never change it, so
- * the question reveals none (06 §6.9).
+ * The one rule for whom the creator of a finished game may add to their players (05
+ * `canAddPlayers` and `add-player`, 06 §6.9, alpha A19), whether or not they already are: the users
+ * of seated rows that joined through a link and acted, whose account still exists, in seat order;
+ * none unless the viewer is the creator and acted too, since a pair needs both to have acted. Both
+ * the route and the envelope use it, so what is listed and what may be named never drift apart.
+ * Blocks, suspensions and pending deletions never change it: the write then silently does nothing,
+ * so the question reveals none of them (06 §6.9, §6.11).
  */
-export function addableRows(
+export function addableUserIds(
   game: Pick<GameRecord, "status">,
   players: readonly GamePlayerRecord[],
   viewer: GamePlayerRecord,
-): GamePlayerRecord[] {
+): string[] {
   if (game.status !== "finished" || viewer.joinedVia !== "creator" || viewer.actedOnce !== 1) {
     return [];
   }
@@ -256,17 +259,22 @@ export function addableRows(
         row.actedOnce === 1 &&
         row.userId !== null,
     )
-    .sort((a, b) => (a.seat ?? 0) - (b.seat ?? 0));
+    .sort((a, b) => (a.seat ?? 0) - (b.seat ?? 0))
+    .map((row) => row.userId ?? "");
 }
 
-/** The envelope's `canAddPlayers`: the {@link addableRows} who aren't yet past opponents. */
+/**
+ * The envelope's `canAddPlayers`: the {@link addableUserIds} who aren't yet past opponents, with
+ * their names (an account deleted since the rows were read is named as deleted, never dropped).
+ */
 function canAddPlayersOf(input: PresentInput): NonNullable<GameEnvelope["canAddPlayers"]> {
   const known = input.pastOpponents ?? new Set<string>();
-  return addableRows(input.game, input.players, input.viewer).flatMap((row) => {
-    const user = row.userId === null ? undefined : input.users.get(row.userId);
-    if (user === undefined || user.displayName === null || known.has(user.id)) return [];
-    return [{ userId: user.id, displayName: user.displayName }];
-  });
+  return addableUserIds(input.game, input.players, input.viewer)
+    .filter((userId) => !known.has(userId))
+    .map((userId) => ({
+      userId,
+      displayName: input.users.get(userId)?.displayName ?? DELETED_PLAYER,
+    }));
 }
 
 /** The seats in `toAct`, and whether the viewer's is one of them. */

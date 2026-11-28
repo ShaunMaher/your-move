@@ -482,11 +482,23 @@ export function repositoryContract(name: string, connect: () => Promise<Contract
           expect(await pairsOf(a, c)).toEqual([]);
         });
 
-        it("writes nothing for an account that is gone or being deleted", async () => {
+        it("writes nothing for an account that is gone, suspended, being deleted or an agent", async () => {
           const a = await pickable("Ann");
           const leaving = await pickable("Leaving", { deletionRequestedAt: T0 });
-          await repos.users.addPastOpponents(a, leaving, T0);
-          await repos.users.addPastOpponents(a, crypto.randomUUID(), T0);
+          const suspended = await pickable("Suspended", { suspendedAt: T0 });
+          const agent = crypto.randomUUID();
+          await repos.users.create({
+            id: agent,
+            kind: "agent",
+            ownerUserId: a,
+            displayName: "Helper",
+            createdAt: T0,
+            updatedAt: T0,
+          });
+          for (const other of [leaving, suspended, agent, crypto.randomUUID()]) {
+            await repos.users.addPastOpponents(a, other, T0);
+            await repos.users.addPastOpponents(other, a, T0);
+          }
           expect(
             await target.sql(
               "SELECT user_id FROM past_opponents WHERE user_id = ? OR other_id = ?",

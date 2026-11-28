@@ -303,7 +303,7 @@ export const addPlayerRoute = createRoute({
   tags: ["Games"],
   summary: "Add a link joiner to your players",
   description:
-    'The creator of a `finished` game answers yes to "Add <name> to your players?" for someone in its `canAddPlayers`: you and that player become past opponents (both ways, never the other players), so either of you can pick the other for a game or a rematch. Not a transition: the game\'s `version` is unchanged. `204` also when repeated, and when a block exists between you either way, which writes nothing and answers the same, so the answer never says whether there is one (06 §6.9).',
+    "The creator of a `finished` game answers yes to \"Add <name> to your players?\" for someone in its `canAddPlayers`: you and that player become past opponents (both ways, never the other players), so either of you can pick the other for a game or a rematch. Not a transition: the game's `version` is unchanged. `204` also when repeated, and when the pair isn't written (a block between you either way, or an account suspended or being deleted), which writes nothing and answers the same, so the answer never says whether, or why (06 §6.9, §6.11).",
   request: { params: GameId, body: jsonBody(AddPlayerBodySchema) },
   responses: {
     204: { description: "Answered: added, already added, or a silent no-op." },

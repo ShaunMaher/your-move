@@ -450,7 +450,10 @@ Seat filling and the lobby are defined in 02 §4; this section covers identity a
       exactly what picking that person in `POST /api/v1/games` answers, for every one of those
       reasons alike. It reveals nothing new: the same person has already left (or never joined) the
       caller's "People you've played" list (`GET /api/v1/players/recent`), for the same set of
-      reasons.
+      reasons. So in a game with a link joiner only its creator can start the rematch, and only
+      after adding them (§6.9): adding pairs the joiner with the creator alone, by design, so
+      every other player's rematch stays `INVALID_INVITEES`, and so does the joiner's own while
+      the game has another player who isn't their past opponent (alpha A19).
     - **A player whose fellow player's account was deleted, or who never acted in that game**
       (declined, or resigned or timed out before a first action): that person isn't carried over,
       and the rematch has one seat fewer. When too few people remain for the game, the answer is

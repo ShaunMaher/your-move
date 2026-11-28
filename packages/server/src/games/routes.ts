@@ -64,7 +64,7 @@ import {
   startAtCreation,
 } from "./lifecycle.js";
 import {
-  addableRows,
+  addableUserIds,
   engineOf,
   envelope,
   invitationOf,
@@ -197,7 +197,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     viewer: GamePlayerRecord,
   ): Promise<PresentInput> => {
     const { rematchGameId } = loaded.game;
-    const addable = addableRows(loaded.game, loaded.players, viewer).map((row) => row.userId ?? "");
+    const addable = addableUserIds(loaded.game, loaded.players, viewer);
     const [gameResources, users, rematch, pastOpponents] = await Promise.all([
       repos.games.resources(loaded.game.id),
       repos.users.findByIds(shownUserIds(loaded.players, () => loaded.game.status === "lobby")),
@@ -589,9 +589,7 @@ export function registerGameRoutes(app: OpenAPIHono<AppEnv>, options: GameRouteO
     const { userId } = c.req.valid("json");
     const { loaded, viewer } = await loadMember(id, user);
     const { endedAt } = loaded.game;
-    const named = addableRows(loaded.game, loaded.players, viewer).some(
-      (row) => row.userId === userId,
-    );
+    const named = addableUserIds(loaded.game, loaded.players, viewer).includes(userId);
     if (!named || endedAt === null) throw ApiError.of("NOT_FOUND");
     await repos.users.addPastOpponents(user.id, userId, endedAt);
     return c.body(null, 204);

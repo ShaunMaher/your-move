@@ -285,7 +285,8 @@ tests are green in CI.
 - Past opponents (picking them, auto-join and `GET /api/v1/players/recent` are alpha A12, link
   joiners' "Add <name> to your players?" alpha A19; the `whoCanAddMe` setting is here), blocks,
   sessions list, account deletion (resumable).
-- **Before the path game (08 §5, Q20)**: `MIN_AGE` confirmation at onboarding, the
+- **Before the path game (08 §5, Q20)**: `MIN_AGE` confirmation at onboarding (its re-prompt
+  gates `POST /api/v1/games/:id/add-player` too, like game creation; alpha A19 review S-2), the
   "don't use your full name" warning, privacy page wording about children playing through a parent's
   account, and a copy review that nothing markets the service to children.
 - Web Push: the generic invitation push (06 §6.2), on the sender, endpoints and service worker
@@ -332,7 +333,8 @@ tests are green in CI.
   `403 ONBOARDING_REQUIRED` on game list, create, accept, join lookup and join until done, invites
   claimed only at onboarding completion, "I'm under `MIN_AGE`" deletes the account, the sweep
   deletes un-onboarded accounts after 7 days (never re-prompted ones), raising `MIN_AGE`
-  re-prompts and gates the same endpoints, "I'm under" for a re-prompted user only signs out that
+  re-prompts and gates the same endpoints, and `POST /api/v1/games/:id/add-player` with them,
+  like game creation (alpha A19 review S-2), "I'm under" for a re-prompted user only signs out that
   session and deletes nothing (deletion still needs the step-up code); display-name rename limit; blocking a lobby co-member
   removes/leaves the seat; tunnel deployment: `TRUST_PROXY=cloudflare` with `TRUST_PROXY_PEERS`
   (foreign peer → `400`), the container health check passing without `CF-Connecting-IP`, no
