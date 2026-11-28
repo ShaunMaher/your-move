@@ -4,13 +4,15 @@
  */
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const SCRIPT = fileURLToPath(new URL("../scripts/check-tunnel-routing.sh", import.meta.url));
+// The stubs must be executable, and CI's TMPDIR is /dev/shm, which Docker mounts noexec (126 on
+// every stub). So they live in the package's own ignored cache directory instead.
+const STUB_ROOT = fileURLToPath(new URL("../node_modules/.cache/", import.meta.url));
 
 // `docker run` answers 202 for the tunnel's route and 400 for the service name; `docker info`
 // lists STUB_SECURITY_OPTIONS (one entry per line); the host's curl answers STUB_HOST_STATUS and
@@ -43,7 +45,8 @@ describe("check-tunnel-routing.sh", () => {
   let dir = "";
 
   beforeAll(() => {
-    dir = mkdtempSync(join(tmpdir(), "routing-script-"));
+    mkdirSync(STUB_ROOT, { recursive: true });
+    dir = mkdtempSync(join(STUB_ROOT, "routing-script-"));
     mkdirSync(join(dir, "bin"));
     for (const [name, body] of Object.entries({ docker: DOCKER, curl: CURL, nsenter: NSENTER })) {
       writeFileSync(join(dir, "bin", name), body);
